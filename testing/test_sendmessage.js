@@ -1,7 +1,7 @@
 import http from "k6/http";
 import ws from "k6/ws";
 import { check } from "k6";
-import { Counter, Rate } from "k6/metrics";
+import { Counter, Rate, Trend } from "k6/metrics";
 import { htmlReport } from "https://raw.githubusercontent.com/benc-uk/k6-reporter/main/dist/bundle.js";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.1/index.js";
 
@@ -12,16 +12,23 @@ const WS_URL =
 const SIO_NAMESPACE = "/realtime";
 
 const PASSWORD = "heheheee";
-const CONVERSATION_ID = __ENV.CONVERSATION_ID || "69861483597e126521362d29";
+const CONVERSATION_ID = __ENV.CONVERSATION_ID || "69a68da08848b5449a670a31";
 
-const SOCKET_DURATION = 60000; // giữ socket 60s
-const WARMUP_TIME = 5000; // chờ 5s cho user ổn định
-const SEND_INTERVAL = 2000; // gửi mỗi 2s
+const SOCKET_DURATION = Number(__ENV.SOCKET_DURATION_MS || 120000); // mặc định giữ socket 120s
+const WARMUP_TIME = Number(__ENV.WARMUP_TIME_MS || 5000); // chờ ổn định trước khi gửi
+const SEND_INTERVAL = Number(__ENV.SEND_INTERVAL_MS || 2000); // gửi mỗi 2s
+const ACK_TIMEOUT_MS = Number(__ENV.ACK_TIMEOUT_MS || 15000); // quá thời gian này xem như fail timeout
+const ACK_GRACE_TIME_MS = Number(__ENV.ACK_GRACE_TIME_MS || 10000); // thêm thời gian chờ ACK trước khi đóng socket
+const MAX_DURATION = __ENV.MAX_DURATION || "10m";
 
 // ─── Custom Metrics ──────────────────────────────────────
 const sentMessages = new Counter("sent_messages");
 const receivedMessages = new Counter("received_messages");
 const sendSuccessRate = new Rate("send_success_rate");
+const sendFailedMessages = new Counter("send_failed_messages");
+const sendErrorMessages = new Counter("send_error_messages");
+const sendTimeoutMessages = new Counter("send_timeout_messages");
+const ackLatency = new Trend("message_ack_latency_ms", true);
 
 // ─── Options ─────────────────────────────────────────────
 export const options = {
@@ -30,12 +37,13 @@ export const options = {
       executor: "per-vu-iterations",
       vus: 200,
       iterations: 1,
-      maxDuration: "90s",
+      maxDuration: MAX_DURATION,
     },
   },
   thresholds: {
     http_req_failed: ["rate<0.05"],
     send_success_rate: ["rate>0.95"],
+    message_ack_latency_ms: ["p(95)<3000", "avg<1500"],
   },
 };
 
@@ -165,21 +173,25 @@ export default function () {
 
             if (eventName === "message:ack") {
               const clientMessageId = eventData.clientMessageId;
-              if (clientMessageId && pendingMessages[clientMessageId]) {
+              if (clientMessageId && pendingMessages[clientMessageId] != null) {
+                const sentAt = pendingMessages[clientMessageId];
                 delete pendingMessages[clientMessageId];
                 ackCount++;
                 receivedMessages.add(1);
                 sendSuccessRate.add(true);
+                ackLatency.add(Date.now() - sentAt);
               }
               return;
             }
 
             if (eventName === "message:error") {
               const clientMessageId = eventData.clientMessageId;
-              if (clientMessageId && pendingMessages[clientMessageId]) {
+              if (clientMessageId && pendingMessages[clientMessageId] != null) {
                 delete pendingMessages[clientMessageId];
                 errorCount++;
                 sendSuccessRate.add(false);
+                sendFailedMessages.add(1);
+                sendErrorMessages.add(1);
               }
               return;
             }
@@ -194,9 +206,24 @@ export default function () {
 
       // ── WARMUP: đợi 5s cho toàn bộ user connect ổn định ──
       socket.setTimeout(function () {
+        const sendDeadlineAt = Date.now() + SOCKET_DURATION;
+
         // Bắt đầu gửi message:create mỗi 2s qua WebSocket
         socket.setInterval(function () {
           if (!authenticated) return;
+          if (Date.now() >= sendDeadlineAt) return;
+
+          for (const [clientMessageId, sentAt] of Object.entries(
+            pendingMessages,
+          )) {
+            if (Date.now() - sentAt > ACK_TIMEOUT_MS) {
+              delete pendingMessages[clientMessageId];
+              errorCount++;
+              sendSuccessRate.add(false);
+              sendFailedMessages.add(1);
+              sendTimeoutMessages.add(1);
+            }
+          }
 
           sequence += 1;
           const clientMessageId = `vu${vuId}-${Date.now()}-${sequence}`;
@@ -215,7 +242,7 @@ export default function () {
             "," +
             JSON.stringify(["message:create", emitPayload]);
 
-          pendingMessages[clientMessageId] = true;
+          pendingMessages[clientMessageId] = Date.now();
           sentCount++;
           sentMessages.add(1);
 
@@ -223,24 +250,29 @@ export default function () {
         }, SEND_INTERVAL);
       }, WARMUP_TIME);
 
-      socket.setTimeout(function () {
-        const unresolvedMessageIds = Object.keys(pendingMessages);
+      socket.setTimeout(
+        function () {
+          const unresolvedMessageIds = Object.keys(pendingMessages);
 
-        if (unresolvedMessageIds.length > 0) {
-          for (const unresolvedId of unresolvedMessageIds) {
-            delete pendingMessages[unresolvedId];
-            sendSuccessRate.add(false);
+          if (unresolvedMessageIds.length > 0) {
+            for (const unresolvedId of unresolvedMessageIds) {
+              delete pendingMessages[unresolvedId];
+              sendSuccessRate.add(false);
+              sendFailedMessages.add(1);
+              sendTimeoutMessages.add(1);
+            }
           }
-        }
 
-        if (vuId <= 3) {
-          console.log(
-            `[VU ${vuId}] Done. Sent=${sentCount}, Ack=${ackCount}, Error=${errorCount}, Pending=${unresolvedMessageIds.length}`,
-          );
-        }
+          if (vuId <= 3) {
+            console.log(
+              `[VU ${vuId}] Done. Sent=${sentCount}, Ack=${ackCount}, Error=${errorCount}, Pending=${unresolvedMessageIds.length}`,
+            );
+          }
 
-        socket.close();
-      }, SOCKET_DURATION);
+          socket.close();
+        },
+        SOCKET_DURATION + ACK_GRACE_TIME_MS + WARMUP_TIME,
+      );
     },
   );
 }
