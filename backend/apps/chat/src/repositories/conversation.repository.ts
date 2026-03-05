@@ -182,7 +182,6 @@ export class ConversationRepository {
       data: {
         type: data.type,
         groupName: data.groupName || null,
-        groupNameLower: data.groupName?.toLocaleLowerCase() || null,
         groupNameSearch: data.groupName
           ? this.normalizeString(data.groupName)
           : null,
@@ -227,7 +226,6 @@ export class ConversationRepository {
             conversationId: true,
             replyToMessageId: true,
             isDeleted: true,
-            deleteType: true,
             medias: {
               orderBy: {
                 sortOrder: 'asc',
@@ -302,20 +300,14 @@ export class ConversationRepository {
   async updateUpdatedAt(
     conversationId: string,
     data?: {
-      lastMessageId?: string
       lastMessageAt?: Date
-      lastMessageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE'
     },
   ) {
     return await this.prisma.conversation.update({
       where: { id: conversationId },
       data: {
         updatedAt: new Date(),
-        ...(data?.lastMessageId ? { lastMessageId: data.lastMessageId } : {}),
         ...(data?.lastMessageAt ? { lastMessageAt: data.lastMessageAt } : {}),
-        ...(data?.lastMessageType
-          ? { lastMessageType: data.lastMessageType }
-          : {}),
       },
     })
   }

@@ -174,9 +174,7 @@ export class ChatService {
     }
 
     await this.conversationRepo.updateUpdatedAt(data.conversationId, {
-      lastMessageId: message.id,
       lastMessageAt: message.createdAt,
-      lastMessageType: message.type,
     })
 
     await this.memberRepo.updateLastMessageAt(
@@ -785,9 +783,7 @@ export class ChatService {
     if (!message) return
 
     await this.conversationRepo.updateUpdatedAt(conversationId, {
-      lastMessageId: message.id,
       lastMessageAt: message.createdAt,
-      lastMessageType: message.type,
     })
 
     await this.memberRepo.updateLastMessageAt(conversationId, message.createdAt)

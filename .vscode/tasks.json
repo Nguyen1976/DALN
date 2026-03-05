@@ -1,16 +1,16 @@
 {
   "version": "2.0.0",
   "tasks": [
-    {
-      "label": "frontend",
-      "type": "shell",
-      "command": "cd ./frontend; npm run dev",
-      "problemMatcher": [],
-      "presentation": {
-        "panel": "new",
-        "focus": false
-      }
-    },
+    // {
+    //   "label": "frontend",
+    //   "type": "shell",
+    //   "command": "cd ./frontend; npm run dev",
+    //   "problemMatcher": [],
+    //   "presentation": {
+    //     "panel": "new",
+    //     "focus": false
+    //   }
+    // },
     {
       "label": "api-gateway",
       "type": "shell",
@@ -64,7 +64,7 @@
     {
       "label": "start-all",
       "dependsOn": [
-        "frontend",
+        // "frontend",
         "api-gateway",
         "user",
         "notification",
