@@ -17,7 +17,7 @@ export class FriendRequestRepository {
   }
 
   async findByUsers(fromUserId: string, toUserId: string) {
-    return await this.prisma.friendRequest.findFirst({
+    return await this.prisma.friendRequest.findMany({
       where: {
         fromUserId,
         toUserId,

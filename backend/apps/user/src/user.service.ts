@@ -147,16 +147,18 @@ export class UserService {
   }
 
   async updateStatusMakeFriend(data: UpdateStatusRequest): Promise<Friendship> {
-    const friendRequest = await this.friendRequestRepo.findByUsers(
+    const friendRequests = await this.friendRequestRepo.findByUsers(
       data.inviterId,
       data.inviteeId,
     )
 
-    if (!friendRequest) {
+    //sửa logic tìm tắt cả friendrequest sau đó check chỉ cần có 1 cái pending thì cho qua còn nếu không thì mới trả về lỗi
+
+    if (friendRequests.length === 0) {
       UserErrors.friendRequestNotFound()
     }
 
-    if (friendRequest.status !== Status.PENDING) {
+    if (!friendRequests.some((r) => r.status === Status.PENDING)) {
       UserErrors.friendRequestAlreadyResponded()
     }
 
@@ -208,7 +210,7 @@ export class UserService {
       ],
     })
 
-    return updatedRequest as Friendship
+    return updatedRequest as unknown as Friendship
   }
 
   async listFriends(
