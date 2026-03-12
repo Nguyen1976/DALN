@@ -1,0 +1,93 @@
+version: '3.9'
+
+services:
+  # ─────────────────────────────────────────────
+  # Kong API Gateway (DB-less)
+  # Proxy  : http://localhost:8080
+  # Admin  : http://localhost:8002
+  # Metrics: http://localhost:8002/metrics
+  # ─────────────────────────────────────────────
+  kong:
+    image: kong:3.7
+    container_name: kong
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    environment:
+      KONG_DATABASE: 'off'
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: '0.0.0.0:8001'
+    volumes:
+      - ./kong/kong.yml:/etc/kong/kong.yml:ro
+    ports:
+      - '8080:8000' # proxy
+      - '8002:8001' # admin API + /metrics
+    healthcheck:
+      test: ['CMD', 'kong', 'health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # Prometheus — scrapes Kong /metrics every 5s
+  # UI: http://localhost:9090
+  # ─────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    ports:
+      - '9090:9090'
+    depends_on:
+      kong:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # Grafana — dashboards & alerting
+  # UI: http://localhost:3001  (login: admin / admin)
+  # ─────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - '3030:3000' # 3000 = frontend, 3001 = node process → use 3030
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # cAdvisor — CPU / memory / network per container
+  # UI: http://localhost:8082
+  # ─────────────────────────────────────────────
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - '8082:8080'
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:

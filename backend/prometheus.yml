@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Kong admin API exposes /metrics (prometheus plugin)
+  - job_name: 'kong'
+    static_configs:
+      - targets: ['kong:8001']
+    metrics_path: /metrics
+
+  # cAdvisor — CPU / memory / network per container
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
