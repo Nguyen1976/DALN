@@ -24,6 +24,53 @@ import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 
+type NotificationChannelToggle = {
+  IN_APP: boolean
+  EMAIL: boolean
+  REALTIME: boolean
+}
+
+type NotificationPreferenceDocument = {
+  global: {
+    enabled: boolean
+    channels: NotificationChannelToggle
+  }
+  overrides: Record<string, NotificationChannelToggle>
+  digest: {
+    enabled: boolean
+    minUnread: number
+    cooldownMinutes: number
+    lastDigestAt: string | null
+  }
+  version: number
+  updatedAt?: string
+}
+
+const NOTIFICATION_TYPES = [
+  'MESSAGE_RECEIVED',
+  'FRIEND_REQUEST_SENT',
+  'FRIEND_REQUEST_ACCEPTED',
+  'FRIEND_REQUEST_REJECTED',
+  'SYSTEM_NOTIFICATION',
+  'USER_JOINED_GROUP',
+  'USER_LEFT_GROUP',
+  'USER_KICKED_FROM_GROUP',
+  'USER_ADDED_TO_GROUP',
+]
+
+const DEFAULT_CHANNELS: NotificationChannelToggle = {
+  IN_APP: true,
+  EMAIL: true,
+  REALTIME: true,
+}
+
+const DEFAULT_DIGEST_SETTINGS = {
+  enabled: true,
+  minUnread: 5,
+  cooldownMinutes: 30,
+  lastDigestAt: null,
+}
+
 @Injectable()
 export class NotificationService {
   @Inject(MailerService)
@@ -45,7 +92,7 @@ export class NotificationService {
   })
   async handleUserRegistered(data: UserCreatedPayload) {
     await this.mailerService.sendUserConfirmation(data)
-    //tạo thông báo
+    await this.ensureUserPreference(data.id)
   }
 
   @RabbitSubscribe({
@@ -139,6 +186,188 @@ export class NotificationService {
     }
   }
 
+  private buildDefaultPreference(): NotificationPreferenceDocument {
+    const overrides = NOTIFICATION_TYPES.reduce<
+      Record<string, NotificationChannelToggle>
+    >((acc, type) => {
+      acc[type] = { ...DEFAULT_CHANNELS }
+      return acc
+    }, {})
+
+    return {
+      global: {
+        enabled: true,
+        channels: { ...DEFAULT_CHANNELS },
+      },
+      overrides,
+      digest: { ...DEFAULT_DIGEST_SETTINGS },
+      version: 1,
+    }
+  }
+
+  private normalizePreference(raw: any): NotificationPreferenceDocument {
+    const defaults = this.buildDefaultPreference()
+    const globalSettings = (raw?.globalSettings ?? {}) as any
+    const digestSettings = (raw?.digestSettings ?? {}) as any
+    const overrides = (raw?.overrides ?? {}) as Record<
+      string,
+      NotificationChannelToggle
+    >
+
+    return {
+      global: {
+        enabled: globalSettings.enabled ?? defaults.global.enabled,
+        channels: {
+          IN_APP:
+            globalSettings?.channels?.IN_APP ?? defaults.global.channels.IN_APP,
+          EMAIL:
+            globalSettings?.channels?.EMAIL ?? defaults.global.channels.EMAIL,
+          REALTIME:
+            globalSettings?.channels?.REALTIME ??
+            defaults.global.channels.REALTIME,
+        },
+      },
+      overrides: {
+        ...defaults.overrides,
+        ...overrides,
+      },
+      digest: {
+        enabled: digestSettings.enabled ?? defaults.digest.enabled,
+        minUnread: digestSettings.minUnread ?? defaults.digest.minUnread,
+        cooldownMinutes:
+          digestSettings.cooldownMinutes ?? defaults.digest.cooldownMinutes,
+        lastDigestAt:
+          digestSettings.lastDigestAt ?? defaults.digest.lastDigestAt,
+      },
+      version: raw?.version || defaults.version,
+      updatedAt: raw?.updatedAt
+        ? new Date(raw.updatedAt).toISOString()
+        : undefined,
+    }
+  }
+
+  async ensureUserPreference(userId: string) {
+    const existing = await this.prisma.userNotificationPreference.findUnique({
+      where: { userId },
+    })
+
+    if (existing) {
+      return this.normalizePreference(existing)
+    }
+
+    const defaults = this.buildDefaultPreference()
+    const created = await this.prisma.userNotificationPreference.create({
+      data: {
+        userId,
+        globalSettings: defaults.global,
+        overrides: defaults.overrides,
+        digestSettings: defaults.digest,
+      },
+    })
+
+    return this.normalizePreference(created)
+  }
+
+  async getNotificationPreferences(userId: string) {
+    return this.ensureUserPreference(userId)
+  }
+
+  async updateNotificationPreferences(userId: string, payload: any) {
+    const current = await this.ensureUserPreference(userId)
+
+    const global = payload?.global
+      ? {
+          enabled:
+            typeof payload.global.enabled === 'boolean'
+              ? payload.global.enabled
+              : current.global.enabled,
+          channels: {
+            IN_APP:
+              payload?.global?.channels?.IN_APP ??
+              current.global.channels.IN_APP,
+            EMAIL:
+              payload?.global?.channels?.EMAIL ?? current.global.channels.EMAIL,
+            REALTIME:
+              payload?.global?.channels?.REALTIME ??
+              current.global.channels.REALTIME,
+          },
+        }
+      : current.global
+
+    const digest = payload?.digest
+      ? {
+          enabled:
+            typeof payload.digest.enabled === 'boolean'
+              ? payload.digest.enabled
+              : current.digest.enabled,
+          minUnread:
+            Number.isFinite(payload.digest.minUnread) &&
+            payload.digest.minUnread > 0
+              ? payload.digest.minUnread
+              : current.digest.minUnread,
+          cooldownMinutes:
+            Number.isFinite(payload.digest.cooldownMinutes) &&
+            payload.digest.cooldownMinutes > 0
+              ? payload.digest.cooldownMinutes
+              : current.digest.cooldownMinutes,
+          lastDigestAt: current.digest.lastDigestAt,
+        }
+      : current.digest
+
+    const incomingOverrides = (payload?.overrides || {}) as Record<
+      string,
+      Partial<NotificationChannelToggle>
+    >
+    const mergedOverrides = { ...current.overrides }
+
+    for (const [type, value] of Object.entries(incomingOverrides)) {
+      if (!NOTIFICATION_TYPES.includes(type)) continue
+      mergedOverrides[type] = {
+        IN_APP: value.IN_APP ?? mergedOverrides[type]?.IN_APP ?? true,
+        EMAIL: value.EMAIL ?? mergedOverrides[type]?.EMAIL ?? true,
+        REALTIME: value.REALTIME ?? mergedOverrides[type]?.REALTIME ?? true,
+      }
+    }
+
+    const updated = await this.prisma.userNotificationPreference.upsert({
+      where: { userId },
+      create: {
+        userId,
+        globalSettings: global,
+        overrides: mergedOverrides,
+        digestSettings: digest,
+        version: current.version + 1,
+      },
+      update: {
+        globalSettings: global,
+        overrides: mergedOverrides,
+        digestSettings: digest,
+        version: current.version + 1,
+      },
+    })
+
+    return this.normalizePreference(updated)
+  }
+
+  async getUnreadCount(userId: string) {
+    const unreadCount = await this.prisma.notification.count({
+      where: {
+        userId,
+        isRead: false,
+      },
+    })
+
+    return {
+      unreadCount,
+    }
+  }
+
+  getNotificationTypes() {
+    return {
+      types: NOTIFICATION_TYPES,
+    }
+  }
+
   async getNotifications(
     data: GetNotificationsRequest,
   ): Promise<GetNotificationsResponse> {
@@ -174,6 +403,7 @@ export class NotificationService {
       },
       data: {
         isRead: true,
+        readAt: new Date(),
       },
     })
 
@@ -192,6 +422,7 @@ export class NotificationService {
       },
       data: {
         isRead: true,
+        readAt: new Date(),
       },
     })
 

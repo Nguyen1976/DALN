@@ -23,6 +23,7 @@ import {
   type Notification,
 } from "./redux/slices/notificationSlice";
 import { upsertOnlineFriend, updateStatus } from "./redux/slices/friendSlice";
+import NotificationSettingsPage from "./pages/NotificationSettings";
 
 const router = createBrowserRouter([
   {
@@ -72,6 +73,14 @@ const router = createBrowserRouter([
         <FriendsPage>
           <ListFriendRequests />
         </FriendsPage>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/settings/notifications",
+    element: (
+      <ProtectedRoute>
+        <NotificationSettingsPage />
       </ProtectedRoute>
     ),
   },

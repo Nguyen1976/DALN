@@ -1,5 +1,5 @@
 import { RequireLogin, UserInfo } from '@app/common/common.decorator'
-import { Controller, Get, Param, Patch, Query } from '@nestjs/common'
+import { Body, Controller, Get, Param, Patch, Put, Query } from '@nestjs/common'
 import { NotificationService } from '../notification.service'
 
 @Controller('notification')
@@ -38,5 +38,32 @@ export class NotificationHttpController {
     return this.notificationService.markAllNotificationsAsRead({
       userId: user.userId,
     })
+  }
+
+  @Get('unread-count')
+  @RequireLogin()
+  getUnreadCount(@UserInfo() user: any) {
+    return this.notificationService.getUnreadCount(user.userId)
+  }
+
+  @Get('types')
+  @RequireLogin()
+  getNotificationTypes() {
+    return this.notificationService.getNotificationTypes()
+  }
+
+  @Get('preferences')
+  @RequireLogin()
+  getNotificationPreferences(@UserInfo() user: any) {
+    return this.notificationService.getNotificationPreferences(user.userId)
+  }
+
+  @Put('preferences')
+  @RequireLogin()
+  updateNotificationPreferences(@UserInfo() user: any, @Body() payload: any) {
+    return this.notificationService.updateNotificationPreferences(
+      user.userId,
+      payload,
+    )
   }
 }

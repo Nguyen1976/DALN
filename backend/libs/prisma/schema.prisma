@@ -43,8 +43,38 @@ model friendRequest {
 }
 
 enum NotificationType {
+  MESSAGE_RECEIVED
+  FRIEND_REQUEST_SENT
+  FRIEND_REQUEST_ACCEPTED
+  FRIEND_REQUEST_REJECTED
+  SYSTEM_NOTIFICATION
+  USER_JOINED_GROUP
+  USER_LEFT_GROUP
+  USER_KICKED_FROM_GROUP
+  USER_ADDED_TO_GROUP
   FRIEND_REQUEST
   NORMAL_NOTIFICATION
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  REALTIME
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  RETRYING
+  DLQ
+}
+
+enum OutboxStatus {
+  NEW
+  PUBLISHED
+  FAILED
+  DEAD
 }
 
 model notification {
@@ -54,7 +84,116 @@ model notification {
   isRead          Boolean  @default(false)
   type            String
   friendRequestId String?  @db.ObjectId
+  payload         Json?
+  correlationId   String?
+  idempotencyKey  String?
+  digestEligible  Boolean  @default(true)
+  readAt          DateTime?
   createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, isRead, createdAt])
+  @@index([digestEligible, isRead, createdAt])
+  @@index([idempotencyKey])
+}
+
+model userNotificationPreference {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String   @db.ObjectId
+  globalSettings Json
+  overrides      Json
+  digestSettings Json
+  version        Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId])
+  @@index([updatedAt])
+}
+
+model notificationDelivery {
+  id             String                     @id @default(auto()) @map("_id") @db.ObjectId
+  notificationId String
+  userId         String                     @db.ObjectId
+  channel        NotificationChannel
+  status         NotificationDeliveryStatus @default(PENDING)
+  attempt        Int                        @default(0)
+  maxAttempts    Int                        @default(3)
+  lastError      String?
+  providerRef    String?
+  nextRetryAt    DateTime?
+  sentAt         DateTime?
+  correlationId  String?
+  idempotencyKey String
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  @@unique([notificationId, channel])
+  @@unique([idempotencyKey])
+  @@index([status, nextRetryAt])
+  @@index([userId, createdAt])
+}
+
+model notificationOutboxEvent {
+  id             String      @id @default(auto()) @map("_id") @db.ObjectId
+  outboxId       String      @unique
+  aggregateType  String
+  aggregateId    String
+  eventName      String
+  exchange       String
+  routingKey     String
+  payload        Json
+  status         OutboxStatus @default(NEW)
+  attempt        Int          @default(0)
+  maxAttempts    Int          @default(10)
+  nextAttemptAt  DateTime?
+  publishedAt    DateTime?
+  correlationId  String?
+  idempotencyKey String
+  error          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([idempotencyKey])
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([aggregateId, eventName])
+}
+
+model userNotificationCounter {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String   @db.ObjectId
+  unreadTotal    Int      @default(0)
+  unreadByType   Json
+  oldestUnreadAt DateTime?
+  latestUnreadAt DateTime?
+  digestCandidate Boolean @default(false)
+  lastDigestAt   DateTime?
+  nextDigestAt   DateTime?
+  version        Int      @default(1)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId])
+  @@index([digestCandidate, nextDigestAt])
+  @@index([updatedAt])
+}
+
+model notificationDigestTracking {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  digestId       String   @unique
+  userId         String   @db.ObjectId
+  windowStart    DateTime
+  windowEnd      DateTime
+  notificationIds String[]
+  totalCount     Int      @default(0)
+  status         String   @default("PENDING")
+  emailDeliveryId String?
+  idempotencyKey String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([idempotencyKey])
+  @@index([userId, windowEnd])
+  @@index([status, createdAt])
 }
 
 enum conversationType {

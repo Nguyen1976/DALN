@@ -18,9 +18,11 @@ import {
 } from "@/redux/slices/notificationSlice";
 import { formatDateTime } from "@/utils/formatDateTime";
 import FriendRequestModal from "../FriendRequestModal";
+import { useNavigate } from "react-router";
 
 export function NotificationsDropdown() {
   const dispatch = useDispatch<AppDispatch>();
+  const navigate = useNavigate();
   const notifications = useSelector(selectNotification);
   const [page, setPage] = useState(1);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -124,6 +126,7 @@ export function NotificationsDropdown() {
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-muted-foreground"
+              onClick={() => navigate("/settings/notifications")}
             >
               <MoreHorizontal className="w-4 h-4" />
             </Button>
