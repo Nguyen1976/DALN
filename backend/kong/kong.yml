@@ -1,0 +1,78 @@
+_format_version: '3.0'
+_transform: true
+
+services:
+  - name: user-http
+    url: http://host.docker.internal:3002
+    routes:
+      - name: user-route
+        paths:
+          - /user
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 200
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+              hide_client_headers: false
+
+  - name: chat-http
+    url: http://host.docker.internal:3003
+    routes:
+      - name: chat-route
+        paths:
+          - /chat
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 200
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+              hide_client_headers: false
+
+  - name: notification-http
+    url: http://host.docker.internal:3004
+    routes:
+      - name: notification-route
+        paths:
+          - /notification
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 200
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+              hide_client_headers: false
+
+plugins:
+  - name: cors
+    config:
+      origins:
+        - http://localhost:5173
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - Origin
+        - X-Requested-With
+      exposed_headers:
+        - Set-Cookie
+      credentials: true
+      max_age: 3600
+  - name: prometheus

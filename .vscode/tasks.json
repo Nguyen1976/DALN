@@ -12,9 +12,9 @@
     //   }
     // },
     {
-      "label": "api-gateway",
+      "label": "kong",
       "type": "shell",
-      "command": "cd ./backend; npm run start:dev api-gateway",
+      "command": "cd ./backend; docker compose up kong --build",
       "problemMatcher": [],
       "presentation": {
         "panel": "new",
@@ -65,7 +65,6 @@
       "label": "start-all",
       "dependsOn": [
         // "frontend",
-        "api-gateway",
         "user",
         "notification",
         "chat",

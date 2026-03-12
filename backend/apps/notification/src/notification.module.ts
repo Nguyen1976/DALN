@@ -9,13 +9,17 @@ import { UtilModule } from '@app/util'
 import { RedisModule } from '@app/redis'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { LoggerModule } from '@app/logger'
+import { AuthGuard, CommonModule } from '@app/common'
+import { APP_GUARD } from '@nestjs/core'
+import { NotificationHttpController } from './http/notification-http.controller'
 
 @Module({
   imports: [
+    CommonModule,
     RedisModule.forRoot(
       {
-        host: 'localhost',
-        port: 6379,
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT || 6379),
         db: 0,
       },
       'REDIS_CLIENT',
@@ -34,13 +38,19 @@ import { LoggerModule } from '@app/logger'
           type: 'topic',
         },
       ],
-      uri: 'amqp://user:user@localhost:5672',
+      uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: true },
     }),
     UtilModule,
     LoggerModule.forService('Notification-Service'),
   ],
-  controllers: [NotificationController],
-  providers: [NotificationService],
+  controllers: [NotificationController, NotificationHttpController],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
+    },
+    NotificationService,
+  ],
 })
 export class NotificationModule {}

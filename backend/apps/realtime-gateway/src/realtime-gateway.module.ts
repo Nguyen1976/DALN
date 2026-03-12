@@ -11,8 +11,8 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
   imports: [
     RedisModule.forRoot(
       {
-        host: 'localhost',
-        port: 6379,
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT || 6379),
         db: 0,
       },
       'REDIS_CLIENT',
@@ -24,7 +24,7 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
           type: 'topic',
         },
       ],
-      uri: 'amqp://user:user@localhost:5672',
+      uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: true },
     }),
     CommonModule,

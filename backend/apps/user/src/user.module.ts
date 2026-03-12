@@ -3,7 +3,7 @@ import { UserController } from './user.controller'
 import { UserService } from './user.service'
 import { RedisModule } from '@app/redis'
 import { PrismaModule } from '@app/prisma'
-import { CommonModule } from '@app/common'
+import { AuthGuard, CommonModule } from '@app/common'
 import { UtilModule } from '@app/util'
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
@@ -18,6 +18,8 @@ import {
 import { UserEventsPublisher } from './rmq/publishers/user-events.publisher'
 import { LoggerModule } from '@app/logger/logger.module'
 import { MessageSubscriber } from './rmq/subcribers/user-subcribers'
+import { UserHttpController } from './http/user-http.controller'
+import { APP_GUARD } from '@nestjs/core'
 
 @Module({
   imports: [
@@ -31,7 +33,7 @@ import { MessageSubscriber } from './rmq/subcribers/user-subcribers'
           type: 'topic',
         },
       ],
-      uri: 'amqp://user:user@localhost:5672',
+      uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: true },
     }),
     StorageR2Module,
@@ -50,21 +52,25 @@ import { MessageSubscriber } from './rmq/subcribers/user-subcribers'
     LoggerModule.forService('Api-Gateway'),
     RedisModule.forRoot(
       {
-        host: 'localhost',
-        port: 6379,
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT || 6379),
         db: 0,
       },
       'REDIS_CLIENT',
     ),
   ],
-  controllers: [UserController],
+  controllers: [UserController, UserHttpController],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
+    },
     UserService,
     UserRepository,
     FriendRequestRepository,
     UserEventsPublisher,
     FriendShipRepository,
-    MessageSubscriber
+    MessageSubscriber,
   ],
 })
 export class UserModule {}

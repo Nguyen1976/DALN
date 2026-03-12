@@ -18,10 +18,14 @@ import { RedisModule } from '@app/redis/redis.module'
 import { StorageR2Module } from '@app/storage-r2/storage-r2.module'
 import { r2Config } from './storage-r2.config'
 import { ConfigModule } from '@nestjs/config/dist/config.module'
+import { AuthGuard, CommonModule } from '@app/common'
+import { APP_GUARD } from '@nestjs/core'
+import { ChatHttpController } from './http/chat-http.controller'
 
 @Module({
   imports: [
     PrismaModule,
+    CommonModule,
     RmqModule,
     UtilModule,
     LoggerModule.forService('Chat-Service'),
@@ -39,8 +43,12 @@ import { ConfigModule } from '@nestjs/config/dist/config.module'
       publicUrl: process.env.R2_PUBLIC_URL!,
     }),
   ],
-  controllers: [ChatController],
+  controllers: [ChatController, ChatHttpController],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
+    },
     ChatService,
     ConversationRepository,
     MessageRepository,

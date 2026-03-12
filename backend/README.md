@@ -25,6 +25,50 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Kong Edge Gateway (api-gateway removed)
+
+Project now runs without the `api-gateway` service in Docker runtime.
+Kong is the only public HTTP entrypoint on port `8080`.
+
+- Public entrypoint: `http://localhost:8080` (Kong)
+- Upstreams: `user:3002`, `chat:3003`, `notification:3004` (inside Docker network)
+- Kong config file: `backend/kong/kong.yml`
+- Redis is external (already running on host `6379`), not managed by this compose file.
+
+What was moved to Kong:
+
+- Global CORS
+- Global rate limit (`200 req/min` by IP, configurable in `backend/kong/kong.yml`)
+
+What is now handled by each service (`user`, `chat`, `notification`):
+
+- Native HTTP endpoints (same paths as before)
+- Auth guard (`accessToken`/`refreshToken` cookies + auto refresh)
+- Response envelope (`{ statusCode, status, message, data }`)
+- gRPC/Rpc exception -> HTTP error mapping
+- DTO validation and multipart handling (where needed)
+
+Kong routing:
+
+- `/user/*` -> `user:3002`
+- `/chat/*` -> `chat:3003`
+- `/notification/*` -> `notification:3004`
+
+Run:
+
+```bash
+cd backend
+docker compose up -d --build
+```
+
+Check Kong declarative config loaded:
+
+```bash
+curl http://localhost:8002/services
+curl http://localhost:8002/routes
+curl http://localhost:8002/plugins
+```
+
 ## Project setup
 
 ```bash
