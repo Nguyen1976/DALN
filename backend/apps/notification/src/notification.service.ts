@@ -174,9 +174,8 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
         const normalized = this.normalizePreference(pref)
         if (!normalized.digest.enabled) continue
 
-        const unreadCount = await this.notificationRepo.countUnreadDigestEligible(
-          pref.userId,
-        )
+        const unreadCount =
+          await this.notificationRepo.countUnreadDigestEligible(pref.userId)
 
         if (unreadCount < normalized.digest.minUnread) continue
 
