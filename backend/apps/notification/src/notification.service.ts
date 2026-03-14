@@ -1,13 +1,6 @@
 import { MailerService } from '@app/mailer'
-import { PrismaService } from '@app/prisma'
 import { RedisService } from '@app/redis'
-import { AmqpConnection, RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
-import {
-  Inject,
-  Injectable,
-  OnModuleDestroy,
-  OnModuleInit,
-} from '@nestjs/common'
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
 import { NotificationType, Status } from '@prisma/client'
 import {
   GetNotificationsRequest,
@@ -17,16 +10,16 @@ import {
   MarkNotificationAsReadRequest,
   MarkNotificationAsReadResponse,
 } from 'interfaces/notification.grpc'
-import { Redis as RedisClient } from 'ioredis'
-import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
+import {
+  NotificationPreferenceRepository,
+  NotificationRepository,
+} from './repositories'
+import { NotificationEventsPublisher } from './rmq/publishers/notification-events.publisher'
 import type {
-  EmitToUserPayload,
   UserCreatedPayload,
   UserMakeFriendPayload,
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'
-import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
-import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 
 type NotificationChannelToggle = {
@@ -78,20 +71,16 @@ const DEFAULT_DIGEST_SETTINGS = {
 
 @Injectable()
 export class NotificationService implements OnModuleInit, OnModuleDestroy {
-  @Inject(MailerService)
-  private readonly mailerService: MailerService
-  @Inject(PrismaService)
-  private readonly prisma: PrismaService
-  private readonly redisService: RedisService
   private digestSweepTimer: NodeJS.Timeout | null = null
   private isDigestSweepRunning = false
 
   constructor(
-    private readonly amqpConnection: AmqpConnection,
-    redisService: RedisService,
-  ) {
-    this.redisService = redisService
-  }
+    private readonly mailerService: MailerService,
+    private readonly redisService: RedisService,
+    private readonly notificationRepo: NotificationRepository,
+    private readonly preferenceRepo: NotificationPreferenceRepository,
+    private readonly notificationEventsPublisher: NotificationEventsPublisher,
+  ) {}
 
   onModuleInit() {
     // Sweep periodically so digest countdown works without waiting for new events.
@@ -107,23 +96,13 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  @RabbitSubscribe({
-    exchange: EXCHANGE_RMQ.USER_EVENTS,
-    routingKey: ROUTING_RMQ.USER_CREATED,
-    queue: QUEUE_RMQ.NOTIFICATION_USER_CREATED,
-  })
   async handleUserRegistered(data: UserCreatedPayload) {
     await this.mailerService.sendUserConfirmation(data)
     await this.ensureUserPreference(data.id)
   }
 
-  @RabbitSubscribe({
-    exchange: EXCHANGE_RMQ.USER_EVENTS,
-    routingKey: ROUTING_RMQ.USER_MAKE_FRIEND,
-    queue: QUEUE_RMQ.NOTIFICATION_USER_MAKE_FRIEND,
-  })
   async handleMakeFriend(data: UserMakeFriendPayload) {
-    let inviteeStatus = await this.redisService.isOnline(data.inviteeId)
+    const inviteeStatus = await this.redisService.isOnline(data.inviteeId)
 
     const notificationCreated = await this.createNotification({
       userId: data.inviteeId,
@@ -140,34 +119,16 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
         receiverName: data.inviteeName,
       })
     } else {
-      //bắn socket
-      this.amqpConnection.publish(
-        EXCHANGE_RMQ.REALTIME_EVENTS,
-        ROUTING_RMQ.EMIT_REALTIME_EVENT,
-        {
-          userIds: [notificationCreated?.userId],
-          event: SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
-          data: notificationCreated,
-        } as unknown as EmitToUserPayload,
+      this.notificationEventsPublisher.emitToUsers(
+        [notificationCreated?.userId],
+        SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
+        notificationCreated,
       )
     }
   }
 
-  @RabbitSubscribe({
-    exchange: EXCHANGE_RMQ.USER_EVENTS,
-    routingKey: ROUTING_RMQ.USER_UPDATE_STATUS_MAKE_FRIEND,
-    queue: QUEUE_RMQ.NOTIFICATION_USER_UPDATE_STATUS_MAKE_FRIEND,
-  })
   async handleUpdateStatusMakeFriend(data: UserUpdateStatusMakeFriendPayload) {
-    /**
-     * inviterId: data.inviterId,//ngươi nhận thông báo
-      inviteeName: data.inviteeName,
-      status: data.status,
-     * 
-     * 
-     */
-    //xử lý tạo bản ghi notification r emit về
-    let createdNotification = await this.createNotification({
+    const createdNotification = await this.createNotification({
       userId: data.inviterId,
       message: `Lời mời kết bạn của ${data.inviteeName} đã được ${
         data.status === Status.ACCEPTED ? 'chấp nhận' : 'từ chối'
@@ -177,32 +138,25 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     const inviterStatus = await this.redisService.isOnline(data.inviterId)
 
     if (inviterStatus) {
-      this.amqpConnection.publish(
-        EXCHANGE_RMQ.REALTIME_EVENTS,
-        ROUTING_RMQ.EMIT_REALTIME_EVENT,
-        {
-          userIds: [createdNotification?.userId],
-          event: SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
-          data: createdNotification,
-        } as unknown as EmitToUserPayload,
+      this.notificationEventsPublisher.emitToUsers(
+        [createdNotification?.userId],
+        SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
+        createdNotification,
       )
-    } else {
-      //offline thì gửi mail (later)
     }
 
     return
   }
 
   async createNotification(data: any) {
-    const res = await this.prisma.notification.create({
-      data: {
-        userId: data.userId,
-        message: data.message,
-        type: data.type as NotificationType,
-        friendRequestId: data.friendRequestId || null,
-        digestEligible: data.digestEligible ?? true,
-      },
+    const res = await this.notificationRepo.create({
+      userId: data.userId,
+      message: data.message,
+      type: data.type as NotificationType,
+      friendRequestId: data.friendRequestId || null,
+      digestEligible: data.digestEligible ?? true,
     })
+
     return {
       ...res,
       createdAt: res.createdAt.toString(),
@@ -214,30 +168,15 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     this.isDigestSweepRunning = true
 
     try {
-      const preferences = await this.prisma.userNotificationPreference.findMany(
-        {
-          select: {
-            userId: true,
-            globalSettings: true,
-            overrides: true,
-            digestSettings: true,
-            version: true,
-            updatedAt: true,
-          },
-        },
-      )
+      const preferences = await this.preferenceRepo.findAllForDigestSweep()
 
       for (const pref of preferences) {
         const normalized = this.normalizePreference(pref)
         if (!normalized.digest.enabled) continue
 
-        const unreadCount = await this.prisma.notification.count({
-          where: {
-            userId: pref.userId,
-            isRead: false,
-            digestEligible: true,
-          },
-        })
+        const unreadCount = await this.notificationRepo.countUnreadDigestEligible(
+          pref.userId,
+        )
 
         if (unreadCount < normalized.digest.minUnread) continue
 
@@ -261,31 +200,25 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
 
         const online = await this.redisService.isOnline(pref.userId)
         if (online) {
-          this.amqpConnection.publish(
-            EXCHANGE_RMQ.REALTIME_EVENTS,
-            ROUTING_RMQ.EMIT_REALTIME_EVENT,
+          this.notificationEventsPublisher.emitToUsers(
+            [pref.userId],
+            SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
             {
-              userIds: [pref.userId],
-              event: SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
-              data: {
-                type: NotificationType.SYSTEM_NOTIFICATION,
-                message: `Bạn có ${unreadCount} thông báo chưa đọc.`,
-                createdAt: now.toISOString(),
-              },
-            } as unknown as EmitToUserPayload,
+              type: NotificationType.SYSTEM_NOTIFICATION,
+              message: `Bạn có ${unreadCount} thông báo chưa đọc.`,
+              createdAt: now.toISOString(),
+            },
           )
         }
 
-        await this.prisma.userNotificationPreference.update({
-          where: { userId: pref.userId },
-          data: {
-            digestSettings: {
-              ...normalized.digest,
-              lastDigestAt: now.toISOString(),
-            },
-            version: normalized.version + 1,
+        await this.preferenceRepo.updateDigest(
+          pref.userId,
+          {
+            ...normalized.digest,
+            lastDigestAt: now.toISOString(),
           },
-        })
+          normalized.version + 1,
+        )
       }
     } finally {
       this.isDigestSweepRunning = false
@@ -353,22 +286,18 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   }
 
   async ensureUserPreference(userId: string) {
-    const existing = await this.prisma.userNotificationPreference.findUnique({
-      where: { userId },
-    })
+    const existing = await this.preferenceRepo.findByUserId(userId)
 
     if (existing) {
       return this.normalizePreference(existing)
     }
 
     const defaults = this.buildDefaultPreference()
-    const created = await this.prisma.userNotificationPreference.create({
-      data: {
-        userId,
-        globalSettings: defaults.global,
-        overrides: defaults.overrides,
-        digestSettings: defaults.digest,
-      },
+    const created = await this.preferenceRepo.create({
+      userId,
+      globalSettings: defaults.global,
+      overrides: defaults.overrides,
+      digestSettings: defaults.digest,
     })
 
     return this.normalizePreference(created)
@@ -435,33 +364,19 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const updated = await this.prisma.userNotificationPreference.upsert({
-      where: { userId },
-      create: {
-        userId,
-        globalSettings: global,
-        overrides: mergedOverrides,
-        digestSettings: digest,
-        version: current.version + 1,
-      },
-      update: {
-        globalSettings: global,
-        overrides: mergedOverrides,
-        digestSettings: digest,
-        version: current.version + 1,
-      },
+    const updated = await this.preferenceRepo.upsert({
+      userId,
+      globalSettings: global,
+      overrides: mergedOverrides,
+      digestSettings: digest,
+      version: current.version + 1,
     })
 
     return this.normalizePreference(updated)
   }
 
   async getUnreadCount(userId: string) {
-    const unreadCount = await this.prisma.notification.count({
-      where: {
-        userId,
-        isRead: false,
-      },
-    })
+    const unreadCount = await this.notificationRepo.countUnread(userId)
 
     return {
       unreadCount,
@@ -482,12 +397,11 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     const take = Number(limit) || 5
     const skip = ((Number(page) || 1) - 1) * take
 
-    const notifications = await this.prisma.notification.findMany({
-      where: { userId: userId },
-      orderBy: { createdAt: 'desc' },
-      skip: skip,
-      take: take,
-    })
+    const notifications = await this.notificationRepo.findManyByUser(
+      userId,
+      skip,
+      take,
+    )
 
     return {
       notifications: notifications.map((n) => ({
@@ -502,16 +416,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   ): Promise<MarkNotificationAsReadResponse> {
     const { userId, notificationId } = data
 
-    await this.prisma.notification.updateMany({
-      where: {
-        id: notificationId,
-        userId,
-      },
-      data: {
-        isRead: true,
-        readAt: new Date(),
-      },
-    })
+    await this.notificationRepo.markOneRead(userId, notificationId)
 
     return { success: true }
   }
@@ -521,16 +426,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   ): Promise<MarkAllNotificationsAsReadResponse> {
     const { userId } = data
 
-    const result = await this.prisma.notification.updateMany({
-      where: {
-        userId,
-        isRead: false,
-      },
-      data: {
-        isRead: true,
-        readAt: new Date(),
-      },
-    })
+    const result = await this.notificationRepo.markAllRead(userId)
 
     return {
       success: true,

@@ -12,6 +12,12 @@ import { LoggerModule } from '@app/logger'
 import { AuthGuard, CommonModule } from '@app/common'
 import { APP_GUARD } from '@nestjs/core'
 import { NotificationHttpController } from './http/notification-http.controller'
+import {
+  NotificationPreferenceRepository,
+  NotificationRepository,
+} from './repositories'
+import { NotificationEventsPublisher } from './rmq/publishers/notification-events.publisher'
+import { NotificationSubscriber } from './rmq/subcribers/notification-subscribers'
 
 @Module({
   imports: [
@@ -51,6 +57,10 @@ import { NotificationHttpController } from './http/notification-http.controller'
       useClass: AuthGuard,
     },
     NotificationService,
+    NotificationRepository,
+    NotificationPreferenceRepository,
+    NotificationEventsPublisher,
+    NotificationSubscriber,
   ],
 })
 export class NotificationModule {}
