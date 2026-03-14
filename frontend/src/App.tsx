@@ -116,7 +116,7 @@ function App() {
   useEffect(() => {
     const handler = (data: Notification) => {
       dispatch(addNotification(data));
-      play();
+      // play();
     };
 
     socket.on("notification.new_notification", handler);

@@ -37,6 +37,23 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }, [conversationId]);
 
   useEffect(() => {
+    const normalizeIncomingMessage = (raw: any): Message | null => {
+      const source = raw?.message ?? raw;
+      if (!source) return null;
+
+      const normalized: Message = {
+        ...source,
+        id: source.id || source._id,
+        conversationId:
+          source.conversationId || source.conversation?.id || source.chatId,
+        text: source.text ?? source.content ?? "",
+        content: source.content ?? source.text ?? "",
+      };
+
+      if (!normalized.id || !normalized.conversationId) return null;
+      return normalized;
+    };
+
     const getMessageDedupKey = (message: Message) => {
       if (message.id) return `id:${message.id}`;
       if (message.clientMessageId) return `client:${message.clientMessageId}`;
@@ -80,15 +97,19 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
           }),
         );
       }
-      play();
+      // play();
     };
 
-    const handler = (data: Message) => {
-      processIncomingMessage(data);
+    const handler = (data: Message | { message: Message }) => {
+      const normalized = normalizeIncomingMessage(data);
+      if (!normalized) return;
+      processIncomingMessage(normalized);
     };
 
     const newMessageHandler = (payload: { message: Message }) => {
-      processIncomingMessage(payload.message);
+      const normalized = normalizeIncomingMessage(payload);
+      if (!normalized) return;
+      processIncomingMessage(normalized);
     };
 
     const ackHandler = (payload: {
@@ -121,7 +142,8 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     };
 
     const systemMessageHandler = (payload: { message: Message }) => {
-      const message = payload.message;
+      const message = normalizeIncomingMessage(payload);
+      if (!message) return;
       dispatch(addMessage(message));
       dispatch(
         updateNewMessage({

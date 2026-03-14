@@ -2,7 +2,12 @@ import { MailerService } from '@app/mailer'
 import { PrismaService } from '@app/prisma'
 import { RedisService } from '@app/redis'
 import { AmqpConnection, RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
-import { Inject, Injectable } from '@nestjs/common'
+import {
+  Inject,
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common'
 import { NotificationType, Status } from '@prisma/client'
 import {
   GetNotificationsRequest,
@@ -67,22 +72,39 @@ const DEFAULT_CHANNELS: NotificationChannelToggle = {
 const DEFAULT_DIGEST_SETTINGS = {
   enabled: true,
   minUnread: 5,
-  cooldownMinutes: 30,
+  cooldownMinutes: 1,
   lastDigestAt: null,
 }
 
 @Injectable()
-export class NotificationService {
+export class NotificationService implements OnModuleInit, OnModuleDestroy {
   @Inject(MailerService)
   private readonly mailerService: MailerService
   @Inject(PrismaService)
   private readonly prisma: PrismaService
   private readonly redisService: RedisService
+  private digestSweepTimer: NodeJS.Timeout | null = null
+  private isDigestSweepRunning = false
+
   constructor(
     private readonly amqpConnection: AmqpConnection,
     redisService: RedisService,
   ) {
     this.redisService = redisService
+  }
+
+  onModuleInit() {
+    // Sweep periodically so digest countdown works without waiting for new events.
+    this.digestSweepTimer = setInterval(() => {
+      void this.runDigestSweep()
+    }, 15_000)
+  }
+
+  onModuleDestroy() {
+    if (this.digestSweepTimer) {
+      clearInterval(this.digestSweepTimer)
+      this.digestSweepTimer = null
+    }
   }
 
   @RabbitSubscribe({
@@ -178,11 +200,95 @@ export class NotificationService {
         message: data.message,
         type: data.type as NotificationType,
         friendRequestId: data.friendRequestId || null,
+        digestEligible: data.digestEligible ?? true,
       },
     })
     return {
       ...res,
       createdAt: res.createdAt.toString(),
+    }
+  }
+
+  private async runDigestSweep() {
+    if (this.isDigestSweepRunning) return
+    this.isDigestSweepRunning = true
+
+    try {
+      const preferences = await this.prisma.userNotificationPreference.findMany(
+        {
+          select: {
+            userId: true,
+            globalSettings: true,
+            overrides: true,
+            digestSettings: true,
+            version: true,
+            updatedAt: true,
+          },
+        },
+      )
+
+      for (const pref of preferences) {
+        const normalized = this.normalizePreference(pref)
+        if (!normalized.digest.enabled) continue
+
+        const unreadCount = await this.prisma.notification.count({
+          where: {
+            userId: pref.userId,
+            isRead: false,
+            digestEligible: true,
+          },
+        })
+
+        if (unreadCount < normalized.digest.minUnread) continue
+
+        const now = new Date()
+        const lastDigestAt = normalized.digest.lastDigestAt
+          ? new Date(normalized.digest.lastDigestAt)
+          : null
+
+        if (lastDigestAt) {
+          const cooldownMillis = normalized.digest.cooldownMinutes * 60 * 1000
+          const elapsed = now.getTime() - lastDigestAt.getTime()
+          if (elapsed < cooldownMillis) continue
+        }
+
+        await this.createNotification({
+          userId: pref.userId,
+          message: `Bạn có ${unreadCount} thông báo chưa đọc.`,
+          type: NotificationType.SYSTEM_NOTIFICATION,
+          digestEligible: false,
+        })
+
+        const online = await this.redisService.isOnline(pref.userId)
+        if (online) {
+          this.amqpConnection.publish(
+            EXCHANGE_RMQ.REALTIME_EVENTS,
+            ROUTING_RMQ.EMIT_REALTIME_EVENT,
+            {
+              userIds: [pref.userId],
+              event: SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
+              data: {
+                type: NotificationType.SYSTEM_NOTIFICATION,
+                message: `Bạn có ${unreadCount} thông báo chưa đọc.`,
+                createdAt: now.toISOString(),
+              },
+            } as unknown as EmitToUserPayload,
+          )
+        }
+
+        await this.prisma.userNotificationPreference.update({
+          where: { userId: pref.userId },
+          data: {
+            digestSettings: {
+              ...normalized.digest,
+              lastDigestAt: now.toISOString(),
+            },
+            version: normalized.version + 1,
+          },
+        })
+      }
+    } finally {
+      this.isDigestSweepRunning = false
     }
   }
 
