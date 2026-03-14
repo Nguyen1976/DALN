@@ -37,6 +37,10 @@ export class RealtimeGateway
   server!: Server
 
   private userStatusStore: UserStatusStore
+  private readonly socketTouchIntervalMs = 25_000
+  private readonly socketTouchTimers = new Map<string, NodeJS.Timeout>()
+  private readonly packetListeners = new Map<string, (packet: any) => void>()
+
   constructor(
     private jwtService: JwtService,
     @Inject('REDIS_CLIENT')
@@ -80,11 +84,23 @@ export class RealtimeGateway
       // 🔥 Lưu Redis + TTL
       await this.userStatusStore.addConnection(userId, client.id)
 
-      client.conn.on('packet', async (packet) => {
+      const touchConnection = async () => {
+        await this.userStatusStore.touchConnection(userId, client.id)
+      }
+
+      const packetListener = async (packet) => {
         if (packet.type === 'pong') {
-          await this.redisClient.expire(`socket:${client.id}`, 60)
+          await touchConnection()
         }
-      })
+      }
+
+      client.conn.on('packet', packetListener)
+      this.packetListeners.set(client.id, packetListener)
+
+      const timer = setInterval(() => {
+        void touchConnection()
+      }, this.socketTouchIntervalMs)
+      this.socketTouchTimers.set(client.id, timer)
 
       //follow
       /**
@@ -113,6 +129,18 @@ export class RealtimeGateway
     const userId = client.data.userId
     if (!userId) return
 
+    const timer = this.socketTouchTimers.get(client.id)
+    if (timer) {
+      clearInterval(timer)
+      this.socketTouchTimers.delete(client.id)
+    }
+
+    const packetListener = this.packetListeners.get(client.id)
+    if (packetListener) {
+      client.conn.off('packet', packetListener)
+      this.packetListeners.delete(client.id)
+    }
+
     await this.userStatusStore.removeConnection(userId, client.id)
 
     const stillOnline = await this.userStatusStore.isOnline(userId)
@@ -129,7 +157,9 @@ export class RealtimeGateway
 
   @SubscribeMessage('pong')
   async handleHeartbeat(@ConnectedSocket() client: Socket) {
-    await this.redisClient.expire(`socket:${client.id}`, 60)
+    const userId = client.data.userId
+    if (!userId) return
+    await this.userStatusStore.touchConnection(userId, client.id)
   }
 
   async checkUserOnline(userId: string): Promise<boolean> {

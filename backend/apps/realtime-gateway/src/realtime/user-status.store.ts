@@ -1,5 +1,7 @@
 export class UserStatusStore {
   // Map userId -> Set socketIds
+  private readonly socketTtlSeconds = 90
+  private readonly userSetTtlSeconds = 300
 
   constructor(private redisClient: any) {}
   private getKey(userId: string) {
@@ -13,7 +15,20 @@ export class UserStatusStore {
     await this.redisClient
       .multi()
       .sadd(userKey, socketId)
-      .set(socketKey, userId, 'EX', 60) // TTL 60s
+      .set(socketKey, userId, 'EX', this.socketTtlSeconds)
+      .expire(userKey, this.userSetTtlSeconds)
+      .exec()
+  }
+
+  async touchConnection(userId: string, socketId: string) {
+    const userKey = this.getKey(userId)
+    const socketKey = `socket:${socketId}`
+
+    await this.redisClient
+      .multi()
+      .sadd(userKey, socketId)
+      .expire(socketKey, this.socketTtlSeconds)
+      .expire(userKey, this.userSetTtlSeconds)
       .exec()
   }
 
