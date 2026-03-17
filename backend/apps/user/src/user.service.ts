@@ -18,14 +18,40 @@ import {
   FriendRequestDetail,
   UserProfile,
 } from './domain/user.domain'
-import type {
-  UserRegisterRequest,
-  UserLoginRequest,
-  MakeFriendRequest,
-  UpdateStatusRequest,
-  UpdateProfileRequest,
-} from 'interfaces/user.grpc'
 import { RedisService } from '@app/redis/redis.service'
+
+// Type definitions for service methods
+interface UserRegisterRequest {
+  email: string
+  username: string
+  password: string
+}
+
+interface UserLoginRequest {
+  email: string
+  password: string
+}
+
+interface MakeFriendRequest {
+  inviterId: string
+  inviterName: string
+  inviteeEmail: string
+}
+
+interface UpdateStatusRequest {
+  inviteeId: string
+  inviteeName: string
+  status: Status
+  inviterId: string
+}
+
+interface UpdateProfileRequest {
+  userId: string
+  fullName?: string
+  bio?: string
+  avatar?: Buffer
+  avatarFilename?: string
+}
 
 @Injectable()
 export class UserService {

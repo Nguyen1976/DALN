@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common'
-import { UserController } from './user.controller'
 import { UserService } from './user.service'
 import { RedisModule } from '@app/redis'
 import { PrismaModule } from '@app/prisma'
@@ -59,7 +58,7 @@ import { APP_GUARD } from '@nestjs/core'
       'REDIS_CLIENT',
     ),
   ],
-  controllers: [UserController, UserHttpController],
+  controllers: [UserHttpController],
   providers: [
     {
       provide: APP_GUARD,

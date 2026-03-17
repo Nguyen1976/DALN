@@ -1,23 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { conversationType, Status } from '@prisma/client'
-import {
-  AddMemberToConversationRequest,
-  type AddMemberToConversationResponse,
-  ConversationAssetKind,
-  CreateMessageUploadUrlRequest,
-  CreateMessageUploadUrlResponse,
-  CreateConversationRequest,
-  DeleteConversationRequest,
-  DeleteConversationResponse,
-  GetConversationAssetsResponse,
-  GetMessagesResponse,
-  LeaveConversationRequest,
-  LeaveConversationResponse,
-  ReadMessageRequest,
-  ReadMessageResponse,
-  RemoveMemberFromConversationRequest,
-  RemoveMemberFromConversationResponse,
-} from 'interfaces/chat.grpc'
 import type {
   MessageSendPayload,
   UserUpdatedPayload,
@@ -31,6 +13,17 @@ import {
 import { ChatErrors } from './errors/chat.errors'
 import { ChatEventsPublisher } from './rmq/publishers/chat-events.publisher'
 import { StorageR2Service } from '@app/storage-r2/storage-r2.service'
+import { ConversationAssetKind, Member } from './http/chat-http.dto'
+
+// Type definitions for service methods
+interface CreateConversationData {
+  members: Member[]
+  type: conversationType
+  createrId?: string
+  groupName?: string
+  groupAvatar?: Buffer
+  groupAvatarFilename?: string
+}
 
 @Injectable()
 export class ChatService {
@@ -73,7 +66,7 @@ export class ChatService {
     })
   }
 
-  async createConversation(data: CreateConversationRequest) {
+  async createConversation(data: CreateConversationData) {
     const memberIds = data.members
       .map((m) => m.userId)
       .filter((id) => id !== data.createrId)
@@ -199,9 +192,7 @@ export class ChatService {
     }
   }
 
-  async createMessageUploadUrl(
-    data: CreateMessageUploadUrlRequest,
-  ): Promise<CreateMessageUploadUrlResponse> {
+  async createMessageUploadUrl(data) {
     const member = await this.memberRepo.findByConversationIdAndUserId(
       data.conversationId,
       data.userId,
@@ -233,9 +224,7 @@ export class ChatService {
     }
   }
 
-  async addMemberToConversation(
-    dto: AddMemberToConversationRequest,
-  ): Promise<AddMemberToConversationResponse> {
+  async addMemberToConversation(dto) {
     const conversation = await this.conversationRepo.findById(
       dto.conversationId,
     )
@@ -309,9 +298,7 @@ export class ChatService {
     }
   }
 
-  async removeMemberFromConversation(
-    dto: RemoveMemberFromConversationRequest,
-  ): Promise<RemoveMemberFromConversationResponse> {
+  async removeMemberFromConversation(dto) {
     const conversation = await this.conversationRepo.findById(
       dto.conversationId,
     )
@@ -398,9 +385,7 @@ export class ChatService {
     }
   }
 
-  async leaveConversation(
-    dto: LeaveConversationRequest,
-  ): Promise<LeaveConversationResponse> {
+  async leaveConversation(dto) {
     const conversation = await this.conversationRepo.findById(
       dto.conversationId,
     )
@@ -461,9 +446,7 @@ export class ChatService {
     }
   }
 
-  async deleteConversation(
-    dto: DeleteConversationRequest,
-  ): Promise<DeleteConversationResponse> {
+  async deleteConversation(dto) {
     const conversation = await this.conversationRepo.findById(
       dto.conversationId,
     )
@@ -517,7 +500,7 @@ export class ChatService {
     conversationId: string,
     userId: string,
     params: any,
-  ): Promise<GetMessagesResponse> {
+  ) {
     const isMember = await this.memberRepo.findByConversationIdAndUserId(
       conversationId,
       userId,
@@ -540,7 +523,7 @@ export class ChatService {
       messages: messages.map((m) => ({
         ...this.normalizeMessage(m),
       })),
-    } as GetMessagesResponse
+    }
   }
 
   async getConversationAssets(
@@ -551,7 +534,7 @@ export class ChatService {
       limit?: number | string
       cursor?: string | null
     },
-  ): Promise<GetConversationAssetsResponse> {
+  ) {
     const isMember = await this.memberRepo.findByConversationIdAndUserId(
       conversationId,
       userId,
@@ -590,7 +573,7 @@ export class ChatService {
     }
   }
 
-  async readMessage(data: ReadMessageRequest): Promise<ReadMessageResponse> {
+  async readMessage(data) {
     const message = await this.messageRepo.findById(
       data.lastReadMessageId,
       data.conversationId,

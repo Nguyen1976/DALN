@@ -11,7 +11,6 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { LoggerModule } from '@app/logger'
 import { AuthGuard, CommonModule } from '@app/common'
 import { APP_GUARD } from '@nestjs/core'
-import { NotificationHttpController } from './http/notification-http.controller'
 import {
   NotificationPreferenceRepository,
   NotificationRepository,
@@ -50,7 +49,7 @@ import { NotificationSubscriber } from './rmq/subcribers/notification-subscriber
     UtilModule,
     LoggerModule.forService('Notification-Service'),
   ],
-  controllers: [NotificationController, NotificationHttpController],
+  controllers: [NotificationController],
   providers: [
     {
       provide: APP_GUARD,

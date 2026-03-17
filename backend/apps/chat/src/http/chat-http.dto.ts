@@ -1,5 +1,20 @@
 import { IsNotEmpty } from 'class-validator'
 
+export enum ConversationAssetKind {
+  ASSET_MEDIA = 0,
+  ASSET_LINK = 1,
+  ASSET_DOC = 2,
+  UNRECOGNIZED = -1,
+}
+
+export enum MessageType {
+  TEXT = 0,
+  IMAGE = 1,
+  VIDEO = 2,
+  FILE = 3,
+  UNRECOGNIZED = -1,
+}
+
 export interface Member {
   username: string
   avatar?: string | undefined

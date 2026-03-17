@@ -12,7 +12,6 @@ import type { Multer } from 'multer'
 import type { Response } from 'express'
 import { FileInterceptor } from '@nestjs/platform-express'
 import { UserService } from '../user.service'
-import { UserMapper } from '../domain/user.mapper'
 import {
   RequireLogin,
   UserInfo,
@@ -34,7 +33,11 @@ export class UserHttpController {
   @WithoutLogin()
   async register(@Body() dto: RegisterUserDto) {
     const user = await this.userService.register(dto)
-    return UserMapper.toRegisterResponse(user as any)
+    return {
+      id: user.id,
+      email: user.email,
+      username: user.username,
+    }
   }
 
   @Post('login')
@@ -55,7 +58,16 @@ export class UserHttpController {
       secure: true,
     })
 
-    return UserMapper.toLoginResponse(session as any)
+    return {
+      id: session.userId,
+      email: session.email,
+      username: session.username,
+      fullName: session.fullName || '',
+      avatar: session.avatar || '',
+      bio: session.bio || '',
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+    }
   }
 
   @Post('logout')
@@ -70,19 +82,27 @@ export class UserHttpController {
   @RequireLogin()
   async getUserById(@Query('userId') userId: string) {
     const user = await this.userService.getUserById(userId)
-    return UserMapper.toGetUserByIdResponse(user as any)
+    return {
+      email: user.email,
+      username: user.username,
+      fullName: user.fullName || '',
+      avatar: user.avatar || '',
+      bio: user.bio || '',
+    }
   }
 
   @Post('make-friend')
   @RequireLogin()
   async makeFriend(@Body() body: MakeFriendDto, @UserInfo() user: any) {
-    const friendship = await this.userService.makeFriend({
+    await this.userService.makeFriend({
       inviterId: user.userId,
       inviterName: user.username,
       inviteeEmail: body.email,
     })
 
-    return UserMapper.toMakeFriendResponse(friendship as any)
+    return {
+      status: 'SUCCESS',
+    }
   }
 
   @Post('update-status-make-friend')
@@ -91,13 +111,15 @@ export class UserHttpController {
     @Body() body: UpdateStatusMakeFriendDto,
     @UserInfo() user: any,
   ) {
-    const friendship = await this.userService.updateStatusMakeFriend({
+    await this.userService.updateStatusMakeFriend({
       ...body,
       inviteeId: user.userId,
       inviteeName: user.username,
     })
 
-    return UserMapper.toUpdateStatusResponse(friendship as any)
+    return {
+      status: 'SUCCESS',
+    }
   }
 
   @Get('list-friends')
@@ -112,14 +134,34 @@ export class UserHttpController {
       Number(limit),
       Number(page),
     )
-    return UserMapper.toListFriendsResponse(friends as any)
+    return {
+      friends: friends.map((friend) => ({
+        id: friend.id,
+        email: friend.email,
+        username: friend.username,
+        fullName: friend.fullName || '',
+        avatar: friend.avatar || '',
+        bio: friend.bio || '',
+        status: (friend as any).status || false,
+      })),
+    }
   }
 
   @Get('search')
   @RequireLogin()
   async searchUsers(@UserInfo() user: any, @Query('keyword') keyword: string) {
     const friends = await this.userService.searchFriends(user.userId, keyword)
-    return UserMapper.toListFriendsResponse(friends as any)
+    return {
+      friends: friends.map((friend) => ({
+        id: friend.id,
+        email: friend.email,
+        username: friend.username,
+        fullName: friend.fullName || '',
+        avatar: friend.avatar || '',
+        bio: friend.bio || '',
+        status: (friend as any).status || false,
+      })),
+    }
   }
 
   @Get('list-friend-requests')
@@ -134,14 +176,41 @@ export class UserHttpController {
       Number(limit),
       Number(page),
     )
-    return UserMapper.toListFriendRequestsResponse(requests)
+    return {
+      friendRequests: requests.map((request) => ({
+        id: request.id,
+        status: request.status,
+        createdAt: request.createdAt.toString(),
+        updatedAt: request.updatedAt.toString(),
+        fromUser: {
+          id: request.fromUser.id,
+          email: request.fromUser.email,
+          username: request.fromUser.username,
+          fullName: request.fromUser.fullName || '',
+          avatar: request.fromUser.avatar || '',
+        },
+      })),
+    }
   }
 
   @Get('detail-friend-request')
   @RequireLogin()
   async detailMakeFriend(@Query('friendRequestId') friendRequestId: string) {
     const request = await this.userService.detailMakeFriend(friendRequestId)
-    return UserMapper.toDetailMakeFriendResponse(request as any)
+    return {
+      id: request.id,
+      toUserId: request.toUserId,
+      status: request.status,
+      createdAt: request.createdAt.toString(),
+      updatedAt: request.updatedAt.toString(),
+      fromUser: {
+        id: request.fromUser.id,
+        email: request.fromUser.email,
+        username: request.fromUser.username,
+        fullName: request.fromUser.fullName || '',
+        avatar: request.fromUser.avatar || '',
+      },
+    }
   }
 
   @Post('update-profile')
@@ -165,6 +234,10 @@ export class UserHttpController {
       avatarFilename: avatar?.originalname,
     })
 
-    return UserMapper.toUpdateProfileResponse(profile as any)
+    return {
+      fullName: profile.fullName || '',
+      bio: profile.bio || '',
+      avatar: profile.avatar || '',
+    }
   }
 }

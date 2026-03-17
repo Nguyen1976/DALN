@@ -1,7 +1,7 @@
 import { PrismaService } from '@app/prisma/prisma.service'
 import { Inject, Injectable } from '@nestjs/common'
 import { conversationType } from '@prisma/client'
-import { Member } from 'interfaces/chat.grpc'
+import { Member } from '../http/chat-http.dto'
 
 @Injectable()
 export class ConversationMemberRepository {

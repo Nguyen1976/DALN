@@ -1,8 +1,3 @@
-import {
-  CreateConversationResponse,
-  GetConversationByFriendIdResponse,
-  GetConversationsResponse,
-} from 'interfaces/chat.grpc'
 
 export class ConversationMapper {
   // Add mapping methods here as needed
@@ -30,7 +25,7 @@ export class ConversationMapper {
   static toGetConversationsResponse(
     conversations,
     unreadMap: Map<string, string>,
-  ): GetConversationsResponse {
+  ) {
     return {
       conversations: conversations.map((c) => ({
         id: c.id,
@@ -52,12 +47,12 @@ export class ConversationMapper {
         })),
         lastMessage: c.messages.length ? this.mapMessage(c.messages[0]) : null,
       })),
-    } as GetConversationsResponse
+    }
   }
   static toGetConversationByFriendIdResponse(
     conversation,
     unreadMap: Map<string, string>,
-  ): GetConversationByFriendIdResponse {
+  ) {
     return {
       conversation: {
         id: conversation.id,
@@ -80,15 +75,15 @@ export class ConversationMapper {
           ? this.mapMessage(conversation.messages[0])
           : null,
       },
-    } as GetConversationByFriendIdResponse
+    }
   }
 
-  static toCreateConversationResponse(res: any): CreateConversationResponse {
+  static toCreateConversationResponse(res: any) {
     return this.formatConversationResponse(res)
   }
 
   // Private helper methods
-  static formatConversationResponse(res: any): CreateConversationResponse {
+  static formatConversationResponse(res: any) {
     return {
       conversation: {
         id: res?.id,
@@ -105,6 +100,6 @@ export class ConversationMapper {
         })),
         messages: res?.messages?.map((msg: any) => this.mapMessage(msg)) || [],
       },
-    } as CreateConversationResponse
+    }
   }
 }

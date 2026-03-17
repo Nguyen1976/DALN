@@ -1,11 +1,8 @@
 import { NestFactory } from '@nestjs/core'
 import { NotificationModule } from './notification.module'
-import { MicroserviceOptions, Transport } from '@nestjs/microservices'
-import { NOTIFICATION_PACKAGE_NAME } from 'interfaces/notification.grpc'
-import { PORT_GRPC } from 'libs/constant/grpc/port-grpc.constant'
-import cookieParser from 'cookie-parser'
 import { ValidationPipe } from '@nestjs/common'
 import { GrpcToHttpExceptionFilter, ResponseInterceptor } from '@app/common'
+import cookieParser from 'cookie-parser'
 
 async function bootstrap() {
   const app = await NestFactory.create(NotificationModule)
@@ -24,16 +21,6 @@ async function bootstrap() {
     credentials: true,
   })
 
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.GRPC,
-    options: {
-      package: NOTIFICATION_PACKAGE_NAME,
-      protoPath: './proto/notification.grpc.proto',
-      url: `localhost:${PORT_GRPC.NOTIFICATION_GRPC_PORT}`,
-    },
-  })
-
-  await app.startAllMicroservices()
   await app.listen(process.env.PORT ?? 3004)
 }
 bootstrap()

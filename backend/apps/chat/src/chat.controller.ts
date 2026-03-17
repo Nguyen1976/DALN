@@ -1,243 +1,321 @@
-import { Controller } from '@nestjs/common'
-import { ChatService } from './chat.service'
-import { GrpcMethod } from '@nestjs/microservices'
 import {
-  type AddMemberToConversationRequest,
-  CHAT_GRPC_SERVICE_NAME,
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Param,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common'
+import { ChatService } from './chat.service'
+import { FileInterceptor } from '@nestjs/platform-express/multer/interceptors/file.interceptor'
+import { RequireLogin, UserInfo } from '@app/common/common.decorator'
+import {
+  CreateConversationDTO,
+  AddMemberToConversationDTO,
+  RemoveMemberFromConversationDTO,
+  LeaveConversationDTO,
+  DeleteConversationDTO,
+  CreateMessageUploadUrlDTO,
+  ReadMessageDto,
   ConversationAssetKind,
-  type CreateConversationResponse,
-  type CreateConversationRequest,
-  type CreateMessageUploadUrlRequest,
-  CreateMessageUploadUrlResponse,
-  type DeleteConversationRequest,
-  type DeleteConversationResponse,
-  type GetConversationsRequest,
-  GetConversationAssetsResponse,
-  type GetConversationAssetsRequest,
-  GetConversationsResponse,
-  type GetMessagesRequest,
-  type LeaveConversationRequest,
-  type LeaveConversationResponse,
-  ReadMessageResponse,
-  type ReadMessageRequest,
-  type RemoveMemberFromConversationRequest,
-  type RemoveMemberFromConversationResponse,
-  SendMessageResponse,
-  type SendMessageRequest,
-  type SearchConversationRequest,
-  GetConversationByFriendIdResponse,
-} from 'interfaces/chat.grpc'
-import { Metadata } from '@grpc/grpc-js'
-import { ConversationMapper } from './domain/conversation.mapper'
-import { safeExecute } from '@app/common/rpc/safe-execute'
+  MessageType,
+} from './http/chat-http.dto'
 
-@Controller()
+// Reusable response formatters
+const formatMessage = (message: any) => {
+  if (!message) return null
+
+  return {
+    ...message,
+    text: message.content || '',
+    type: message.type || 'TEXT',
+    clientMessageId: message.clientMessageId || undefined,
+    createdAt: message.createdAt.toString(),
+    medias: (message.medias || []).map((media: any) => ({
+      ...media,
+      size: String(media.size),
+    })),
+  }
+}
+
+const formatConversation = (c: any, unreadMap?: Map<string, string>) => ({
+  id: c.id,
+  type: c.type,
+  groupName: c.groupName,
+  groupAvatar: c.groupAvatar,
+  unreadCount: unreadMap?.get(c.id) ?? '0',
+  createdAt: c.createdAt.toString(),
+  updatedAt: c.updatedAt.toString(),
+  members: c.members.map((m: any) => ({
+    ...m,
+    userId: m.userId,
+    role: m.role,
+    username: m.username,
+    avatar: m.avatar,
+    fullName: m.fullName,
+    lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : null,
+    lastMessageAt: m.lastMessageAt.toString(),
+  })),
+  lastMessage: c.messages.length ? formatMessage(c.messages[0]) : null,
+})
+
+@Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'createConversation')
+  @Post('create')
+  @UseInterceptors(
+    FileInterceptor('groupAvatar', {
+      limits: {
+        fileSize: 2 * 1024 * 1024,
+      },
+    }),
+  )
+  @RequireLogin()
   async createConversation(
-    data: CreateConversationRequest,
-    metadata: Metadata,
-  ): Promise<CreateConversationResponse> {
-    const res = await safeExecute(() =>
-      this.chatService.createConversation(data),
-    )
-    return ConversationMapper.toCreateConversationResponse(res)
-  }
+    @Body() dto: CreateConversationDTO,
+    @UserInfo() userInfo: any,
+    @UploadedFile() groupAvatar?,
+  ) {
+    const parsedMembers =
+      typeof dto.members === 'string'
+        ? JSON.parse(dto.members || '[]')
+        : dto.members || []
 
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'addMemberToConversation')
-  async addMemberToConversation(
-    data: AddMemberToConversationRequest,
-    metadata: Metadata,
-  ): Promise<any> {
-    const res = await safeExecute(() =>
-      this.chatService.addMemberToConversation(data),
-    )
-    return res
-  }
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'removeMemberFromConversation')
-  async removeMemberFromConversation(
-    data: RemoveMemberFromConversationRequest,
-    metadata: Metadata,
-  ): Promise<RemoveMemberFromConversationResponse> {
-    return await safeExecute(() =>
-      this.chatService.removeMemberFromConversation(data),
-    )
-  }
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'leaveConversation')
-  async leaveConversation(
-    data: LeaveConversationRequest,
-    metadata: Metadata,
-  ): Promise<LeaveConversationResponse> {
-    return await safeExecute(() => this.chatService.leaveConversation(data))
-  }
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'deleteConversation')
-  async deleteConversation(
-    data: DeleteConversationRequest,
-    metadata: Metadata,
-  ): Promise<DeleteConversationResponse> {
-    return await safeExecute(() => this.chatService.deleteConversation(data))
-  }
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'getConversations')
-  async getConversations(
-    data: GetConversationsRequest,
-    metadata: Metadata,
-  ): Promise<GetConversationsResponse> {
-    const res = await safeExecute(() =>
-      this.chatService.getConversations(data.userId, data),
-    )
-    return ConversationMapper.toGetConversationsResponse(
-      res.conversations,
-      res.unreadMap,
-    )
-  }
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'getMessagesByConversationId')
-  async getMessagesByConversationId(
-    data: GetMessagesRequest,
-    metadata: Metadata,
-  ): Promise<any> {
-    const res = await safeExecute(() =>
-      this.chatService.getMessagesByConversationId(
-        data.conversationId,
-        data.userId,
-        { limit: data.limit, page: data.page, cursor: data.cursor },
-      ),
-    )
-    return res
-  }
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'getConversationAssets')
-  async getConversationAssets(
-    data: GetConversationAssetsRequest,
-    metadata: Metadata,
-  ): Promise<GetConversationAssetsResponse> {
-    return await safeExecute(() =>
-      this.chatService.getConversationAssets(
-        data.conversationId,
-        data.userId,
-        data.kind as ConversationAssetKind,
+    const res = await this.chatService.createConversation({
+      ...dto,
+      type: 'GROUP',
+      members: [
+        ...(parsedMembers as any[]),
         {
-          limit: data.limit,
-          cursor: data.cursor,
+          userId: userInfo.userId,
+          username: userInfo.username,
+          fullName: userInfo.fullName,
         },
-      ),
-    )
-  }
+      ],
+      createrId: userInfo.userId,
+      groupAvatar: groupAvatar?.buffer,
+      groupAvatarFilename: groupAvatar?.originalname,
+    })
 
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'createMessageUploadUrl')
-  async createMessageUploadUrl(
-    data: CreateMessageUploadUrlRequest,
-    metadata: Metadata,
-  ): Promise<CreateMessageUploadUrlResponse> {
-    return await safeExecute(() =>
-      this.chatService.createMessageUploadUrl(data),
-    )
-  }
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'readMessage')
-  async readMessage(
-    data: ReadMessageRequest,
-    metadata: Metadata,
-  ): Promise<ReadMessageResponse> {
-    const res = await safeExecute(() => this.chatService.readMessage(data))
-    return res
-  }
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'sendMessage')
-  async sendMessage(
-    data: SendMessageRequest,
-    metadata: Metadata,
-  ): Promise<SendMessageResponse> {
-    const normalizeMessageType = (
-      type: any,
-    ): 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE' => {
-      if (typeof type === 'number') {
-        return (['TEXT', 'IMAGE', 'VIDEO', 'FILE'][type] || 'TEXT') as
-          | 'TEXT'
-          | 'IMAGE'
-          | 'VIDEO'
-          | 'FILE'
-      }
-      const normalized = String(type || 'TEXT').toUpperCase()
-      if (normalized.includes('IMAGE')) return 'IMAGE'
-      if (normalized.includes('VIDEO')) return 'VIDEO'
-      if (normalized.includes('FILE')) return 'FILE'
-      return 'TEXT'
-    }
-
-    const normalizeMediaType = (type: any): 'IMAGE' | 'VIDEO' | 'FILE' => {
-      if (typeof type === 'number') {
-        return (['IMAGE', 'VIDEO', 'FILE'][type] || 'FILE') as
-          | 'IMAGE'
-          | 'VIDEO'
-          | 'FILE'
-      }
-      const normalized = String(type || 'MEDIA_FILE').toUpperCase()
-      if (normalized.includes('IMAGE')) return 'IMAGE'
-      if (normalized.includes('VIDEO')) return 'VIDEO'
-      return 'FILE'
-    }
-
-    const res = await safeExecute(() =>
-      this.chatService.sendMessage({
-        conversationId: data.conversationId,
-        senderId: data.senderId,
-        text: data.message || '',
-        replyToMessageId: data.replyToMessageId,
-        tempMessageId: data.clientMessageId || `grpc-${Date.now()}`,
-        clientMessageId: data.clientMessageId,
-        type: normalizeMessageType(data.type),
-        medias: (data.medias || []).map((media) => ({
-          mediaType: normalizeMediaType(media.mediaType),
-          objectKey: media.objectKey,
-          url: media.url,
-          mimeType: media.mimeType,
-          size: media.size,
-          width: media.width,
-          height: media.height,
-          duration: media.duration,
-          thumbnailUrl: media.thumbnailUrl,
-          sortOrder: media.sortOrder,
+    return {
+      conversation: {
+        id: res?.id,
+        unreadCount: '0',
+        type: res?.type,
+        groupName: res?.groupName,
+        groupAvatar: res?.groupAvatar,
+        createdAt: res?.createdAt.toString(),
+        updatedAt: res?.updatedAt.toString(),
+        members: res?.members.map((m: any) => ({
+          ...m,
+          role: m.role,
+          lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : '',
         })),
-      }),
+        messages: res?.messages?.map((msg: any) => formatMessage(msg)) || [],
+      },
+    }
+  }
+
+  @Post('add-member')
+  @RequireLogin()
+  async addMemberToConversation(
+    @Body() body: AddMemberToConversationDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    const providedMembers = body.members || []
+
+    const normalizedMembers: Array<{
+      userId: string
+      username: string
+      fullName?: string
+      avatar?: string
+    }> =
+      providedMembers.length > 0
+        ? providedMembers.map((member) => ({
+            userId: member.userId,
+            username: member.username || '',
+            fullName: member.fullName,
+            avatar: member.avatar,
+          }))
+        : (body.memberIds || []).map((memberId) => ({
+            username: '',
+            userId: memberId,
+          }))
+
+    return await this.chatService.addMemberToConversation({
+      conversationId: body.conversationId,
+      members: normalizedMembers,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Post('remove-member')
+  @RequireLogin()
+  async removeMemberFromConversation(
+    @Body() body: RemoveMemberFromConversationDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    return await this.chatService.removeMemberFromConversation({
+      conversationId: body.conversationId,
+      targetUserId: body.targetUserId,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Post('leave-group')
+  @RequireLogin()
+  async leaveConversation(
+    @Body() body: LeaveConversationDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    return await this.chatService.leaveConversation({
+      conversationId: body.conversationId,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Post('delete-conversation')
+  @RequireLogin()
+  async deleteConversation(
+    @Body() body: DeleteConversationDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    return await this.chatService.deleteConversation({
+      conversationId: body.conversationId,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Get('conversations')
+  @RequireLogin()
+  async getConversations(
+    @UserInfo() userInfo: any,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    const result = await this.chatService.getConversations(userInfo.userId, {
+      limit: limit ? parseInt(limit, 10) : 20,
+      cursor: cursor || null,
+    })
+
+    return {
+      conversations: result.conversations.map((c) =>
+        formatConversation(c, result.unreadMap),
+      ),
+    }
+  }
+
+  @Get('messages/:conversationId')
+  @RequireLogin()
+  async getMessagesByConversationId(
+    @Param('conversationId') conversationId: string,
+    @UserInfo() userInfo: any,
+    @Query('limit') limit?: string,
+    @Query('page') page?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return await this.chatService.getMessagesByConversationId(
+      conversationId,
+      userInfo.userId,
+      {
+        limit: limit ? parseInt(limit, 10) : 20,
+        page: page ? parseInt(page, 10) : 1,
+        cursor: cursor || null,
+      },
+    )
+  }
+
+  @Get('assets')
+  @RequireLogin()
+  async getConversationAssets(
+    @Query('conversationId') conversationId: string,
+    @Query('kind') kind: 'MEDIA' | 'LINK' | 'DOC',
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @UserInfo() userInfo?: any,
+  ) {
+    const kindMap: Record<'MEDIA' | 'LINK' | 'DOC', ConversationAssetKind> = {
+      MEDIA: ConversationAssetKind.ASSET_MEDIA,
+      LINK: ConversationAssetKind.ASSET_LINK,
+      DOC: ConversationAssetKind.ASSET_DOC,
+    }
+
+    const assetKind = ['MEDIA', 'LINK', 'DOC'].includes(kind)
+      ? kindMap[kind]
+      : ConversationAssetKind.ASSET_MEDIA
+
+    return await this.chatService.getConversationAssets(
+      conversationId,
+      userInfo.userId,
+      assetKind,
+      {
+        limit: limit ? parseInt(limit, 10) : 20,
+        cursor: cursor || null,
+      },
+    )
+  }
+
+  @Post('media/presign')
+  @RequireLogin()
+  async createMessageUploadUrl(
+    @Body() data: CreateMessageUploadUrlDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    const mapMessageType = (type: 'IMAGE' | 'VIDEO' | 'FILE') => {
+      if (type === 'IMAGE') return MessageType.IMAGE
+      if (type === 'VIDEO') return MessageType.VIDEO
+      return MessageType.FILE
+    }
+
+    return await this.chatService.createMessageUploadUrl({
+      ...data,
+      userId: userInfo.userId,
+      type: mapMessageType(data.type),
+    })
+  }
+
+  @Post('read_message')
+  @RequireLogin()
+  async readMessage(@Body() data: ReadMessageDto, @UserInfo() userInfo: any) {
+    return await this.chatService.readMessage({
+      ...data,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Get('search')
+  @RequireLogin()
+  async searchConversations(
+    @Query('keyword') keyword: string,
+    @UserInfo() userInfo: any,
+  ) {
+    const res = await this.chatService.searchConversations(
+      userInfo.userId,
+      keyword,
     )
 
     return {
-      message: res?.message,
-    } as SendMessageResponse
+      conversations: res.conversations.map((c) =>
+        formatConversation(c, res.unreadMap),
+      ),
+    }
   }
 
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'searchConversations')
-  async searchConversations(
-    data: SearchConversationRequest,
-    metadata: Metadata,
-  ): Promise<any> {
-    const res = await safeExecute(() =>
-      this.chatService.searchConversations(data.userId, data.keyword),
-    )
-    return ConversationMapper.toGetConversationsResponse(
-      res.conversations,
-      res.unreadMap,
-    )
-  }
-
-  @GrpcMethod(CHAT_GRPC_SERVICE_NAME, 'getConversationByFriendId')
+  @Get('conversation-by-friend')
+  @RequireLogin()
   async getConversationByFriendId(
-    data: { friendId: string; userId: string },
-    metadata: Metadata,
-  ): Promise<GetConversationByFriendIdResponse> {
-    const res = await safeExecute(() =>
-      this.chatService.getConversationByFriendId(data.friendId, data.userId),
+    @Query('friendId') friendId: string,
+    @UserInfo() userInfo: any,
+  ) {
+    const res = await this.chatService.getConversationByFriendId(
+      friendId,
+      userInfo.userId,
     )
-    return ConversationMapper.toGetConversationByFriendIdResponse(
-      res.conversation,
-      res.unreadMap,
-    ) as GetConversationByFriendIdResponse
+
+    return {
+      conversation: formatConversation(res.conversation, res.unreadMap),
+    }
   }
 }

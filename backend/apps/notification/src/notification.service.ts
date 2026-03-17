@@ -3,14 +3,6 @@ import { RedisService } from '@app/redis'
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
 import { NotificationType, Status } from '@prisma/client'
 import {
-  GetNotificationsRequest,
-  GetNotificationsResponse,
-  MarkAllNotificationsAsReadRequest,
-  MarkAllNotificationsAsReadResponse,
-  MarkNotificationAsReadRequest,
-  MarkNotificationAsReadResponse,
-} from 'interfaces/notification.grpc'
-import {
   NotificationPreferenceRepository,
   NotificationRepository,
 } from './repositories'
@@ -389,8 +381,8 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getNotifications(
-    data: GetNotificationsRequest,
-  ): Promise<GetNotificationsResponse> {
+    data,
+  ) {
     const { userId, page, limit } = data
 
     const take = Number(limit) || 5
@@ -407,12 +399,12 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
         ...n,
         createdAt: n.createdAt.toString(),
       })),
-    } as GetNotificationsResponse
+    }
   }
 
   async markNotificationAsRead(
-    data: MarkNotificationAsReadRequest,
-  ): Promise<MarkNotificationAsReadResponse> {
+    data,
+  ) {
     const { userId, notificationId } = data
 
     await this.notificationRepo.markOneRead(userId, notificationId)
@@ -421,8 +413,8 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   }
 
   async markAllNotificationsAsRead(
-    data: MarkAllNotificationsAsReadRequest,
-  ): Promise<MarkAllNotificationsAsReadResponse> {
+    data,
+  ) {
     const { userId } = data
 
     const result = await this.notificationRepo.markAllRead(userId)

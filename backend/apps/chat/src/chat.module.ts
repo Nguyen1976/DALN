@@ -2,9 +2,7 @@ import { Module } from '@nestjs/common'
 import { ChatController } from './chat.controller'
 import { ChatService } from './chat.service'
 import { PrismaModule } from '@app/prisma'
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
 import { UtilModule } from '@app/util'
-import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   ConversationRepository,
   MessageRepository,
@@ -14,13 +12,11 @@ import { ChatEventsPublisher } from './rmq/publishers/chat-events.publisher'
 import { MessageSubscriber } from './rmq/subcribers/chat-subcribers'
 import { RmqModule } from './rmq.module'
 import { LoggerModule } from '@app/logger'
-import { RedisModule } from '@app/redis/redis.module'
 import { StorageR2Module } from '@app/storage-r2/storage-r2.module'
 import { r2Config } from './storage-r2.config'
 import { ConfigModule } from '@nestjs/config/dist/config.module'
 import { AuthGuard, CommonModule } from '@app/common'
 import { APP_GUARD } from '@nestjs/core'
-import { ChatHttpController } from './http/chat-http.controller'
 
 @Module({
   imports: [
@@ -43,7 +39,7 @@ import { ChatHttpController } from './http/chat-http.controller'
       publicUrl: process.env.R2_PUBLIC_URL!,
     }),
   ],
-  controllers: [ChatController, ChatHttpController],
+  controllers: [ChatController],
   providers: [
     {
       provide: APP_GUARD,

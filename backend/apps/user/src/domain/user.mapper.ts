@@ -1,14 +1,4 @@
-import {
-  UserRegisterResponse,
-  UserLoginResponse,
-  GetUserByIdResponse,
-  MakeFriendResponse,
-  UpdateStatusResponse,
-  ListFriendsResponse,
-  ListFriendRequestsResponse,
-  DetailMakeFriendResponse,
-  UpdateProfileResponse,
-} from 'interfaces/user.grpc'
+
 import {
   AuthSession,
   UserEntity,
@@ -18,7 +8,7 @@ import {
 } from './user.domain'
 
 export class UserMapper {
-  static toRegisterResponse(user: UserEntity): UserRegisterResponse {
+  static toRegisterResponse(user: UserEntity) {
     return {
       id: user.id,
       email: user.email,
@@ -26,7 +16,7 @@ export class UserMapper {
     }
   }
 
-  static toLoginResponse(session: AuthSession): UserLoginResponse {
+  static toLoginResponse(session: AuthSession) {
     return {
       id: session.userId,
       email: session.email,
@@ -39,7 +29,7 @@ export class UserMapper {
     }
   }
 
-  static toGetUserByIdResponse(user: UserEntity): GetUserByIdResponse {
+  static toGetUserByIdResponse(user: UserEntity) {
     return {
       email: user.email,
       username: user.username,
@@ -49,19 +39,19 @@ export class UserMapper {
     }
   }
 
-  static toMakeFriendResponse(_friendship: Friendship): MakeFriendResponse {
+  static toMakeFriendResponse(_friendship: Friendship) {
     return {
       status: 'SUCCESS',
     }
   }
 
-  static toUpdateStatusResponse(_friendship: Friendship): UpdateStatusResponse {
+  static toUpdateStatusResponse(_friendship: Friendship)   {
     return {
       status: 'SUCCESS',
     }
   }
 
-  static toListFriendsResponse(friends: UserEntity[]): ListFriendsResponse {
+  static toListFriendsResponse(friends: UserEntity[]) {
     return {
       friends: friends.map((friend) => ({
         id: friend.id,
@@ -77,7 +67,7 @@ export class UserMapper {
 
   static toDetailMakeFriendResponse(
     friendRequest: FriendRequestDetail,
-  ): DetailMakeFriendResponse {
+  ) {
     return {
       id: friendRequest.id,
       toUserId: friendRequest.toUserId,
@@ -96,7 +86,7 @@ export class UserMapper {
 
   static toListFriendRequestsResponse(
     friendRequests: any[],
-  ): ListFriendRequestsResponse {
+  ) {
     return {
       friendRequests: friendRequests.map((request) => ({
         id: request.id,
@@ -114,7 +104,7 @@ export class UserMapper {
     }
   }
 
-  static toUpdateProfileResponse(profile: UserProfile): UpdateProfileResponse {
+  static toUpdateProfileResponse(profile: UserProfile) {
     return {
       fullName: profile.fullName || '',
       bio: profile.bio || '',
