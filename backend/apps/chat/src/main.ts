@@ -3,7 +3,6 @@ import { ChatModule } from './chat.module'
 import { ValidationPipe } from '@nestjs/common'
 import { GrpcToHttpExceptionFilter, ResponseInterceptor } from '@app/common'
 import cookieParser from 'cookie-parser'
-
 async function bootstrap() {
   const app = await NestFactory.create(ChatModule)
 

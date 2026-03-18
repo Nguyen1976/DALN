@@ -2,7 +2,6 @@ import { StorageR2Service } from '@app/storage-r2'
 import { UtilService } from '@app/util/util.service'
 import { Inject, Injectable } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
-import { Status } from '@prisma/client'
 import { lookup } from 'mime-types'
 import {
   UserRepository,
@@ -19,6 +18,7 @@ import {
   UserProfile,
 } from './domain/user.domain'
 import { RedisService } from '@app/redis/redis.service'
+import { Status } from '../src/generated'
 
 // Type definitions for service methods
 interface UserRegisterRequest {

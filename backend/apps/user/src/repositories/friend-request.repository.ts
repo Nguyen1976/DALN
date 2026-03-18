@@ -1,6 +1,6 @@
-import { PrismaService } from '@app/prisma'
+import { PrismaService } from 'apps/user/prisma/prisma.service'
 import { Inject, Injectable } from '@nestjs/common'
-import { Status } from '@prisma/client'
+import { Status } from 'apps/user/src/generated';
 
 @Injectable()
 export class FriendRequestRepository {

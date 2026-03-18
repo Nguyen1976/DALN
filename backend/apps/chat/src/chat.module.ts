@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common'
 import { ChatController } from './chat.controller'
 import { ChatService } from './chat.service'
-import { PrismaModule } from '@app/prisma'
 import { UtilModule } from '@app/util'
 import {
   ConversationRepository,
@@ -17,6 +16,7 @@ import { r2Config } from './storage-r2.config'
 import { ConfigModule } from '@nestjs/config/dist/config.module'
 import { AuthGuard, CommonModule } from '@app/common'
 import { APP_GUARD } from '@nestjs/core'
+import { PrismaModule } from '../prisma/prisma.module'
 
 @Module({
   imports: [
@@ -28,7 +28,7 @@ import { APP_GUARD } from '@nestjs/core'
     StorageR2Module,
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: process.cwd() + '/apps/chat/.storage-r2.env',
+      envFilePath: process.cwd() + '/apps/chat/.env',
       load: [r2Config],
     }),
     StorageR2Module.forRoot({

@@ -1,4 +1,4 @@
-import { PrismaService } from '@app/prisma'
+import { PrismaService } from 'apps/user/prisma/prisma.service'
 import { Inject, Injectable } from '@nestjs/common'
 @Injectable()
 export class FriendShipRepository {

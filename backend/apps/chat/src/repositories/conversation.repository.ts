@@ -1,7 +1,6 @@
-import { PrismaService } from '@app/prisma/prisma.service'
 import { Inject, Injectable } from '@nestjs/common'
-import { conversationType } from '@prisma/client'
-import { Prisma } from '@prisma/client'
+import { conversationType, Prisma } from 'apps/chat/src/generated'
+import { PrismaService } from 'apps/chat/prisma/prisma.service'
 
 @Injectable()
 export class ConversationRepository {

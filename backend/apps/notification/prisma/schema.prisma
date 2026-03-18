@@ -1,45 +1,11 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../../node_modules/.prisma/client"
+  output   = "../src/generated"
 }
 
 datasource db {
   provider = "mongodb"
   url      = env("DATABASE_URL")
-}
-
-model User {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  email     String   @unique
-  username  String   @unique
-  fullName  String
-  password  String
-  avatar    String?
-  bio       String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Friendship {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId    String   @db.ObjectId
-  friendId  String   @db.ObjectId
-  createdAt DateTime @default(now())
-}
-
-enum Status {
-  PENDING
-  REJECTED
-  ACCEPTED
-}
-
-model friendRequest {
-  id         String   @id @default(auto()) @map("_id") @db.ObjectId
-  fromUserId String   @db.ObjectId
-  toUserId   String   @db.ObjectId
-  status     Status   @default(PENDING)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
 }
 
 enum NotificationType {
@@ -194,108 +160,4 @@ model notificationDigestTracking {
   @@unique([idempotencyKey])
   @@index([userId, windowEnd])
   @@index([status, createdAt])
-}
-
-enum conversationType {
-  DIRECT
-  GROUP
-}
-
-enum participantRole {
-  OWNER
-  ADMIN
-  MEMBER
-}
-
-enum messageType {
-  TEXT
-  IMAGE
-  VIDEO
-  FILE
-}
-
-enum mediaType {
-  IMAGE
-  VIDEO
-  FILE
-}
-
-model conversation {
-  id              String                @id @default(auto()) @map("_id") @db.ObjectId
-  type            conversationType      @default(DIRECT)
-  groupName       String?
-  groupAvatar     String?
-  members         conversationMember[]
-  messages        message[]
-  lastMessageAt   DateTime?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-  groupNameSearch String?
-
-  @@index([type, groupNameSearch, updatedAt])
-  @@index([lastMessageAt])
-}
-
-model conversationMember {
-  id                String            @id @default(auto()) @map("_id") @db.ObjectId
-  conversationId    String            @db.ObjectId
-  userId            String            @db.ObjectId
-  username          String?
-  fullName          String?
-  avatar            String?
-  role              participantRole   @default(MEMBER)
-  isActive          Boolean           @default(true)
-  lastReadMessageId String?           @db.ObjectId
-  lastReadAt        DateTime?
-  joinedAt          DateTime          @default(now())
-  conversation      conversation      @relation(fields: [conversationId], references: [id])
-  sentMessages      message[]         @relation("SenderMessages")
-  lastMessageAt     DateTime?
-
-  @@unique([conversationId, userId])
-  @@index([userId, lastMessageAt])
-  @@index([username])
-  @@index([conversationId, lastReadAt])
-}
-
-model message {
-  id              String             @id @default(auto()) @map("_id") @db.ObjectId
-  conversationId  String             @db.ObjectId
-  senderId        String             @db.ObjectId
-  type            messageType        @default(TEXT)
-  content         String?
-  clientMessageId String
-  replyToMessageId String?           @db.ObjectId
-  isDeleted       Boolean            @default(false)
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  conversation    conversation       @relation(fields: [conversationId], references: [id])
-  senderMember    conversationMember @relation("SenderMessages", fields: [conversationId, senderId], references: [conversationId, userId])
-  replyTo         message?           @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  replies         message[]          @relation("MessageReply")
-  medias          messageMedia[]
-
-  @@unique([conversationId, senderId, clientMessageId])
-  @@index([conversationId, createdAt, id])
-  @@index([conversationId, senderId, createdAt])
-  @@index([replyToMessageId])
-}
-
-model messageMedia {
-  id           String    @id @default(auto()) @map("_id") @db.ObjectId
-  messageId    String    @db.ObjectId
-  mediaType    mediaType
-  objectKey    String    @unique
-  url          String
-  mimeType     String
-  size         BigInt
-  width        Int?
-  height       Int?
-  duration     Float?
-  thumbnailUrl String?
-  sortOrder    Int       @default(0)
-  createdAt    DateTime  @default(now())
-  message      message   @relation(fields: [messageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([messageId, sortOrder])
 }

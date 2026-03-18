@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common'
 import { UserService } from './user.service'
 import { RedisModule } from '@app/redis'
-import { PrismaModule } from '@app/prisma'
 import { AuthGuard, CommonModule } from '@app/common'
 import { UtilModule } from '@app/util'
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
@@ -19,6 +18,7 @@ import { LoggerModule } from '@app/logger/logger.module'
 import { MessageSubscriber } from './rmq/subcribers/user-subcribers'
 import { UserHttpController } from './http/user-http.controller'
 import { APP_GUARD } from '@nestjs/core'
+import { PrismaModule } from '../prisma/prisma.module'
 
 @Module({
   imports: [
@@ -38,7 +38,7 @@ import { APP_GUARD } from '@nestjs/core'
     StorageR2Module,
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: process.cwd() + '/apps/user/.storage-r2.env',
+      envFilePath: process.cwd() + '/apps/user/.env',
       load: [r2Config],
     }),
     StorageR2Module.forRoot({
@@ -48,7 +48,7 @@ import { APP_GUARD } from '@nestjs/core'
       bucket: process.env.R2_BUCKET!,
       publicUrl: process.env.R2_PUBLIC_URL!,
     }),
-    LoggerModule.forService('Api-Gateway'),
+    LoggerModule.forService('User-Service'),
     RedisModule.forRoot(
       {
         host: process.env.REDIS_HOST || 'localhost',

@@ -1,7 +1,6 @@
 import { MailerService } from '@app/mailer'
 import { RedisService } from '@app/redis'
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
-import { NotificationType, Status } from '@prisma/client'
 import {
   NotificationPreferenceRepository,
   NotificationRepository,
@@ -13,6 +12,7 @@ import type {
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
+import { NotificationType } from './generated'
 
 type NotificationChannelToggle = {
   IN_APP: boolean
@@ -123,7 +123,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     const createdNotification = await this.createNotification({
       userId: data.inviterId,
       message: `Lời mời kết bạn của ${data.inviteeName} đã được ${
-        data.status === Status.ACCEPTED ? 'chấp nhận' : 'từ chối'
+        data.status === 'ACCEPTED' ? 'chấp nhận' : 'từ chối'
       }.`,
       type: NotificationType.NORMAL_NOTIFICATION,
     })

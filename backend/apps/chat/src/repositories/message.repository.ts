@@ -1,6 +1,6 @@
-import { PrismaService } from '@app/prisma/prisma.service'
 import { Inject, Injectable } from '@nestjs/common'
-import { messageType } from '@prisma/client'
+import { messageType } from 'apps/chat/src/generated'
+import { PrismaService } from 'apps/chat/prisma/prisma.service'
 
 type MediaInput = {
   mediaType: 'IMAGE' | 'VIDEO' | 'FILE'

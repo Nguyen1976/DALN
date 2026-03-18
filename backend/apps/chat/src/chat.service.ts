@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { conversationType, Status } from '@prisma/client'
 import type {
   MessageSendPayload,
   UserUpdatedPayload,
@@ -14,6 +13,7 @@ import { ChatErrors } from './errors/chat.errors'
 import { ChatEventsPublisher } from './rmq/publishers/chat-events.publisher'
 import { StorageR2Service } from '@app/storage-r2/storage-r2.service'
 import { ConversationAssetKind, Member } from './http/chat-http.dto'
+import { conversationType } from './generated'
 
 // Type definitions for service methods
 interface CreateConversationData {
@@ -59,7 +59,7 @@ export class ChatService {
   async createConversationWhenAcceptFriend(
     data: UserUpdateStatusMakeFriendPayload,
   ) {
-    if (!(data.status === Status.ACCEPTED)) return
+    if (!(data.status === 'ACCEPTED')) return
     await this.createConversation({
       type: conversationType.DIRECT,
       members: data.members,
@@ -335,23 +335,24 @@ export class ChatService {
       ChatErrors.memberNotFoundInConversation()
     }
 
-    const actorProfile = await this.memberRepo.findUserProfileById(dto.userId)
-    const targetProfile = await this.memberRepo.findUserProfileById(
-      dto.targetUserId,
-    )
+    //sẽ đổi thành call qua user service or cache
+    // const actorProfile = await this.memberRepo.findUserProfileById(dto.userId)
+    // const targetProfile = await this.memberRepo.findUserProfileById(
+    //   dto.targetUserId,
+    // ) 
 
     const actorDisplayName =
       actor.fullName ||
       actor.username ||
-      actorProfile?.fullName ||
-      actorProfile?.username ||
+      // actorProfile?.fullName ||
+      // actorProfile?.username ||
       actor.userId
 
     const targetDisplayName =
       target.fullName ||
       target.username ||
-      targetProfile?.fullName ||
-      targetProfile?.username ||
+      // targetProfile?.fullName ||
+      // targetProfile?.username ||
       dto.targetUserId
 
     await this.createSystemMessageAndSync(

@@ -1,30 +1,21 @@
 {
   "$schema": "https://json.schemastore.org/nest-cli",
   "collection": "@nestjs/schematics",
-  "sourceRoot": "apps/api-gateway/src",
-  "compilerOptions": {
-    "deleteOutDir": true,
-    "webpack": true,
-    "tsConfigPath": "apps/api-gateway/tsconfig.app.json"
-  },
+
   "monorepo": true,
-  "root": "apps/api-gateway",
   "projects": {
-    "api-gateway": {
-      "type": "application",
-      "root": "apps/api-gateway",
-      "entryFile": "main",
-      "sourceRoot": "apps/api-gateway/src",
-      "compilerOptions": {
-        "tsConfigPath": "apps/api-gateway/tsconfig.app.json"
-      }
-    },
     "chat": {
       "type": "application",
       "root": "apps/chat",
       "entryFile": "main",
       "sourceRoot": "apps/chat/src",
       "compilerOptions": {
+        "assets": [
+          {
+            "include": "generated/**/*",
+            "outDir": "dist/apps/chat/apps/chat/src"
+          }
+        ],
         "tsConfigPath": "apps/chat/tsconfig.app.json"
       }
     },
@@ -70,16 +61,13 @@
       "entryFile": "main",
       "sourceRoot": "apps/notification/src",
       "compilerOptions": {
+        "assets": [
+          {
+            "include": "generated/**/*",
+            "outDir": "dist/apps/notification/apps/notification/src"
+          }
+        ],
         "tsConfigPath": "apps/notification/tsconfig.app.json"
-      }
-    },
-    "prisma": {
-      "type": "library",
-      "root": "libs/prisma",
-      "entryFile": "index",
-      "sourceRoot": "libs/prisma/src",
-      "compilerOptions": {
-        "tsConfigPath": "libs/prisma/tsconfig.lib.json"
       }
     },
     "realtime-gateway": {
@@ -115,6 +103,12 @@
       "entryFile": "main",
       "sourceRoot": "apps/user/src",
       "compilerOptions": {
+        "assets": [
+          {
+            "include": "generated/**/*",
+            "outDir": "dist/apps/user/apps/user/src"
+          }
+        ],
         "tsConfigPath": "apps/user/tsconfig.app.json"
       }
     },

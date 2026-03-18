@@ -1,4 +1,5 @@
-import { Status } from '@prisma/client'
+
+import { Status } from 'apps/user/src/generated'
 import {
   IsEmail,
   IsEnum,

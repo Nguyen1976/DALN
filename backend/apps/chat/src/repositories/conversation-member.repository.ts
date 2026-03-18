@@ -1,7 +1,7 @@
-import { PrismaService } from '@app/prisma/prisma.service'
 import { Inject, Injectable } from '@nestjs/common'
-import { conversationType } from '@prisma/client'
 import { Member } from '../http/chat-http.dto'
+import { PrismaService } from 'apps/chat/prisma/prisma.service'
+import { conversationType } from 'apps/chat/src/generated'
 
 @Injectable()
 export class ConversationMemberRepository {
@@ -250,18 +250,18 @@ export class ConversationMemberRepository {
     })
   }
 
-  async findUserProfileById(userId: string) {
-    return await this.prisma.user.findUnique({
-      where: {
-        id: userId,
-      },
-      select: {
-        username: true,
-        fullName: true,
-        avatar: true,
-      },
-    })
-  }
+  // async findUserProfileById(userId: string) {
+  //   return await this.prisma.user.findUnique({
+  //     where: {
+  //       id: userId,
+  //     },
+  //     select: {
+  //       username: true,
+  //       fullName: true,
+  //       avatar: true,
+  //     },
+  //   })
+  // }
 
   async promoteToAdmin(conversationId: string, userId: string) {
     return await this.prisma.conversationMember.updateMany({

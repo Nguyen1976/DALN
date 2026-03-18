@@ -1,5 +1,5 @@
 {
-  "name": "api-gateway",
+  "name": "microservice",
   "version": "0.0.1",
   "description": "",
   "author": "",
@@ -14,13 +14,11 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/apps/api-gateway/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./apps/api-gateway/test/jest-e2e.json"
+    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.966.0",
@@ -48,7 +46,7 @@
     "class-validator": "^0.14.3",
     "cookie-parser": "^1.4.7",
     "dayjs": "^1.11.19",
-    "dotenv": "^17.2.3",
+    "dotenv": "^17.3.1",
     "ioredis": "^5.8.2",
     "mime-types": "^3.0.2",
     "nest-winston": "^1.10.2",
@@ -112,7 +110,6 @@
       "^@app/constant(|/.*)$": "<rootDir>/libs/constant/src/$1",
       "^@app/logger(|/.*)$": "<rootDir>/libs/logger/src/$1",
       "^@app/mailer(|/.*)$": "<rootDir>/libs/mailer/src/$1",
-      "^@app/prisma(|/.*)$": "<rootDir>/libs/prisma/src/$1",
       "^@app/redis(|/.*)$": "<rootDir>/libs/redis/src/$1",
       "^@app/storage-r2(|/.*)$": "<rootDir>/libs/storage-r2/src/$1",
       "^@app/util(|/.*)$": "<rootDir>/libs/util/src/$1"

@@ -1,6 +1,5 @@
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
 import { Injectable } from '@nestjs/common'
-import { Status } from '@prisma/client'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   EmitToUserPayload,

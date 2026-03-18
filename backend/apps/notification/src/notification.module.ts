@@ -3,7 +3,6 @@ import { NotificationController } from './notification.controller'
 import { NotificationService } from './notification.service'
 import { MailerModule } from '@app/mailer'
 import { ConfigModule } from '@nestjs/config'
-import { PrismaModule } from '@app/prisma'
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
 import { UtilModule } from '@app/util'
 import { RedisModule } from '@app/redis'
@@ -17,6 +16,7 @@ import {
 } from './repositories'
 import { NotificationEventsPublisher } from './rmq/publishers/notification-events.publisher'
 import { NotificationSubscriber } from './rmq/subcribers/notification-subscribers'
+import { PrismaModule } from '../prisma/prisma.module'
 
 @Module({
   imports: [
@@ -31,9 +31,8 @@ import { NotificationSubscriber } from './rmq/subcribers/notification-subscriber
     ),
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: process.cwd() + '/apps/notification/.env',
     }),
-
     MailerModule,
     PrismaModule,
     RabbitMQModule.forRoot({

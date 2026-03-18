@@ -46,12 +46,6 @@
       "@app/mailer/*": [
         "libs/mailer/src/*"
       ],
-      "@app/prisma": [
-        "libs/prisma/src"
-      ],
-      "@app/prisma/*": [
-        "libs/prisma/src/*"
-      ],
       "@app/redis": [
         "libs/redis/src"
       ],
