@@ -152,3 +152,8 @@ curl -i http://localhost:8080/user
 - `backend/libs/common/src/http/grpc-http.filter.ts`
 - `backend/libs/common/src/http/response.interceptor.ts`
 - `frontend/src/utils/constant.ts`
+
+
+```bash
+docker run -d --name kong -e KONG_DATABASE=off -e KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yml -e KONG_PROXY_ACCESS_LOG=/dev/stdout -e KONG_ADMIN_ACCESS_LOG=/dev/stdout -e KONG_PROXY_ERROR_LOG=/dev/stderr -e KONG_ADMIN_ERROR_LOG=/dev/stderr -e KONG_ADMIN_LISTEN=0.0.0.0:8001 -v ./backend/kong/kong.yml:/etc/kong/kong.yml:ro -p 8080:8000 -p 8002:8001 kong:3.7 
+```
