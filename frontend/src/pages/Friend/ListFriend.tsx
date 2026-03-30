@@ -27,6 +27,7 @@ import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import { formatLastSeen } from "@/utils";
 
 const ListFriend = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -214,7 +215,9 @@ const ListFriend = () => {
                         {friend.username}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {friend.status ? "Đang online" : "Đang offline"}
+                        {friend.status
+                          ? "Đang online"
+                          : formatLastSeen(friend.lastSeen)}
                       </p>
                     </div>
 

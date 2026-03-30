@@ -16,6 +16,7 @@ export interface Friend {
   avatar?: string;
   fullName?: string;
   status: boolean;
+  lastSeen?: string;
 }
 
 export interface FriendState {
@@ -73,17 +74,19 @@ export const friendSlice = createSlice({
   name: "friend",
   initialState,
   reducers: {
-    updateStatus: (
+    updateStatusOffline: (
       state,
-      action: PayloadAction<{ friendId: string; status: boolean }>,
+      action: PayloadAction<{ friendId: string; lastSeen: string }>,
     ) => {
-      const { friendId, status } = action.payload;
+      const { friendId, lastSeen } = action.payload;
       const friendIndex = state.friends.findIndex(
         (friend) => friend.id === friendId,
       );
       if (friendIndex !== -1) {
-        state.friends[friendIndex].status = status;
+          state.friends[friendIndex].status = false;
+          state.friends[friendIndex].lastSeen = lastSeen;
       }
+      console.log("updateStatusOffline", friendId, lastSeen);
       return state;
     },
   },
@@ -92,7 +95,6 @@ export const friendSlice = createSlice({
       getFriends.fulfilled,
       (state, action: PayloadAction<FriendState>) => {
         //push thêm vào state
-
         state.friends = [...state.friends, ...action.payload.friends];
         state.page = action.payload.page;
         return state;
@@ -143,5 +145,5 @@ export const selectFriendPage = createSelector(
   (friend) => friend.page,
 );
 
-export const { updateStatus } = friendSlice.actions;
+export const { updateStatusOffline } = friendSlice.actions;
 export default friendSlice.reducer;

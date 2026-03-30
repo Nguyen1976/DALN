@@ -22,7 +22,7 @@ import {
   addNotification,
   type Notification,
 } from "./redux/slices/notificationSlice";
-import { upsertOnlineFriend, updateStatus } from "./redux/slices/friendSlice";
+import { upsertOnlineFriend, updateStatusOffline } from "./redux/slices/friendSlice";
 import NotificationSettingsPage from "./pages/NotificationSettings";
 
 const router = createBrowserRouter([
@@ -139,8 +139,9 @@ function App() {
   }, [dispatch]);
 
   useEffect(() => {
-    const handleOfflineStatusChanged = (userId: string) => {
-      dispatch(updateStatus({ friendId: userId, status: false }));
+    const handleOfflineStatusChanged = (data: { userId: string; lastSeen: string }) => {
+      console.log("handleOfflineStatusChanged", data.userId, data.lastSeen);
+      dispatch(updateStatusOffline({ friendId: data.userId, lastSeen: data.lastSeen }));
     };
 
     socket.on("user.offline_status_changed", handleOfflineStatusChanged);

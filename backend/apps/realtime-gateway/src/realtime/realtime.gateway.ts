@@ -102,18 +102,10 @@ export class RealtimeGateway
       }, this.socketTouchIntervalMs)
       this.socketTouchTimers.set(client.id, timer)
 
-      //follow
-      /**
-       * khi user tạo 1 connect thì sẽ kiểm tra trong redis đã có connect nào chưa trước khi mà user online
-       * trường hợp chưa có prev Online thì cần phải thông báo cho bạn bè là đã online
-       *
-       * ở đây sẽ publish 1 sự kiện cho user service xử lý
-       * và user service sẽ lấy danh sách bạn bè của user đó rồi publish
-       * lại vào đây với sự kiện user_online kèm theo id của mình
-       * còn lại là fe xử lý
-       */
-
       if (!prevOnline) {
+        //delete lastSeen vì user đã online trở lại
+        await this.redisClient.del(`user:${userId}:lastSeen`)
+
         this.amqpConnection.publish(
           EXCHANGE_RMQ.REALTIME_EVENTS,
           ROUTING_RMQ.USER_ONLINE,
@@ -146,11 +138,20 @@ export class RealtimeGateway
     const stillOnline = await this.userStatusStore.isOnline(userId)
 
     if (!stillOnline) {
-      // publish event qua RMQ nếu cần
+      //trường hợp này là trường hợp user offline thật sự, chứ k phải do lỗi kết nối mạng hay tắt máy đột ngột mà chưa kịp remove connection
+      const lastSeen = new Date().toISOString()
+      await this.redisClient.set(
+        `user:${userId}:lastSeen`,
+        lastSeen,
+        'EX',
+        60 * 60 * 24 * 7,
+      ) // lưu lastSeen trong 7 ngày
+
+
       this.amqpConnection.publish(
         EXCHANGE_RMQ.REALTIME_EVENTS,
         ROUTING_RMQ.USER_OFFLINE,
-        { userId },
+        { userId, lastSeen },
       )
     }
   }
@@ -176,32 +177,6 @@ export class RealtimeGateway
       this.server.to(`user:${userId}`).emit(event, data)
     }
   }
-
-  //nhận sự kiện send_message ở đây
-  // @SubscribeMessage(SOCKET_EVENTS.CHAT.SEND_MESSAGE)
-  // async handleSendMessage(
-  //   @MessageBody() data: any,
-  //   @ConnectedSocket() client: Socket,
-  // ) {
-  //   if (!client.data.userId) {
-  //     client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
-  //       code: 'UNAUTHORIZED',
-  //       message: 'Unauthorized socket client',
-  //       retryable: false,
-  //     })
-  //     return
-  //   }
-
-  //   //tin nhan duoc gui di qua rabbitmq
-  //   this.amqpConnection.publish(
-  //     EXCHANGE_RMQ.REALTIME_EVENTS,
-  //     ROUTING_RMQ.SEND_MESSAGE,
-  //     {
-  //       ...data,
-  //       senderId: client.data.userId,
-  //     },
-  //   )
-  // }
 
   @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_CREATE)
   async handleCreateMessage(
@@ -246,9 +221,3 @@ export class RealtimeGateway
     )
   }
 }
-//đoạn này có thể viết thành dùng chung thì sẽ giảm thiểu được code
-//tức là chỉ viết 1 hàm emit user thì khi có sự kiện payload nó luôn là người nhận, tên sự kiện và data
-//trước khi refactor thì sẽ load lại toàn bộ thông tin về socket io đã nhé
-//còn 1 số sự kiện khác như user typing, message delivered, message seen thì sẽ làm sau vì cần phải tối ưu hơn nữa
-//vì những sự kiện đó tần suất nó sẽ cao hơn nhiều so với những sự kiện hiện tại
-//lên cho gateway này 1 exchange riêng biệt để tránh bị lẫn lộn với các service khác

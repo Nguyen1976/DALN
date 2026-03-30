@@ -59,6 +59,7 @@ export class UserRepository {
         username: true,
         avatar: true,
         fullName: true,
+        lastSeen: true,
       },
     })
   }
@@ -96,6 +97,15 @@ export class UserRepository {
         fullName: data.fullName,
         bio: data.bio,
         avatar: data.avatar || undefined,
+      },
+    })
+  }
+
+  async updateLastSeen(userId: string, lastSeen: string | null) {
+    return await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        lastSeen,
       },
     })
   }

@@ -60,14 +60,21 @@ export class UserEventsPublisher {
       } as EmitToUserPayload,
     )
   }
-  publisherUserOffline(payload: { userIds: string[]; userId: string }): void {
+  publisherUserOffline(payload: {
+    userIds: string[]
+    userId: string
+    lastSeen: string
+  }): void {
     this.amqpConnection.publish(
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
         userIds: payload.userIds,
         event: SOCKET_EVENTS.USER.OFFLINE_STATUS_CHANGED,
-        data: payload.userId,
+        data: {
+          userId: payload.userId,
+          lastSeen: payload.lastSeen,
+        },
       } as EmitToUserPayload,
     )
   }

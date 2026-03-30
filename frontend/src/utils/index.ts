@@ -13,3 +13,17 @@ export const interceptorLoadingElements = (calling: unknown) => {
     }
   })
 }
+
+export function formatLastSeen(isoString?: string) {
+  if (!isoString) return ""
+  const diffMs = new Date().getTime() - new Date(isoString).getTime()
+  const diffSeconds = Math.floor(diffMs / 1000)
+  const diffMinutes = Math.floor(diffSeconds / 60)
+  const diffHours = Math.floor(diffMinutes / 60)
+  const diffDays = Math.floor(diffHours / 24)
+
+  if (diffDays > 0) return `${diffDays} ngày trước`
+  if (diffHours > 0) return `${diffHours} giờ trước`
+  if (diffMinutes > 0) return `${diffMinutes} phút trước`
+  return `${diffSeconds} giây trước`
+}

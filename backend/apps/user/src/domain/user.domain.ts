@@ -13,6 +13,7 @@ export interface UserEntity {
   avatar: string | null
   createdAt: Date
   updatedAt: Date
+  lastSeen: Date | null
 }
 
 export interface AuthSession {

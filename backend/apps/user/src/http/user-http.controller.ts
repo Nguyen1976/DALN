@@ -136,13 +136,12 @@ export class UserHttpController {
     )
     return {
       friends: friends.map((friend) => ({
-        id: friend.id,
-        email: friend.email,
-        username: friend.username,
+        ...friend,
         fullName: friend.fullName || '',
         avatar: friend.avatar || '',
         bio: friend.bio || '',
         status: (friend as any).status || false,
+        lastSeen: friend.lastSeen ? new Date(friend.lastSeen).toISOString() : null,
       })),
     }
   }

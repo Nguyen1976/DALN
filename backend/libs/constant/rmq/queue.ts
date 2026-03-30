@@ -10,4 +10,5 @@ export const QUEUE_RMQ = {
   CHAT_SEND_MESSAGE: 'chat_queue_send_message',
   USER_ONLINE: 'user_online_queue',
   USER_OFFLINE: 'user_offline_queue',
+  UPDATE_LAST_SEEN: 'update_last_seen_queue',
 }

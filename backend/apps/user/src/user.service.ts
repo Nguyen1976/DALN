@@ -258,12 +258,14 @@ export class UserService {
       friendships.map((f) => f.friendId) || [],
     )
 
+    
     const friendsWithStatus = await Promise.all(
       friends.map(async (f) => ({
         ...f,
         status: await this.redisService.isOnline(f.id),
       })),
     )
+
 
     return friendsWithStatus as (UserEntity & { status: boolean })[]
   }
@@ -390,19 +392,25 @@ export class UserService {
     const friends = await this.friendShipRepo.findAllFriendsByUserId(userId)
     const friendIds = friends.map((f) => f.friendId)
 
+
+    await this.userRepo.updateLastSeen(userId, null)
     this.eventsPublisher.publisherUserOnline({
       userIds: friendIds,
       userId,
     })
   }
 
-  async handleUserOffline(userId: string): Promise<void> {
+  async handleUserOffline(userId: string, lastSeen: string): Promise<void> {
     const friends = await this.friendShipRepo.findAllFriendsByUserId(userId)
     const friendIds = friends.map((f) => f.friendId)
+
+    await this.userRepo.updateLastSeen(userId, lastSeen)
 
     this.eventsPublisher.publisherUserOffline({
       userIds: friendIds,
       userId,
+      lastSeen,
     })
   }
+
 }

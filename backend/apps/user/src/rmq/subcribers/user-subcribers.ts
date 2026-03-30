@@ -15,9 +15,7 @@ export class MessageSubscriber {
     routingKey: ROUTING_RMQ.USER_ONLINE,
     queue: QUEUE_RMQ.USER_ONLINE,
   })
-  async handleUserOnline(
-    data: { userId: string },
-  ): Promise<void> {
+  async handleUserOnline(data: { userId: string }): Promise<void> {
     await safeExecute(() => this.userService.handleUserOnline(data.userId))
   }
 
@@ -26,10 +24,7 @@ export class MessageSubscriber {
     routingKey: ROUTING_RMQ.USER_OFFLINE,
     queue: QUEUE_RMQ.USER_OFFLINE,
   })
-  async handleUserOffline(
-    data: { userId: string },
-  ): Promise<void> {
-    await safeExecute(() => this.userService.handleUserOffline(data.userId))
+  async handleUserOffline(data: { userId: string, lastSeen: string }): Promise<void> {
+    await safeExecute(() => this.userService.handleUserOffline(data.userId, data.lastSeen))
   }
-
 }

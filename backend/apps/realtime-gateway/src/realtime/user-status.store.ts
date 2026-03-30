@@ -45,6 +45,8 @@ export class UserStatusStore {
     if (count === 0) {
       await this.redisClient.del(userKey)
     }
+
+    
   }
 
   async isOnline(userId: string): Promise<boolean> {
