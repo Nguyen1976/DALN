@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'kong-metrics'
+    static_configs:
+      # Nếu dùng Docker Desktop (Windows/Mac), dùng host.docker.internal
+      # Nếu dùng Linux, hãy thay bằng IP thật của máy bạn
+      - targets: ['host.docker.internal:9542']
