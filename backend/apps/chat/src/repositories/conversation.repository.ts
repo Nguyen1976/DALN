@@ -210,6 +210,8 @@ export class ConversationRepository {
             avatar: true,
             lastReadAt: true,
             fullName: true,
+            lastMessageAt: true,
+            unreadCount: true,
           },
         },
         messages: {

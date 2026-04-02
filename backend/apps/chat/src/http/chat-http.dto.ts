@@ -88,10 +88,3 @@ export class CreateMessageUploadUrlDTO {
   size: string
 }
 
-export class ReadMessageDto {
-  @IsNotEmpty()
-  conversationId: string
-
-  @IsNotEmpty()
-  lastReadMessageId: string
-}

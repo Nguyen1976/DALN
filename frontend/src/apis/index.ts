@@ -193,6 +193,19 @@ export interface SearchConversationItem {
   } | null;
 }
 
+export interface ConversationByIdResponse {
+  conversation: SearchConversationItem;
+}
+
+export const getConversationByIdAPI = async (
+  conversationId: string,
+): Promise<ConversationByIdResponse> => {
+  const response = await authorizeAxiosInstance.get(
+    `${API_ROOT}/chat/conversations/${conversationId}`,
+  );
+  return response.data.data;
+};
+
 export const searchConversationsAPI = async (
   keyword: string,
 ): Promise<SearchConversationItem[]> => {

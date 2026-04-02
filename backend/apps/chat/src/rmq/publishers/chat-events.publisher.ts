@@ -22,8 +22,6 @@ export class ChatEventsPublisher {
   }
 
   publishMessageSent(message: any, memberIds: string[]): void {
-    const data = { ...message, memberIds }
-
     const senderId = String(message.senderId)
     const otherMemberIds = memberIds.filter((id) => id !== senderId)
 
@@ -52,16 +50,6 @@ export class ChatEventsPublisher {
         userIds: otherMemberIds,
         event: SOCKET_EVENTS.CHAT.MESSAGE_NEW,
         data: { message },
-      } as EmitToUserPayload,
-    )
-
-    this.amqpConnection.publish(
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds: data.memberIds,
-        event: SOCKET_EVENTS.CHAT.NEW_MESSAGE,
-        data,
       } as EmitToUserPayload,
     )
   }

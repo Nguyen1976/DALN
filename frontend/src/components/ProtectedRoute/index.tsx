@@ -3,6 +3,7 @@ import { selectUser } from "@/redux/slices/userSlice";
 import { useDispatch, useSelector } from "react-redux";
 import { Navigate, useParams } from "react-router";
 import { useEffect, useRef } from "react";
+import { getConversationByIdAPI } from "@/apis";
 import {
   ackMessage,
   addMessage,
@@ -17,6 +18,7 @@ import {
   setConversationAccessState,
   updateNewMessage,
   upUnreadCount,
+  selectConversation,
 } from "@/redux/slices/conversationSlice";
 import { useSound } from "use-sound";
 import notificationSound from "@/assets/notification.mp3";
@@ -25,12 +27,19 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { conversationId } = useParams();
 
   const selectedChatIdRef = useRef<string | null>(conversationId);
-  const processedMessageKeysRef = useRef<Map<string, number>>(new Map());
+  const knownConversationIdsRef = useRef<Set<string>>(new Set());
 
   const [play] = useSound(notificationSound, { volume: 0.5 });
 
   const dispatch = useDispatch<AppDispatch>();
   const user = useSelector(selectUser);
+  const conversations = useSelector(selectConversation);
+
+  useEffect(() => {
+    knownConversationIdsRef.current = new Set(
+      conversations.map((item) => item.id),
+    );
+  }, [conversations]);
 
   useEffect(() => {
     selectedChatIdRef.current = conversationId ?? null;
@@ -54,31 +63,26 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       return normalized;
     };
 
-    const getMessageDedupKey = (message: Message) => {
-      if (message.id) return `id:${message.id}`;
-      if (message.clientMessageId) return `client:${message.clientMessageId}`;
-      return `fallback:${message.conversationId}:${message.senderId}:${message.createdAt ?? ""}:${message.text ?? ""}`;
-    };
+    const ensureConversationHydrated = async (targetConversationId: string) => {
+      if (knownConversationIdsRef.current.has(targetConversationId)) return;
 
-    const isDuplicateIncomingMessage = (message: Message) => {
-      const key = getMessageDedupKey(message);
-      const now = Date.now();
-      const ttlMs = 5000;
-      const tracked = processedMessageKeysRef.current;
+      try {
+        const response = await getConversationByIdAPI(targetConversationId);
+        if (!response?.conversation) return;
 
-      for (const [trackedKey, timestamp] of tracked.entries()) {
-        if (now - timestamp > ttlMs) {
-          tracked.delete(trackedKey);
-        }
+        dispatch(
+          applyConversationUpdate({
+            conversation: response.conversation as any,
+          }),
+        );
+        knownConversationIdsRef.current.add(targetConversationId);
+      } catch {
+        // Ignore hydration errors for inaccessible conversations.
       }
-
-      if (tracked.has(key)) return true;
-      tracked.set(key, now);
-      return false;
     };
 
-    const processIncomingMessage = (message: Message) => {
-      const isDuplicate = isDuplicateIncomingMessage(message);
+    const processIncomingMessage = async (message: Message) => {
+      await ensureConversationHydrated(message.conversationId);
 
       dispatch(addMessage(message));
       dispatch(
@@ -87,8 +91,6 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
           lastMessage: { ...message },
         }),
       );
-
-      if (isDuplicate) return;
 
       if (message.conversationId !== selectedChatIdRef.current) {
         dispatch(
@@ -100,16 +102,10 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       // play();
     };
 
-    const handler = (data: Message | { message: Message }) => {
-      const normalized = normalizeIncomingMessage(data);
-      if (!normalized) return;
-      processIncomingMessage(normalized);
-    };
-
     const newMessageHandler = (payload: { message: Message }) => {
       const normalized = normalizeIncomingMessage(payload);
       if (!normalized) return;
-      processIncomingMessage(normalized);
+      void processIncomingMessage(normalized);
     };
 
     const ackHandler = (payload: {
@@ -126,6 +122,15 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
           message: payload.message,
         }),
       );
+
+      if (payload.message) {
+        dispatch(
+          updateNewMessage({
+            conversationId: payload.conversationId,
+            lastMessage: payload.message,
+          }),
+        );
+      }
     };
 
     const errorHandler = (payload: {
@@ -232,7 +237,6 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       );
     };
 
-    socket.on("chat.new_message", handler);
     socket.on("message:new", newMessageHandler);
     socket.on("message:ack", ackHandler);
     socket.on("message:error", errorHandler);
@@ -243,7 +247,6 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     socket.on("conversation:update", conversationUpdateHandler);
 
     return () => {
-      socket.off("chat.new_message", handler);
       socket.off("message:new", newMessageHandler);
       socket.off("message:ack", ackHandler);
       socket.off("message:error", errorHandler);

@@ -73,24 +73,6 @@ export const createConversation = createAsyncThunk(
   },
 );
 
-export const readMessage = createAsyncThunk(
-  `/chat/read-message`,
-  async ({
-    conversationId,
-    lastReadMessageId,
-  }: {
-    conversationId: string;
-    lastReadMessageId: string;
-  }) => {
-    await authorizeAxiosInstance.post(`${API_ROOT}/chat/read_message`, {
-      conversationId,
-      lastReadMessageId,
-    });
-    // return response.data.data
-    return { conversationId, lastReadMessageId };
-  },
-);
-
 export const conversationSlice = createSlice({
   name: "conversations",
   initialState,
@@ -282,6 +264,17 @@ export const conversationSlice = createSlice({
         newUnreadCount > 5 ? "5+" : newUnreadCount,
       );
     },
+    markConversationRead: (
+      state,
+      action: PayloadAction<{ conversationId: string }>,
+    ) => {
+      const target = state.find(
+        (conversation) => conversation.id === action.payload.conversationId,
+      );
+      if (!target) return;
+
+      target.unreadCount = "0";
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -331,28 +324,6 @@ export const conversationSlice = createSlice({
           toast.success("Conversation created successfully");
         },
       )
-      .addCase(
-        readMessage.fulfilled,
-        (
-          state,
-          action: PayloadAction<{
-            conversationId: string;
-            lastReadMessageId: string;
-          }>,
-        ) => {
-          //thực tế trong tương lại việc đọc tin nhắn sẽ thông qua socket
-          //nên phần này có thể không cần thiết
-          const { conversationId } = action.payload;
-
-          const conversation = state.find((c) => c.id === conversationId);
-
-          if (!conversation) return state;
-
-          // Reset unread count
-          conversation.unreadCount = "0";
-          return state;
-        },
-      )
       .addCase(logoutAPI.fulfilled, () => initialState);
   },
 });
@@ -387,6 +358,7 @@ export const {
   addConversation,
   updateNewMessage,
   upUnreadCount,
+  markConversationRead,
   setConversationAccessState,
   applyConversationUpdate,
   addConversationMembers,

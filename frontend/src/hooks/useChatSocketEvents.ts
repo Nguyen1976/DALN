@@ -93,14 +93,39 @@ export const useChatSocketEvents = () => {
       );
     };
 
+    const handleUserReadBatch = (data: {
+      conversationId: string;
+      users: Array<{
+        userId: string;
+        lastReadMessageId: string;
+      }>;
+    }) => {
+      if (!data?.conversationId || !Array.isArray(data.users)) return;
+
+      data.users.forEach((item) => {
+        if (!item?.userId || !item?.lastReadMessageId) return;
+        if (item.userId === user.id) return;
+
+        dispatch(
+          updateSeenStatus({
+            conversationId: data.conversationId,
+            userId: item.userId,
+            lastReadMessageId: item.lastReadMessageId,
+          }),
+        );
+      });
+    };
+
     // Register event listeners
     socket.on(SOCKET_EVENTS.CHAT.USER_TYPING, handleUserTyping);
     socket.on(SOCKET_EVENTS.CHAT.USER_READ, handleUserRead);
+    socket.on(SOCKET_EVENTS.CHAT.USER_READ_BATCH, handleUserReadBatch);
 
     // Cleanup
     return () => {
       socket.off(SOCKET_EVENTS.CHAT.USER_TYPING, handleUserTyping);
       socket.off(SOCKET_EVENTS.CHAT.USER_READ, handleUserRead);
+      socket.off(SOCKET_EVENTS.CHAT.USER_READ_BATCH, handleUserReadBatch);
 
       typingTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
       typingTimeouts.clear();

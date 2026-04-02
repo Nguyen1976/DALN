@@ -18,7 +18,6 @@ import {
   LeaveConversationDTO,
   DeleteConversationDTO,
   CreateMessageUploadUrlDTO,
-  ReadMessageDto,
   ConversationAssetKind,
   MessageType,
 } from './http/chat-http.dto'
@@ -56,7 +55,7 @@ const formatConversation = (c: any, unreadMap?: Map<string, string>) => ({
     avatar: m.avatar,
     fullName: m.fullName,
     lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : null,
-    lastMessageAt: m.lastMessageAt.toString(),
+    lastMessageAt: m.lastMessageAt ? m.lastMessageAt.toString() : null,
   })),
   lastMessage: c.messages.length ? formatMessage(c.messages[0]) : null,
 })
@@ -207,6 +206,22 @@ export class ChatController {
     }
   }
 
+  @Get('conversations/:conversationId')
+  @RequireLogin()
+  async getConversationById(
+    @Param('conversationId') conversationId: string,
+    @UserInfo() userInfo: any,
+  ) {
+    const result = await this.chatService.getConversationById(
+      conversationId,
+      userInfo.userId,
+    )
+
+    return {
+      conversation: formatConversation(result.conversation, result.unreadMap),
+    }
+  }
+
   @Get('messages/:conversationId')
   @RequireLogin()
   async getMessagesByConversationId(
@@ -276,14 +291,6 @@ export class ChatController {
     })
   }
 
-  @Post('read_message')
-  @RequireLogin()
-  async readMessage(@Body() data: ReadMessageDto, @UserInfo() userInfo: any) {
-    return await this.chatService.readMessage({
-      ...data,
-      userId: userInfo.userId,
-    })
-  }
 
   @Get('search')
   @RequireLogin()

@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import {
   addConversation,
-  readMessage,
+  markConversationRead,
   type Conversation,
   type ConversationState,
 } from "@/redux/slices/conversationSlice";
@@ -308,11 +308,9 @@ export default function ChatWindow({
       lastMessageId: lastMessage.id,
     });
 
-    // Cũng dispatch Redux action để cập nhật HTTP request nếu cần
     dispatch(
-      readMessage({
+      markConversationRead({
         conversationId,
-        lastReadMessageId: lastMessage.id,
       }),
     );
   }, [messages, conversationId, dispatch, user.id, canLoadMessages]);

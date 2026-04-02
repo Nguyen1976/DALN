@@ -23,6 +23,7 @@ export const SOCKET_EVENTS = {
     USER_TYPING: "user:typing",
     MESSAGE_READ: "message:read",
     USER_READ: "user:read",
+    USER_READ_BATCH: "user:read_batch",
   },
 
   USER: {

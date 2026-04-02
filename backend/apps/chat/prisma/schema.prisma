@@ -57,6 +57,7 @@ model conversationMember {
   avatar            String?
   role              participantRole   @default(MEMBER)
   isActive          Boolean           @default(true)
+  unreadCount       Int               @default(0)
   lastReadMessageId String?           @db.ObjectId
   lastReadAt        DateTime?
   joinedAt          DateTime          @default(now())

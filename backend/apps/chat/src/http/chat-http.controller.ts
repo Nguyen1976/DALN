@@ -19,7 +19,6 @@ import {
   DeleteConversationDTO,
   LeaveConversationDTO,
   MessageType,
-  ReadMessageDto,
   RemoveMemberFromConversationDTO,
 } from './chat-http.dto'
 import { RequireLogin, UserInfo } from '@app/common/common.decorator'

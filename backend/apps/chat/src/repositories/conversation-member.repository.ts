@@ -8,9 +8,37 @@ export class ConversationMemberRepository {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private participantRoleBackfilled = false
+    private unreadCountBackfilled = false
   private readonly activeMemberFilter = {
     isActive: true,
   }
+
+    private async forceBackfillUnreadCount() {
+      await this.prisma.$runCommandRaw({
+        update: 'conversationMember',
+        updates: [
+          {
+            q: {
+              $or: [{ unreadCount: null }, { unreadCount: { $exists: false } }],
+            },
+            u: [
+              {
+                $set: {
+                  unreadCount: 0,
+                },
+              },
+            ],
+            multi: true,
+          },
+        ],
+      })
+    }
+
+    private async ensureUnreadCountInitialized() {
+      if (this.unreadCountBackfilled) return
+      await this.forceBackfillUnreadCount()
+      this.unreadCountBackfilled = true
+    }
 
   private async forceBackfillParticipantRole() {
     await this.prisma.$runCommandRaw({
@@ -91,6 +119,7 @@ export class ConversationMemberRepository {
             ? 'ADMIN'
             : 'MEMBER',
         isActive: true,
+        unreadCount: 0,
         lastReadMessageId: null,
         lastMessageAt: new Date(),
       })),
@@ -99,6 +128,7 @@ export class ConversationMemberRepository {
 
   async findByConversationId(conversationId: string) {
     await this.ensureParticipantRoleNormalized()
+    await this.ensureUnreadCountInitialized()
 
     return await this.withRoleRetry(() =>
       this.prisma.conversationMember.findMany({
@@ -129,11 +159,29 @@ export class ConversationMemberRepository {
     })
   }
 
+  async increaseUnreadForOthers(conversationId: string, senderId: string) {
+    return await this.prisma.conversationMember.updateMany({
+      where: {
+        conversationId,
+        userId: {
+          not: senderId,
+        },
+        ...this.activeMemberFilter,
+      },
+      data: {
+        unreadCount: {
+          increment: 1,
+        },
+      },
+    })
+  }
+
   async findByConversationIdAndUserIds(
     conversationId: string,
     userIds: string[],
   ) {
     await this.ensureParticipantRoleNormalized()
+    await this.ensureUnreadCountInitialized()
 
     return await this.withRoleRetry(() =>
       this.prisma.conversationMember.findMany({
@@ -149,6 +197,7 @@ export class ConversationMemberRepository {
 
   async findByConversationIdAndUserId(conversationId: string, userId: string) {
     await this.ensureParticipantRoleNormalized()
+    await this.ensureUnreadCountInitialized()
 
     return await this.withRoleRetry(() =>
       this.prisma.conversationMember.findFirst({
@@ -197,6 +246,7 @@ export class ConversationMemberRepository {
           avatar: member.avatar || null,
           role: 'MEMBER',
           isActive: true,
+          unreadCount: 0,
           lastMessageAt: new Date(),
         },
       })
@@ -208,6 +258,8 @@ export class ConversationMemberRepository {
     userId: string,
     lastReadMessageId: string,
   ) {
+    await this.ensureUnreadCountInitialized()
+
     return await this.prisma.conversationMember.updateMany({
       where: {
         conversationId,
@@ -216,6 +268,7 @@ export class ConversationMemberRepository {
       data: {
         lastReadAt: new Date(),
         lastReadMessageId,
+        unreadCount: 0,
       },
     })
   }

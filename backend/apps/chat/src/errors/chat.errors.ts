@@ -37,13 +37,6 @@ export class ChatErrors {
     })
   }
 
-  static invalidLastReadMessage(): never {
-    throw new RpcException({
-      code: status.FAILED_PRECONDITION,
-      message: 'lastReadMessageId does not belong to the conversation',
-    })
-  }
-
   static invalidMessagePayload(): never {
     throw new RpcException({
       code: status.INVALID_ARGUMENT,

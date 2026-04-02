@@ -1,168 +1,145 @@
 # Unread Count Realtime README
 
-Tai lieu nay mo ta cach he thong dang xu ly unread count theo thoi gian thuc (realtime) trong code hien tai.
+Tai lieu nay mo ta implementation hien tai sau khi toi uu unread realtime.
 
 ## 1. Muc tieu
 
-Unread count can dat 2 yeu cau:
-
-1. Tang ngay khi co tin nhan moi toi mot conversation ma user khong mo conversation do.
-2. Ve 0 khi user da mo conversation va doc tin nhan.
+1. Unread tang ngay khi co tin nhan moi.
+2. Unread reset ve 0 khi user doc.
+3. Load sidebar nhanh, khong N+1 query dem unread.
+4. Frontend xu ly message event don gian, khong dedupe TTL.
 
 ## 2. Thanh phan lien quan
 
 Frontend:
-
 - `frontend/src/components/ProtectedRoute/index.tsx`
 - `frontend/src/redux/slices/conversationSlice.ts`
 - `frontend/src/components/ChatWindow/index.tsx`
+- `frontend/src/apis/index.ts`
 
 Backend:
-
-- `backend/apps/chat/src/rmq/publishers/chat-events.publisher.ts`
-- `backend/apps/realtime-gateway/src/realtime/realtime.gateway.ts`
+- `backend/apps/chat/prisma/schema.prisma`
+- `backend/apps/chat/src/repositories/conversation-member.repository.ts`
 - `backend/apps/chat/src/chat.service.ts`
 - `backend/apps/chat/src/chat.controller.ts`
+- `backend/apps/chat/src/rmq/publishers/chat-events.publisher.ts`
+- `backend/apps/realtime-gateway/src/realtime/realtime.gateway.ts`
 
-## 3. Event realtime lien quan unread
+## 3. Denormalization unreadCount (chong N+1)
 
-Khi server tao message thanh cong, backend publish cac event:
+He thong da them truong:
+- `conversationMember.unreadCount` (Int, default 0)
 
-1. `message:ack` -> gui cho sender (xac nhan gui thanh cong).
-2. `message:new` -> gui cho cac thanh vien khac sender.
-3. `chat.new_message` -> gui cho tat ca thanh vien conversation.
+Khi gui message moi:
+- Chat Service goi `increaseUnreadForOthers(conversationId, senderId)`
+- DB tang `unreadCount += 1` cho tat ca member active, tru sender
 
-Frontend (`ProtectedRoute`) dang nghe ca:
+Khi user read:
+- Chat Service goi `updateLastRead(...)`
+- DB set:
+  - `lastReadAt = now`
+  - `lastReadMessageId = ...`
+  - `unreadCount = 0`
 
+Khi load danh sach conversation:
+- Backend khong dem unread theo tung conversation nua
+- `calculateUnreadCounts` chi doc gia tri `me.unreadCount` da denormalized
+
+## 4. Event message realtime (da hop nhat)
+
+Backend `publishMessageSent` hien tai:
+
+1. `message:ack` -> gui cho sender
+2. `message:new` -> gui cho cac member khac sender
+
+Da bo event trung lap:
 - `chat.new_message`
+
+Frontend (`ProtectedRoute`) chi nghe:
 - `message:new`
+- `message:ack`
 
-Sau khi nhan message, frontend se:
+Khong con co che `processedMessageKeysRef` dedupe TTL 5s.
 
-- `dispatch(addMessage(message))`
-- `dispatch(updateNewMessage({ conversationId, lastMessage }))`
-- Neu conversation cua message KHONG phai conversation dang mo:
-  - `dispatch(upUnreadCount({ conversationId }))`
+## 5. Luong tang unread tren frontend
 
-## 4. Co che tang unread count (UI realtime)
+Khi nhan `message:new`:
 
-File: `frontend/src/redux/slices/conversationSlice.ts`
+1. Frontend normalize message
+2. Neu conversation chua co trong Redux:
+  - Goi `GET /chat/conversations/:conversationId`
+  - Upsert conversation vao store
+3. `addMessage` + `updateNewMessage`
+4. Neu khong dung conversation dang mo:
+  - `upUnreadCount({ conversationId })`
 
-Reducer `upUnreadCount`:
+Gioi han hien thi:
+- `0..5`, qua 5 thi hien `5+`
 
-- Tim conversation theo `conversationId`.
-- Neu khong tim thay -> bo qua.
-- Neu da la `"5+"` -> giu nguyen.
-- Nguoc lai tang len 1, neu >5 thi chuyen thanh `"5+"`.
+## 6. Xu ly Ghost Conversation
 
-Nghia la unread realtime tren UI duoc cap nhat theo event socket, khong doi API polling.
+Da bo sung endpoint:
+- `GET /chat/conversations/:conversationId`
 
-## 5. Co che reset unread count (doc tin nhan)
+Muc dich:
+- Khi co tin nhan den 1 conversation chua duoc load trong sidebar, frontend co the hydrate va day len dau danh sach ngay, khong can F5.
 
-File: `frontend/src/components/ChatWindow/index.tsx`
+## 7. Luong read (socket-only)
 
-Khi dang mo conversation va co message moi nhat KHONG phai cua minh:
+Frontend `ChatWindow`:
+- Emit `message:read` voi payload `{ conversationId, lastMessageId }`
+- Reset unread local bang action `markConversationRead`
 
-1. Frontend emit socket:
+Backend Gateway:
+- Nhan `message:read`
+- Publish RabbitMQ `UPDATE_MESSAGE_READ` cho Chat Service
 
-- `message:read` voi payload `{ conversationId, lastMessageId }`
+Backend Chat Service:
+- `updateMessageRead(...)` cap nhat DB async
+- Reset unreadCount ve 0 trong `conversationMember`
 
-2. Frontend dong thoi goi HTTP:
+Da loai bo:
+- HTTP endpoint `POST /chat/read_message`
+- DTO/service method phu thuoc endpoint nay
 
-- `POST /chat/read_message` voi payload `{ conversationId, lastReadMessageId }`
+## 8. Seen status batching
 
-3. Redux local reset unread:
+Gateway da throttle event read:
+- Gom read trong cua so 1 giay
+- Broadcast 1 event:
+  - `user:read_batch`
+  - payload: `{ conversationId, users: [{ userId, lastReadMessageId }] }`
 
-- `readMessage.fulfilled` set `conversation.unreadCount = "0"`
+Frontend `useChatSocketEvents`:
+- Nhan `user:read_batch`
+- Update seen status theo lo de giam giat UI khi nhieu user doc cung luc
 
-## 6. Co che persist tren server
+## 9. Sequence tom tat
 
-### 6.1 API read_message
+### 9.1 New message -> unread tang
 
-File: `backend/apps/chat/src/chat.controller.ts`
+1. Sender gui message
+2. Chat Service luu message, tang unreadCount cho member khac
+3. Realtime emit `message:new` den nguoi nhan
+4. Frontend nguoi nhan cap nhat sidebar/message
+5. Neu khong mo conversation do, unread local +1
 
-- Endpoint: `POST /chat/read_message`
+### 9.2 Read message -> unread reset
 
-File: `backend/apps/chat/src/chat.service.ts`
+1. User mo conversation va emit `message:read`
+2. Frontend reset unread local ngay (`markConversationRead`)
+3. Gateway publish RMQ update read
+4. Chat Service reset unreadCount DB = 0
+5. Seen status gui theo batch `user:read_batch`
 
-- `readMessage(data)`:
-  - Kiem tra message hop le.
-  - Cap nhat `conversationMember.lastReadAt` va `lastReadMessageId`.
+## 10. Trang thai hien tai
 
-### 6.2 Socket message:read
-
-File: `backend/apps/realtime-gateway/src/realtime/realtime.gateway.ts`
-
-- Nhan event `message:read`.
-- Broadcast `user:read` cho cac member khac de hien seen status.
-- Publish RMQ `UPDATE_MESSAGE_READ` de chat service cap nhat DB async.
-
-Ghi chu:
-
-- Luong `user:read` chu yeu phuc vu seen status (avatar da xem), khong truc tiep tang/giu unread count.
-
-## 7. Unread khi load lai trang
-
-Unread count ban dau khi vao app khong den tu realtime event, ma den tu API list conversation:
-
-- `GET /chat/conversations`
-- Backend goi `calculateUnreadCounts(conversations, userId)`
-
-`calculateUnreadCounts`:
-
-- Lay `lastReadAt` cua user trong moi conversation.
-- Dem message chua doc qua `messageRepo.findUnreadMessages(...)`.
-- Mapping:
-  - 0 -> `"0"`
-  - 1..5 -> `"1".."5"`
-  - > 5 -> `"5+"`
-
-Vi vay unread count se duoc "chot lai dung" sau khi reload app hoac fetch lai conversations.
-
-## 8. Co che tranh duplicate event
-
-File: `frontend/src/components/ProtectedRoute/index.tsx`
-
-Do frontend nghe ca `chat.new_message` va `message:new`, cung 1 message co the den 2 lan.
-De tranh tang unread 2 lan:
-
-- Co `processedMessageKeysRef` + TTL 5s.
-- Neu trung key message trong cua so 5s -> bo qua phan tang unread.
-
-Tuy vay, `addMessage` va `updateNewMessage` van duoc goi truoc khi check duplicate trong code hien tai.
-Unnread thi da duoc chan duplicate.
-
-## 9. Tom tat sequence
-
-### 9.1 Tang unread
-
-1. User B gui message.
-2. User A nhan socket `chat.new_message`/`message:new`.
-3. Neu A khong mo conversation do:
-
-- `upUnreadCount` -> unread +1 (toi da `5+`).
-
-### 9.2 Reset unread
-
-1. User A mo conversation va thay tin nhan moi.
-2. A goi `readMessage` (HTTP) + emit `message:read` (socket).
-3. Redux local set unread ve `0`.
-4. Server cap nhat `lastReadAt/lastReadMessageId` de lan load sau dung.
-
-## 10. Hanh vi hien tai va gioi han
-
-1. Realtime unread count hien tai la client-driven (dua tren socket event + state local).
-2. Du lieu unread chinh xac cuoi cung duoc server recompute khi fetch conversations.
-3. Co gioi han hien thi unread toi da `5+`.
-4. Neu conversation chua co trong state local, `upUnreadCount` se bo qua.
-5. Co dedupe theo TTL 5s de tranh tang 2 lan khi nhan 2 event gan nhau.
-
-## 11. De xuat nang cap (optional)
-
-1. Dong bo unread qua mot event server-side rieng (vd: `conversation:unread_updated`) de giam phu thuoc logic local.
-2. Khi duplicate message, can nhac skip ca `addMessage/updateNewMessage` de giam side-effect.
-3. Co the bo sung co che "mark as read on focus" chi khi user thuc su o dung conversation va cua so dang active.
+1. Sidebar load nhanh hon do bo N+1 unread query.
+2. Event message da don gian hoa, khong con duplicate path.
+3. Ghost conversation da duoc hydrate tu dong.
+4. Luong read da socket-only.
+5. Seen status da co batching 1 giay.
 
 ---
 
-Tai lieu nay phan anh dung implementation hien tai de team de debug va mo rong unread realtime.
+Tai lieu nay phan anh dung implementation hien tai de team backend/frontend van hanh va mo rong unread realtime.

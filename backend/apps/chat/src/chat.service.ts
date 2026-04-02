@@ -176,6 +176,11 @@ export class ChatService {
       message.createdAt,
     )
 
+    await this.memberRepo.increaseUnreadForOthers(
+      data.conversationId,
+      data.senderId,
+    )
+
     const normalizedMessage = this.normalizeMessage(message)
 
     this.eventsPublisher.publishMessageSent(
@@ -575,25 +580,6 @@ export class ChatService {
     }
   }
 
-  async readMessage(data) {
-    const message = await this.messageRepo.findById(
-      data.lastReadMessageId,
-      data.conversationId,
-    )
-
-    if (!message) {
-      ChatErrors.invalidLastReadMessage()
-    }
-
-    await this.memberRepo.updateLastRead(
-      data.conversationId,
-      data.userId,
-      data.lastReadMessageId,
-    )
-
-    return { lastReadMessageId: data.lastReadMessageId }
-  }
-
   async handleUserUpdated(data: UserUpdatedPayload) {
     await this.memberRepo.updateByUserId(data.userId, {
       avatar: data.avatar,
@@ -668,6 +654,26 @@ export class ChatService {
   async getConversationByFriendId(friendId: string, userId: string) {
     const conversation: any =
       await this.conversationRepo.findConversationByFriendId(friendId, userId)
+
+    if (!conversation) {
+      ChatErrors.conversationNotFound()
+    }
+
+    const isMember = conversation.members.find((m) => m.userId === userId)
+    if (!isMember) {
+      ChatErrors.userNotMember()
+    }
+
+    const unreadMap = await this.calculateUnreadCounts([conversation], userId)
+    return {
+      conversation,
+      unreadMap,
+    }
+  }
+
+  async getConversationById(conversationId: string, userId: string) {
+    const conversation: any =
+      await this.conversationRepo.findByIdWithMembers(conversationId)
 
     if (!conversation) {
       ChatErrors.conversationNotFound()
@@ -787,6 +793,7 @@ export class ChatService {
     })
 
     await this.memberRepo.updateLastMessageAt(conversationId, message.createdAt)
+    await this.memberRepo.increaseUnreadForOthers(conversationId, actorUserId)
 
     const normalized = this.normalizeMessage(message)
     const members = await this.memberRepo.findByConversationId(conversationId)
@@ -814,26 +821,17 @@ export class ChatService {
   ): Promise<Map<string, string>> {
     const unreadMap = new Map<string, string>()
 
-    await Promise.all(
-      conversations.map(async (c) => {
-        const me = c.members.find((m: any) => m.userId === userId)
-        const lastReadAt = me?.lastReadAt ?? null
+    conversations.forEach((conversation) => {
+      const me = conversation?.members?.find((m: any) => m.userId === userId)
+      const unread = Number(me?.unreadCount || 0)
 
-        const unreadMessages = await this.messageRepo.findUnreadMessages(
-          c.id,
-          lastReadAt,
-          userId,
-        )
+      if (unread <= 0) {
+        unreadMap.set(conversation.id, '0')
+        return
+      }
 
-        if (unreadMessages.length === 0) {
-          unreadMap.set(c.id, '0')
-        } else if (unreadMessages.length <= 5) {
-          unreadMap.set(c.id, String(unreadMessages.length))
-        } else {
-          unreadMap.set(c.id, '5+')
-        }
-      }),
-    )
+      unreadMap.set(conversation.id, unread > 5 ? '5+' : String(unread))
+    })
 
     return unreadMap
   }

@@ -41,6 +41,14 @@ export class RealtimeGateway
   private readonly socketTouchTimers = new Map<string, NodeJS.Timeout>()
   private readonly packetListeners = new Map<string, (packet: any) => void>()
   private readonly typingConversationsBySocket = new Map<string, Set<string>>()
+  private readonly readBatchByConversation = new Map<
+    string,
+    {
+      timer: NodeJS.Timeout
+      users: Map<string, string>
+    }
+  >()
+  private readonly readBatchWindowMs = 1000
 
   private emitTypingStopToRoom(
     client: Socket,
@@ -68,6 +76,49 @@ export class RealtimeGateway
     }
 
     this.typingConversationsBySocket.delete(client.id)
+  }
+
+  private queueReadBroadcast(
+    client: Socket,
+    conversationId: string,
+    userId: string,
+    lastReadMessageId: string,
+  ) {
+    const current = this.readBatchByConversation.get(conversationId)
+
+    if (!current) {
+      const users = new Map<string, string>()
+      users.set(userId, lastReadMessageId)
+
+      const timer = setTimeout(() => {
+        const pending = this.readBatchByConversation.get(conversationId)
+        if (!pending) return
+
+        const usersPayload = Array.from(pending.users.entries()).map(
+          ([uid, msgId]) => ({
+            userId: uid,
+            lastReadMessageId: msgId,
+          }),
+        )
+
+        client.broadcast
+          .to(`conversation:${conversationId}`)
+          .emit(SOCKET_EVENTS.CHAT.USER_READ_BATCH, {
+            conversationId,
+            users: usersPayload,
+          })
+
+        this.readBatchByConversation.delete(conversationId)
+      }, this.readBatchWindowMs)
+
+      this.readBatchByConversation.set(conversationId, {
+        timer,
+        users,
+      })
+      return
+    }
+
+    current.users.set(userId, lastReadMessageId)
   }
 
   constructor(
@@ -151,6 +202,17 @@ export class RealtimeGateway
     if (!userId) return
 
     this.forceStopAllTypingForSocket(client, userId)
+
+    this.readBatchByConversation.forEach((batch, conversationId) => {
+      if (batch.users.has(userId)) {
+        batch.users.delete(userId)
+      }
+
+      if (batch.users.size === 0) {
+        clearTimeout(batch.timer)
+        this.readBatchByConversation.delete(conversationId)
+      }
+    })
 
     const timer = this.socketTouchTimers.get(client.id)
     if (timer) {
@@ -377,15 +439,8 @@ export class RealtimeGateway
       return
     }
 
-    // 1️⃣ Broadcast user_read event tới các thành viên khác trong room
-    client.broadcast
-      .to(`conversation:${conversationId}`)
-      .emit(SOCKET_EVENTS.CHAT.USER_READ, {
-        conversationId,
-        userId,
-        lastReadMessageId: lastMessageId,
-        lastMessageId,
-      })
+    // 1️⃣ Batch broadcast user_read để giảm số lượng event dồn dập
+    this.queueReadBroadcast(client, conversationId, userId, lastMessageId)
 
     // 2️⃣ Gửi async message tới Chat Service để cập nhật MongoDB
     this.amqpConnection.publish(
