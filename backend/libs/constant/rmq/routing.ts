@@ -8,4 +8,7 @@ export const ROUTING_RMQ = {
   SEND_MESSAGE: 'realtime.sendMessage',
   USER_OFFLINE: 'user.offline',
   USER_ONLINE: 'user.online',
+  USER_TYPING: 'user.typing',
+  MESSAGE_READ: 'message.read',
+  UPDATE_MESSAGE_READ: 'message.updateRead',
 }

@@ -87,3 +87,21 @@ export interface MessageErrorPayload {
   message: string
   retryable: boolean
 }
+
+export interface UserTypingPayload {
+  conversationId: string
+  userId: string
+  status: 'start' | 'stop'
+}
+
+export interface UserReadPayload {
+  conversationId: string
+  userId: string
+  lastReadMessageId: string
+}
+
+export interface UpdateMessageReadPayload {
+  conversationId: string
+  userId: string
+  lastReadMessageId: string
+}

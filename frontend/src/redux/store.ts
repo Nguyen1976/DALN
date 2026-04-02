@@ -9,13 +9,22 @@ import conversationReducer from "./slices/conversationSlice";
 import notificationReducer from "./slices/notificationSlice";
 import messageReducer from "./slices/messageSlice";
 import notificationPreferenceReducer from "./slices/notificationPreferenceSlice";
+import typingIndicatorReducer from "./slices/typingIndicatorSlice";
+import seenStatusReducer from "./slices/seenStatusSlice";
 
 const rootPersistConfig = {
   key: "root",
   storage: storage,
   whitelist: ["user"], //Mảng những slice được lưu trữ ở storage
   //blacklist ngược lại của whitelist
-  blacklist: ["friend", "conversations", "notification", "message"], //những slice k lưu trữ ở storage
+  blacklist: [
+    "friend",
+    "conversations",
+    "notification",
+    "message",
+    "typingIndicator",
+    "seenStatus",
+  ], //những slice k lưu trữ ở storage
 };
 
 const reducers = combineReducers({
@@ -25,6 +34,8 @@ const reducers = combineReducers({
   notification: notificationReducer,
   message: messageReducer,
   notificationPreference: notificationPreferenceReducer,
+  typingIndicator: typingIndicatorReducer,
+  seenStatus: seenStatusReducer,
 });
 
 const persistedReducer = persistReducer(rootPersistConfig, reducers);

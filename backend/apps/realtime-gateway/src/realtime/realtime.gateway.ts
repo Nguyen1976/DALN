@@ -40,6 +40,35 @@ export class RealtimeGateway
   private readonly socketTouchIntervalMs = 25_000
   private readonly socketTouchTimers = new Map<string, NodeJS.Timeout>()
   private readonly packetListeners = new Map<string, (packet: any) => void>()
+  private readonly typingConversationsBySocket = new Map<string, Set<string>>()
+
+  private emitTypingStopToRoom(
+    client: Socket,
+    userId: string,
+    conversationId: string,
+  ) {
+    client.broadcast
+      .to(`conversation:${conversationId}`)
+      .emit(SOCKET_EVENTS.CHAT.USER_TYPING, {
+        conversationId,
+        userId,
+        status: 'stop',
+      })
+  }
+
+  private forceStopAllTypingForSocket(client: Socket, userId: string) {
+    const typingConversations = this.typingConversationsBySocket.get(client.id)
+    if (!typingConversations || typingConversations.size === 0) {
+      this.typingConversationsBySocket.delete(client.id)
+      return
+    }
+
+    for (const conversationId of typingConversations) {
+      this.emitTypingStopToRoom(client, userId, conversationId)
+    }
+
+    this.typingConversationsBySocket.delete(client.id)
+  }
 
   constructor(
     private jwtService: JwtService,
@@ -121,6 +150,8 @@ export class RealtimeGateway
     const userId = client.data.userId
     if (!userId) return
 
+    this.forceStopAllTypingForSocket(client, userId)
+
     const timer = this.socketTouchTimers.get(client.id)
     if (timer) {
       clearInterval(timer)
@@ -147,7 +178,6 @@ export class RealtimeGateway
         60 * 60 * 24 * 7,
       ) // lưu lastSeen trong 7 ngày
 
-
       this.amqpConnection.publish(
         EXCHANGE_RMQ.REALTIME_EVENTS,
         ROUTING_RMQ.USER_OFFLINE,
@@ -161,6 +191,45 @@ export class RealtimeGateway
     const userId = client.data.userId
     if (!userId) return
     await this.userStatusStore.touchConnection(userId, client.id)
+  }
+
+  /**
+   * Khi người dùng vào xem một conversation, join room để nhận typing/read events
+   */
+  @SubscribeMessage('conversation:join')
+  async handleJoinConversation(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const { conversationId } = data
+    if (!conversationId) return
+
+    client.join(`conversation:${conversationId}`)
+  }
+
+  /**
+   * Khi người dùng rời khỏi conversation
+   */
+  @SubscribeMessage('conversation:leave')
+  async handleLeaveConversation(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = client.data.userId
+    const { conversationId } = data
+    if (!conversationId || !userId) return
+
+    const typingConversations = this.typingConversationsBySocket.get(client.id)
+    if (typingConversations?.has(conversationId)) {
+      this.emitTypingStopToRoom(client, userId, conversationId)
+      typingConversations.delete(conversationId)
+
+      if (typingConversations.size === 0) {
+        this.typingConversationsBySocket.delete(client.id)
+      }
+    }
+
+    client.leave(`conversation:${conversationId}`)
   }
 
   async checkUserOnline(userId: string): Promise<boolean> {
@@ -217,6 +286,115 @@ export class RealtimeGateway
         clientMessageId: data.clientMessageId,
         type: data.type,
         medias: data.media || data.medias || [],
+      },
+    )
+  }
+
+  /**
+   * TYPING INDICATOR
+   * Khi người dùng gõ, emit typing event với { conversationId, status: 'start' | 'stop' }
+   * Broadcast tới các thành viên khác trong room
+   */
+  @SubscribeMessage(SOCKET_EVENTS.CHAT.USER_TYPING)
+  async handleUserTyping(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = client.data.userId
+    if (!userId) {
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        code: 'UNAUTHORIZED',
+        message: 'Unauthorized socket client',
+        retryable: false,
+      })
+      return
+    }
+
+    const { conversationId, status } = data
+    if (!conversationId || !status || !['start', 'stop'].includes(status)) {
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        code: 'INVALID_PAYLOAD',
+        message: 'conversationId and status (start/stop) are required',
+        retryable: false,
+      })
+      return
+    }
+
+    // Broadcast to other users in the conversation room
+    // Gửi tới tất cả users trong conversation, ngoại trừ sender
+    const typingConversations =
+      this.typingConversationsBySocket.get(client.id) || new Set<string>()
+
+    if (status === 'start') {
+      typingConversations.add(conversationId)
+      this.typingConversationsBySocket.set(client.id, typingConversations)
+    } else {
+      typingConversations.delete(conversationId)
+      if (typingConversations.size === 0) {
+        this.typingConversationsBySocket.delete(client.id)
+      } else {
+        this.typingConversationsBySocket.set(client.id, typingConversations)
+      }
+    }
+
+    client.broadcast
+      .to(`conversation:${conversationId}`)
+      .emit(SOCKET_EVENTS.CHAT.USER_TYPING, {
+        conversationId,
+        userId,
+        status,
+      })
+  }
+
+  /**
+   * SEEN STATUS (ĐÃ XEM)
+   * Khi người dùng mở hội thoại, emit message_read event với { conversationId, lastMessageId }
+   * 1. Broadcast tới các thành viên khác để cập nhật UI
+   * 2. Gửi async message tới Chat Service để cập nhật MongoDB
+   */
+  @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_READ)
+  async handleMessageRead(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = client.data.userId
+    if (!userId) {
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        code: 'UNAUTHORIZED',
+        message: 'Unauthorized socket client',
+        retryable: false,
+      })
+      return
+    }
+
+    const { conversationId, lastMessageId } = data
+    if (!conversationId || !lastMessageId) {
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        code: 'INVALID_PAYLOAD',
+        message: 'conversationId and lastMessageId are required',
+        retryable: false,
+      })
+      return
+    }
+
+    // 1️⃣ Broadcast user_read event tới các thành viên khác trong room
+    client.broadcast
+      .to(`conversation:${conversationId}`)
+      .emit(SOCKET_EVENTS.CHAT.USER_READ, {
+        conversationId,
+        userId,
+        lastReadMessageId: lastMessageId,
+        lastMessageId,
+      })
+
+    // 2️⃣ Gửi async message tới Chat Service để cập nhật MongoDB
+    this.amqpConnection.publish(
+      EXCHANGE_RMQ.REALTIME_EVENTS,
+      ROUTING_RMQ.UPDATE_MESSAGE_READ,
+      {
+        conversationId,
+        userId,
+        lastReadMessageId: lastMessageId,
       },
     )
   }

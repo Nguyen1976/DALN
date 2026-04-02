@@ -27,6 +27,7 @@ import {
   selectMessage,
   type Message,
 } from "@/redux/slices/messageSlice";
+import { selectTypingUsersInConversation } from "@/redux/slices/typingIndicatorSlice";
 import MessageComponent from "./Messages";
 import EmojiPicker from "emoji-picker-react";
 import {
@@ -41,6 +42,10 @@ import {
   uploadFileToSignedUrl,
   type MessageMediaInput,
 } from "@/apis";
+import { useConversationRoom } from "@/hooks/useConversationRoom";
+import { useTypingIndicator } from "@/hooks/useTypingIndicator";
+import { SOCKET_EVENTS } from "@/lib/socket.events";
+import { TypingIndicator } from "@/components/TypingIndicator";
 
 interface ChatWindowProps {
   conversationId?: string;
@@ -111,6 +116,63 @@ export default function ChatWindow({
   const pagination = useSelector((state: RootState) =>
     selectMessagePagination(state, conversationId),
   );
+
+  // Get typing users in this conversation
+  const typingUsers = useSelector((state: RootState) =>
+    selectTypingUsersInConversation(state, conversationId || ""),
+  );
+
+  // Get all seen status for this conversation
+  const allSeenStatus = useSelector((state: RootState) => {
+    const seenState = state.seenStatus as any;
+    return conversationId && seenState?.seenByUser?.[conversationId]
+      ? seenState.seenByUser[conversationId]
+      : {};
+  });
+
+  // Make conversation members available for display
+  const conversationMembers = effectiveConversation?.members || [];
+  const memberNamesMap = new Map(
+    conversationMembers.map((m) => [
+      m.userId,
+      m.username || m.fullName || "Unknown",
+    ]),
+  );
+  const memberAvatarMap = new Map(
+    conversationMembers.map((m) => [m.userId, m.avatar || ""]),
+  );
+
+  // Get typing user display names (filter out current user)
+  const typingUserNames = typingUsers
+    .filter((uid) => uid !== user.id)
+    .map((uid) => memberNamesMap.get(uid) || "Unknown user");
+
+  // Build seenMessages object for MessageComponent with proper typing
+  const seenMessages: Record<
+    string,
+    { userId: string; username?: string; avatar?: string }[]
+  > = {};
+  Object.entries(allSeenStatus).forEach(
+    ([messageId, seenUsers]: [string, any]) => {
+      if (Array.isArray(seenUsers)) {
+        seenMessages[messageId] = seenUsers.map((s: any) => ({
+          userId: s.userId,
+          username: memberNamesMap.get(s.userId),
+          avatar: memberAvatarMap.get(s.userId),
+        }));
+      }
+    },
+  );
+
+  // Setup conversation room join/leave
+  useConversationRoom(conversationId);
+
+  // Setup typing indicator
+  const { handleTyping, stopTyping, handleInputFocus, handleInputBlur } =
+    useTypingIndicator({
+      conversationId: conversationId || "",
+      enabled: canSendMessage && !!conversationId,
+    });
 
   useEffect(() => {
     if (!isAtBottom) return;
@@ -240,6 +302,13 @@ export default function ChatWindow({
     // Chỉ đánh dấu read nếu message KHÔNG phải của mình
     if (lastMessage.senderId === user.id) return;
 
+    // Emit socket event để báo cho server (Realtime Service) biết
+    socket.emit(SOCKET_EVENTS.CHAT.MESSAGE_READ, {
+      conversationId,
+      lastMessageId: lastMessage.id,
+    });
+
+    // Cũng dispatch Redux action để cập nhật HTTP request nếu cần
     dispatch(
       readMessage({
         conversationId,
@@ -289,6 +358,7 @@ export default function ChatWindow({
       clientMessageId,
       media: [],
     });
+    stopTyping();
     setMsg("");
 
     requestAnimationFrame(() => {
@@ -302,6 +372,7 @@ export default function ChatWindow({
     user.id,
     conversation,
     effectiveConversation,
+    stopTyping,
   ]);
 
   const getMessageTypeFromFile = (file: File): "IMAGE" | "VIDEO" | "FILE" => {
@@ -483,7 +554,12 @@ export default function ChatWindow({
         <MessageComponent
           messages={messages}
           highlightMessageId={highlightMessageId}
+          seenMessages={seenMessages}
         />
+
+        {/* Typing Indicator */}
+        <TypingIndicator userNames={typingUserNames} />
+
         <div ref={bottomRef} />
       </div>
 
@@ -533,8 +609,13 @@ export default function ChatWindow({
           placeholder="Nhập tin nhắn..."
           disabled={!canSendMessage}
           className="flex-1 bg-transparent text-text placeholder:text-gray-500 outline-none text-sm"
-          onChange={(e) => setMsg(e.target.value)}
+          onChange={(e) => {
+            setMsg(e.target.value);
+            handleTyping(e.target.value); // Emit typing indicator
+          }}
           value={msg}
+          onFocus={handleInputFocus}
+          onBlur={handleInputBlur}
           onKeyDown={(e) => {
             // Nếu đang trong quá trình gõ tiếng Việt (IME composition), không gửi
             if (e.nativeEvent.isComposing) return;

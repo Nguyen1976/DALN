@@ -3,6 +3,7 @@ import type {
   MessageSendPayload,
   UserUpdatedPayload,
   UserUpdateStatusMakeFriendPayload,
+  UpdateMessageReadPayload,
 } from 'libs/constant/rmq/payload'
 import {
   ConversationRepository,
@@ -339,7 +340,7 @@ export class ChatService {
     // const actorProfile = await this.memberRepo.findUserProfileById(dto.userId)
     // const targetProfile = await this.memberRepo.findUserProfileById(
     //   dto.targetUserId,
-    // ) 
+    // )
 
     const actorDisplayName =
       actor.fullName ||
@@ -598,6 +599,21 @@ export class ChatService {
       avatar: data.avatar,
       fullName: data.fullName,
     })
+  }
+
+  /**
+   * Cập nhật lastReadMessageId cho user trong conversation
+   * Gọi từ Realtime Service qua RabbitMQ khi user đã xem tin nhắn
+   */
+  async updateMessageRead(data: UpdateMessageReadPayload) {
+    const { conversationId, userId, lastReadMessageId } = data
+
+    // Cập nhật thông tin user đã xem tin nhắn vào conversation member
+    await this.memberRepo.updateLastRead(
+      conversationId,
+      userId,
+      lastReadMessageId,
+    )
   }
 
   async searchConversations(userId: string, keyword: string) {

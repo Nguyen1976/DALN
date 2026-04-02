@@ -16,6 +16,9 @@ export const SOCKET_EVENTS = {
     CONVERSATION_UPDATE: 'conversation:update',
     NEW_CONVERSATION: 'chat.new_conversation', //listen
     NEW_MEMBER_ADDED: 'chat.new_member_added', //listen
+    USER_TYPING: 'user:typing', //listen - người dùng gõ
+    MESSAGE_READ: 'message:read', //emit - gửi lên không đọc
+    USER_READ: 'user:read', //listen - người khác đã xem
   },
 
   USER: {

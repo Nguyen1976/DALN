@@ -9,6 +9,7 @@ import type {
   MessageSendPayload,
   UserUpdatedPayload,
   UserUpdateStatusMakeFriendPayload,
+  UpdateMessageReadPayload,
 } from 'libs/constant/rmq/payload'
 import { ChatEventsPublisher } from '../publishers/chat-events.publisher'
 
@@ -61,5 +62,14 @@ export class MessageSubscriber {
       })
       throw error
     }
+  }
+
+  @RabbitSubscribe({
+    exchange: EXCHANGE_RMQ.REALTIME_EVENTS,
+    routingKey: ROUTING_RMQ.UPDATE_MESSAGE_READ,
+    queue: QUEUE_RMQ.CHAT_UPDATE_MESSAGE_READ,
+  })
+  async updateMessageRead(data: UpdateMessageReadPayload): Promise<void> {
+    await safeExecute(() => this.chatService.updateMessageRead(data))
   }
 }

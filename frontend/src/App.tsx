@@ -22,8 +22,12 @@ import {
   addNotification,
   type Notification,
 } from "./redux/slices/notificationSlice";
-import { upsertOnlineFriend, updateStatusOffline } from "./redux/slices/friendSlice";
+import {
+  upsertOnlineFriend,
+  updateStatusOffline,
+} from "./redux/slices/friendSlice";
 import NotificationSettingsPage from "./pages/NotificationSettings";
+import { useChatSocketEvents } from "./hooks/useChatSocketEvents";
 
 const router = createBrowserRouter([
   {
@@ -91,6 +95,9 @@ function App() {
   const user = useSelector(selectUser);
   const [play] = useSound(notificationSound, { volume: 0.5 });
 
+  // Setup chat socket events (typing indicator, seen status)
+  useChatSocketEvents();
+
   useEffect(() => {
     if (!user?.id) return;
 
@@ -139,9 +146,14 @@ function App() {
   }, [dispatch]);
 
   useEffect(() => {
-    const handleOfflineStatusChanged = (data: { userId: string; lastSeen: string }) => {
+    const handleOfflineStatusChanged = (data: {
+      userId: string;
+      lastSeen: string;
+    }) => {
       console.log("handleOfflineStatusChanged", data.userId, data.lastSeen);
-      dispatch(updateStatusOffline({ friendId: data.userId, lastSeen: data.lastSeen }));
+      dispatch(
+        updateStatusOffline({ friendId: data.userId, lastSeen: data.lastSeen }),
+      );
     };
 
     socket.on("user.offline_status_changed", handleOfflineStatusChanged);

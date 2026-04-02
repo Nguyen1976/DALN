@@ -5,13 +5,19 @@ import { formatDateTime } from "@/utils/formatDateTime";
 import { useSelector } from "react-redux";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { FileText, User } from "lucide-react";
+import { SeenStatus } from "@/components/SeenStatus";
 
 const MessageComponent = ({
   messages,
   highlightMessageId,
+  seenMessages = {},
 }: {
   messages: Message[];
   highlightMessageId?: string | null;
+  seenMessages?: Record<
+    string,
+    { userId: string; username?: string; avatar?: string }[]
+  >;
 }) => {
   const user = useSelector(selectUser);
 
@@ -180,17 +186,10 @@ const MessageComponent = ({
               </div>
             </div>
             {isMine && !isSameAsNext && (
-              <div className="flex justify-end mr-10 h-3">
-                <span className="mt-1 text-[11px] text-gray-400">
-                  {message?.status === "pending"
-                    ? "Đang gửi"
-                    : message?.status === "sent"
-                      ? "Đã gửi"
-                      : message?.status === "failed"
-                        ? "Gửi thất bại"
-                        : message?.status}
-                </span>
-              </div>
+              <SeenStatus
+                seenUsers={seenMessages[message.id] || []}
+                messageStatus={message?.status as any}
+              />
             )}
           </div>
         );
