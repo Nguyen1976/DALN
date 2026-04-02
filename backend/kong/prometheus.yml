@@ -1,9 +1,22 @@
 global:
-  scrape_interval: 15s
+  scrape_interval: 15s # Cứ 15s đi lấy dữ liệu 1 lần
+  evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'kong-metrics'
+  # 1. Job lấy metrics từ Kong Gateway
+  - job_name: 'kong-gateway'
     static_configs:
-      # Nếu dùng Docker Desktop (Windows/Mac), dùng host.docker.internal
-      # Nếu dùng Linux, hãy thay bằng IP thật của máy bạn
       - targets: ['host.docker.internal:9542']
+        labels:
+          group: 'gateway'
+
+  # 2. Job lấy metrics từ các NestJS Services
+  - job_name: 'nestjs-backend'
+    metrics_path: '/metrics' # Đường dẫn đến endpoint nestjs-prometheus
+    static_configs:
+      - targets: 
+          - 'host.docker.internal:3002' # user-service
+          - 'host.docker.internal:3003' # chat-service
+          - 'host.docker.internal:3004' # notification-service
+        labels:
+          group: 'microservices'

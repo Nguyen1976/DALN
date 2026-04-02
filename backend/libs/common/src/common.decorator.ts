@@ -18,3 +18,6 @@ export const UserInfo = createParamDecorator(
     return data ? request.user[data] : request.user
   },
 )
+
+export const IS_TRANSFORM_KEY = 'isTransform';
+export const NoTransform = () => SetMetadata(IS_TRANSFORM_KEY, true);

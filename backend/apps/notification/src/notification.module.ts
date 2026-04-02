@@ -17,9 +17,16 @@ import {
 import { NotificationEventsPublisher } from './rmq/publishers/notification-events.publisher'
 import { NotificationSubscriber } from './rmq/subcribers/notification-subscribers'
 import { PrismaModule } from '../prisma/prisma.module'
+import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
 
 @Module({
   imports: [
+    PrometheusModule.register({
+          path: '/metrics', // Endpoint để Prometheus kéo data
+          defaultMetrics: {
+            enabled: true, // Tự động lấy CPU, RAM, Heap của Node.js
+          },
+        }),
     CommonModule,
     RedisModule.forRoot(
       {

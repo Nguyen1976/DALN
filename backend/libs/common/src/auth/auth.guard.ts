@@ -23,7 +23,9 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>()
     const response = context.switchToHttp().getResponse<Response>()
-
+    if (request.url === '/metrics') {
+      return true
+    }
     if (!request) {
       throw new UnauthorizedException({
         message: 'UNAUTHORIZED',

@@ -29,8 +29,12 @@ export class ResponseInterceptor<T> implements NestInterceptor<
     data: T
   }> {
     const response = context.switchToHttp().getResponse<Response>()
+    const request = context.switchToHttp().getRequest()
     const statusCode = response.statusCode
-
+    if (request.url === '/metrics') {
+      return next.handle()
+      // Trả về dữ liệu gốc (chuỗi văn bản) mà không bọc JSON
+    }
     return next.handle().pipe(
       map((data) => ({
         statusCode,

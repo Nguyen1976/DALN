@@ -19,9 +19,16 @@ import { MessageSubscriber } from './rmq/subcribers/user-subcribers'
 import { UserHttpController } from './http/user-http.controller'
 import { APP_GUARD } from '@nestjs/core'
 import { PrismaModule } from '../prisma/prisma.module'
+import { PrometheusModule } from '@willsoto/nestjs-prometheus'
 
 @Module({
   imports: [
+    PrometheusModule.register({
+      path: '/metrics', // Endpoint để Prometheus kéo data
+      defaultMetrics: {
+        enabled: true, // Tự động lấy CPU, RAM, Heap của Node.js
+      },
+    }),
     PrismaModule,
     CommonModule,
     UtilModule,
