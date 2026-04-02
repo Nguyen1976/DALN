@@ -291,7 +291,6 @@ export class ChatController {
     })
   }
 
-
   @Get('search')
   @RequireLogin()
   async searchConversations(

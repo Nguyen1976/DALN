@@ -62,12 +62,15 @@ Khi nhan event `message:new`:
 
 1. Frontend normalize message.
 2. Neu `conversationId` chua co trong Redux:
-  - Goi `GET /chat/conversations/:conversationId` qua `getConversationByIdAPI`.
-  - `applyConversationUpdate(...)` de them/upsert vao dau danh sach.
+
+- Goi `GET /chat/conversations/:conversationId` qua `getConversationByIdAPI`.
+- `applyConversationUpdate(...)` de them/upsert vao dau danh sach.
+
 3. Cap nhat `lastMessage` cho sidebar.
 4. Neu user khong mo dung conversation do, tang unread local (`upUnreadCount`).
 
 Muc dich:
+
 - Tranh mat tin nhan moi voi conversation nam o trang pagination sau.
 - Sidebar luon "song" ma khong can reload toan bo.
 
@@ -155,6 +158,7 @@ File: `backend/apps/chat/src/chat.service.ts`
   - > 5 -> `"5+"`
 
 Cap nhat counter:
+
 - Khi message moi: increment unread cho member khac sender.
 - Khi read: reset unread = 0 trong `updateLastRead`.
 
@@ -206,15 +210,18 @@ Khi frontend load danh sach conversation, moi item da co du lieu du de render si
 ## 10. Realtime interaction voi loading
 
 1. Event message da hop nhat:
+
 - Frontend chi nghe `message:new` (khong con `chat.new_message`).
 
 2. Read flow socket-only:
+
 - Frontend emit `message:read`.
 - Gateway publish RMQ de Chat Service cap nhat DB async.
 - Frontend reset unread local qua `markConversationRead`.
 - Khong con `POST /chat/read_message`.
 
 3. Seen status batching:
+
 - Gateway gom event read trong 1 giay va emit `user:read_batch`.
 
 ## 11. Cac diem quan trong de tranh loi

@@ -87,4 +87,3 @@ export class CreateMessageUploadUrlDTO {
   @IsNotEmpty()
   size: string
 }
-

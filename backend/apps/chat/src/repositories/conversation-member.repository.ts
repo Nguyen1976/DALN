@@ -8,37 +8,37 @@ export class ConversationMemberRepository {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private participantRoleBackfilled = false
-    private unreadCountBackfilled = false
+  private unreadCountBackfilled = false
   private readonly activeMemberFilter = {
     isActive: true,
   }
 
-    private async forceBackfillUnreadCount() {
-      await this.prisma.$runCommandRaw({
-        update: 'conversationMember',
-        updates: [
-          {
-            q: {
-              $or: [{ unreadCount: null }, { unreadCount: { $exists: false } }],
-            },
-            u: [
-              {
-                $set: {
-                  unreadCount: 0,
-                },
-              },
-            ],
-            multi: true,
+  private async forceBackfillUnreadCount() {
+    await this.prisma.$runCommandRaw({
+      update: 'conversationMember',
+      updates: [
+        {
+          q: {
+            $or: [{ unreadCount: null }, { unreadCount: { $exists: false } }],
           },
-        ],
-      })
-    }
+          u: [
+            {
+              $set: {
+                unreadCount: 0,
+              },
+            },
+          ],
+          multi: true,
+        },
+      ],
+    })
+  }
 
-    private async ensureUnreadCountInitialized() {
-      if (this.unreadCountBackfilled) return
-      await this.forceBackfillUnreadCount()
-      this.unreadCountBackfilled = true
-    }
+  private async ensureUnreadCountInitialized() {
+    if (this.unreadCountBackfilled) return
+    await this.forceBackfillUnreadCount()
+    this.unreadCountBackfilled = true
+  }
 
   private async forceBackfillParticipantRole() {
     await this.prisma.$runCommandRaw({

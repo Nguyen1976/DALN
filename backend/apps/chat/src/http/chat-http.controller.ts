@@ -27,6 +27,4 @@ import { ConversationMapper } from '../domain/conversation.mapper'
 @Controller('chat')
 export class ChatHttpController {
   constructor(private readonly chatService: ChatService) {}
-
- 
 }
