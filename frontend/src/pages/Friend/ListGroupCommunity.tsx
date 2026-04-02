@@ -82,8 +82,7 @@ const ListGroupCommunity = () => {
 
   const loadMoreGroups = () => {
     const cursor =
-      conversations[conversations.length - 1]?.members?.[0]?.lastMessageAt ||
-      null;
+      conversations[conversations.length - 1]?.lastMessageAt || null;
 
     dispatch(getConversations({ limit: 20, cursor }));
   };
@@ -146,7 +145,7 @@ const ListGroupCommunity = () => {
                       {group.groupName || "Nhóm chưa đặt tên"}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {group.members.length} thành viên
+                      {group.members?.length || 0} thành viên
                     </p>
                   </div>
 

@@ -167,8 +167,17 @@ export class ChatService {
       ChatErrors.invalidMessagePayload()
     }
 
+    const senderMember = conversationMembers.find(
+      (member) => member.userId === data.senderId,
+    )
+
     await this.conversationRepo.updateUpdatedAt(data.conversationId, {
       lastMessageAt: message.createdAt,
+      lastMessageText: message.content || '',
+      lastMessageSenderId: data.senderId,
+      lastMessageSenderName:
+        senderMember?.fullName || senderMember?.username || data.senderId,
+      lastMessageSenderAvatar: senderMember?.avatar || null,
     })
 
     await this.memberRepo.updateLastMessageAt(
@@ -496,7 +505,6 @@ export class ChatService {
       take,
     )
     const unreadMap = await this.calculateUnreadCounts(conversations, userId)
-
     return {
       conversations,
       unreadMap,
@@ -790,6 +798,10 @@ export class ChatService {
 
     await this.conversationRepo.updateUpdatedAt(conversationId, {
       lastMessageAt: message.createdAt,
+      lastMessageText: text,
+      lastMessageSenderId: actorUserId,
+      lastMessageSenderName: 'System',
+      lastMessageSenderAvatar: null,
     })
 
     await this.memberRepo.updateLastMessageAt(conversationId, message.createdAt)

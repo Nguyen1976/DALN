@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import {
   addConversation,
+  applyConversationUpdate,
   markConversationRead,
   type Conversation,
   type ConversationState,
@@ -39,6 +40,7 @@ import { socket } from "@/lib/socket";
 import { useLocation } from "react-router";
 import {
   createMessageUploadUrlAPI,
+  getConversationByIdAPI,
   uploadFileToSignedUrl,
   type MessageMediaInput,
 } from "@/apis";
@@ -73,6 +75,7 @@ export default function ChatWindow({
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(
     null,
   );
+  const hydratedConversationRef = useRef<string | null>(null);
 
   const dispatch = useDispatch<AppDispatch>();
   const location = useLocation();
@@ -97,7 +100,7 @@ export default function ChatWindow({
 
   const conversationName =
     effectiveConversation?.type === "DIRECT"
-      ? effectiveConversation.members.find(
+      ? effectiveConversation.members?.find(
           (member) => member.userId !== user.id,
         )?.username ||
         effectiveConversation.groupName ||
@@ -106,7 +109,7 @@ export default function ChatWindow({
 
   const conversationAvatar =
     effectiveConversation?.type === "DIRECT"
-      ? effectiveConversation.members.find(
+      ? effectiveConversation.members?.find(
           (member) => member.userId !== user.id,
         )?.avatar || ""
       : (effectiveConversation?.groupAvatar as string) || "";
@@ -166,6 +169,29 @@ export default function ChatWindow({
 
   // Setup conversation room join/leave
   useConversationRoom(conversationId);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    if (effectiveConversation?.members?.length) return;
+    if (hydratedConversationRef.current === conversationId) return;
+
+    hydratedConversationRef.current = conversationId;
+
+    void (async () => {
+      try {
+        const response = await getConversationByIdAPI(conversationId);
+        if (!response?.conversation) return;
+
+        dispatch(
+          applyConversationUpdate({
+            conversation: response.conversation as Conversation,
+          }),
+        );
+      } catch {
+        hydratedConversationRef.current = null;
+      }
+    })();
+  }, [conversationId, effectiveConversation?.members?.length, dispatch]);
 
   // Setup typing indicator
   const { handleTyping, stopTyping, handleInputFocus, handleInputBlur } =

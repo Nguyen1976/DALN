@@ -135,7 +135,7 @@ const ListFriend = () => {
     const existingConversation = conversations.find(
       (conversation) =>
         conversation.type === "DIRECT" &&
-        conversation.members.some(
+        conversation.members?.some(
           (member) => member.userId === selectedFriendId,
         ),
     );
@@ -150,9 +150,7 @@ const ListFriend = () => {
       const response = await getConversationByFriendIdAPI(selectedFriendId);
       const conversation = response.conversation as Conversation;
 
-      if (conversation.lastMessage) {
-        dispatch(addConversation({ conversation, userId: user.id }));
-      }
+      dispatch(addConversation({ conversation, userId: user.id }));
 
       navigate(`/chat/${conversation.id}`, {
         state: { conversation },

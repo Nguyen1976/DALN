@@ -39,7 +39,59 @@ const formatMessage = (message: any) => {
   }
 }
 
-const formatConversation = (c: any, unreadMap?: Map<string, string>) => ({
+const formatConversationLastMessage = (c: any) => {
+  if (c?.messages?.length) {
+    return formatMessage(c.messages[0])
+  }
+
+  if (
+    c?.lastMessageText === undefined &&
+    c?.lastMessageSenderName === undefined
+  ) {
+    return null
+  }
+
+  return {
+    id: c?.lastMessageId || c?.id,
+    conversationId: c?.id,
+    senderId: c?.lastMessageSenderId || '',
+    text: c?.lastMessageText || '',
+    content: c?.lastMessageText || '',
+    type: 'TEXT',
+    createdAt: c?.lastMessageAt
+      ? c.lastMessageAt.toString()
+      : c?.updatedAt?.toString?.() || new Date().toISOString(),
+    senderMember:
+      c?.lastMessageSenderName || c?.lastMessageSenderAvatar
+        ? {
+            userId: c?.lastMessageSenderId || '',
+            username: c?.lastMessageSenderName || '',
+            avatar: c?.lastMessageSenderAvatar || '',
+            fullName: c?.lastMessageSenderName || '',
+          }
+        : undefined,
+  }
+}
+
+const formatConversationSummary = (
+  c: any,
+  unreadMap?: Map<string, string>,
+) => ({
+  id: c.id,
+  type: c.type,
+  groupName: c.groupName,
+  groupAvatar: c.groupAvatar,
+  unreadCount: unreadMap?.get(c.id) ?? '0',
+  createdAt: c.createdAt.toString(),
+  updatedAt: c.updatedAt.toString(),
+  lastMessageAt: c.lastMessageAt ? c.lastMessageAt.toString() : null,
+  lastMessageText: c.lastMessageText || '',
+  lastMessageSenderId: c.lastMessageSenderId || null,
+  lastMessageSenderName: c.lastMessageSenderName || null,
+  lastMessageSenderAvatar: c.lastMessageSenderAvatar || null,
+})
+
+const formatConversationDetail = (c: any, unreadMap?: Map<string, string>) => ({
   id: c.id,
   type: c.type,
   groupName: c.groupName,
@@ -57,7 +109,7 @@ const formatConversation = (c: any, unreadMap?: Map<string, string>) => ({
     lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : null,
     lastMessageAt: m.lastMessageAt ? m.lastMessageAt.toString() : null,
   })),
-  lastMessage: c.messages.length ? formatMessage(c.messages[0]) : null,
+  lastMessage: formatConversationLastMessage(c),
 })
 
 @Controller('chat')
@@ -201,7 +253,7 @@ export class ChatController {
 
     return {
       conversations: result.conversations.map((c) =>
-        formatConversation(c, result.unreadMap),
+        formatConversationSummary(c, result.unreadMap),
       ),
     }
   }
@@ -218,7 +270,10 @@ export class ChatController {
     )
 
     return {
-      conversation: formatConversation(result.conversation, result.unreadMap),
+      conversation: formatConversationDetail(
+        result.conversation,
+        result.unreadMap,
+      ),
     }
   }
 
@@ -304,7 +359,7 @@ export class ChatController {
 
     return {
       conversations: res.conversations.map((c) =>
-        formatConversation(c, res.unreadMap),
+        formatConversationDetail(c, res.unreadMap),
       ),
     }
   }
@@ -321,7 +376,7 @@ export class ChatController {
     )
 
     return {
-      conversation: formatConversation(res.conversation, res.unreadMap),
+      conversation: formatConversationDetail(res.conversation, res.unreadMap),
     }
   }
 }

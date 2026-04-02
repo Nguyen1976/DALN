@@ -37,12 +37,17 @@ model conversation {
   type            conversationType      @default(DIRECT)
   groupName       String?
   groupAvatar     String?
+  lastMessageText String?
+  lastMessageSenderId String?
+  lastMessageSenderName String?
+  lastMessageSenderAvatar String?
   members         conversationMember[]
   messages        message[]
   lastMessageAt   DateTime?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   groupNameSearch String?
+
 
   @@index([type, groupNameSearch, updatedAt])
   @@index([lastMessageAt])
@@ -65,8 +70,9 @@ model conversationMember {
   sentMessages      message[]         @relation("SenderMessages")
   lastMessageAt     DateTime?
 
+  @@index([userId, isActive, lastMessageAt(sort: Desc)])
+  
   @@unique([conversationId, userId])
-  @@index([userId, lastMessageAt])
   @@index([username])
   @@index([conversationId, lastReadAt])
 }

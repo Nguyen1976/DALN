@@ -38,10 +38,7 @@ export function ChatSidebar() {
     dispatch(
       getConversations({
         limit: 10,
-        cursor:
-          conversations[conversations.length - 1]?.members.find(
-            (m) => m.userId === user?.id,
-          )?.lastMessageAt || null,
+        cursor: conversations[conversations.length - 1]?.lastMessageAt || null,
       }),
     );
   };
@@ -81,29 +78,21 @@ export function ChatSidebar() {
                   </AvatarFallback>
                 </Avatar>
               ) : (
-                // {/* {conversation.isOnline && (
-                //   <div className='absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-black-bland' />
-                // )} */}
-
                 <div className="*:data-[slot=avatar]:ring-background flex -space-x-2 *:data-[slot=avatar]:ring-2 *:data-[slot=avatar]:grayscale">
                   <Avatar>
                     <AvatarImage
-                      src={
-                        conversation.groupAvatar ||
-                        conversation.members?.[0]?.avatar ||
-                        ""
-                      }
+                      src={conversation.groupAvatar || ""}
                       alt={conversation.groupName || ""}
                     />
                     <AvatarFallback>
                       {(conversation.groupName || "C")[0]}
                     </AvatarFallback>
                   </Avatar>
-                  {conversation.members.length >= 2 && (
+                  {(conversation.members?.length || 0) >= 2 && (
                     <Avatar>
                       <AvatarFallback>
-                        {conversation.members.length - 1 <= 99
-                          ? conversation.members.length - 1
+                        {(conversation.members?.length || 1) - 1 <= 99
+                          ? (conversation.members?.length || 1) - 1
                           : "99+"}
                       </AvatarFallback>
                     </Avatar>
@@ -122,8 +111,11 @@ export function ChatSidebar() {
                 </span>
               </div>
               <p className="text-sm text-gray-400 truncate">
-                {conversation?.lastMessage
-                  ? conversation.lastMessage.text
+                {conversation?.lastMessageText
+                  ? conversation.lastMessageSenderName &&
+                    conversation.lastMessageSenderId !== user?.id
+                    ? `${conversation.lastMessageSenderName}: ${conversation.lastMessageText}`
+                    : conversation.lastMessageText
                   : "Chưa có tin nhắn nào."}
               </p>
             </div>

@@ -1,4 +1,3 @@
-
 export class ConversationMapper {
   // Add mapping methods here as needed
 
@@ -15,6 +14,39 @@ export class ConversationMapper {
         ...media,
         size: String(media.size),
       })),
+    }
+  }
+
+  private static mapConversationLastMessage(conversation: any) {
+    if (conversation?.messages?.length) {
+      return this.mapMessage(conversation.messages[0])
+    }
+
+    if (
+      conversation?.lastMessageText === undefined &&
+      conversation?.lastMessageSenderName === undefined
+    ) {
+      return null
+    }
+
+    return {
+      id: conversation?.lastMessageId || conversation?.id,
+      conversationId: conversation?.id,
+      senderId: conversation?.lastMessageSenderId || '',
+      text: conversation?.lastMessageText || '',
+      content: conversation?.lastMessageText || '',
+      type: 'TEXT',
+      createdAt: conversation?.lastMessageAt
+        ? conversation.lastMessageAt.toString()
+        : conversation?.updatedAt?.toString?.() || new Date().toISOString(),
+      senderMember: conversation?.lastMessageSenderName
+        ? {
+            userId: conversation?.lastMessageSenderId || '',
+            username: conversation?.lastMessageSenderName || '',
+            avatar: conversation?.lastMessageSenderAvatar || '',
+            fullName: conversation?.lastMessageSenderName || '',
+          }
+        : undefined,
     }
   }
 
@@ -45,7 +77,7 @@ export class ConversationMapper {
           lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : null,
           lastMessageAt: m.lastMessageAt.toString(),
         })),
-        lastMessage: c.messages.length ? this.mapMessage(c.messages[0]) : null,
+        lastMessage: this.mapConversationLastMessage(c),
       })),
     }
   }
@@ -71,9 +103,7 @@ export class ConversationMapper {
           lastReadAt: m.lastReadAt?.toString() ?? null,
           lastMessageAt: m.lastMessageAt.toString(),
         })),
-        lastMessage: conversation.messages.length
-          ? this.mapMessage(conversation.messages[0])
-          : null,
+        lastMessage: this.mapConversationLastMessage(conversation),
       },
     }
   }
@@ -98,6 +128,7 @@ export class ConversationMapper {
           role: m.role,
           lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : '',
         })),
+        lastMessage: this.mapConversationLastMessage(res),
         messages: res?.messages?.map((msg: any) => this.mapMessage(msg)) || [],
       },
     }

@@ -251,10 +251,9 @@ export class ConversationRepository {
     cursor: Date | null,
     take: number,
   ) {
-    await this.ensureConversationUpdatedAtNotNull()
-    await this.ensureParticipantRoleNormalized()
-
-    const memberships = await this.prisma.conversationMember.findMany({
+    // await this.ensureParticipantRoleNormalized()
+    // await this.ensureConversationUpdatedAtNotNull()
+    const memberships = (await this.prisma.conversationMember.findMany({
       where: {
         userId,
         ...this.activeMemberWhere,
@@ -264,44 +263,45 @@ export class ConversationRepository {
       },
       orderBy: { lastMessageAt: 'desc' },
       take,
-      select: { conversationId: true },
-    })
-
-    const conversations = await this.findConversationsWithRetry({
-      where: {
-        id: { in: memberships.map((m) => m.conversationId) },
-      },
-      include: {
-        members: {
-          where: this.activeMemberWhere,
-        },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          include: {
-            senderMember: true,
-            medias: {
-              orderBy: {
-                sortOrder: 'asc',
-              },
-            },
+      select: {
+        unreadCount: true,
+        lastReadAt: true,
+        lastMessageAt: true,
+        conversation: {
+          select: {
+            id: true,
+            type: true,
+            groupName: true,
+            groupAvatar: true,
+            lastMessageText: true,
+            lastMessageSenderId: true,
+            lastMessageSenderName: true,
+            lastMessageSenderAvatar: true,
+            lastMessageAt: true,
+            createdAt: true,
+            updatedAt: true,
           },
         },
       },
-    } as any)
-
-    //sort lại conver theo thứ tự member vì conver không có order by
-    const map = new Map(conversations.map((c) => [c.id, c]))
-
-    const ordered = memberships.map((m) => map.get(m.conversationId))
-
-    return ordered
+    } as any)) as any[]
+    const result = memberships.map((membership) => ({
+      ...membership.conversation,
+      unreadCount: membership.unreadCount,
+      lastReadAt: membership.lastReadAt,
+      lastMessageAt: membership.lastMessageAt,
+    }))
+    
+    return result
   }
 
   async updateUpdatedAt(
     conversationId: string,
     data?: {
       lastMessageAt?: Date
+      lastMessageText?: string | null
+      lastMessageSenderId?: string | null
+      lastMessageSenderName?: string | null
+      lastMessageSenderAvatar?: string | null
     },
   ) {
     return await this.prisma.conversation.update({
@@ -309,6 +309,18 @@ export class ConversationRepository {
       data: {
         updatedAt: new Date(),
         ...(data?.lastMessageAt ? { lastMessageAt: data.lastMessageAt } : {}),
+        ...(data?.lastMessageText !== undefined
+          ? { lastMessageText: data.lastMessageText }
+          : {}),
+        ...(data?.lastMessageSenderId !== undefined
+          ? { lastMessageSenderId: data.lastMessageSenderId }
+          : {}),
+        ...(data?.lastMessageSenderName !== undefined
+          ? { lastMessageSenderName: data.lastMessageSenderName }
+          : {}),
+        ...(data?.lastMessageSenderAvatar !== undefined
+          ? { lastMessageSenderAvatar: data.lastMessageSenderAvatar }
+          : {}),
       },
     })
   }

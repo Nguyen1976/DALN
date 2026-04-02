@@ -33,13 +33,47 @@ export interface Conversation {
   groupAvatar?: string | undefined;
   createdAt: string;
   updatedAt?: string | undefined;
-  members: ConversationMember[];
-  lastMessage: Message | null;
+  members?: ConversationMember[];
+  lastMessage?: Message | null;
+  lastMessageAt?: string;
+  lastMessageText?: string;
+  lastMessageSenderId?: string | null;
+  lastMessageSenderName?: string | null;
+  lastMessageSenderAvatar?: string | null;
 }
 
 export type ConversationState = Conversation[];
 
 const initialState: ConversationState = [];
+
+const getConversationTitle = (conversation: Conversation, userId?: string) => {
+  if (conversation.type !== "DIRECT") {
+    return conversation.groupName || "Nhóm chat";
+  }
+
+  const otherMember = conversation.members?.find(
+    (member) => member.userId !== userId,
+  );
+
+  return (
+    otherMember?.username ||
+    otherMember?.fullName ||
+    conversation.groupName ||
+    "Trò chuyện trực tiếp"
+  );
+};
+
+const getConversationAvatar = (conversation: Conversation, userId?: string) => {
+  if (conversation.type !== "DIRECT") {
+    return conversation.groupAvatar || "";
+  }
+
+  const otherMember = conversation.members?.find(
+    (member) => member.userId !== userId,
+  );
+
+  return otherMember?.avatar || conversation.groupAvatar || "";
+};
 
 export const getConversations = createAsyncThunk(
   `/chat/conversations`,
@@ -85,18 +119,8 @@ export const conversationSlice = createSlice({
 
       state.unshift({
         ...conversation,
-        groupName:
-          conversation.type === "DIRECT"
-            ? conversation.members.find(
-                (p: ConversationMember) => p.userId !== userId,
-              )?.username || ""
-            : conversation.groupName,
-        groupAvatar:
-          conversation.type === "DIRECT"
-            ? conversation.members.find(
-                (p: ConversationMember) => p.userId !== userId,
-              )?.avatar || ""
-            : conversation.groupAvatar,
+        groupName: getConversationTitle(conversation, userId),
+        groupAvatar: getConversationAvatar(conversation, userId),
         lastMessage:
           conversation.lastMessage !== undefined
             ? conversation.lastMessage
@@ -192,6 +216,8 @@ export const conversationSlice = createSlice({
       });
       if (!target) return;
 
+      target.members ||= [];
+
       const incomingById = new Map(
         (action.payload.members || []).map((member) => [member.userId, member]),
       );
@@ -238,6 +264,8 @@ export const conversationSlice = createSlice({
         return conversation.id === action.payload.conversationId;
       });
       if (!target) return;
+
+      target.members ||= [];
 
       target.members = target.members.filter(
         (member) => member.userId !== action.payload.userId,
@@ -293,18 +321,8 @@ export const conversationSlice = createSlice({
             ...oldState,
             ...(conversations?.map((c) => ({
               ...c,
-              groupName:
-                c.type === "DIRECT"
-                  ? c.members.find(
-                      (p: ConversationMember) => p.userId !== userId,
-                    )?.username || ""
-                  : c.groupName,
-              groupAvatar:
-                c.type === "DIRECT"
-                  ? c.members.find(
-                      (p: ConversationMember) => p.userId !== userId,
-                    )?.avatar || ""
-                  : c.groupAvatar,
+              groupName: getConversationTitle(c, userId),
+              groupAvatar: getConversationAvatar(c, userId),
               lastMessage: c.lastMessage !== undefined ? c.lastMessage : null,
               membershipStatus: c.membershipStatus || "ACTIVE",
               canSendMessage: c.canSendMessage ?? true,
