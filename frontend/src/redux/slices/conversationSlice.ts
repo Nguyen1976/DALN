@@ -31,6 +31,7 @@ export interface Conversation {
   canSendMessage?: boolean;
   groupName?: string | undefined;
   groupAvatar?: string | undefined;
+  memberCount?: number;
   createdAt: string;
   updatedAt?: string | undefined;
   members?: ConversationMember[];
@@ -73,6 +74,10 @@ const getConversationAvatar = (conversation: Conversation, userId?: string) => {
   );
 
   return otherMember?.avatar || conversation.groupAvatar || "";
+};
+
+const getConversationMemberCount = (conversation: Conversation) => {
+  return conversation.memberCount ?? conversation.members?.length ?? 0;
 };
 
 export const getConversations = createAsyncThunk(
@@ -121,6 +126,7 @@ export const conversationSlice = createSlice({
         ...conversation,
         groupName: getConversationTitle(conversation, userId),
         groupAvatar: getConversationAvatar(conversation, userId),
+        memberCount: getConversationMemberCount(conversation),
         lastMessage:
           conversation.lastMessage !== undefined
             ? conversation.lastMessage
@@ -179,6 +185,7 @@ export const conversationSlice = createSlice({
 
       const nextConversation: Conversation = {
         ...conversation,
+        memberCount: getConversationMemberCount(conversation),
         membershipStatus:
           membershipStatus || conversation.membershipStatus || "ACTIVE",
         canSendMessage:
@@ -225,6 +232,7 @@ export const conversationSlice = createSlice({
       const existingIds = new Set(
         target.members.map((member) => member.userId),
       );
+      let addedCount = 0;
 
       for (let index = 0; index < target.members.length; index += 1) {
         const existing = target.members[index];
@@ -244,6 +252,7 @@ export const conversationSlice = createSlice({
           continue;
         }
 
+        addedCount += 1;
         target.members.push({
           userId: memberId,
           role: incoming?.role,
@@ -251,6 +260,11 @@ export const conversationSlice = createSlice({
           fullName: incoming?.fullName,
           avatar: incoming?.avatar,
         });
+      }
+
+      if (addedCount > 0) {
+        target.memberCount =
+          (target.memberCount ?? target.members.length ?? 0) + addedCount;
       }
     },
     removeConversationMember: (
@@ -267,9 +281,19 @@ export const conversationSlice = createSlice({
 
       target.members ||= [];
 
+      const beforeCount = target.members.length;
+
       target.members = target.members.filter(
         (member) => member.userId !== action.payload.userId,
       );
+
+      const removedCount = beforeCount - target.members.length;
+      if (removedCount > 0) {
+        target.memberCount = Math.max(
+          (target.memberCount ?? beforeCount) - removedCount,
+          0,
+        );
+      }
     },
     removeConversationById: (
       state,
@@ -323,6 +347,7 @@ export const conversationSlice = createSlice({
               ...c,
               groupName: getConversationTitle(c, userId),
               groupAvatar: getConversationAvatar(c, userId),
+              memberCount: getConversationMemberCount(c),
               lastMessage: c.lastMessage !== undefined ? c.lastMessage : null,
               membershipStatus: c.membershipStatus || "ACTIVE",
               canSendMessage: c.canSendMessage ?? true,
@@ -338,6 +363,7 @@ export const conversationSlice = createSlice({
           state.unshift({
             ...c,
             lastMessage: c.lastMessage !== undefined ? c.lastMessage : null,
+            memberCount: getConversationMemberCount(c),
           });
           toast.success("Conversation created successfully");
         },

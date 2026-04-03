@@ -89,15 +89,16 @@ export class ChatService {
       })
     }
 
+    const uniqueMembers = Array.from(
+      new Map(data.members.map((m) => [m.userId, m])).values(),
+    )
+
     const conversation = await this.conversationRepo.create({
       type: data.type as conversationType,
       groupName: data.groupName,
       groupAvatar: avatarUrl,
+      memberCount: uniqueMembers.length,
     })
-
-    const uniqueMembers = Array.from(
-      new Map(data.members.map((m) => [m.userId, m])).values(),
-    )
 
     await this.memberRepo.createMany(
       conversation.id,
@@ -281,7 +282,7 @@ export class ChatService {
       }
     }
 
-    await this.memberRepo.addMembers(
+    const addedMemberCount = await this.memberRepo.addMembers(
       dto.conversationId,
       newMembers.map((member) => ({
         userId: member.userId,
@@ -290,6 +291,13 @@ export class ChatService {
         avatar: member.avatar,
       })),
     )
+
+    if (addedMemberCount > 0) {
+      await this.conversationRepo.incrementMemberCount(
+        dto.conversationId,
+        addedMemberCount,
+      )
+    }
 
     const actorDisplayName = actor.fullName || actor.username || actor.userId
     await this.createSystemMessageAndSync(
@@ -376,7 +384,14 @@ export class ChatService {
       `${actorDisplayName} đã xóa ${targetDisplayName} khỏi nhóm`,
     )
 
-    await this.memberRepo.removeMember(dto.conversationId, dto.targetUserId)
+    const removed = await this.memberRepo.removeMember(
+      dto.conversationId,
+      dto.targetUserId,
+    )
+
+    if (removed) {
+      await this.conversationRepo.incrementMemberCount(dto.conversationId, -1)
+    }
 
     const conversationAfterRemove =
       await this.conversationRepo.findByIdWithMembers(dto.conversationId)
@@ -438,7 +453,14 @@ export class ChatService {
       leaveText,
     )
 
-    await this.memberRepo.removeMember(dto.conversationId, dto.userId)
+    const removed = await this.memberRepo.removeMember(
+      dto.conversationId,
+      dto.userId,
+    )
+
+    if (removed) {
+      await this.conversationRepo.incrementMemberCount(dto.conversationId, -1)
+    }
 
     const conversationAfterLeave =
       await this.conversationRepo.findByIdWithMembers(dto.conversationId)

@@ -219,7 +219,19 @@ export class ConversationMemberRepository {
       avatar?: string
     }>,
   ) {
+    let changedCount = 0
+
     for (const member of members) {
+      const existing = await this.prisma.conversationMember.findFirst({
+        where: {
+          conversationId,
+          userId: member.userId,
+        },
+        select: {
+          isActive: true,
+        },
+      })
+
       const updated = await this.prisma.conversationMember.updateMany({
         where: {
           conversationId,
@@ -235,7 +247,12 @@ export class ConversationMemberRepository {
         },
       })
 
-      if (updated.count > 0) continue
+      if (updated.count > 0) {
+        if (!existing?.isActive) {
+          changedCount += 1
+        }
+        continue
+      }
 
       await this.prisma.conversationMember.create({
         data: {
@@ -250,7 +267,11 @@ export class ConversationMemberRepository {
           lastMessageAt: new Date(),
         },
       })
+
+      changedCount += 1
     }
+
+    return changedCount
   }
 
   async updateLastRead(
@@ -292,7 +313,21 @@ export class ConversationMemberRepository {
   }
 
   async removeMember(conversationId: string, userId: string) {
-    return await this.prisma.conversationMember.updateMany({
+    const existing = await this.prisma.conversationMember.findFirst({
+      where: {
+        conversationId,
+        userId,
+      },
+      select: {
+        isActive: true,
+      },
+    })
+
+    if (!existing?.isActive) {
+      return false
+    }
+
+    await this.prisma.conversationMember.updateMany({
       where: {
         conversationId,
         userId,
@@ -301,6 +336,8 @@ export class ConversationMemberRepository {
         isActive: false,
       },
     })
+
+    return true
   }
 
   // async findUserProfileById(userId: string) {

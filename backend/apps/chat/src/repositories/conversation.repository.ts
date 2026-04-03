@@ -176,6 +176,7 @@ export class ConversationRepository {
     type: conversationType
     groupName?: string
     groupAvatar?: string
+    memberCount?: number
   }) {
     return await this.prisma.conversation.create({
       data: {
@@ -185,6 +186,7 @@ export class ConversationRepository {
           ? this.normalizeString(data.groupName)
           : null,
         groupAvatar: data.groupAvatar || null,
+        memberCount: data.memberCount ?? 0,
       },
     })
   }
@@ -274,12 +276,12 @@ export class ConversationRepository {
       lastReadAt: membership.lastReadAt,
       lastMessageAt: membership.lastMessageAt,
     }))
-    
+
     return result
   }
 
   async updateUpdatedAt(
-    conversationId: string, 
+    conversationId: string,
     data?: {
       lastMessageAt?: Date
       lastMessageText?: string | null
@@ -305,6 +307,19 @@ export class ConversationRepository {
         ...(data?.lastMessageSenderAvatar !== undefined
           ? { lastMessageSenderAvatar: data.lastMessageSenderAvatar }
           : {}),
+      },
+    })
+  }
+
+  async incrementMemberCount(conversationId: string, delta: number) {
+    if (!delta) return null
+
+    return await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        memberCount: {
+          increment: delta,
+        },
       },
     })
   }

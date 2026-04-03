@@ -125,6 +125,7 @@ export interface ConversationByFriendResponse {
     unreadCount?: string;
     groupName?: string;
     groupAvatar?: string;
+    memberCount?: number;
     createdAt: string;
     updatedAt?: string;
     members: Array<{
@@ -167,6 +168,7 @@ export interface SearchConversationItem {
   unreadCount?: string;
   groupName?: string;
   groupAvatar?: string;
+  memberCount?: number;
   createdAt: string;
   updatedAt?: string;
   members: Array<{

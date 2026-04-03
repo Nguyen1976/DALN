@@ -102,6 +102,45 @@ const ListGroupCommunity = () => {
     });
   };
 
+  const renderGroupItem = (group: Conversation | SearchConversationItem) => {
+    const memberCount = group.memberCount ?? group.members?.length ?? 0;
+
+    return (
+      <button
+        key={group.id}
+        onClick={() => openConversation(group)}
+        className="w-full p-3 rounded-lg flex items-center gap-3 hover:bg-accent transition-colors group"
+      >
+        <div className="relative w-12 h-12 shrink-0">
+          <Avatar className="w-12 h-12">
+            <AvatarImage
+              src={(group.groupAvatar as string) || "/placeholder.svg"}
+              alt={group.groupName || "Nhóm"}
+            />
+            <AvatarFallback>{(group.groupName || "G")[0]}</AvatarFallback>
+          </Avatar>
+        </div>
+
+        <div className="flex-1 min-w-0 text-left">
+          <p className="font-medium text-foreground truncate">
+            {group.groupName || "Nhóm chưa đặt tên"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {memberCount} thành viên
+          </p>
+        </div>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="opacity-0 group-hover:opacity-100 transition-opacity"
+        >
+          <span className="text-xl">⋮</span>
+        </Button>
+      </button>
+    );
+  };
+
   return (
     <div className="h-full min-h-0 flex-1">
       <div className="p-4 border-b">
@@ -119,46 +158,7 @@ const ListGroupCommunity = () => {
       <ScrollArea className="h-full">
         <div className="p-6">
           <div className="space-y-2">
-            {displayedGroups.map(
-              (group: Conversation | SearchConversationItem) => (
-                <button
-                  key={group.id}
-                  onClick={() => openConversation(group)}
-                  className="w-full p-3 rounded-lg flex items-center gap-3 hover:bg-accent transition-colors group"
-                >
-                  <div className="relative w-12 h-12 shrink-0">
-                    <Avatar className="w-12 h-12">
-                      <AvatarImage
-                        src={
-                          (group.groupAvatar as string) || "/placeholder.svg"
-                        }
-                        alt={group.groupName || "Nhóm"}
-                      />
-                      <AvatarFallback>
-                        {(group.groupName || "G")[0]}
-                      </AvatarFallback>
-                    </Avatar>
-                  </div>
-
-                  <div className="flex-1 min-w-0 text-left">
-                    <p className="font-medium text-foreground truncate">
-                      {group.groupName || "Nhóm chưa đặt tên"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {group.members?.length || 0} thành viên
-                    </p>
-                  </div>
-
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <span className="text-xl">⋮</span>
-                  </Button>
-                </button>
-              ),
-            )}
+            {displayedGroups.map(renderGroupItem)}
           </div>
 
           {isSearching && (

@@ -81,6 +81,7 @@ const formatConversationSummary = (
   type: c.type,
   groupName: c.groupName,
   groupAvatar: c.groupAvatar,
+  memberCount: c.memberCount ?? c.members?.length ?? 0,
   unreadCount: unreadMap?.get(c.id) ?? '0',
   createdAt: c.createdAt.toString(),
   updatedAt: c.updatedAt.toString(),
@@ -96,6 +97,7 @@ const formatConversationDetail = (c: any, unreadMap?: Map<string, string>) => ({
   type: c.type,
   groupName: c.groupName,
   groupAvatar: c.groupAvatar,
+  memberCount: c.memberCount ?? c.members?.length ?? 0,
   unreadCount: unreadMap?.get(c.id) ?? '0',
   createdAt: c.createdAt.toString(),
   updatedAt: c.updatedAt.toString(),
@@ -157,6 +159,7 @@ export class ChatController {
         type: res?.type,
         groupName: res?.groupName,
         groupAvatar: res?.groupAvatar,
+        memberCount: res?.memberCount ?? res?.members?.length ?? 0,
         createdAt: res?.createdAt.toString(),
         updatedAt: res?.updatedAt.toString(),
         members: res?.members.map((m: any) => ({
