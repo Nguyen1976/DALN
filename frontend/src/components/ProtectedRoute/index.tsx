@@ -64,11 +64,12 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     };
 
     const ensureConversationHydrated = async (targetConversationId: string) => {
-      if (knownConversationIdsRef.current.has(targetConversationId)) return;
+      if (knownConversationIdsRef.current.has(targetConversationId))
+        return null;
 
       try {
         const response = await getConversationByIdAPI(targetConversationId);
-        if (!response?.conversation) return;
+        if (!response?.conversation) return null;
 
         dispatch(
           applyConversationUpdate({
@@ -76,13 +77,17 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
           }),
         );
         knownConversationIdsRef.current.add(targetConversationId);
+        return response.conversation; // Return to indicate newly hydrated
       } catch {
         // Ignore hydration errors for inaccessible conversations.
+        return null;
       }
     };
 
     const processIncomingMessage = async (message: Message) => {
-      await ensureConversationHydrated(message.conversationId);
+      const hydratedConversation = await ensureConversationHydrated(
+        message.conversationId,
+      );
 
       dispatch(addMessage(message));
       dispatch(
@@ -92,12 +97,18 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
         }),
       );
 
+      // Only increment unreadCount if:
+      // 1. User is NOT currently viewing this conversation
+      // 2. Conversation was NOT just hydrated from API (API unreadCount is already accurate)
       if (message.conversationId !== selectedChatIdRef.current) {
-        dispatch(
-          upUnreadCount({
-            conversationId: message.conversationId,
-          }),
-        );
+        // If not newly hydrated, increment unread count for this incoming message
+        if (!hydratedConversation) {
+          dispatch(
+            upUnreadCount({
+              conversationId: message.conversationId,
+            }),
+          );
+        }
       }
       // play();
     };
