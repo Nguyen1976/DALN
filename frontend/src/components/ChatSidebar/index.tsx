@@ -110,15 +110,16 @@ export function ChatSidebar() {
           </p>
         </div>
 
-        {conversation.unreadCount &&
-          (Number(conversation.unreadCount) > 0 ||
-            conversation.unreadCount === "5+") && (
-            <div className="w-6 h-6 bg-bg-box-message-out rounded-full flex items-center justify-center">
-              <span className="text-xs text-text font-medium">
-                {conversation.unreadCount}
-              </span>
-            </div>
-          )}
+        {(Number(conversation.unreadCount) > 0 ||
+          conversation.unreadCount === "5+") && (
+          <div className="w-6 h-6 bg-bg-box-message-out rounded-full flex items-center justify-center">
+            <span className="text-xs text-text font-medium">
+              {Number(conversation.unreadCount) > 5
+                ? "5+"
+                : conversation.unreadCount}
+            </span>
+          </div>
+        )}
       </button>
     );
   };

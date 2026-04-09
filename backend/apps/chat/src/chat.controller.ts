@@ -253,12 +253,8 @@ export class ChatController {
       limit: limit ? parseInt(limit, 10) : 20,
       cursor: cursor || null,
     })
-
-    return {
-      conversations: result.conversations.map((c) =>
-        formatConversationSummary(c, result.unreadMap),
-      ),
-    }
+    console.log(result)
+    return result
   }
 
   @Get('conversations/:conversationId')

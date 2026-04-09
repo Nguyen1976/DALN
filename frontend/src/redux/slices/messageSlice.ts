@@ -93,10 +93,6 @@ export const messageSlice = createSlice({
   reducers: {
     addMessage: (state, action: PayloadAction<Message>) => {
       const message = action.payload;
-      //2 trường hợp 1 là emssage của mình 2 là message của họ
-      //nhưng có vấn đề đó chính là khi message về có senđẻ member nhưng mình sẽ k biết được vì mình đang chx biết userId của mình
-      //nhưng mình có thể dựa vào tempId nếu trong tempId có tồn tại trong list message thì đó sẽ là message của mình chỉ cần update trạng thái
-
       if (!state.messages[message.conversationId]) {
         state.messages[message.conversationId] = [];
       }

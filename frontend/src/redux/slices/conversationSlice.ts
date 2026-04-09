@@ -92,7 +92,7 @@ export const getConversations = createAsyncThunk(
     const response = await authorizeAxiosInstance.get(
       `${API_ROOT}/chat/conversations?limit=${limit}&cursor=${cursor ?? ""}`,
     );
-    return { userId, conversations: response.data.data.conversations };
+    return { userId, conversations: response.data.data };
   },
 );
 
@@ -148,6 +148,15 @@ export const conversationSlice = createSlice({
       const newConversation = {
         ...updatedConversation,
         lastMessage,
+        lastMessageAt: lastMessage.createdAt,
+        lastMessageText: lastMessage.text || lastMessage.content || "",
+        lastMessageSenderId: lastMessage.senderId,
+        lastMessageSenderName:
+          lastMessage.senderMember?.fullName ||
+          lastMessage.senderMember?.username ||
+          "",
+        lastMessageSenderAvatar: lastMessage.senderMember?.avatar || null,
+        updatedAt: lastMessage.createdAt,
       };
 
       return [newConversation, ...state.filter((c) => c.id !== conversationId)];

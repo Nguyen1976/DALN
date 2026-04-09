@@ -13,6 +13,7 @@ import {
   addConversation,
   applyConversationUpdate,
   markConversationRead,
+  updateNewMessage,
   type Conversation,
   type ConversationState,
 } from "@/redux/slices/conversationSlice";
@@ -357,10 +358,16 @@ export default function ChatWindow({
       clientMessageId,
       status: "pending",
       createdAt: new Date().toISOString(),
+      senderMember: {
+        userId: user.id,
+        username: user.username,
+        fullName: user.fullName,
+        avatar: user.avatar || "",
+      },
     };
-    console.log("temp message:", tempMessage);
 
     dispatch(addMessage(tempMessage));
+    dispatch(updateNewMessage({ conversationId, lastMessage: tempMessage }));
 
     if (!conversation && effectiveConversation) {
       dispatch(
@@ -394,6 +401,9 @@ export default function ChatWindow({
     dispatch,
     conversationId,
     user.id,
+    user.username,
+    user.fullName,
+    user.avatar,
     conversation,
     effectiveConversation,
     stopTyping,
@@ -436,9 +446,16 @@ export default function ChatWindow({
         clientMessageId,
         status: "pending",
         createdAt: new Date().toISOString(),
+        senderMember: {
+          userId: user.id,
+          username: user.username,
+          fullName: user.fullName,
+          avatar: user.avatar || "",
+        },
       };
 
       dispatch(addMessage(tempMessage));
+      dispatch(updateNewMessage({ conversationId, lastMessage: tempMessage }));
 
       if (!conversation && effectiveConversation) {
         dispatch(
@@ -496,6 +513,9 @@ export default function ChatWindow({
       canSendMessage,
       conversationId,
       user.id,
+      user.username,
+      user.fullName,
+      user.avatar,
       msg,
       dispatch,
       conversation,
