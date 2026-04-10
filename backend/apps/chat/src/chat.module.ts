@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common'
+import { ScheduleModule } from '@nestjs/schedule'
+import { BullModule } from '@nestjs/bullmq'
 import { ChatController } from './chat.controller'
 import { ChatService } from './chat.service'
 import { UtilModule } from '@app/util'
@@ -18,6 +20,8 @@ import { AuthGuard, CommonModule } from '@app/common'
 import { APP_GUARD } from '@nestjs/core'
 import { PrismaModule } from '../prisma/prisma.module'
 import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
+import { RedisModule } from '@app/redis/redis.module'
+import { BackgroundJobModule } from './background-jobs/background-jobs.module'
 
 @Module({
   imports: [
@@ -45,6 +49,25 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
       bucket: process.env.R2_BUCKET!,
       publicUrl: process.env.R2_PUBLIC_URL!,
     }),
+    ScheduleModule.forRoot(),
+    BullModule.forRoot({
+      connection: {
+        host: 'localhost', // Hoặc config từ file .env
+        port: 6379,
+      },
+    }),
+    BullModule.registerQueue({
+      name: 'unreadQueue', // Tên cái xe buýt chở event
+    }),
+    BackgroundJobModule,
+    RedisModule.forRoot(
+      {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT || 6379),
+        db: 0,
+      },
+      'REDIS_CLIENT',
+    ),
   ],
   controllers: [ChatController],
   providers: [

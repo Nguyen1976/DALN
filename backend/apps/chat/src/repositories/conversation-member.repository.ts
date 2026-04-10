@@ -127,8 +127,8 @@ export class ConversationMemberRepository {
   }
 
   async findByConversationId(conversationId: string) {
-    await this.ensureParticipantRoleNormalized()
-    await this.ensureUnreadCountInitialized()
+    // await this.ensureParticipantRoleNormalized()
+    // await this.ensureUnreadCountInitialized()
 
     return await this.withRoleRetry(() =>
       this.prisma.conversationMember.findMany({
@@ -171,6 +171,27 @@ export class ConversationMemberRepository {
       data: {
         unreadCount: {
           increment: 1,
+        },
+      },
+    })
+  }
+
+  async updateUnreadCount(
+    conversationId: string,
+    senderId: string,
+    unreadCount: number,
+  ) {
+    return await this.prisma.conversationMember.updateMany({
+      where: {
+        conversationId,
+        userId: {
+          not: senderId,
+        },
+        ...this.activeMemberFilter,
+      },
+      data: {
+        unreadCount: {
+          increment: unreadCount,
         },
       },
     })

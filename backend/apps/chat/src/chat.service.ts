@@ -15,6 +15,8 @@ import { ChatEventsPublisher } from './rmq/publishers/chat-events.publisher'
 import { StorageR2Service } from '@app/storage-r2/storage-r2.service'
 import { ConversationAssetKind, Member } from './http/chat-http.dto'
 import { conversationType } from './generated'
+import { Queue } from 'bullmq'
+import { InjectQueue } from '@nestjs/bullmq'
 
 // Type definitions for service methods
 interface CreateConversationData {
@@ -50,11 +52,12 @@ export class ChatService {
 
   constructor(
     private readonly conversationRepo: ConversationRepository,
-    private readonly messageRepo: MessageRepository,
     private readonly memberRepo: ConversationMemberRepository,
+    private readonly messageRepo: MessageRepository,
     private readonly eventsPublisher: ChatEventsPublisher,
     @Inject(StorageR2Service)
     private readonly storageR2Service: StorageR2Service,
+    @InjectQueue('unreadQueue') private unreadQueue: Queue,
   ) {}
 
   async createConversationWhenAcceptFriend(
@@ -172,24 +175,20 @@ export class ChatService {
       (member) => member.userId === data.senderId,
     )
 
-    await this.conversationRepo.updateUpdatedAt(data.conversationId, {
-      lastMessageAt: message.createdAt,
-      lastMessageText: message.content || '',
-      lastMessageSenderId: data.senderId,
-      lastMessageSenderName:
-        senderMember?.fullName || senderMember?.username || data.senderId,
-      lastMessageSenderAvatar: senderMember?.avatar || null,
-    })//ghi lại thông tin người cuối cùng gửi tin nhắn
-
-    await this.memberRepo.updateLastMessageAt(
-      data.conversationId,
-      message.createdAt,
-    )//lưu lại thông tin lastMessage cho việc query conversation đúng thứ tự
-
-    await this.memberRepo.increaseUnreadForOthers(
-      data.conversationId,
-      data.senderId,
-    )//update unread
+    this.unreadQueue.add(
+      'increase-unread',
+      {
+        conversationId: data.conversationId,
+        senderId: data.senderId,
+        lastMessageAt: message.createdAt,
+        lastMessageText: message.content || '',
+        lastMessageSenderId: data.senderId,
+        lastMessageSenderName:
+          senderMember?.fullName || senderMember?.username || data.senderId,
+        lastMessageSenderAvatar: senderMember?.avatar || null,
+      },
+      { removeOnComplete: true, removeOnFail: true },
+    )
 
     const normalizedMessage = this.normalizeMessage(message)
 
@@ -527,7 +526,6 @@ export class ChatService {
       take,
     )
     return conversations
-    
   }
 
   async getMessagesByConversationId(
@@ -863,7 +861,6 @@ export class ChatService {
 
       unreadMap.set(conversation.id, unread > 5 ? '5+' : String(unread))
     })
-    
 
     return unreadMap
   }
