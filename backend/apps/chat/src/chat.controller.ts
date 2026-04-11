@@ -73,16 +73,13 @@ const formatConversationLastMessage = (c: any) => {
   }
 }
 
-const formatConversationSummary = (
-  c: any,
-  unreadMap?: Map<string, string>,
-) => ({
+const formatConversationSummary = (c: any, userId?: string) => ({
   id: c.id,
   type: c.type,
   groupName: c.groupName,
   groupAvatar: c.groupAvatar,
   memberCount: c.memberCount ?? c.members?.length ?? 0,
-  unreadCount: unreadMap?.get(c.id) ?? '0',
+  unreadCount: resolveUnreadCount(c, userId),
   createdAt: c.createdAt.toString(),
   updatedAt: c.updatedAt.toString(),
   lastMessageAt: c.lastMessageAt ? c.lastMessageAt.toString() : null,
@@ -92,13 +89,33 @@ const formatConversationSummary = (
   lastMessageSenderAvatar: c.lastMessageSenderAvatar || null,
 })
 
-const formatConversationDetail = (c: any, unreadMap?: Map<string, string>) => ({
+const resolveUnreadCount = (conversation: any, userId?: string) => {
+  if (
+    conversation?.unreadCount !== undefined &&
+    conversation?.unreadCount !== null
+  ) {
+    const unread = Number(conversation.unreadCount)
+    if (!Number.isFinite(unread) || unread <= 0) return '0'
+    return unread > 5 ? '5+' : String(unread)
+  }
+
+  if (userId && Array.isArray(conversation?.members)) {
+    const me = conversation.members.find((m: any) => m.userId === userId)
+    const unread = Number(me?.unreadCount || 0)
+    if (!Number.isFinite(unread) || unread <= 0) return '0'
+    return unread > 5 ? '5+' : String(unread)
+  }
+
+  return '0'
+}
+
+const formatConversationDetail = (c: any, userId?: string) => ({
   id: c.id,
   type: c.type,
   groupName: c.groupName,
   groupAvatar: c.groupAvatar,
   memberCount: c.memberCount ?? c.members?.length ?? 0,
-  unreadCount: unreadMap?.get(c.id) ?? '0',
+  unreadCount: resolveUnreadCount(c, userId),
   createdAt: c.createdAt.toString(),
   updatedAt: c.updatedAt.toString(),
   members: c.members.map((m: any) => ({
@@ -253,8 +270,9 @@ export class ChatController {
       limit: limit ? parseInt(limit, 10) : 20,
       cursor: cursor || null,
     })
-    console.log(result)
-    return result
+    return result.map((conversation) =>
+      formatConversationSummary(conversation, userInfo.userId),
+    )
   }
 
   @Get('conversations/:conversationId')
@@ -271,7 +289,7 @@ export class ChatController {
     return {
       conversation: formatConversationDetail(
         result.conversation,
-        result.unreadMap,
+        userInfo.userId,
       ),
     }
   }
@@ -358,7 +376,7 @@ export class ChatController {
 
     return {
       conversations: res.conversations.map((c) =>
-        formatConversationDetail(c, res.unreadMap),
+        formatConversationSummary(c, userInfo.userId),
       ),
     }
   }
@@ -375,7 +393,7 @@ export class ChatController {
     )
 
     return {
-      conversation: formatConversationDetail(res.conversation, res.unreadMap),
+      conversation: formatConversationDetail(res.conversation, userInfo.userId),
     }
   }
 }

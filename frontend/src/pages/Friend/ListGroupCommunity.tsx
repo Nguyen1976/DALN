@@ -4,6 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { searchConversationsAPI, type SearchConversationItem } from "@/apis";
 import {
+  applyConversationUpdate,
   getConversations,
   selectConversation,
   type Conversation,
@@ -96,6 +97,12 @@ const ListGroupCommunity = () => {
       navigate(`/chat/${existing.id}`);
       return;
     }
+
+    dispatch(
+      applyConversationUpdate({
+        conversation: conversation as Conversation,
+      }),
+    );
 
     navigate(`/chat/${conversation.id}`, {
       state: { conversation },

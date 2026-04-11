@@ -632,7 +632,6 @@ export class ChatService {
     if (!safeKeyword) {
       return {
         conversations: [],
-        unreadMap: new Map<string, string>(),
       }
     }
 
@@ -664,14 +663,8 @@ export class ChatService {
       return bTime - aTime
     })
 
-    const unreadMap = await this.calculateUnreadCounts(
-      uniqueConversations,
-      userId,
-    )
-
     return {
       conversations: uniqueConversations,
-      unreadMap,
     }
   }
 
@@ -688,10 +681,8 @@ export class ChatService {
       ChatErrors.userNotMember()
     }
 
-    const unreadMap = await this.calculateUnreadCounts([conversation], userId)
     return {
       conversation,
-      unreadMap,
     }
   }
 
@@ -708,10 +699,8 @@ export class ChatService {
       ChatErrors.userNotMember()
     }
 
-    const unreadMap = await this.calculateUnreadCounts([conversation], userId)
     return {
       conversation,
-      unreadMap,
     }
   }
 
@@ -840,26 +829,5 @@ export class ChatService {
     } catch (error) {
       console.error('[chat-service] publish event failed', error)
     }
-  }
-
-  private async calculateUnreadCounts(
-    conversations: any[],
-    userId: string,
-  ): Promise<Map<string, string>> {
-    const unreadMap = new Map<string, string>()
-
-    conversations.forEach((conversation) => {
-      const me = conversation?.members?.find((m: any) => m.userId === userId)
-      const unread = Number(me?.unreadCount || 0)
-
-      if (unread <= 0) {
-        unreadMap.set(conversation.id, '0')
-        return
-      }
-
-      unreadMap.set(conversation.id, unread > 5 ? '5+' : String(unread))
-    })
-
-    return unreadMap
   }
 }

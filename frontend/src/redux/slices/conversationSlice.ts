@@ -80,6 +80,33 @@ const getConversationMemberCount = (conversation: Conversation) => {
   return conversation.memberCount ?? conversation.members?.length ?? 0;
 };
 
+const normalizeUnreadCount = (
+  unreadCount: Conversation["unreadCount"] | number | null | undefined,
+): string => {
+  if (unreadCount === "5+") return "5+";
+
+  const parsed = Number(unreadCount ?? 0);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "0";
+  return parsed > 5 ? "5+" : String(parsed);
+};
+
+const normalizeConversationForStore = (
+  conversation: Conversation,
+  userId?: string,
+): Conversation => {
+  return {
+    ...conversation,
+    groupName: getConversationTitle(conversation, userId),
+    groupAvatar: getConversationAvatar(conversation, userId),
+    memberCount: getConversationMemberCount(conversation),
+    lastMessage:
+      conversation.lastMessage !== undefined ? conversation.lastMessage : null,
+    unreadCount: normalizeUnreadCount(conversation.unreadCount),
+    membershipStatus: conversation.membershipStatus || "ACTIVE",
+    canSendMessage: conversation.canSendMessage ?? true,
+  };
+};
+
 export const getConversations = createAsyncThunk(
   `/chat/conversations`,
   async (
@@ -123,17 +150,8 @@ export const conversationSlice = createSlice({
       const { conversation, userId } = action.payload;
 
       state.unshift({
-        ...conversation,
-        groupName: getConversationTitle(conversation, userId),
-        groupAvatar: getConversationAvatar(conversation, userId),
-        memberCount: getConversationMemberCount(conversation),
-        lastMessage:
-          conversation.lastMessage !== undefined
-            ? conversation.lastMessage
-            : null,
+        ...normalizeConversationForStore(conversation, userId),
         unreadCount: "0",
-        membershipStatus: conversation.membershipStatus || "ACTIVE",
-        canSendMessage: conversation.canSendMessage ?? true,
       });
     },
     updateNewMessage: (
@@ -193,13 +211,16 @@ export const conversationSlice = createSlice({
       );
 
       const nextConversation: Conversation = {
-        ...conversation,
-        memberCount: getConversationMemberCount(conversation),
+        ...normalizeConversationForStore(conversation),
         membershipStatus:
-          membershipStatus || conversation.membershipStatus || "ACTIVE",
+          membershipStatus ||
+          conversation.membershipStatus ||
+          state[existingIndex]?.membershipStatus ||
+          "ACTIVE",
         canSendMessage:
           canSendMessage ??
           conversation.canSendMessage ??
+          state[existingIndex]?.canSendMessage ??
           membershipStatus !== "REMOVED",
       };
 
@@ -352,15 +373,9 @@ export const conversationSlice = createSlice({
           const oldState = state || [];
           state = [
             ...oldState,
-            ...(conversations?.map((c) => ({
-              ...c,
-              groupName: getConversationTitle(c, userId),
-              groupAvatar: getConversationAvatar(c, userId),
-              memberCount: getConversationMemberCount(c),
-              lastMessage: c.lastMessage !== undefined ? c.lastMessage : null,
-              membershipStatus: c.membershipStatus || "ACTIVE",
-              canSendMessage: c.canSendMessage ?? true,
-            })) as Conversation[]),
+            ...(conversations?.map((c) =>
+              normalizeConversationForStore(c, userId),
+            ) as Conversation[]),
           ];
           return state;
         },
@@ -369,11 +384,7 @@ export const conversationSlice = createSlice({
         createConversation.fulfilled,
         (state, action: PayloadAction<{ conversation: Conversation }>) => {
           const c = action.payload.conversation;
-          state.unshift({
-            ...c,
-            lastMessage: c.lastMessage !== undefined ? c.lastMessage : null,
-            memberCount: getConversationMemberCount(c),
-          });
+          state.unshift(normalizeConversationForStore(c));
           toast.success("Conversation created successfully");
         },
       )

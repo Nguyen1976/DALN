@@ -186,10 +186,7 @@ const MessageComponent = ({
               </div>
             </div>
             {isMine && !isSameAsNext && (
-              <SeenStatus
-                seenUsers={seenMessages[message.id] || []}
-                messageStatus={message?.status as any}
-              />
+              <SeenStatus seenUsers={seenMessages[message.id] || []} />
             )}
           </div>
         );

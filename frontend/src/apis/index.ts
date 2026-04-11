@@ -171,7 +171,12 @@ export interface SearchConversationItem {
   memberCount?: number;
   createdAt: string;
   updatedAt?: string;
-  members: Array<{
+  lastMessageAt?: string | null;
+  lastMessageText?: string;
+  lastMessageSenderId?: string | null;
+  lastMessageSenderName?: string | null;
+  lastMessageSenderAvatar?: string | null;
+  members?: Array<{
     userId: string;
     lastReadAt?: string;
     username?: string;
@@ -179,7 +184,7 @@ export interface SearchConversationItem {
     fullName?: string;
     lastMessageAt?: string;
   }>;
-  lastMessage: {
+  lastMessage?: {
     id: string;
     conversationId: string;
     senderId: string;

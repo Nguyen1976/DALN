@@ -1,9 +1,10 @@
 import { useEffect } from "react";
-import { useDispatch } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { socket } from "@/lib/socket";
 import { clearTypingUsers } from "@/redux/slices/typingIndicatorSlice";
-import { markConversationRead } from "@/redux/slices/conversationSlice";
-import type { AppDispatch } from "@/redux/store";
+import { markConversationRead, selectConversationById } from "@/redux/slices/conversationSlice";
+import { SOCKET_EVENTS } from "@/lib/socket.events";
+import type { AppDispatch, RootState } from "@/redux/store";
 
 /**
  * Hook để manage việc join/leave Socket.io rooms cho conversation
@@ -13,6 +14,9 @@ import type { AppDispatch } from "@/redux/store";
  */
 export const useConversationRoom = (conversationId?: string) => {
   const dispatch = useDispatch<AppDispatch>();
+  const conversation = useSelector((state: RootState) =>
+    conversationId ? selectConversationById(state, conversationId) : null,
+  );
 
   useEffect(() => {
     if (!conversationId) return;
@@ -21,6 +25,14 @@ export const useConversationRoom = (conversationId?: string) => {
       socket.emit("conversation:join", { conversationId });
       // Mark all messages as read when opening conversation
       dispatch(markConversationRead({ conversationId }));
+
+      // Emit message:read event to trigger BE unreadCount reset
+      if (conversation?.lastMessage?.id) {
+        socket.emit(SOCKET_EVENTS.CHAT.MESSAGE_READ, {
+          conversationId,
+          lastMessageId: conversation.lastMessage.id,
+        });
+      }
     };
 
     if (socket.connected) {
@@ -35,5 +47,5 @@ export const useConversationRoom = (conversationId?: string) => {
       socket.emit("conversation:leave", { conversationId });
       dispatch(clearTypingUsers(conversationId));
     };
-  }, [conversationId, dispatch]);
+  }, [conversationId, conversation?.lastMessage?.id, dispatch]);
 };

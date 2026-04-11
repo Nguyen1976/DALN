@@ -156,10 +156,12 @@ export function GroupMemberManager() {
     PROFILE_ENRICH_BATCH_SIZE,
     PROFILE_ENRICH_MEMBER_LIMIT,
   ]);
+  const conversationMembers = conversation?.members ?? [];
+
   // Get available friends not already in the group
   const availableFriends = friends.filter(
     (friend) =>
-      conversation?.members.map((m) => m.userId).indexOf(friend.id) === -1,
+      conversationMembers.map((m) => m.userId).indexOf(friend.id) === -1,
   );
 
   const handleAddMember = async (friend: {
@@ -344,7 +346,7 @@ export function GroupMemberManager() {
               className="flex items-center gap-2 text-xs"
             >
               <User className="w-3 h-3" />
-              Thành viên ({conversation?.members.length || 0})
+              Thành viên ({conversationMembers.length})
             </TabsTrigger>
             <TabsTrigger
               value="add"
@@ -359,12 +361,12 @@ export function GroupMemberManager() {
           <TabsContent value="members" className="m-0 p-3">
             <ScrollArea className="h-[200px] pr-3">
               <div className="space-y-2">
-                {conversation?.members.length === 0 ? (
+                {conversationMembers.length === 0 ? (
                   <div className="flex items-center justify-center h-40 text-muted-foreground">
                     Nhóm này chưa có thành viên
                   </div>
                 ) : (
-                  conversation?.members.map((member) =>
+                  conversationMembers.map((member) =>
                     (() => {
                       const fallbackProfile = memberProfileMap[member.userId];
                       const displayName =

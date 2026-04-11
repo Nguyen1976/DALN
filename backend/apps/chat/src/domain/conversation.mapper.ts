@@ -1,6 +1,26 @@
 export class ConversationMapper {
   // Add mapping methods here as needed
 
+  private static resolveUnreadCount(conversation: any, userId?: string) {
+    if (
+      conversation?.unreadCount !== undefined &&
+      conversation?.unreadCount !== null
+    ) {
+      const unread = Number(conversation.unreadCount)
+      if (!Number.isFinite(unread) || unread <= 0) return '0'
+      return unread > 5 ? '5+' : String(unread)
+    }
+
+    if (userId && Array.isArray(conversation?.members)) {
+      const me = conversation.members.find((m: any) => m.userId === userId)
+      const unread = Number(me?.unreadCount || 0)
+      if (!Number.isFinite(unread) || unread <= 0) return '0'
+      return unread > 5 ? '5+' : String(unread)
+    }
+
+    return '0'
+  }
+
   private static mapMessage(message: any) {
     if (!message) return null
 
@@ -54,17 +74,14 @@ export class ConversationMapper {
     return this.formatConversationResponse(res)
   }
 
-  static toGetConversationsResponse(
-    conversations,
-    unreadMap: Map<string, string>,
-  ) {
+  static toGetConversationsResponse(conversations, userId?: string) {
     return {
       conversations: conversations.map((c) => ({
         id: c.id,
         type: c.type,
         groupName: c.groupName,
         groupAvatar: c.groupAvatar,
-        unreadCount: unreadMap.get(c.id) ?? '0',
+        unreadCount: this.resolveUnreadCount(c, userId),
         createdAt: c.createdAt.toString(),
         updatedAt: c.updatedAt.toString(),
         members: c.members.map((m) => ({
@@ -81,17 +98,14 @@ export class ConversationMapper {
       })),
     }
   }
-  static toGetConversationByFriendIdResponse(
-    conversation,
-    unreadMap: Map<string, string>,
-  ) {
+  static toGetConversationByFriendIdResponse(conversation, userId?: string) {
     return {
       conversation: {
         id: conversation.id,
         type: conversation.type,
         groupName: conversation.groupName,
         groupAvatar: conversation.groupAvatar,
-        unreadCount: unreadMap.get(conversation.id) ?? '0',
+        unreadCount: this.resolveUnreadCount(conversation, userId),
         createdAt: conversation.createdAt.toString(),
         updatedAt: conversation.updatedAt.toString(),
         members: conversation.members.map((m) => ({
