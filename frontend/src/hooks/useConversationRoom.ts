@@ -2,7 +2,10 @@ import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { socket } from "@/lib/socket";
 import { clearTypingUsers } from "@/redux/slices/typingIndicatorSlice";
-import { markConversationRead, selectConversationById } from "@/redux/slices/conversationSlice";
+import {
+  markConversationRead,
+  selectConversationById,
+} from "@/redux/slices/conversationSlice";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
 import type { AppDispatch, RootState } from "@/redux/store";
 
