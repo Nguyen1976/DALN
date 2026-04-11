@@ -223,7 +223,6 @@ export class ConversationRepository {
             id: true,
             content: true,
             type: true,
-            clientMessageId: true,
             senderId: true,
             createdAt: true,
             conversationId: true,

@@ -36,7 +36,6 @@ export class ChatEventsPublisher {
           clientMessageId: message.clientMessageId || message.tempMessageId,
           serverMessageId: message.id,
           conversationId: message.conversationId,
-          duplicated: Boolean(message.duplicated),
           createdAt: message.createdAt,
           message,
         },

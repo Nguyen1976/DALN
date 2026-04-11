@@ -24,102 +24,43 @@ export class MessageRepository {
     senderId: string
     type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE'
     content?: string | null
-    clientMessageId: string
     replyToMessageId?: string | null
     medias?: MediaInput[]
   }) {
-    const existed = await this.prisma.message.findFirst({
-      where: {
+    // Ghi dữ liệu & trả về trong 1 nhịp duy nhất (nested writes)
+    const created = await this.prisma.message.create({
+      data: {
         conversationId: data.conversationId,
         senderId: data.senderId,
-        clientMessageId: data.clientMessageId,
+        type: data.type as any, // Ép kiểu messageType
+        content: data.content || null,
+        replyToMessageId: data.replyToMessageId || null,
+
+        // Khởi tạo Medias luôn (Prisma tự động làm Transaction ngầm)
+        medias: data.medias?.length
+          ? {
+              create: data.medias.map((media, index) => ({
+                mediaType: media.mediaType,
+                objectKey: media.objectKey,
+                url: media.url,
+                mimeType: media.mimeType,
+                size: BigInt(media.size),
+                width: media.width ?? null,
+                height: media.height ?? null,
+                duration: media.duration ?? null,
+                thumbnailUrl: media.thumbnailUrl ?? null,
+                sortOrder: media.sortOrder ?? index,
+              })),
+            }
+          : undefined,
       },
+      // Trả về luôn relations, không cần gọi findUnique thêm lần nữa!
       include: {
-        senderMember: {
-          select: {
-            userId: true,
-            username: true,
-            avatar: true,
-            role: true,
-            lastReadAt: true,
-            fullName: true,
-          },
-        },
-        medias: {
-          orderBy: {
-            sortOrder: 'asc',
-          },
-        },
+        medias: { orderBy: { sortOrder: 'asc' } },
       },
     })
 
-    if (existed) {
-      return {
-        message: existed,
-        duplicated: true,
-      }
-    }
-
-    const created = await this.prisma.$transaction(async (transaction) => {
-      const message = await transaction.message.create({
-        data: {
-          conversationId: data.conversationId,
-          senderId: data.senderId,
-          type: data.type as messageType,
-          content: data.content || null,
-          clientMessageId: data.clientMessageId,
-          replyToMessageId: data.replyToMessageId || null,
-        },
-      })
-
-      if ((data.medias?.length || 0) > 0) {
-        await transaction.messageMedia.createMany({
-          data: (data.medias || []).map((media, index) => ({
-            messageId: message.id,
-            mediaType: media.mediaType,
-            objectKey: media.objectKey,
-            url: media.url,
-            mimeType: media.mimeType,
-            size: BigInt(media.size),
-            width: media.width ?? null,
-            height: media.height ?? null,
-            duration: media.duration ?? null,
-            thumbnailUrl: media.thumbnailUrl ?? null,
-            sortOrder: media.sortOrder ?? index,
-          })),
-        })
-      }
-
-      return message
-    })
-
-    const message = await this.prisma.message.findUnique({
-      where: {
-        id: created.id,
-      },
-      include: {
-        senderMember: {
-          select: {
-            userId: true,
-            username: true,
-            avatar: true,
-            role: true,
-            lastReadAt: true,
-            fullName: true,
-          },
-        },
-        medias: {
-          orderBy: {
-            sortOrder: 'asc',
-          },
-        },
-      },
-    })
-
-    return {
-      message,
-      duplicated: false,
-    }
+    return created
   }
 
   async findById(id: string, conversationId: string) {

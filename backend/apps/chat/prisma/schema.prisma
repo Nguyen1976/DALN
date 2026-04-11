@@ -84,7 +84,6 @@ model message {
   senderId        String             @db.ObjectId
   type            messageType        @default(TEXT)
   content         String?
-  clientMessageId String
   replyToMessageId String?           @db.ObjectId
   isDeleted       Boolean            @default(false)
   createdAt       DateTime           @default(now())
@@ -95,10 +94,7 @@ model message {
   replies         message[]          @relation("MessageReply")
   medias          messageMedia[]
 
-  @@unique([conversationId, senderId, clientMessageId])
   @@index([conversationId, createdAt, id])
-  @@index([conversationId, senderId, createdAt])
-  @@index([replyToMessageId])
 }
 
 model messageMedia {

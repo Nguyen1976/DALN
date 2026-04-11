@@ -121,6 +121,7 @@ export class ChatService {
   }
 
   async sendMessage(data: MessageSendPayload) {
+    console.time('fetch-members')
     const conversationMembers = await this.memberRepo.findByConversationId(
       data.conversationId,
     )
@@ -129,6 +130,7 @@ export class ChatService {
     if (!memberIds.includes(data.senderId)) {
       ChatErrors.senderNotMember()
     }
+    console.timeEnd('fetch-members')
 
     const type = this.normalizeMessageType(data.type || 'TEXT')
     const content = data.text?.trim() || null
@@ -154,18 +156,16 @@ export class ChatService {
       )
     }
 
-    const saveResult = await this.messageRepo.create({
+    console.time('save-message')
+    const message: any = await this.messageRepo.create({
       conversationId: data.conversationId,
       senderId: data.senderId,
       type,
       content,
-      clientMessageId:
-        data.clientMessageId || data.tempMessageId || crypto.randomUUID(),
       replyToMessageId: data.replyToMessageId,
       medias,
     })
-
-    const message: any = saveResult.message
+    console.timeEnd('save-message')
 
     if (!message) {
       ChatErrors.invalidMessagePayload()
@@ -174,6 +174,7 @@ export class ChatService {
     const senderMember = conversationMembers.find(
       (member) => member.userId === data.senderId,
     )
+    message.senderMember = senderMember
 
     this.unreadQueue.add(
       'increase-unread',
@@ -196,14 +197,12 @@ export class ChatService {
       {
         ...normalizedMessage,
         tempMessageId: data.tempMessageId,
-        duplicated: saveResult.duplicated,
       },
       memberIds as string[],
     )
 
     return {
       message: normalizedMessage,
-      duplicated: saveResult.duplicated,
     }
   }
 
@@ -805,12 +804,11 @@ export class ChatService {
       senderId: actorUserId,
       type: 'TEXT',
       content: text,
-      clientMessageId: `system-${Date.now()}-${crypto.randomUUID()}`,
       replyToMessageId: undefined,
       medias: [],
     })
 
-    const message = result.message
+    const message = result
     if (!message) return
 
     await this.conversationRepo.updateUpdatedAt(conversationId, {
