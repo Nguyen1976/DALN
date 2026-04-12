@@ -40,4 +40,26 @@ export class MailerService {
       html, // mail/templates/confirmation.hbs
     })
   }
+
+  async sendRegistrationOtp(data: {
+    email: string
+    username: string
+    otp: string
+  }) {
+    let html = readFileSync(
+      './libs/mailer/src/templates/register-otp.html',
+      'utf8',
+    )
+
+    html = html
+      .replace(/{{\s*name\s*}}/g, data.username)
+      .replace(/{{\s*otp\s*}}/g, data.otp)
+      .replace(/{{\s*year\s*}}/g, String(new Date().getFullYear()))
+
+    await this.mailer.sendMail({
+      to: data.email,
+      subject: 'Mã OTP kích hoạt tài khoản Chat App',
+      html,
+    })
+  }
 }

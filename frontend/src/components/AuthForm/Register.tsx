@@ -14,8 +14,10 @@ import {
 } from "@/components/ui/form";
 import { registerAPI } from "@/apis";
 import { toast } from "sonner";
+import { useNavigate } from "react-router";
 
 const Register = () => {
+  const navigate = useNavigate();
   const form = useForm<z.infer<typeof formRegisterScheme>>({
     resolver: zodResolver(formRegisterScheme),
     defaultValues: {
@@ -29,8 +31,13 @@ const Register = () => {
   const onSubmit = async (data: z.infer<typeof formRegisterScheme>) => {
     const { username, email, password } = data;
 
-    await registerAPI({ username, email, password });
-    toast.success("Đăng ký thành công, vui lòng đăng nhập");
+    const result = await registerAPI({ username, email, password });
+    if (result?.requiresOtpVerification) {
+      toast.success(
+        "Đăng ký thành công, vui lòng nhập OTP để kích hoạt tài khoản",
+      );
+      navigate("/verify-otp", { state: { email } });
+    }
     form.reset();
   };
 

@@ -2,7 +2,6 @@ import { status } from '@grpc/grpc-js'
 import { RpcException } from '@nestjs/microservices'
 
 export class UserErrors {
-
   static alreadyFriends(): never {
     throw new RpcException({
       code: status.ALREADY_EXISTS,
@@ -13,7 +12,28 @@ export class UserErrors {
   static emailAlreadyExists(): never {
     throw new RpcException({
       code: status.ALREADY_EXISTS,
-      message: 'Email already exists',
+      message: 'Email đã được sử dụng',
+    })
+  }
+
+  static invalidCredentials(): never {
+    throw new RpcException({
+      code: status.UNAUTHENTICATED,
+      message: 'Email hoặc mật khẩu không chính xác',
+    })
+  }
+
+  static accountNotActivated(): never {
+    throw new RpcException({
+      code: status.FAILED_PRECONDITION,
+      message: 'Tài khoản chưa kích hoạt. Vui lòng xác thực OTP',
+    })
+  }
+
+  static otpInvalidOrExpired(): never {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'Mã OTP không hợp lệ hoặc đã hết hạn',
     })
   }
 

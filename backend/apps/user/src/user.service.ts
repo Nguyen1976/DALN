@@ -32,6 +32,15 @@ interface UserLoginRequest {
   password: string
 }
 
+interface VerifyOtpRequest {
+  email: string
+  otp: string
+}
+
+interface ResendOtpRequest {
+  email: string
+}
+
 interface MakeFriendRequest {
   inviterId: string
   inviterName: string
@@ -67,44 +76,125 @@ export class UserService {
     private readonly redisService: RedisService,
   ) {}
 
-  async register(data: UserRegisterRequest): Promise<UserEntity> {
+  private generateOtp(length = 6): string {
+    return Array.from({ length }, () => Math.floor(Math.random() * 10)).join('')
+  }
+
+  private async sendRegistrationOtp(
+    email: string,
+    username: string,
+  ): Promise<void> {
+    const otp = this.generateOtp()
+    await this.redisService.saveOTP(email, otp)
+    this.eventsPublisher.publishUserRegisterOtp({
+      email,
+      username,
+      otp,
+    })
+  }
+
+  async register(data: UserRegisterRequest): Promise<{
+    email: string
+    requiresOtpVerification: boolean
+  }> {
     const existingUser = await this.userRepo.findByEmail(data.email)
-    if (existingUser) {
+
+    if (existingUser?.isActive) {
       UserErrors.emailAlreadyExists()
     }
 
     const existingUsername = await this.userRepo.findByUsername(data.username)
-    if (existingUsername) {
+    if (existingUsername && existingUsername.email !== data.email) {
       UserErrors.usernameAlreadyExists()
     }
 
     const hashedPassword = await this.utilService.hashPassword(data.password)
-    const { createdAt, updatedAt, password, ...user } =
-      await this.userRepo.create({
-        email: data.email,
-        username: data.username,
-        password: hashedPassword,
-      })
 
-    const userEntity: UserEntity = {
-      ...user,
-      createdAt,
-      updatedAt,
+    const user = existingUser
+      ? await this.userRepo.updateRegisterInfoByEmail({
+          email: data.email,
+          username: data.username,
+          password: hashedPassword,
+        })
+      : await this.userRepo.create({
+          email: data.email,
+          username: data.username,
+          password: hashedPassword,
+        })
+
+    await this.sendRegistrationOtp(user.email, user.username)
+
+    return {
+      email: user.email,
+      requiresOtpVerification: true,
+    }
+  }
+
+  async verifyRegistrationOtp(
+    data: VerifyOtpRequest,
+  ): Promise<{ success: true }> {
+    const currentOtp = await this.redisService.getOTP(data.email)
+    if (!currentOtp || currentOtp !== data.otp) {
+      UserErrors.otpInvalidOrExpired()
     }
 
+    const user = await this.userRepo.findByEmail(data.email)
+    if (!user) {
+      UserErrors.userNotFound()
+    }
+
+    await this.userRepo.activateByEmail(data.email)
+    await this.redisService.deleteOTP(data.email)
+
     this.eventsPublisher.publishUserCreated({
-      id: userEntity.id,
-      email: userEntity.email,
-      username: userEntity.username,
+      id: user.id,
+      email: user.email,
+      username: user.username,
     })
 
-    return userEntity
+    return { success: true }
+  }
+
+  async resendRegistrationOtp(data: ResendOtpRequest): Promise<{
+    email: string
+    requiresOtpVerification: boolean
+  }> {
+    const user = await this.userRepo.findByEmail(data.email)
+
+    if (!user) {
+      UserErrors.userNotFound()
+    }
+
+    if (user.isActive) {
+      UserErrors.emailAlreadyExists()
+    }
+
+    await this.sendRegistrationOtp(user.email, user.username)
+
+    return {
+      email: user.email,
+      requiresOtpVerification: true,
+    }
   }
 
   async login(data: UserLoginRequest): Promise<AuthSession> {
     const user = await this.userRepo.findByEmail(data.email)
     if (!user) {
       UserErrors.userNotFound()
+    }
+
+    if (!user.isActive) {
+      await this.sendRegistrationOtp(user.email, user.username)
+      UserErrors.accountNotActivated()
+    }
+
+    const isPasswordValid = await this.utilService.comparePassword(
+      data.password,
+      user.password,
+    )
+
+    if (!isPasswordValid) {
+      UserErrors.invalidCredentials()
     }
 
     const payload = {
@@ -258,14 +348,12 @@ export class UserService {
       friendships.map((f) => f.friendId) || [],
     )
 
-    
     const friendsWithStatus = await Promise.all(
       friends.map(async (f) => ({
         ...f,
         status: await this.redisService.isOnline(f.id),
       })),
     )
-
 
     return friendsWithStatus as (UserEntity & { status: boolean })[]
   }
@@ -392,7 +480,6 @@ export class UserService {
     const friends = await this.friendShipRepo.findAllFriendsByUserId(userId)
     const friendIds = friends.map((f) => f.friendId)
 
-
     await this.userRepo.updateLastSeen(userId, null)
     this.eventsPublisher.publisherUserOnline({
       userIds: friendIds,
@@ -412,5 +499,4 @@ export class UserService {
       lastSeen,
     })
   }
-
 }

@@ -5,6 +5,7 @@ import {
   EmitToUserPayload,
   UserCreatedPayload,
   UserMakeFriendPayload,
+  UserRegisterOtpPayload,
   UserUpdatedPayload,
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'
@@ -19,6 +20,14 @@ export class UserEventsPublisher {
     this.amqpConnection.publish(
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_CREATED,
+      payload,
+    )
+  }
+
+  publishUserRegisterOtp(payload: UserRegisterOtpPayload): void {
+    this.amqpConnection.publish(
+      EXCHANGE_RMQ.USER_EVENTS,
+      ROUTING_RMQ.USER_REGISTER_OTP,
       payload,
     )
   }

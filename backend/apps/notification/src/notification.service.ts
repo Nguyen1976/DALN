@@ -9,6 +9,7 @@ import { NotificationEventsPublisher } from './rmq/publishers/notification-event
 import type {
   UserCreatedPayload,
   UserMakeFriendPayload,
+  UserRegisterOtpPayload,
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
@@ -91,6 +92,10 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   async handleUserRegistered(data: UserCreatedPayload) {
     await this.mailerService.sendUserConfirmation(data)
     await this.ensureUserPreference(data.id)
+  }
+
+  async handleUserRegisterOtp(data: UserRegisterOtpPayload) {
+    await this.mailerService.sendRegistrationOtp(data)
   }
 
   async handleMakeFriend(data: UserMakeFriendPayload) {
@@ -380,9 +385,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async getNotifications(
-    data,
-  ) {
+  async getNotifications(data) {
     const { userId, page, limit } = data
 
     const take = Number(limit) || 5
@@ -402,9 +405,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async markNotificationAsRead(
-    data,
-  ) {
+  async markNotificationAsRead(data) {
     const { userId, notificationId } = data
 
     await this.notificationRepo.markOneRead(userId, notificationId)
@@ -412,9 +413,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     return { success: true }
   }
 
-  async markAllNotificationsAsRead(
-    data,
-  ) {
+  async markAllNotificationsAsRead(data) {
     const { userId } = data
 
     const result = await this.notificationRepo.markAllRead(userId)

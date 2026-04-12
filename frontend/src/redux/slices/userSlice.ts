@@ -24,12 +24,22 @@ const initialState: UserState = {
 
 export const loginAPI = createAsyncThunk(
   `/user/login`,
-  async (data: { email: string; password: string }) => {
-    const response = await authorizeAxiosInstance.post(
-      `${API_ROOT}/user/login`,
-      data,
-    );
-    return response.data.data;
+  async (data: { email: string; password: string }, { rejectWithValue }) => {
+    try {
+      const response = await authorizeAxiosInstance.post(
+        `${API_ROOT}/user/login`,
+        data,
+      );
+      return response.data.data;
+    } catch (error: any) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error?.message ||
+        error?.message ||
+        "Đã xảy ra lỗi";
+
+      return rejectWithValue(backendMessage);
+    }
   },
 );
 

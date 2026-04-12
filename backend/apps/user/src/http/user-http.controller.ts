@@ -20,9 +20,11 @@ import {
 import {
   LoginUserDto,
   MakeFriendDto,
+  ResendOtpDto,
   RegisterUserDto,
   UpdateProfileDto,
   UpdateStatusMakeFriendDto,
+  VerifyOtpDto,
 } from './user-http.dto'
 
 @Controller('user')
@@ -32,11 +34,33 @@ export class UserHttpController {
   @Post('register')
   @WithoutLogin()
   async register(@Body() dto: RegisterUserDto) {
-    const user = await this.userService.register(dto)
+    const registration = await this.userService.register(dto)
     return {
-      id: user.id,
-      email: user.email,
-      username: user.username,
+      email: registration.email,
+      requiresOtpVerification: registration.requiresOtpVerification,
+    }
+  }
+
+  @Post('verify-otp')
+  @WithoutLogin()
+  async verifyOtp(@Body() dto: VerifyOtpDto) {
+    await this.userService.verifyRegistrationOtp(dto)
+
+    return {
+      success: true,
+      message: 'Xác thực OTP thành công',
+    }
+  }
+
+  @Post('resend-otp')
+  @WithoutLogin()
+  async resendOtp(@Body() dto: ResendOtpDto) {
+    const registration = await this.userService.resendRegistrationOtp(dto)
+
+    return {
+      email: registration.email,
+      requiresOtpVerification: registration.requiresOtpVerification,
+      message: 'Đã gửi lại mã OTP',
     }
   }
 
@@ -141,7 +165,9 @@ export class UserHttpController {
         avatar: friend.avatar || '',
         bio: friend.bio || '',
         status: (friend as any).status || false,
-        lastSeen: friend.lastSeen ? new Date(friend.lastSeen).toISOString() : null,
+        lastSeen: friend.lastSeen
+          ? new Date(friend.lastSeen).toISOString()
+          : null,
       })),
     }
   }

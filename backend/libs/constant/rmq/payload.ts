@@ -4,6 +4,12 @@ export interface UserCreatedPayload {
   username: string
 }
 
+export interface UserRegisterOtpPayload {
+  email: string
+  username: string
+  otp: string
+}
+
 export interface UserMakeFriendPayload {
   inviterId: string
   inviterName: string

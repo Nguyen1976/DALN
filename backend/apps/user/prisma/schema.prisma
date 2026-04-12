@@ -14,6 +14,7 @@ model User {
   username  String   @unique
   fullName  String
   password  String
+  isActive  Boolean  @default(false)
   avatar    String?
   bio       String?
   lastSeen DateTime?

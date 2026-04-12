@@ -22,12 +22,28 @@ export const registerAPI = async (data: {
   email: string;
   username: string;
   password: string;
-}): Promise<unknown> => {
+}): Promise<{ email: string; requiresOtpVerification: boolean }> => {
   const response = await authorizeAxiosInstance.post(
     `${API_ROOT}/user/register`,
     data,
   );
-  return response.data;
+  return response.data.data;
+};
+
+export const verifyOtpAPI = async (data: { email: string; otp: string }) => {
+  const response = await authorizeAxiosInstance.post(
+    `${API_ROOT}/user/verify-otp`,
+    data,
+  );
+  return response.data.data;
+};
+
+export const resendOtpAPI = async (data: { email: string }) => {
+  const response = await authorizeAxiosInstance.post(
+    `${API_ROOT}/user/resend-otp`,
+    data,
+  );
+  return response.data.data;
 };
 
 export interface FromUser {

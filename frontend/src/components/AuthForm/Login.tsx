@@ -16,6 +16,7 @@ import { loginAPI } from "@/redux/slices/userSlice";
 import { useDispatch } from "react-redux";
 import type { AppDispatch } from "@/redux/store";
 import { useNavigate } from "react-router";
+import { toast } from "sonner";
 
 const Login = () => {
   const form = useForm<z.infer<typeof formLoginScheme>>({
@@ -30,12 +31,23 @@ const Login = () => {
   const navigate = useNavigate();
 
   const onSubmit = async (data: z.infer<typeof formLoginScheme>) => {
-    console.log(data);
-    dispatch(loginAPI(data)).then((res) => {
-      if (loginAPI.fulfilled.match(res)) {
-        navigate("/");
+    try {
+      await dispatch(loginAPI(data)).unwrap();
+      navigate("/");
+    } catch (error) {
+      const message =
+        typeof error === "string"
+          ? error
+          : (error as { message?: string })?.message;
+
+      if (
+        message === "Tài khoản chưa kích hoạt. Vui lòng xác thực OTP" ||
+        message === "Tài khoản chưa kích hoạt"
+      ) {
+        toast.info("Vui lòng xác thực OTP trước khi đăng nhập");
+        navigate("/verify-otp", { state: { email: data.email } });
       }
-    });
+    }
   };
 
   return (

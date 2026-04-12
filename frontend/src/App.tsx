@@ -28,11 +28,16 @@ import {
 } from "./redux/slices/friendSlice";
 import NotificationSettingsPage from "./pages/NotificationSettings";
 import { useChatSocketEvents } from "./hooks/useChatSocketEvents";
+import VerifyOtpPage from "./pages/VerifyOtp";
 
 const router = createBrowserRouter([
   {
     path: "/auth",
     element: <AuthPage />,
+  },
+  {
+    path: "/verify-otp",
+    element: <VerifyOtpPage />,
   },
   {
     path: "/",

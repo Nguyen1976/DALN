@@ -1,6 +1,7 @@
 export const QUEUE_RMQ = {
   CHAT_USER_UPDATE_STATUS_MAKE_FRIEND: 'chat_queue_user_updateStatusMakeFriend',
   NOTIFICATION_USER_CREATED: 'notification_queue_user_created',
+  NOTIFICATION_USER_REGISTER_OTP: 'notification_queue_user_register_otp',
   NOTIFICATION_USER_MAKE_FRIEND: 'notification_queue_user_makeFriend',
   NOTIFICATION_USER_UPDATE_STATUS_MAKE_FRIEND:
     'notification_queue_user_updateStatusMakeFriend',

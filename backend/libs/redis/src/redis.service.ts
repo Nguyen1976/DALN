@@ -54,6 +54,25 @@ export class RedisService {
     await this.redisClient.set(key, value)
   }
 
+  private getRegistrationOtpKey(email: string): string {
+    return `otp:reg:${email.trim().toLowerCase()}`
+  }
+
+  async saveOTP(email: string, otp: string, ttl = 300): Promise<void> {
+    const key = this.getRegistrationOtpKey(email)
+    await this.redisClient.set(key, otp, 'EX', ttl)
+  }
+
+  async getOTP(email: string): Promise<string | null> {
+    const key = this.getRegistrationOtpKey(email)
+    return await this.redisClient.get(key)
+  }
+
+  async deleteOTP(email: string): Promise<void> {
+    const key = this.getRegistrationOtpKey(email)
+    await this.redisClient.del(key)
+  }
+
   async get(key: string): Promise<string | null> {
     return await this.redisClient.get(key)
   }

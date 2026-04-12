@@ -1,5 +1,6 @@
 export const ROUTING_RMQ = {
   USER_CREATED: 'user.created',
+  USER_REGISTER_OTP: 'user.registerOtp',
   USER_MAKE_FRIEND: 'user.makeFriend',
   USER_UPDATE_STATUS_MAKE_FRIEND: 'user.updateStatusMakeFriend',
   MESSAGE_SEND: 'message.send',

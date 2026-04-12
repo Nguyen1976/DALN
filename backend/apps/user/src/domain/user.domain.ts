@@ -8,6 +8,7 @@ export interface UserEntity {
   id: string
   email: string
   username: string
+  isActive: boolean
   fullName: string | null
   bio: string | null
   avatar: string | null

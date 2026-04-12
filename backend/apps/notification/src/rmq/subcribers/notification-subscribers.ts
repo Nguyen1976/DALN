@@ -4,6 +4,7 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import type {
   UserCreatedPayload,
   UserMakeFriendPayload,
+  UserRegisterOtpPayload,
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
@@ -22,6 +23,17 @@ export class NotificationSubscriber {
   })
   async handleUserRegistered(data: UserCreatedPayload): Promise<void> {
     await safeExecute(() => this.notificationService.handleUserRegistered(data))
+  }
+
+  @RabbitSubscribe({
+    exchange: EXCHANGE_RMQ.USER_EVENTS,
+    routingKey: ROUTING_RMQ.USER_REGISTER_OTP,
+    queue: QUEUE_RMQ.NOTIFICATION_USER_REGISTER_OTP,
+  })
+  async handleUserRegisterOtp(data: UserRegisterOtpPayload): Promise<void> {
+    await safeExecute(() =>
+      this.notificationService.handleUserRegisterOtp(data),
+    )
   }
 
   @RabbitSubscribe({

@@ -1,4 +1,3 @@
-
 import { Status } from 'apps/user/src/generated'
 import {
   IsEmail,
@@ -41,6 +40,24 @@ export class LoginUserDto {
 
   @IsNotEmpty({ message: 'Password must not be empty' })
   password: string
+}
+
+export class VerifyOtpDto {
+  @IsEmail()
+  @IsNotEmpty({ message: 'Email must not be empty' })
+  email: string
+
+  @IsNotEmpty({ message: 'OTP must not be empty' })
+  @IsString()
+  @MinLength(6, { message: 'OTP must be 6 characters' })
+  @MaxLength(6, { message: 'OTP must be 6 characters' })
+  otp: string
+}
+
+export class ResendOtpDto {
+  @IsEmail()
+  @IsNotEmpty({ message: 'Email must not be empty' })
+  email: string
 }
 
 export class MakeFriendDto {

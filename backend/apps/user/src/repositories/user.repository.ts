@@ -44,6 +44,30 @@ export class UserRepository {
         fullName: '',
         password: data.password,
         username: data.username,
+        isActive: false,
+      },
+    })
+  }
+
+  async updateRegisterInfoByEmail(data: {
+    email: string
+    username: string
+    password: string
+  }) {
+    return await this.prisma.user.update({
+      where: { email: data.email },
+      data: {
+        username: data.username,
+        password: data.password,
+      },
+    })
+  }
+
+  async activateByEmail(email: string) {
+    return await this.prisma.user.update({
+      where: { email },
+      data: {
+        isActive: true,
       },
     })
   }
