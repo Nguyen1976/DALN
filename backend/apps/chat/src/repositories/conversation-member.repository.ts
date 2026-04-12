@@ -300,6 +300,10 @@ export class ConversationMemberRepository {
     userId: string,
     lastReadMessageId: string,
   ) {
+    if (!/^[a-f\d]{24}$/i.test(lastReadMessageId)) {
+      return { count: 0 }
+    }
+
     await this.ensureUnreadCountInitialized()
 
     return await this.prisma.conversationMember.updateMany({

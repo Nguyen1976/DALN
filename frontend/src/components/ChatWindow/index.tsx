@@ -415,19 +415,38 @@ export default function ChatWindow({
     return "FILE";
   };
 
+  const getMimeTypeFromFile = (file: File): string => {
+    if (file.type) return file.type;
+
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith(".java")) return "text/plain";
+    if (fileName.endsWith(".txt")) return "text/plain";
+    if (fileName.endsWith(".md")) return "text/plain";
+    if (fileName.endsWith(".json")) return "application/json";
+    if (fileName.endsWith(".csv")) return "text/plain";
+    if (fileName.endsWith(".py")) return "text/plain";
+    if (fileName.endsWith(".js") || fileName.endsWith(".jsx"))
+      return "text/plain";
+    if (fileName.endsWith(".ts") || fileName.endsWith(".tsx"))
+      return "text/plain";
+
+    return "application/octet-stream";
+  };
+
   const handleUploadMedia = useCallback(
     async (file: File) => {
       if (!canSendMessage) return;
       if (!conversationId) return;
 
       const mediaType = getMessageTypeFromFile(file);
+      const mimeType = getMimeTypeFromFile(file);
       const clientMessageId = `temp-media-${Date.now()}`;
 
       const tempMedia: MessageMediaInput = {
         mediaType,
         objectKey: "",
         url: URL.createObjectURL(file),
-        mimeType: file.type,
+        mimeType,
         size: String(file.size),
         width: undefined,
         height: undefined,
@@ -474,12 +493,12 @@ export default function ChatWindow({
         const upload = await createMessageUploadUrlAPI({
           conversationId,
           type: mediaType,
-          mimeType: file.type,
+          mimeType,
           fileName: file.name,
           size: String(file.size),
         });
 
-        await uploadFileToSignedUrl(upload.uploadUrl, file, file.type);
+        await uploadFileToSignedUrl(upload.uploadUrl, file, mimeType);
 
         socket.emit("message:create", {
           conversationId,
@@ -491,7 +510,7 @@ export default function ChatWindow({
               mediaType,
               objectKey: upload.objectKey,
               url: upload.publicUrl,
-              mimeType: file.type,
+              mimeType,
               size: String(file.size),
               sortOrder: 0,
             },

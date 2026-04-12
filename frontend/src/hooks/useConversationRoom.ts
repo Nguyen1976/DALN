@@ -6,6 +6,7 @@ import {
   markConversationRead,
   selectConversationById,
 } from "@/redux/slices/conversationSlice";
+import { selectUser } from "@/redux/slices/userSlice";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
 import type { AppDispatch, RootState } from "@/redux/store";
 
@@ -20,6 +21,10 @@ export const useConversationRoom = (conversationId?: string) => {
   const conversation = useSelector((state: RootState) =>
     conversationId ? selectConversationById(state, conversationId) : null,
   );
+  const user = useSelector(selectUser);
+
+  const isObjectId = (value?: string | null) =>
+    typeof value === "string" && /^[a-f\d]{24}$/i.test(value);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -30,7 +35,11 @@ export const useConversationRoom = (conversationId?: string) => {
       dispatch(markConversationRead({ conversationId }));
 
       // Emit message:read event to trigger BE unreadCount reset
-      if (conversation?.lastMessage?.id) {
+      if (
+        conversation?.lastMessage?.id &&
+        isObjectId(conversation.lastMessage.id) &&
+        conversation.lastMessage.senderId !== user.id
+      ) {
         socket.emit(SOCKET_EVENTS.CHAT.MESSAGE_READ, {
           conversationId,
           lastMessageId: conversation.lastMessage.id,

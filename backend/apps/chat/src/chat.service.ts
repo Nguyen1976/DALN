@@ -50,6 +50,10 @@ export class ChatService {
     ],
   }
 
+  private isObjectId(value: string): boolean {
+    return /^[a-f\d]{24}$/i.test(value)
+  }
+
   constructor(
     private readonly conversationRepo: ConversationRepository,
     private readonly memberRepo: ConversationMemberRepository,
@@ -218,15 +222,18 @@ export class ChatService {
 
     const type = data.type as unknown as 'IMAGE' | 'VIDEO' | 'FILE'
     const size = Number(data.size)
+    const resolvedMimeType =
+      (typeof data.mimeType === 'string' && data.mimeType.trim()) ||
+      this.getMimeType(data.fileName)
 
     const normalizedType = this.normalizeMessageType(type)
 
-    this.validateMimeAndSize(normalizedType, data.mimeType, size)
+    this.validateMimeAndSize(normalizedType, resolvedMimeType, size)
 
     const upload = await this.storageR2Service.createPresignedUploadUrl({
       folder: `chat-media/${data.conversationId}/${data.userId}`,
       fileName: data.fileName,
-      mime: data.mimeType,
+      mime: resolvedMimeType,
       expiresInSeconds: 300,
     })
 
@@ -618,6 +625,10 @@ export class ChatService {
   async updateMessageRead(data: UpdateMessageReadPayload) {
     const { conversationId, userId, lastReadMessageId } = data
 
+    if (!this.isObjectId(lastReadMessageId)) {
+      return
+    }
+
     // Cập nhật thông tin user đã xem tin nhắn vào conversation member
     await this.memberRepo.updateLastRead(
       conversationId,
@@ -717,6 +728,30 @@ export class ChatService {
       gif: 'image/gif',
       webp: 'image/webp',
       bmp: 'image/bmp',
+      txt: 'text/plain',
+      md: 'text/plain',
+      csv: 'text/plain',
+      json: 'application/json',
+      xml: 'application/xml',
+      yaml: 'text/plain',
+      yml: 'text/plain',
+      js: 'text/plain',
+      jsx: 'text/plain',
+      ts: 'text/plain',
+      tsx: 'text/plain',
+      java: 'text/plain',
+      kt: 'text/plain',
+      go: 'text/plain',
+      py: 'text/plain',
+      rb: 'text/plain',
+      c: 'text/plain',
+      cpp: 'text/plain',
+      h: 'text/plain',
+      hpp: 'text/plain',
+      php: 'text/plain',
+      sh: 'text/plain',
+      sql: 'text/plain',
+      log: 'text/plain',
     }
     return mimeTypes[ext || ''] || 'application/octet-stream'
   }
