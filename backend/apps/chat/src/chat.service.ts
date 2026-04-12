@@ -635,21 +635,28 @@ export class ChatService {
       }
     }
 
+    console.time('search-conversations')
     const conversations = await this.conversationRepo.searchByKeyword(
       userId,
       safeKeyword,
     )
+    console.timeEnd('search-conversations')
 
+    console.time('search-conversations-friend')
     const converOfFriend =
       await this.conversationRepo.findDirectConversationOfFriend(
         userId,
         safeKeyword,
       )
+    console.timeEnd('search-conversations-friend')
 
+    console.time('merge-conversations')
     const mergedConversations = [...conversations, ...converOfFriend].filter(
       (conversation): conversation is any => conversation != null,
     )
+    console.timeEnd('merge-conversations')
 
+    console.time('deduplicate-sort-conversations')
     const uniqueConversations = Array.from(
       new Map(
         mergedConversations.map((conversation) => [
@@ -662,10 +669,9 @@ export class ChatService {
       const aTime = new Date(a.updatedAt ?? a.createdAt).getTime()
       return bTime - aTime
     })
+    console.timeEnd('deduplicate-sort-conversations')
 
-    return {
-      conversations: uniqueConversations,
-    }
+    return uniqueConversations
   }
 
   async getConversationByFriendId(friendId: string, userId: string) {
@@ -681,9 +687,7 @@ export class ChatService {
       ChatErrors.userNotMember()
     }
 
-    return {
-      conversation,
-    }
+    return conversation
   }
 
   async getConversationById(conversationId: string, userId: string) {

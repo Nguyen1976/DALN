@@ -128,7 +128,7 @@ export class ConversationRepository {
   }
 
   async findConversationByFriendId(friendId: string, userId: string) {
-    await this.ensureParticipantRoleNormalized()
+    // await this.ensureParticipantRoleNormalized()
 
     return await this.prisma.conversation.findFirst({
       where: {
@@ -439,23 +439,35 @@ export class ConversationRepository {
   // }
 
   async searchByKeyword(userId: string, keyword: string) {
-    await this.ensureConversationUpdatedAtNotNull()
-    await this.ensureParticipantRoleNormalized()
+    const safeKeyword = this.normalizeString(keyword)
 
+    // BƯỚC 1: Lấy danh sách ID các nhóm mà User đang tham gia (Nhanh như chớp)
+    const myMemberships = await this.prisma.conversationMember.findMany({
+      where: {
+        userId: userId,
+        ...this.activeMemberWhere,
+      },
+      select: { conversationId: true },
+    })
+
+    // Ép mảng object thành mảng String IDs
+    const myConversationIds = myMemberships.map((m) => m.conversationId)
+
+    if (myConversationIds.length === 0) return []
+
+    // BƯỚC 2: Tìm kiếm Conversation bằng toán tử "in" (Bỏ qua hoàn toàn lệnh Join "some")
     return this.findConversationsWithRetry({
       where: {
+        id: { in: myConversationIds }, // Chỉ tìm trong các nhóm tôi đã tham gia
         type: 'GROUP',
         groupNameSearch: {
-          startsWith: this.normalizeString(keyword),
-          // mode: 'insensitive',
-        },
-        members: {
-          some: {
-            userId,
-            ...this.activeMemberWhere,
-          },
+          startsWith: safeKeyword, // Ăn thẳng vào Index, cực nhanh
         },
       },
+      // Thêm take để chặn đứng việc DB bị quá tải
+      take: 20,
+
+      // Khuyên chân thành: Cắt giảm bớt include nếu UI tìm kiếm không cần thiết
       include: {
         members: {
           where: this.activeMemberWhere,
@@ -465,11 +477,9 @@ export class ConversationRepository {
           take: 1,
           include: {
             senderMember: true,
-            medias: {
-              orderBy: {
-                sortOrder: 'asc',
-              },
-            },
+            // Thật sự UI lúc search có cần load chi tiết cả Media không?
+            // Nếu không cần, hãy xóa mảng medias này đi để nhẹ DB.
+            medias: { orderBy: { sortOrder: 'asc' } },
           },
         },
       },
@@ -480,7 +490,7 @@ export class ConversationRepository {
   }
 
   async findDirectConversationOfFriend(userId: string, keyword: string) {
-    await this.ensureParticipantRoleNormalized()
+    // await this.ensureParticipantRoleNormalized()
 
     // 1️⃣ Tìm member KHÁC user match username
     const matchedMembers = await this.prisma.conversationMember.findMany({

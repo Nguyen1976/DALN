@@ -219,7 +219,7 @@ export const searchConversationsAPI = async (
   const response = await authorizeAxiosInstance.get(
     `${API_ROOT}/chat/search?keyword=${encodeURIComponent(keyword)}`,
   );
-  return response.data.data.conversations || [];
+  return response.data.data || [];
 };
 
 export type MessageType = "TEXT" | "IMAGE" | "VIDEO" | "FILE";

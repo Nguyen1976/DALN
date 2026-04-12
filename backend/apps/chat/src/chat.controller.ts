@@ -369,16 +369,12 @@ export class ChatController {
     @Query('keyword') keyword: string,
     @UserInfo() userInfo: any,
   ) {
-    const res = await this.chatService.searchConversations(
+    const res = (await this.chatService.searchConversations(
       userInfo.userId,
       keyword,
-    )
+    )) as Array<any>
 
-    return {
-      conversations: res.conversations.map((c) =>
-        formatConversationSummary(c, userInfo.userId),
-      ),
-    }
+    return res.map((c) => formatConversationSummary(c, userInfo.userId))
   }
 
   @Get('conversation-by-friend')
@@ -392,8 +388,6 @@ export class ChatController {
       userInfo.userId,
     )
 
-    return {
-      conversation: formatConversationDetail(res.conversation, userInfo.userId),
-    }
+    return formatConversationDetail(res, userInfo.userId)
   }
 }
