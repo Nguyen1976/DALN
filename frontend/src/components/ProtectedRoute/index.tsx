@@ -8,6 +8,7 @@ import {
   ackMessage,
   addMessage,
   failMessage,
+  revokeMessage,
   type Message,
 } from "@/redux/slices/messageSlice";
 import type { AppDispatch } from "@/redux/store";
@@ -34,6 +35,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const dispatch = useDispatch<AppDispatch>();
   const user = useSelector(selectUser);
   const conversations = useSelector(selectConversation);
+  const conversationsRef = useRef(conversations);
 
   useEffect(() => {
     knownConversationIdsRef.current = new Set(
@@ -44,6 +46,10 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     selectedChatIdRef.current = conversationId ?? null;
   }, [conversationId]);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   useEffect(() => {
     const normalizeIncomingMessage = (raw: any): Message | null => {
@@ -169,6 +175,42 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       );
     };
 
+    const revokedMessageHandler = (payload: {
+      conversationId: string;
+      messageId: string;
+      message?: Message;
+    }) => {
+      if (!payload?.conversationId || !payload?.messageId) return;
+
+      const currentConversation = conversationsRef.current.find(
+        (item) => item.id === payload.conversationId,
+      );
+
+      dispatch(
+        revokeMessage({
+          conversationId: payload.conversationId,
+          messageId: payload.messageId,
+        }),
+      );
+
+      if (
+        payload.message &&
+        currentConversation?.lastMessage?.id === payload.messageId
+      ) {
+        const normalized = normalizeIncomingMessage({
+          message: payload.message,
+        });
+        if (normalized) {
+          dispatch(
+            updateNewMessage({
+              conversationId: payload.conversationId,
+              lastMessage: normalized,
+            }),
+          );
+        }
+      }
+    };
+
     const memberAddedHandler = (payload: {
       conversationId: string;
       memberIds: string[];
@@ -252,6 +294,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     socket.on("message:ack", ackHandler);
     socket.on("message:error", errorHandler);
     socket.on("message:system", systemMessageHandler);
+    socket.on("message:revoked", revokedMessageHandler);
     socket.on("conversation:member_added", memberAddedHandler);
     socket.on("conversation:member_removed", memberRemovedHandler);
     socket.on("conversation:member_left", memberLeftHandler);
@@ -262,6 +305,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       socket.off("message:ack", ackHandler);
       socket.off("message:error", errorHandler);
       socket.off("message:system", systemMessageHandler);
+      socket.off("message:revoked", revokedMessageHandler);
       socket.off("conversation:member_added", memberAddedHandler);
       socket.off("conversation:member_removed", memberRemovedHandler);
       socket.off("conversation:member_left", memberLeftHandler);

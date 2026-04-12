@@ -20,6 +20,9 @@ import {
   CreateMessageUploadUrlDTO,
   ConversationAssetKind,
   MessageType,
+  RevokeMessageDTO,
+  DeleteMessageForMeDTO,
+  ClearConversationHistoryDTO,
 } from './http/chat-http.dto'
 
 // Reusable response formatters
@@ -312,6 +315,44 @@ export class ChatController {
         cursor: cursor || null,
       },
     )
+  }
+
+  @Post('messages/revoke')
+  @RequireLogin()
+  async revokeMessage(
+    @Body() body: RevokeMessageDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    return await this.chatService.revokeMessage({
+      conversationId: body.conversationId,
+      messageId: body.messageId,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Post('messages/delete-for-me')
+  @RequireLogin()
+  async deleteMessageForMe(
+    @Body() body: DeleteMessageForMeDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    return await this.chatService.deleteMessageForMe({
+      conversationId: body.conversationId,
+      messageId: body.messageId,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Post('conversations/clear-history')
+  @RequireLogin()
+  async clearConversationHistory(
+    @Body() body: ClearConversationHistoryDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    return await this.chatService.clearConversationHistory({
+      conversationId: body.conversationId,
+      userId: userInfo.userId,
+    })
   }
 
   @Get('assets')

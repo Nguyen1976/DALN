@@ -10,6 +10,7 @@ export const SOCKET_EVENTS = {
     MESSAGE_ACK: 'message:ack',
     MESSAGE_ERROR: 'message:error',
     MESSAGE_SYSTEM: 'message:system',
+    MESSAGE_REVOKED: 'message:revoked',
     CONVERSATION_MEMBER_ADDED: 'conversation:member_added',
     CONVERSATION_MEMBER_REMOVED: 'conversation:member_removed',
     CONVERSATION_MEMBER_LEFT: 'conversation:member_left',

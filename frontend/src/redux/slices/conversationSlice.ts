@@ -167,7 +167,9 @@ export const conversationSlice = createSlice({
         ...updatedConversation,
         lastMessage,
         lastMessageAt: lastMessage.createdAt,
-        lastMessageText: lastMessage.text || lastMessage.content || "",
+        lastMessageText: lastMessage.isRevoked
+          ? "Tin nhắn đã bị thu hồi"
+          : lastMessage.text || lastMessage.content || "",
         lastMessageSenderId: lastMessage.senderId,
         lastMessageSenderName:
           lastMessage.senderMember?.fullName ||

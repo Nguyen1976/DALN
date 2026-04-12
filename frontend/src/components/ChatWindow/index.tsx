@@ -8,6 +8,7 @@ import {
   Smile,
   Send,
   CircleChevronDown,
+  Trash2,
 } from "lucide-react";
 import {
   addConversation,
@@ -27,8 +28,12 @@ import {
   getMessages,
   selectMessagePagination,
   selectMessage,
+  revokeMessage as revokeMessageAction,
+  deleteMessageForMe as deleteMessageForMeAction,
+  clearConversationMessages,
   type Message,
 } from "@/redux/slices/messageSlice";
+import { clearConversationSeenStatus } from "@/redux/slices/seenStatusSlice";
 import { selectTypingUsersInConversation } from "@/redux/slices/typingIndicatorSlice";
 import MessageComponent from "./Messages";
 import EmojiPicker from "emoji-picker-react";
@@ -41,7 +46,10 @@ import { socket } from "@/lib/socket";
 import { useLocation } from "react-router";
 import {
   createMessageUploadUrlAPI,
+  clearConversationHistoryAPI,
+  deleteMessageForMeAPI,
   getConversationByIdAPI,
+  revokeMessageAPI,
   uploadFileToSignedUrl,
   type MessageMediaInput,
 } from "@/apis";
@@ -49,6 +57,22 @@ import { useConversationRoom } from "@/hooks/useConversationRoom";
 import { useTypingIndicator } from "@/hooks/useTypingIndicator";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
 import { TypingIndicator } from "@/components/TypingIndicator";
+import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface ChatWindowProps {
   conversationId?: string;
@@ -76,6 +100,7 @@ export default function ChatWindow({
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(
     null,
   );
+  const [showClearHistoryDialog, setShowClearHistoryDialog] = useState(false);
   const hydratedConversationRef = useRef<string | null>(null);
 
   const dispatch = useDispatch<AppDispatch>();
@@ -200,6 +225,112 @@ export default function ChatWindow({
       conversationId: conversationId || "",
       enabled: canSendMessage && !!conversationId,
     });
+
+  const handleRevokeMessage = useCallback(
+    async (message: Message) => {
+      if (!conversationId) return;
+
+      const isTempMessage =
+        message.id.startsWith("temp-") || message.status === "pending";
+
+      if (isTempMessage) {
+        toast.error("Không thể thu hồi tin nhắn chưa gửi xong");
+        return;
+      }
+
+      try {
+        const result = await revokeMessageAPI({
+          conversationId,
+          messageId: message.id,
+        });
+
+        dispatch(
+          revokeMessageAction({
+            conversationId,
+            messageId: result?.message?.id || message.id,
+          }),
+        );
+
+        if (messages[messages.length - 1]?.id === message.id) {
+          dispatch(
+            updateNewMessage({
+              conversationId,
+              lastMessage: {
+                ...(result?.message || message),
+                id: result?.message?.id || message.id,
+                isRevoked: true,
+                content: "",
+                text: "Tin nhắn đã bị thu hồi",
+              } as Message,
+            }),
+          );
+        }
+
+        toast.success("Đã thu hồi tin nhắn");
+      } catch {
+        toast.error("Không thể thu hồi tin nhắn");
+      }
+    },
+    [conversationId, dispatch, messages],
+  );
+
+  const handleDeleteMessageForMe = useCallback(
+    async (message: Message) => {
+      if (!conversationId) return;
+
+      try {
+        const isTempMessage =
+          message.id.startsWith("temp-") || message.status === "pending";
+        const latestMessage = messages[messages.length - 1];
+
+        if (!isTempMessage) {
+          await deleteMessageForMeAPI({
+            conversationId,
+            messageId: message.id,
+          });
+        }
+
+        dispatch(
+          deleteMessageForMeAction({
+            conversationId,
+            messageId: message.id,
+          }),
+        );
+
+        if (latestMessage?.id === message.id) {
+          const nextLatest = messages[messages.length - 2];
+          if (nextLatest) {
+            dispatch(
+              updateNewMessage({
+                conversationId,
+                lastMessage: nextLatest,
+              }),
+            );
+          }
+        }
+
+        toast.success("Đã xóa tin nhắn ở phía bạn");
+      } catch {
+        toast.error("Không thể xóa tin nhắn");
+      }
+    },
+    [conversationId, dispatch, messages],
+  );
+
+  const handleClearHistory = useCallback(async () => {
+    if (!conversationId) return;
+
+    try {
+      await clearConversationHistoryAPI({ conversationId });
+      dispatch(clearConversationMessages({ conversationId }));
+      dispatch(clearConversationSeenStatus(conversationId));
+      dispatch(markConversationRead({ conversationId }));
+      setShowClearHistoryDialog(false);
+      toast.success("Đã xóa toàn bộ lịch sử trò chuyện");
+    } catch {
+      toast.error("Không thể xóa lịch sử trò chuyện");
+    }
+  }, [conversationId, dispatch]);
 
   useEffect(() => {
     if (!isAtBottom) return;
@@ -583,14 +714,32 @@ export default function ChatWindow({
           >
             <Video className="w-5 h-5" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleProfile}
-            className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
-          >
-            <MoreVertical className="w-5 h-5" />
-          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
+              >
+                <MoreVertical className="w-5 h-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 bg-popover">
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={onToggleProfile}>
+                  Xem chi tiết đoạn chat
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => setShowClearHistoryDialog(true)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Xóa toàn bộ lịch sử
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -618,6 +767,8 @@ export default function ChatWindow({
           messages={messages}
           highlightMessageId={highlightMessageId}
           seenMessages={seenMessages}
+          onRevokeMessage={handleRevokeMessage}
+          onDeleteMessageForMe={handleDeleteMessageForMe}
         />
 
         {/* Typing Indicator */}
@@ -734,6 +885,35 @@ export default function ChatWindow({
           <Send className="w-5 h-5" />
         </Button>
       </div>
+
+      <Dialog
+        open={showClearHistoryDialog}
+        onOpenChange={setShowClearHistoryDialog}
+      >
+        <DialogContent className="bg-background text-foreground">
+          <DialogHeader>
+            <DialogTitle>Xóa toàn bộ lịch sử trò chuyện?</DialogTitle>
+            <DialogDescription>
+              Hành động này chỉ ẩn lịch sử ở phía bạn. Người khác vẫn nhìn thấy
+              tin nhắn bình thường.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowClearHistoryDialog(false)}
+            >
+              Hủy
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleClearHistory()}
+            >
+              Xóa lịch sử
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

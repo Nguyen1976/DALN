@@ -28,6 +28,23 @@ interface CreateConversationData {
   groupAvatarFilename?: string
 }
 
+interface RevokeMessageRequest {
+  conversationId: string
+  messageId: string
+  userId: string
+}
+
+interface DeleteMessageForMeRequest {
+  conversationId: string
+  messageId: string
+  userId: string
+}
+
+interface ClearConversationHistoryRequest {
+  conversationId: string
+  userId: string
+}
+
 @Injectable()
 export class ChatService {
   private readonly uploadLimitByType: Record<string, number> = {
@@ -551,16 +568,129 @@ export class ChatService {
     const take = Number(params.limit) || 20
     const cursor = params.cursor ? new Date(params.cursor) : null
 
-    const messages = await this.messageRepo.findByConversationIdPaginated(
-      conversationId,
-      take,
-      cursor,
-    )
+    const messages =
+      await this.messageRepo.findByConversationIdPaginatedForUser(
+        conversationId,
+        userId,
+        take,
+        cursor,
+      )
 
     return {
       messages: messages.map((m) => ({
         ...this.normalizeMessage(m),
       })),
+    }
+  }
+
+  async revokeMessage(data: RevokeMessageRequest) {
+    const message = await this.messageRepo.findById(
+      data.messageId,
+      data.conversationId,
+    )
+
+    if (!message) {
+      ChatErrors.messageNotFound()
+    }
+
+    if (String(message.senderId) !== String(data.userId)) {
+      ChatErrors.notMessageOwner()
+    }
+
+    const updated = await this.messageRepo.revokeMessage(
+      data.messageId,
+      data.conversationId,
+      data.userId,
+    )
+
+    if (!updated.count) {
+      ChatErrors.messageNotFound()
+    }
+
+    const conversationMembers = await this.memberRepo.findByConversationId(
+      data.conversationId,
+    )
+
+    const senderMember = conversationMembers.find(
+      (member) => member.userId === String(message.senderId),
+    )
+
+    const revokedMessage = {
+      ...message,
+      senderMember: senderMember
+        ? {
+            userId: senderMember.userId,
+            username: senderMember.username,
+            fullName: senderMember.fullName,
+            avatar: senderMember.avatar,
+          }
+        : undefined,
+      isRevoked: true,
+      content: '',
+    }
+
+    this.eventsPublisher.publishMessageRevoked(
+      {
+        conversationId: data.conversationId,
+        messageId: data.messageId,
+        message: revokedMessage,
+      },
+      conversationMembers.map((member) => member.userId),
+    )
+
+    return {
+      message: this.normalizeMessage(revokedMessage),
+    }
+  }
+
+  async deleteMessageForMe(data: DeleteMessageForMeRequest) {
+    const member = await this.memberRepo.findByConversationIdAndUserId(
+      data.conversationId,
+      data.userId,
+    )
+
+    if (!member) {
+      ChatErrors.userNotMember()
+    }
+
+    const message = await this.messageRepo.findById(
+      data.messageId,
+      data.conversationId,
+    )
+
+    if (!message) {
+      ChatErrors.messageNotFound()
+    }
+
+    await this.messageRepo.createDeleteMessage(data.messageId, data.userId)
+
+    return {
+      messageId: data.messageId,
+      conversationId: data.conversationId,
+    }
+  }
+
+  async clearConversationHistory(data: ClearConversationHistoryRequest) {
+    const member = await this.memberRepo.findByConversationIdAndUserId(
+      data.conversationId,
+      data.userId,
+    )
+
+    if (!member) {
+      ChatErrors.userNotMember()
+    }
+
+    const clearedHistoryAt = new Date()
+
+    await this.memberRepo.clearHistoryForMember(
+      data.conversationId,
+      data.userId,
+      clearedHistoryAt,
+    )
+
+    return {
+      conversationId: data.conversationId,
+      clearedHistoryAt: clearedHistoryAt.toISOString(),
     }
   }
 

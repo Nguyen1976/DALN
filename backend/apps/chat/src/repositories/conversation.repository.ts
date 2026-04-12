@@ -340,6 +340,14 @@ export class ConversationRepository {
             },
           },
         })
+
+        await transaction.deleteMessage.deleteMany({
+          where: {
+            messageId: {
+              in: messageIds,
+            },
+          },
+        })
       }
 
       await transaction.message.deleteMany({

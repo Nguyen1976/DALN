@@ -85,4 +85,18 @@ export class ChatErrors {
       message: 'Admin không thể rời nhóm. Hãy chuyển quyền admin trước.',
     })
   }
+
+  static messageNotFound(): never {
+    throw new RpcException({
+      code: status.NOT_FOUND,
+      message: 'Message not found',
+    })
+  }
+
+  static notMessageOwner(): never {
+    throw new RpcException({
+      code: status.PERMISSION_DENIED,
+      message: 'You can only perform this action on your own message',
+    })
+  }
 }

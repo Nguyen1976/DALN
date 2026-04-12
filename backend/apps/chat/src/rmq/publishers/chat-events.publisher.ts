@@ -1,7 +1,10 @@
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
 import { Injectable } from '@nestjs/common'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
-import { EmitToUserPayload } from 'libs/constant/rmq/payload'
+import {
+  EmitToUserPayload,
+  MessageRevokedPayload,
+} from 'libs/constant/rmq/payload'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 
@@ -202,6 +205,21 @@ export class ChatEventsPublisher {
       {
         userIds: [userId],
         event: SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+        data: payload,
+      } as EmitToUserPayload,
+    )
+  }
+
+  publishMessageRevoked(
+    payload: MessageRevokedPayload,
+    userIds: string[],
+  ): void {
+    this.amqpConnection.publish(
+      EXCHANGE_RMQ.REALTIME_EVENTS,
+      ROUTING_RMQ.EMIT_REALTIME_EVENT,
+      {
+        userIds,
+        event: SOCKET_EVENTS.CHAT.MESSAGE_REVOKED,
         data: payload,
       } as EmitToUserPayload,
     )

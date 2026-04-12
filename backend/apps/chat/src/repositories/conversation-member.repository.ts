@@ -319,6 +319,27 @@ export class ConversationMemberRepository {
     })
   }
 
+  async clearHistoryForMember(
+    conversationId: string,
+    userId: string,
+    clearedHistoryAt: Date,
+  ) {
+    await this.ensureUnreadCountInitialized()
+
+    return await this.prisma.conversationMember.updateMany({
+      where: {
+        conversationId,
+        userId,
+      },
+      data: {
+        clearedHistoryAt,
+        unreadCount: 0,
+        lastReadAt: clearedHistoryAt,
+        lastReadMessageId: null,
+      },
+    })
+  }
+
   async updateByUserId(
     userId: string,
     data: {

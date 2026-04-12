@@ -4,13 +4,23 @@ import { selectUser } from "@/redux/slices/userSlice";
 import { formatDateTime } from "@/utils/formatDateTime";
 import { useSelector } from "react-redux";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
-import { FileText, User } from "lucide-react";
+import { FileText, MoreVertical, RotateCcw, Trash2, User } from "lucide-react";
 import { SeenStatus } from "@/components/SeenStatus";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 
 const MessageComponent = ({
   messages,
   highlightMessageId,
   seenMessages = {},
+  onRevokeMessage,
+  onDeleteMessageForMe,
 }: {
   messages: Message[];
   highlightMessageId?: string | null;
@@ -18,6 +28,8 @@ const MessageComponent = ({
     string,
     { userId: string; username?: string; avatar?: string }[]
   >;
+  onRevokeMessage?: (message: Message) => void;
+  onDeleteMessageForMe?: (message: Message) => void;
 }) => {
   const user = useSelector(selectUser);
 
@@ -77,6 +89,11 @@ const MessageComponent = ({
         const isSameAsNext = nextMessage?.senderId === message.senderId;
 
         const showAvatar = !isSameAsPrev;
+        const isRevoked = Boolean(message.isRevoked);
+        const canRevoke =
+          isMine &&
+          !message.id.startsWith("temp-") &&
+          message.status !== "pending";
 
         return (
           <div
@@ -106,7 +123,7 @@ const MessageComponent = ({
 
               <div
                 className={cn(
-                  "max-w-md px-4 py-2 text-sm",
+                  "group relative max-w-md px-4 py-2 text-sm",
                   isMine
                     ? "bg-bg-box-message-out text-text"
                     : "bg-bg-box-message-incoming text-text",
@@ -125,57 +142,104 @@ const MessageComponent = ({
                       ),
                 )}
               >
-                {message.medias?.map((media, mediaIndex) => {
-                  const mediaKind = resolveMediaKind(media);
+                {!isRevoked &&
+                  message.medias?.map((media, mediaIndex) => {
+                    const mediaKind = resolveMediaKind(media);
 
-                  if (mediaKind === "IMAGE") {
+                    if (mediaKind === "IMAGE") {
+                      return (
+                        <img
+                          key={`${message.id}-${mediaIndex}`}
+                          src={media.url}
+                          alt="image-message"
+                          className="max-w-70 max-h-90 rounded-lg mb-2 object-cover"
+                        />
+                      );
+                    }
+
+                    if (mediaKind === "VIDEO") {
+                      return (
+                        <video
+                          key={`${message.id}-${mediaIndex}`}
+                          src={media.url}
+                          controls
+                          className="max-w-75 max-h-90 rounded-lg mb-2"
+                        />
+                      );
+                    }
+
                     return (
-                      <img
+                      <a
                         key={`${message.id}-${mediaIndex}`}
-                        src={media.url}
-                        alt="image-message"
-                        className="max-w-70 max-h-90 rounded-lg mb-2 object-cover"
-                      />
-                    );
-                  }
-
-                  if (mediaKind === "VIDEO") {
-                    return (
-                      <video
-                        key={`${message.id}-${mediaIndex}`}
-                        src={media.url}
-                        controls
-                        className="max-w-75 max-h-90 rounded-lg mb-2"
-                      />
-                    );
-                  }
-
-                  return (
-                    <a
-                      key={`${message.id}-${mediaIndex}`}
-                      href={media.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mb-2 block rounded-lg border border-bg-box-message-incoming px-3 py-2 hover:opacity-90"
-                    >
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 shrink-0 text-blue-300" />
-                        <div className="min-w-0">
-                          <p className="truncate text-sm text-blue-300">
-                            {getFileNameFromUrl(media.url)}
-                          </p>
-                          <p className="text-xs text-gray-400">
-                            {formatBytes(media.size) || "Mở tệp"}
-                          </p>
+                        href={media.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mb-2 block rounded-lg border border-bg-box-message-incoming px-3 py-2 hover:opacity-90"
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 shrink-0 text-blue-300" />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm text-blue-300">
+                              {getFileNameFromUrl(media.url)}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              {formatBytes(media.size) || "Mở tệp"}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </a>
-                  );
-                })}
+                      </a>
+                    );
+                  })}
 
-                {message.text ? (
+                {isRevoked ? (
+                  <p className="italic text-muted-foreground">
+                    Tin nhắn đã bị thu hồi
+                  </p>
+                ) : message.text ? (
                   <p className="wrap-break-word">{message.text}</p>
                 ) : null}
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Message actions"
+                      className={cn(
+                        "absolute top-1 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent",
+                        isMine ? "-left-9" : "-right-9",
+                      )}
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align={isMine ? "end" : "start"}
+                    className="w-56 bg-popover text-popover-foreground"
+                  >
+                    {canRevoke && (
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem
+                          onClick={() => onRevokeMessage?.(message)}
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Thu hồi
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    )}
+
+                    {isMine && <DropdownMenuSeparator />}
+
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => onDeleteMessageForMe?.(message)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Xóa chỉ ở phía tôi
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 {/* Hiện time ở tin cuối */}
                 {!isSameAsNext && (

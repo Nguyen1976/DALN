@@ -238,6 +238,38 @@ export const searchConversationsAPI = async (
   return response.data.data || [];
 };
 
+export const revokeMessageAPI = async (data: {
+  conversationId: string;
+  messageId: string;
+}) => {
+  const response = await authorizeAxiosInstance.post(
+    `${API_ROOT}/chat/messages/revoke`,
+    data,
+  );
+  return response.data.data;
+};
+
+export const deleteMessageForMeAPI = async (data: {
+  conversationId: string;
+  messageId: string;
+}) => {
+  const response = await authorizeAxiosInstance.post(
+    `${API_ROOT}/chat/messages/delete-for-me`,
+    data,
+  );
+  return response.data.data;
+};
+
+export const clearConversationHistoryAPI = async (data: {
+  conversationId: string;
+}) => {
+  const response = await authorizeAxiosInstance.post(
+    `${API_ROOT}/chat/conversations/clear-history`,
+    data,
+  );
+  return response.data.data;
+};
+
 export type MessageType = "TEXT" | "IMAGE" | "VIDEO" | "FILE";
 
 export interface UploadMediaUrlResponse {

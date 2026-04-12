@@ -26,6 +26,7 @@ export interface Message {
   clientMessageId?: string;
   replyToMessageId?: string | undefined;
   isDeleted?: boolean;
+  isRevoked?: boolean;
   deleteType?: string;
   createdAt?: string;
   senderMember?: SenderMember | undefined;
@@ -169,6 +170,51 @@ export const messageSlice = createSlice({
         };
       }
     },
+    revokeMessage: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        messageId: string;
+      }>,
+    ) => {
+      const { conversationId, messageId } = action.payload;
+      const currentMessages = state.messages[conversationId] || [];
+      const index = currentMessages.findIndex(
+        (message) =>
+          message.id === messageId || message.clientMessageId === messageId,
+      );
+
+      if (index !== -1) {
+        currentMessages[index] = {
+          ...currentMessages[index],
+          isRevoked: true,
+          content: "",
+          text: "",
+          medias: [],
+        };
+      }
+    },
+    deleteMessageForMe: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        messageId: string;
+      }>,
+    ) => {
+      const { conversationId, messageId } = action.payload;
+      const currentMessages = state.messages[conversationId] || [];
+      state.messages[conversationId] = currentMessages.filter(
+        (message) =>
+          message.id !== messageId && message.clientMessageId !== messageId,
+      );
+    },
+    clearConversationMessages: (
+      state,
+      action: PayloadAction<{ conversationId: string }>,
+    ) => {
+      delete state.messages[action.payload.conversationId];
+      delete state.pagination[action.payload.conversationId];
+    },
   },
   extraReducers: (builder) => {
     builder.addCase(
@@ -255,5 +301,12 @@ export const selectMessagePagination = createSelector(
   },
 );
 
-export const { addMessage, ackMessage, failMessage } = messageSlice.actions;
+export const {
+  addMessage,
+  ackMessage,
+  failMessage,
+  revokeMessage,
+  deleteMessageForMe,
+  clearConversationMessages,
+} = messageSlice.actions;
 export default messageSlice.reducer;

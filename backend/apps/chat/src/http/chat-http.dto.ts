@@ -87,3 +87,24 @@ export class CreateMessageUploadUrlDTO {
   @IsNotEmpty()
   size: string
 }
+
+export class RevokeMessageDTO {
+  @IsNotEmpty()
+  conversationId: string
+
+  @IsNotEmpty()
+  messageId: string
+}
+
+export class DeleteMessageForMeDTO {
+  @IsNotEmpty()
+  conversationId: string
+
+  @IsNotEmpty()
+  messageId: string
+}
+
+export class ClearConversationHistoryDTO {
+  @IsNotEmpty()
+  conversationId: string
+}

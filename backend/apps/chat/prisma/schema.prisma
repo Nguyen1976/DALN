@@ -66,6 +66,7 @@ model conversationMember {
   unreadCount       Int               @default(0)
   lastReadMessageId String?           @db.ObjectId
   lastReadAt        DateTime?
+  clearedHistoryAt  DateTime?
   joinedAt          DateTime          @default(now())
   conversation      conversation      @relation(fields: [conversationId], references: [id])
   sentMessages      message[]         @relation("SenderMessages")
@@ -85,6 +86,7 @@ model message {
   type            messageType        @default(TEXT)
   content         String?
   replyToMessageId String?           @db.ObjectId
+  isRevoked       Boolean            @default(false)
   isDeleted       Boolean            @default(false)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
@@ -95,6 +97,17 @@ model message {
   medias          messageMedia[]
 
   @@index([conversationId, createdAt, id])
+}
+
+model DeleteMessage {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  messageId String   @db.ObjectId
+  userId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([userId, createdAt])
+  @@index([messageId])
 }
 
 model messageMedia {

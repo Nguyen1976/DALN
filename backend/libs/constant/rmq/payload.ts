@@ -87,6 +87,12 @@ export interface MessageAckPayload {
   message: any
 }
 
+export interface MessageRevokedPayload {
+  conversationId: string
+  messageId: string
+  message: any
+}
+
 export interface MessageErrorPayload {
   clientMessageId?: string
   code: string
