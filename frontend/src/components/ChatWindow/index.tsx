@@ -9,6 +9,11 @@ import {
   Send,
   CircleChevronDown,
   Trash2,
+  Plus,
+  X,
+  Settings,
+  Lock,
+  ListChecks,
 } from "lucide-react";
 import {
   addConversation,
@@ -31,6 +36,7 @@ import {
   revokeMessage as revokeMessageAction,
   deleteMessageForMe as deleteMessageForMeAction,
   clearConversationMessages,
+  updateMessagePoll,
   type Message,
 } from "@/redux/slices/messageSlice";
 import { clearConversationSeenStatus } from "@/redux/slices/seenStatusSlice";
@@ -45,11 +51,14 @@ import {
 import { socket } from "@/lib/socket";
 import { useLocation } from "react-router";
 import {
+  closePollAPI,
+  createPollAPI,
   createMessageUploadUrlAPI,
   clearConversationHistoryAPI,
   deleteMessageForMeAPI,
   getConversationByIdAPI,
   revokeMessageAPI,
+  submitPollVoteAPI,
   uploadFileToSignedUrl,
   type MessageMediaInput,
 } from "@/apis";
@@ -60,6 +69,7 @@ import { TypingIndicator } from "@/components/TypingIndicator";
 import { toast } from "sonner";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -73,6 +83,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface ChatWindowProps {
   conversationId?: string;
@@ -101,6 +112,25 @@ export default function ChatWindow({
     null,
   );
   const [showClearHistoryDialog, setShowClearHistoryDialog] = useState(false);
+  const [showCreatePollDialog, setShowCreatePollDialog] = useState(false);
+  const [showPollDetailDialog, setShowPollDetailDialog] = useState(false);
+  const [showClosePollConfirmDialog, setShowClosePollConfirmDialog] =
+    useState(false);
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState<string[]>(["", ""]);
+  const [isMultipleChoicePoll, setIsMultipleChoicePoll] = useState(true);
+  const [activePollMessageId, setActivePollMessageId] = useState<string | null>(
+    null,
+  );
+  const [selectedVoteOptionIds, setSelectedVoteOptionIds] = useState<string[]>(
+    [],
+  );
+  const [pollVoteSelections, setPollVoteSelections] = useState<
+    Record<string, string[]>
+  >({});
+  const [pollStats, setPollStats] = useState<
+    Record<string, { totalVoters: number; totalVotes: number }>
+  >({});
   const hydratedConversationRef = useRef<string | null>(null);
 
   const dispatch = useDispatch<AppDispatch>();
@@ -145,6 +175,39 @@ export default function ChatWindow({
   const pagination = useSelector((state: RootState) =>
     selectMessagePagination(state, conversationId),
   );
+
+  const activePollMessage = messages.find(
+    (message) => message.id === activePollMessageId,
+  );
+  const activePoll = activePollMessage?.poll;
+  const activePollTotalVotes = activePoll
+    ? (pollStats[activePoll.id]?.totalVotes ??
+      activePoll.options.reduce((sum, option) => sum + option.count, 0))
+    : 0;
+  const activePollTotalVoters = activePoll
+    ? (pollStats[activePoll.id]?.totalVoters ?? 0)
+    : 0;
+
+  const normalizedCreateOptions = pollOptions
+    .map((option) => option.trim())
+    .filter(Boolean);
+  const duplicateOptionMap = new Map<string, number>();
+  normalizedCreateOptions.forEach((option) => {
+    const key = option.toLowerCase();
+    duplicateOptionMap.set(key, (duplicateOptionMap.get(key) || 0) + 1);
+  });
+  const hasDuplicateOptions = Array.from(duplicateOptionMap.values()).some(
+    (count) => count > 1,
+  );
+  const canCreatePoll =
+    Boolean(pollQuestion.trim()) &&
+    normalizedCreateOptions.length >= 2 &&
+    !hasDuplicateOptions;
+
+  useEffect(() => {
+    if (!activePoll) return;
+    setSelectedVoteOptionIds(pollVoteSelections[activePoll.id] || []);
+  }, [activePoll, pollVoteSelections]);
 
   // Get typing users in this conversation
   const typingUsers = useSelector((state: RootState) =>
@@ -331,6 +394,293 @@ export default function ChatWindow({
       toast.error("Không thể xóa lịch sử trò chuyện");
     }
   }, [conversationId, dispatch]);
+
+  const handleOpenCreatePollDialog = useCallback(() => {
+    setPollQuestion("");
+    setPollOptions(["", ""]);
+    setIsMultipleChoicePoll(true);
+    setShowCreatePollDialog(true);
+  }, []);
+
+  const handleCreatePoll = useCallback(async () => {
+    if (!conversationId || !canCreatePoll) return;
+
+    try {
+      const result = await createPollAPI({
+        conversationId,
+        question: pollQuestion.trim(),
+        options: normalizedCreateOptions,
+        isMultipleChoice: isMultipleChoicePoll,
+      });
+
+      if (result?.message) {
+        dispatch(addMessage(result.message as Message));
+        dispatch(
+          updateNewMessage({
+            conversationId,
+            lastMessage: result.message as Message,
+          }),
+        );
+
+        if (result.poll?.id) {
+          setPollStats((prev) => ({
+            ...prev,
+            [result.poll.id]: {
+              totalVoters: 0,
+              totalVotes: 0,
+            },
+          }));
+        }
+      }
+
+      setShowCreatePollDialog(false);
+      toast.success("Tạo bình chọn thành công");
+    } catch {
+      toast.error("Không thể tạo bình chọn");
+    }
+  }, [
+    canCreatePoll,
+    conversationId,
+    dispatch,
+    isMultipleChoicePoll,
+    normalizedCreateOptions,
+    pollQuestion,
+  ]);
+
+  const handleOpenPoll = useCallback(
+    (message: Message) => {
+      if (!message.poll) return;
+      setActivePollMessageId(message.id);
+      setSelectedVoteOptionIds(pollVoteSelections[message.poll.id] || []);
+      setShowPollDetailDialog(true);
+    },
+    [pollVoteSelections],
+  );
+
+  const handleToggleVoteOption = useCallback(
+    (optionId: string) => {
+      if (!activePoll || activePoll.isClosed) return;
+
+      setSelectedVoteOptionIds((prev) => {
+        if (activePoll.isMultipleChoice) {
+          return prev.includes(optionId)
+            ? prev.filter((id) => id !== optionId)
+            : [...prev, optionId];
+        }
+
+        if (prev.includes(optionId)) return [];
+        return [optionId];
+      });
+    },
+    [activePoll],
+  );
+
+  const handleSubmitPollVote = useCallback(async () => {
+    if (!activePoll || !activePollMessage || selectedVoteOptionIds.length < 1) {
+      return;
+    }
+
+    const previousOptions = activePoll.options;
+    const previousSelection = pollVoteSelections[activePoll.id] || [];
+    const previousStats = pollStats[activePoll.id] || {
+      totalVoters: 0,
+      totalVotes: previousOptions.reduce(
+        (sum, option) => sum + option.count,
+        0,
+      ),
+    };
+
+    const previousSet = new Set(previousSelection);
+    const nextSet = new Set(selectedVoteOptionIds);
+
+    const optimisticOptions = previousOptions.map((option) => {
+      const wasSelected = previousSet.has(option.id);
+      const isSelected = nextSet.has(option.id);
+      if (wasSelected === isSelected) return option;
+
+      return {
+        ...option,
+        count: Math.max(0, option.count + (isSelected ? 1 : -1)),
+      };
+    });
+
+    dispatch(
+      updateMessagePoll({
+        conversationId: activePollMessage.conversationId,
+        messageId: activePollMessage.id,
+        poll: {
+          ...activePoll,
+          options: optimisticOptions,
+        },
+      }),
+    );
+
+    const optimisticTotalVotes = optimisticOptions.reduce(
+      (sum, option) => sum + option.count,
+      0,
+    );
+    const optimisticTotalVoters = Math.max(
+      0,
+      previousStats.totalVoters + (previousSelection.length ? 0 : 1),
+    );
+
+    setPollVoteSelections((prev) => ({
+      ...prev,
+      [activePoll.id]: selectedVoteOptionIds,
+    }));
+    setPollStats((prev) => ({
+      ...prev,
+      [activePoll.id]: {
+        totalVoters: optimisticTotalVoters,
+        totalVotes: optimisticTotalVotes,
+      },
+    }));
+
+    try {
+      const result = await submitPollVoteAPI({
+        pollId: activePoll.id,
+        optionIds: selectedVoteOptionIds,
+      });
+
+      dispatch(
+        updateMessagePoll({
+          conversationId: result.conversationId,
+          messageId: result.messageId,
+          poll: {
+            ...activePoll,
+            isClosed: result.isClosed,
+            closedAt: result.closedAt || null,
+            options: result.options,
+          },
+        }),
+      );
+
+      setPollVoteSelections((prev) => ({
+        ...prev,
+        [activePoll.id]: result.userVoteOptionIds || selectedVoteOptionIds,
+      }));
+      setPollStats((prev) => ({
+        ...prev,
+        [activePoll.id]: {
+          totalVoters:
+            result.totalVoters || prev[activePoll.id]?.totalVoters || 0,
+          totalVotes: result.options.reduce(
+            (sum, option) => sum + option.count,
+            0,
+          ),
+        },
+      }));
+
+      toast.success("Đã cập nhật bình chọn");
+    } catch {
+      dispatch(
+        updateMessagePoll({
+          conversationId: activePollMessage.conversationId,
+          messageId: activePollMessage.id,
+          poll: {
+            ...activePoll,
+            options: previousOptions,
+          },
+        }),
+      );
+      setPollVoteSelections((prev) => ({
+        ...prev,
+        [activePoll.id]: previousSelection,
+      }));
+      setPollStats((prev) => ({
+        ...prev,
+        [activePoll.id]: previousStats,
+      }));
+      toast.error("Không thể gửi bình chọn");
+    }
+  }, [
+    activePoll,
+    activePollMessage,
+    dispatch,
+    pollStats,
+    pollVoteSelections,
+    selectedVoteOptionIds,
+  ]);
+
+  const handleClosePoll = useCallback(async () => {
+    if (!activePoll || !activePollMessage) return;
+
+    try {
+      const result = await closePollAPI({
+        pollId: activePoll.id,
+      });
+
+      dispatch(
+        updateMessagePoll({
+          conversationId: result.conversationId,
+          messageId: result.messageId,
+          poll: {
+            ...activePoll,
+            isClosed: true,
+            closedAt: result.closedAt || new Date().toISOString(),
+          },
+        }),
+      );
+      setShowClosePollConfirmDialog(false);
+      toast.success("Đã đóng bình chọn");
+    } catch {
+      toast.error("Không thể đóng bình chọn");
+    }
+  }, [activePoll, activePollMessage, dispatch]);
+
+  useEffect(() => {
+    const handlePollUpdated = (payload: {
+      pollId: string;
+      totalVoters: number;
+      options: Array<{ id: string; text: string; count: number }>;
+    }) => {
+      if (!payload?.pollId) return;
+
+      setPollStats((prev) => ({
+        ...prev,
+        [payload.pollId]: {
+          totalVoters: payload.totalVoters || 0,
+          totalVotes: (payload.options || []).reduce(
+            (sum, option) => sum + Number(option.count || 0),
+            0,
+          ),
+        },
+      }));
+    };
+
+    const handlePollClosed = (payload: {
+      pollId: string;
+      options: Array<{ id: string; text: string; count: number }>;
+    }) => {
+      if (!payload?.pollId) return;
+
+      setPollStats((prev) => {
+        const current = prev[payload.pollId] || {
+          totalVoters: 0,
+          totalVotes: 0,
+        };
+
+        return {
+          ...prev,
+          [payload.pollId]: {
+            totalVoters: current.totalVoters,
+            totalVotes: (payload.options || []).reduce(
+              (sum, option) => sum + Number(option.count || 0),
+              0,
+            ),
+          },
+        };
+      });
+    };
+
+    socket.on(SOCKET_EVENTS.CHAT.POLL_UPDATED, handlePollUpdated);
+    socket.on(SOCKET_EVENTS.CHAT.POLL_CLOSED, handlePollClosed);
+
+    return () => {
+      socket.off(SOCKET_EVENTS.CHAT.POLL_UPDATED, handlePollUpdated);
+      socket.off(SOCKET_EVENTS.CHAT.POLL_CLOSED, handlePollClosed);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isAtBottom) return;
@@ -769,6 +1119,8 @@ export default function ChatWindow({
           seenMessages={seenMessages}
           onRevokeMessage={handleRevokeMessage}
           onDeleteMessageForMe={handleDeleteMessageForMe}
+          onOpenPoll={handleOpenPoll}
+          pollVoteSelections={pollVoteSelections}
         />
 
         {/* Typing Indicator */}
@@ -816,6 +1168,16 @@ export default function ChatWindow({
           className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
         >
           <Paperclip className="w-5 h-5" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={!canSendMessage}
+          onClick={handleOpenCreatePollDialog}
+          className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
+        >
+          <ListChecks className="w-5 h-5" />
         </Button>
 
         <input
@@ -910,6 +1272,275 @@ export default function ChatWindow({
               onClick={() => void handleClearHistory()}
             >
               Xóa lịch sử
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showCreatePollDialog}
+        onOpenChange={setShowCreatePollDialog}
+      >
+        <DialogContent className="max-w-2xl bg-background text-foreground">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-semibold">
+              Tạo bình chọn
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <div>
+              <label className="mb-2 block text-base font-medium text-foreground">
+                Chủ đề bình chọn
+              </label>
+              <div className="rounded-xl border border-input bg-background p-3">
+                <textarea
+                  value={pollQuestion}
+                  onChange={(event) =>
+                    setPollQuestion(event.target.value.slice(0, 200))
+                  }
+                  placeholder="Đặt câu hỏi bình chọn"
+                  className="h-28 w-full resize-none bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground"
+                />
+                <div className="text-right text-sm text-muted-foreground">
+                  {pollQuestion.length}/200
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-base font-medium text-foreground">
+                Các lựa chọn
+              </label>
+              <div className="space-y-2">
+                {pollOptions.map((option, index) => {
+                  const key = option.trim().toLowerCase();
+                  const isDuplicate =
+                    Boolean(key) && (duplicateOptionMap.get(key) || 0) > 1;
+
+                  return (
+                    <div key={`poll-option-${index}`}>
+                      <div className="flex items-center gap-2 rounded-xl border border-input bg-background px-3 py-2">
+                        <input
+                          value={option}
+                          onChange={(event) => {
+                            const nextOptions = [...pollOptions];
+                            nextOptions[index] = event.target.value;
+                            setPollOptions(nextOptions);
+                          }}
+                          placeholder={`Lựa chọn ${index + 1}`}
+                          className="h-9 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground"
+                        />
+                        {pollOptions.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPollOptions((prev) =>
+                                prev.filter(
+                                  (_, itemIndex) => itemIndex !== index,
+                                ),
+                              );
+                            }}
+                            className="rounded-md p-1 text-muted-foreground hover:bg-accent"
+                          >
+                            <X className="h-5 w-5" />
+                          </button>
+                        )}
+                      </div>
+                      {isDuplicate && (
+                        <p className="mt-1 text-sm text-destructive">
+                          Phương án được thêm đã tồn tại
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPollOptions((prev) => [...prev, ""])}
+                className="mt-3 inline-flex items-center gap-2 text-base font-semibold text-primary hover:text-primary/80"
+              >
+                <Plus className="h-5 w-5" />
+                Thêm lựa chọn
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between rounded-xl border border-border bg-muted/40 px-4 py-3">
+              <div className="inline-flex items-center gap-2 text-sm text-foreground">
+                <Settings className="h-4 w-4" />
+                Chọn nhiều phương án
+              </div>
+              <Checkbox
+                checked={isMultipleChoicePoll}
+                onCheckedChange={(checked) =>
+                  setIsMultipleChoicePoll(Boolean(checked))
+                }
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreatePollDialog(false)}
+            >
+              Hủy
+            </Button>
+            <Button
+              disabled={!canCreatePoll}
+              onClick={() => void handleCreatePoll()}
+            >
+              Tạo bình chọn
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showPollDetailDialog}
+        onOpenChange={setShowPollDetailDialog}
+      >
+        <DialogContent className="max-w-2xl bg-background text-foreground">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-semibold">
+              Bình chọn
+            </DialogTitle>
+            <DialogDescription className="text-base text-foreground">
+              {activePoll?.question}
+            </DialogDescription>
+          </DialogHeader>
+
+          {activePoll && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <ListChecks className="h-4 w-4" />
+                <span className="text-sm">
+                  {activePoll.isMultipleChoice
+                    ? "Chọn nhiều phương án"
+                    : "Chọn một phương án"}
+                </span>
+                {activePoll.isClosed && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-sm">
+                    <Lock className="h-4 w-4" /> Bình chọn đã đóng
+                  </span>
+                )}
+              </div>
+
+              <div className="text-sm font-medium text-primary">
+                {activePollTotalVoters} người bình chọn, {activePollTotalVotes}{" "}
+                lượt bình chọn
+              </div>
+
+              <div className="space-y-2">
+                {activePoll.options.map((option) => {
+                  const isSelected = selectedVoteOptionIds.includes(option.id);
+
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      disabled={activePoll.isClosed}
+                      onClick={() => handleToggleVoteOption(option.id)}
+                      className="flex w-full items-center gap-3"
+                    >
+                      <div
+                        className={`h-5 w-5 rounded-full border ${
+                          isSelected
+                            ? "border-primary bg-primary"
+                            : "border-border"
+                        }`}
+                      />
+                      <div
+                        className={`flex-1 rounded-xl border px-4 py-2 text-left text-sm ${
+                          isSelected
+                            ? "border-primary/40 bg-primary/15 text-foreground"
+                            : "border-border bg-muted text-foreground"
+                        }`}
+                      >
+                        {option.text}
+                      </div>
+                      <span className="w-6 text-right text-base font-medium text-foreground">
+                        {option.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="sm:justify-between">
+            <Button
+              variant="outline"
+              className="text-destructive border-destructive/40 hover:bg-destructive/10"
+              onClick={() => {
+                if (!activePollMessage?.poll || !activePollMessage?.senderId) {
+                  return;
+                }
+
+                if (activePollMessage.senderId !== user.id) {
+                  return;
+                }
+
+                setShowClosePollConfirmDialog(true);
+              }}
+              disabled={
+                !activePoll ||
+                activePoll.isClosed ||
+                activePollMessage?.senderId !== user.id
+              }
+            >
+              <Settings className="h-4 w-4" />
+              Đóng bình chọn
+            </Button>
+
+            {activePoll?.isClosed ? (
+              <Button onClick={() => setShowPollDetailDialog(false)}>
+                Đóng
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowPollDetailDialog(false)}
+                >
+                  Hủy
+                </Button>
+                <Button
+                  onClick={() => void handleSubmitPollVote()}
+                  disabled={selectedVoteOptionIds.length < 1}
+                >
+                  Xác nhận
+                </Button>
+              </div>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showClosePollConfirmDialog}
+        onOpenChange={setShowClosePollConfirmDialog}
+      >
+        <DialogContent className="max-w-xl bg-background text-foreground">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Khóa bình chọn?</DialogTitle>
+            <DialogDescription>
+              Sau khi khóa, bạn và các thành viên khác sẽ không thể tiếp tục
+              tham gia bình chọn.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Không</Button>
+            </DialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => void handleClosePoll()}
+            >
+              Khóa bình chọn
             </Button>
           </DialogFooter>
         </DialogContent>

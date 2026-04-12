@@ -9,6 +9,7 @@ import {
   addMessage,
   failMessage,
   revokeMessage,
+  updateMessagePoll,
   type Message,
 } from "@/redux/slices/messageSlice";
 import type { AppDispatch } from "@/redux/store";
@@ -21,6 +22,7 @@ import {
   upUnreadCount,
   selectConversation,
 } from "@/redux/slices/conversationSlice";
+import { SOCKET_EVENTS } from "@/lib/socket.events";
 import { useSound } from "use-sound";
 import notificationSound from "@/assets/notification.mp3";
 
@@ -211,6 +213,64 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       }
     };
 
+    const pollUpdatedHandler = (payload: {
+      conversationId: string;
+      messageId: string;
+      pollId: string;
+      question: string;
+      isMultipleChoice: boolean;
+      isClosed: boolean;
+      closedAt?: string | null;
+      options: Array<{ id: string; text: string; count: number }>;
+    }) => {
+      if (!payload?.conversationId || !payload?.messageId || !payload?.pollId)
+        return;
+
+      dispatch(
+        updateMessagePoll({
+          conversationId: payload.conversationId,
+          messageId: payload.messageId,
+          poll: {
+            id: payload.pollId,
+            question: payload.question,
+            isMultipleChoice: Boolean(payload.isMultipleChoice),
+            isClosed: Boolean(payload.isClosed),
+            closedAt: payload.closedAt || null,
+            options: payload.options || [],
+          },
+        }),
+      );
+    };
+
+    const pollClosedHandler = (payload: {
+      conversationId: string;
+      messageId: string;
+      pollId: string;
+      question: string;
+      isMultipleChoice: boolean;
+      isClosed: boolean;
+      closedAt?: string | null;
+      options: Array<{ id: string; text: string; count: number }>;
+    }) => {
+      if (!payload?.conversationId || !payload?.messageId || !payload?.pollId)
+        return;
+
+      dispatch(
+        updateMessagePoll({
+          conversationId: payload.conversationId,
+          messageId: payload.messageId,
+          poll: {
+            id: payload.pollId,
+            question: payload.question,
+            isMultipleChoice: Boolean(payload.isMultipleChoice),
+            isClosed: Boolean(payload.isClosed),
+            closedAt: payload.closedAt || null,
+            options: payload.options || [],
+          },
+        }),
+      );
+    };
+
     const memberAddedHandler = (payload: {
       conversationId: string;
       memberIds: string[];
@@ -290,26 +350,48 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       );
     };
 
-    socket.on("message:new", newMessageHandler);
-    socket.on("message:ack", ackHandler);
-    socket.on("message:error", errorHandler);
-    socket.on("message:system", systemMessageHandler);
-    socket.on("message:revoked", revokedMessageHandler);
-    socket.on("conversation:member_added", memberAddedHandler);
-    socket.on("conversation:member_removed", memberRemovedHandler);
-    socket.on("conversation:member_left", memberLeftHandler);
-    socket.on("conversation:update", conversationUpdateHandler);
+    socket.on(SOCKET_EVENTS.CHAT.MESSAGE_NEW, newMessageHandler);
+    socket.on(SOCKET_EVENTS.CHAT.MESSAGE_ACK, ackHandler);
+    socket.on(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, errorHandler);
+    socket.on(SOCKET_EVENTS.CHAT.MESSAGE_SYSTEM, systemMessageHandler);
+    socket.on(SOCKET_EVENTS.CHAT.MESSAGE_REVOKED, revokedMessageHandler);
+    socket.on(SOCKET_EVENTS.CHAT.POLL_UPDATED, pollUpdatedHandler);
+    socket.on(SOCKET_EVENTS.CHAT.POLL_CLOSED, pollClosedHandler);
+    socket.on(SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_ADDED, memberAddedHandler);
+    socket.on(
+      SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_REMOVED,
+      memberRemovedHandler,
+    );
+    socket.on(SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_LEFT, memberLeftHandler);
+    socket.on(
+      SOCKET_EVENTS.CHAT.CONVERSATION_UPDATE,
+      conversationUpdateHandler,
+    );
 
     return () => {
-      socket.off("message:new", newMessageHandler);
-      socket.off("message:ack", ackHandler);
-      socket.off("message:error", errorHandler);
-      socket.off("message:system", systemMessageHandler);
-      socket.off("message:revoked", revokedMessageHandler);
-      socket.off("conversation:member_added", memberAddedHandler);
-      socket.off("conversation:member_removed", memberRemovedHandler);
-      socket.off("conversation:member_left", memberLeftHandler);
-      socket.off("conversation:update", conversationUpdateHandler);
+      socket.off(SOCKET_EVENTS.CHAT.MESSAGE_NEW, newMessageHandler);
+      socket.off(SOCKET_EVENTS.CHAT.MESSAGE_ACK, ackHandler);
+      socket.off(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, errorHandler);
+      socket.off(SOCKET_EVENTS.CHAT.MESSAGE_SYSTEM, systemMessageHandler);
+      socket.off(SOCKET_EVENTS.CHAT.MESSAGE_REVOKED, revokedMessageHandler);
+      socket.off(SOCKET_EVENTS.CHAT.POLL_UPDATED, pollUpdatedHandler);
+      socket.off(SOCKET_EVENTS.CHAT.POLL_CLOSED, pollClosedHandler);
+      socket.off(
+        SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_ADDED,
+        memberAddedHandler,
+      );
+      socket.off(
+        SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_REMOVED,
+        memberRemovedHandler,
+      );
+      socket.off(
+        SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_LEFT,
+        memberLeftHandler,
+      );
+      socket.off(
+        SOCKET_EVENTS.CHAT.CONVERSATION_UPDATE,
+        conversationUpdateHandler,
+      );
     };
   }, [dispatch, play, user.id]);
 

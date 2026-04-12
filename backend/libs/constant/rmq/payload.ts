@@ -93,6 +93,37 @@ export interface MessageRevokedPayload {
   message: any
 }
 
+export interface PollUpdatedPayload {
+  pollId: string
+  messageId: string
+  conversationId: string
+  question: string
+  isMultipleChoice: boolean
+  isClosed: boolean
+  closedAt?: string | null
+  options: Array<{
+    id: string
+    text: string
+    count: number
+  }>
+  totalVoters: number
+}
+
+export interface PollClosedPayload {
+  pollId: string
+  messageId: string
+  conversationId: string
+  question: string
+  isMultipleChoice: boolean
+  isClosed: boolean
+  closedAt: string
+  options: Array<{
+    id: string
+    text: string
+    count: number
+  }>
+}
+
 export interface MessageErrorPayload {
   clientMessageId?: string
   code: string

@@ -24,6 +24,7 @@ enum messageType {
   IMAGE
   VIDEO
   FILE
+  POLL
 }
 
 enum mediaType {
@@ -86,6 +87,7 @@ model message {
   type            messageType        @default(TEXT)
   content         String?
   replyToMessageId String?           @db.ObjectId
+  pollId          String?            @unique @db.ObjectId
   isRevoked       Boolean            @default(false)
   isDeleted       Boolean            @default(false)
   createdAt       DateTime           @default(now())
@@ -94,9 +96,43 @@ model message {
   senderMember    conversationMember @relation("SenderMessages", fields: [conversationId, senderId], references: [conversationId, userId])
   replyTo         message?           @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   replies         message[]          @relation("MessageReply")
+  poll            poll?              @relation(fields: [pollId], references: [id])
   medias          messageMedia[]
 
   @@index([conversationId, createdAt, id])
+}
+
+type PollOption {
+  id    String
+  text  String
+  count Int    @default(0)
+}
+
+model poll {
+  id               String      @id @default(auto()) @map("_id") @db.ObjectId
+  question         String
+  isMultipleChoice Boolean     @default(false)
+  isClosed         Boolean     @default(false)
+  closedAt         DateTime?
+  options          PollOption[]
+  message          message?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([isClosed, updatedAt])
+}
+
+model pollVote {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  pollId    String   @db.ObjectId
+  userId    String   @db.ObjectId
+  optionIds String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([pollId, userId])
+  @@index([pollId])
+  @@index([userId, updatedAt])
 }
 
 model DeleteMessage {

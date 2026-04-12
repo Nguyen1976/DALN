@@ -1,4 +1,12 @@
-import { IsNotEmpty } from 'class-validator'
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator'
 
 export enum ConversationAssetKind {
   ASSET_MEDIA = 0,
@@ -107,4 +115,38 @@ export class DeleteMessageForMeDTO {
 export class ClearConversationHistoryDTO {
   @IsNotEmpty()
   conversationId: string
+}
+
+export class CreatePollDTO {
+  @IsNotEmpty()
+  @IsString()
+  conversationId: string
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(200)
+  question: string
+
+  @IsArray()
+  @ArrayMinSize(2)
+  options: string[]
+
+  @IsOptional()
+  @IsBoolean()
+  isMultipleChoice?: boolean
+}
+
+export class SubmitPollVoteDTO {
+  @IsNotEmpty()
+  @IsString()
+  pollId: string
+
+  @IsArray()
+  optionIds: string[]
+}
+
+export class ClosePollDTO {
+  @IsNotEmpty()
+  @IsString()
+  pollId: string
 }

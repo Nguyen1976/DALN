@@ -16,12 +16,27 @@ export interface SenderMember {
   avatar: string;
 }
 
+export interface PollOption {
+  id: string;
+  text: string;
+  count: number;
+}
+
+export interface PollData {
+  id: string;
+  question: string;
+  isMultipleChoice: boolean;
+  isClosed: boolean;
+  closedAt?: string | null;
+  options: PollOption[];
+}
+
 export interface Message {
   id: string;
   conversationId: string;
   senderId: string;
   text: string;
-  type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE";
+  type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL";
   content?: string;
   clientMessageId?: string;
   replyToMessageId?: string | undefined;
@@ -43,6 +58,7 @@ export interface Message {
     thumbnailUrl?: string;
     sortOrder?: number;
   }[];
+  poll?: PollData;
   status?: "sent" | "pending" | "failed";
   tempMessageId?: string;
 }
@@ -215,6 +231,28 @@ export const messageSlice = createSlice({
       delete state.messages[action.payload.conversationId];
       delete state.pagination[action.payload.conversationId];
     },
+    updateMessagePoll: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        messageId: string;
+        poll: PollData;
+      }>,
+    ) => {
+      const { conversationId, messageId, poll } = action.payload;
+      const currentMessages = state.messages[conversationId] || [];
+      const target = currentMessages.find(
+        (message) =>
+          message.id === messageId || message.clientMessageId === messageId,
+      );
+
+      if (!target) return;
+
+      target.poll = poll;
+      target.type = "POLL";
+      target.text = poll.question;
+      target.content = poll.question;
+    },
   },
   extraReducers: (builder) => {
     builder.addCase(
@@ -308,5 +346,6 @@ export const {
   revokeMessage,
   deleteMessageForMe,
   clearConversationMessages,
+  updateMessagePoll,
 } = messageSlice.actions;
 export default messageSlice.reducer;

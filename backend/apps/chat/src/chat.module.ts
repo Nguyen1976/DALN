@@ -8,6 +8,7 @@ import {
   ConversationRepository,
   MessageRepository,
   ConversationMemberRepository,
+  PollRepository,
 } from './repositories'
 import { ChatEventsPublisher } from './rmq/publishers/chat-events.publisher'
 import { MessageSubscriber } from './rmq/subcribers/chat-subcribers'
@@ -79,6 +80,7 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
     ConversationRepository,
     MessageRepository,
     ConversationMemberRepository,
+    PollRepository,
     ChatEventsPublisher,
     MessageSubscriber,
   ],

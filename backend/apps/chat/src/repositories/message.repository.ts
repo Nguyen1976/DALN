@@ -33,14 +33,16 @@ export class MessageRepository {
         sortOrder: 'asc' as const,
       },
     },
+    poll: true,
   }
 
   async create(data: {
     conversationId: string
     senderId: string
-    type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE'
+    type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE' | 'POLL'
     content?: string | null
     replyToMessageId?: string | null
+    pollId?: string | null
     medias?: MediaInput[]
   }) {
     // Ghi dữ liệu & trả về trong 1 nhịp duy nhất (nested writes)
@@ -51,6 +53,7 @@ export class MessageRepository {
         type: data.type as any, // Ép kiểu messageType
         content: data.content || null,
         replyToMessageId: data.replyToMessageId || null,
+        pollId: data.pollId || null,
 
         // Khởi tạo Medias luôn (Prisma tự động làm Transaction ngầm)
         medias: data.medias?.length
@@ -73,6 +76,7 @@ export class MessageRepository {
       // Trả về luôn relations, không cần gọi findUnique thêm lần nữa!
       include: {
         medias: { orderBy: { sortOrder: 'asc' } },
+        poll: true,
       },
     })
 
@@ -116,6 +120,7 @@ export class MessageRepository {
             sortOrder: 'asc',
           },
         },
+        poll: true,
       },
     })
   }
@@ -326,6 +331,7 @@ export class MessageRepository {
             sortOrder: 'asc',
           },
         },
+        poll: true,
       },
     } as any)
   }

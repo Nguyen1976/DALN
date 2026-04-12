@@ -99,4 +99,32 @@ export class ChatErrors {
       message: 'You can only perform this action on your own message',
     })
   }
+
+  static invalidPollPayload(message = 'Invalid poll payload'): never {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message,
+    })
+  }
+
+  static pollNotFound(): never {
+    throw new RpcException({
+      code: status.NOT_FOUND,
+      message: 'Poll not found',
+    })
+  }
+
+  static pollAlreadyClosed(): never {
+    throw new RpcException({
+      code: status.FAILED_PRECONDITION,
+      message: 'Poll is already closed',
+    })
+  }
+
+  static pollCreatorOnly(): never {
+    throw new RpcException({
+      code: status.PERMISSION_DENIED,
+      message: 'Only the poll creator can close this poll',
+    })
+  }
 }

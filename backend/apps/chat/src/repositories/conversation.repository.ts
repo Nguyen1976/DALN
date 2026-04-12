@@ -152,6 +152,7 @@ export class ConversationRepository {
           take: 1,
           include: {
             senderMember: true,
+            poll: true,
             medias: {
               orderBy: {
                 sortOrder: 'asc',
@@ -228,6 +229,7 @@ export class ConversationRepository {
             conversationId: true,
             replyToMessageId: true,
             isDeleted: true,
+            poll: true,
             medias: {
               orderBy: {
                 sortOrder: 'asc',
@@ -326,10 +328,13 @@ export class ConversationRepository {
   async deleteConversationById(conversationId: string) {
     const messages = await this.prisma.message.findMany({
       where: { conversationId },
-      select: { id: true },
+      select: { id: true, pollId: true },
     })
 
     const messageIds = messages.map((message) => message.id)
+    const pollIds = messages
+      .map((message) => message.pollId)
+      .filter((pollId): pollId is string => Boolean(pollId))
 
     await this.prisma.$transaction(async (transaction) => {
       if (messageIds.length > 0) {
@@ -348,6 +353,24 @@ export class ConversationRepository {
             },
           },
         })
+
+        if (pollIds.length > 0) {
+          await transaction.pollVote.deleteMany({
+            where: {
+              pollId: {
+                in: pollIds,
+              },
+            },
+          })
+
+          await transaction.poll.deleteMany({
+            where: {
+              id: {
+                in: pollIds,
+              },
+            },
+          })
+        }
       }
 
       await transaction.message.deleteMany({
@@ -485,6 +508,7 @@ export class ConversationRepository {
           take: 1,
           include: {
             senderMember: true,
+            poll: true,
             // Thật sự UI lúc search có cần load chi tiết cả Media không?
             // Nếu không cần, hãy xóa mảng medias này đi để nhẹ DB.
             medias: { orderBy: { sortOrder: 'asc' } },
@@ -549,6 +573,7 @@ export class ConversationRepository {
           take: 1,
           include: {
             senderMember: true,
+            poll: true,
             medias: {
               orderBy: {
                 sortOrder: 'asc',

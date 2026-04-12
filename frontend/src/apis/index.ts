@@ -270,7 +270,87 @@ export const clearConversationHistoryAPI = async (data: {
   return response.data.data;
 };
 
-export type MessageType = "TEXT" | "IMAGE" | "VIDEO" | "FILE";
+export interface PollOption {
+  id: string;
+  text: string;
+  count: number;
+}
+
+export interface PollPayload {
+  id: string;
+  question: string;
+  isMultipleChoice: boolean;
+  isClosed: boolean;
+  closedAt?: string | null;
+  options: PollOption[];
+}
+
+export const createPollAPI = async (data: {
+  conversationId: string;
+  question: string;
+  options: string[];
+  isMultipleChoice: boolean;
+}) => {
+  const response = await authorizeAxiosInstance.post(
+    `${API_ROOT}/chat/polls`,
+    data,
+  );
+  return response.data.data as {
+    message: {
+      id: string;
+      conversationId: string;
+      senderId: string;
+      text: string;
+      content?: string;
+      type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL";
+      createdAt: string;
+      poll?: PollPayload;
+      senderMember?: {
+        userId: string;
+        username?: string;
+        avatar?: string;
+        fullName?: string;
+      };
+    };
+    poll: PollPayload;
+  };
+};
+
+export const submitPollVoteAPI = async (data: {
+  pollId: string;
+  optionIds: string[];
+}) => {
+  const response = await authorizeAxiosInstance.post(
+    `${API_ROOT}/chat/polls/vote`,
+    data,
+  );
+  return response.data.data as {
+    pollId: string;
+    messageId: string;
+    conversationId: string;
+    options: PollOption[];
+    userVoteOptionIds: string[];
+    totalVoters: number;
+    isClosed: boolean;
+    closedAt?: string | null;
+  };
+};
+
+export const closePollAPI = async (data: { pollId: string }) => {
+  const response = await authorizeAxiosInstance.post(
+    `${API_ROOT}/chat/polls/close`,
+    data,
+  );
+  return response.data.data as {
+    pollId: string;
+    messageId: string;
+    conversationId: string;
+    isClosed: boolean;
+    closedAt?: string | null;
+  };
+};
+
+export type MessageType = "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL";
 
 export interface UploadMediaUrlResponse {
   uploadUrl: string;

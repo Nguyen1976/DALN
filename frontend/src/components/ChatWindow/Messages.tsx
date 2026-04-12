@@ -14,6 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
+import { Check, ChevronRight } from "lucide-react";
 
 const MessageComponent = ({
   messages,
@@ -21,6 +22,8 @@ const MessageComponent = ({
   seenMessages = {},
   onRevokeMessage,
   onDeleteMessageForMe,
+  onOpenPoll,
+  pollVoteSelections,
 }: {
   messages: Message[];
   highlightMessageId?: string | null;
@@ -30,6 +33,8 @@ const MessageComponent = ({
   >;
   onRevokeMessage?: (message: Message) => void;
   onDeleteMessageForMe?: (message: Message) => void;
+  onOpenPoll?: (message: Message) => void;
+  pollVoteSelections?: Record<string, string[]>;
 }) => {
   const user = useSelector(selectUser);
 
@@ -93,7 +98,125 @@ const MessageComponent = ({
         const canRevoke =
           isMine &&
           !message.id.startsWith("temp-") &&
-          message.status !== "pending";
+          message.status !== "pending" &&
+          message.type !== "POLL";
+        const isPoll = message.type === "POLL" && Boolean(message.poll);
+        const selectedPollOptions = message.poll
+          ? pollVoteSelections?.[message.poll.id] || []
+          : [];
+
+        if (isPoll && message.poll) {
+          const totalVotes = message.poll.options.reduce(
+            (sum, option) => sum + option.count,
+            0,
+          );
+
+          return (
+            <div
+              key={message.id}
+              id={`message-${message.id}`}
+              className={cn(
+                "mb-2 scroll-mt-24 rounded-xl transition-colors duration-300",
+                highlightMessageId === message.id &&
+                  "bg-bg-box-message-incoming",
+              )}
+            >
+              <div className="mx-auto w-2/3 max-w-xl px-1 mt-10">
+                <div
+                  className={cn(
+                    "relative overflow-hidden rounded-2xl border px-4 py-3 shadow-sm",
+                    message.poll.isClosed
+                      ? "border-primary/20 bg-card"
+                      : "border-primary/35 bg-card shadow-primary/10",
+                  )}
+                >
+                  <div className="space-y-3">
+                    <h4 className="text-xl font-semibold leading-tight text-foreground sm:text-2xl">
+                      {message.poll.question}
+                    </h4>
+
+                    <p className="text-base text-muted-foreground sm:text-lg">
+                      {message.poll.isClosed
+                        ? "Bình chọn đã đóng"
+                        : message.poll.isMultipleChoice
+                          ? "Chọn nhiều phương án"
+                          : "Chọn một phương án"}
+                    </p>
+
+                    <p className="text-xs font-semibold text-primary">
+                      {totalVotes} lượt bình chọn
+                    </p>
+
+                    <div className="space-y-2">
+                      {message.poll.options.map((option) => {
+                        const isSelected = selectedPollOptions.includes(
+                          option.id,
+                        );
+
+                        return (
+                          <div
+                            key={option.id}
+                            className={cn(
+                              "flex items-center justify-between rounded-lg border px-3 py-2 text-sm",
+                              isSelected
+                                ? "border-primary/60 bg-primary/20 text-foreground"
+                                : "border-border bg-muted text-foreground",
+                              message.poll?.isClosed && "opacity-90",
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium leading-snug">
+                                {option.text}
+                              </span>
+                              {isSelected && (
+                                <Check className="h-4 w-4 text-primary" />
+                              )}
+                            </div>
+                            <span className="text-base font-semibold">
+                              {option.count}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => onOpenPoll?.(message)}
+                      className={cn(
+                        "w-full rounded-lg border py-2 text-base font-semibold transition-colors",
+                        message.poll.isClosed
+                          ? "border-primary/60 bg-primary/10 text-primary hover:bg-primary/15"
+                          : "border-primary bg-primary/5 text-primary hover:bg-primary/12",
+                      )}
+                    >
+                      {message.poll.isClosed
+                        ? "Xem lựa chọn"
+                        : selectedPollOptions.length > 0
+                          ? "Đổi lựa chọn"
+                          : "Bình chọn"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onOpenPoll?.(message)}
+                      className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:text-primary/80"
+                    >
+                      {selectedPollOptions.length > 0
+                        ? `${selectedPollOptions.length} lựa chọn của bạn`
+                        : "Xem chi tiết"}
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+
+                    <span className="block text-xs text-muted-foreground">
+                      {formatDateTime(message.createdAt)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
 
         return (
           <div
@@ -143,6 +266,7 @@ const MessageComponent = ({
                 )}
               >
                 {!isRevoked &&
+                  !isPoll &&
                   message.medias?.map((media, mediaIndex) => {
                     const mediaKind = resolveMediaKind(media);
 

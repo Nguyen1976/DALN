@@ -23,6 +23,9 @@ import {
   RevokeMessageDTO,
   DeleteMessageForMeDTO,
   ClearConversationHistoryDTO,
+  CreatePollDTO,
+  SubmitPollVoteDTO,
+  ClosePollDTO,
 } from './http/chat-http.dto'
 
 // Reusable response formatters
@@ -39,6 +42,22 @@ const formatMessage = (message: any) => {
       ...media,
       size: String(media.size),
     })),
+    poll: message.poll
+      ? {
+          id: message.poll.id,
+          question: message.poll.question,
+          isMultipleChoice: Boolean(message.poll.isMultipleChoice),
+          isClosed: Boolean(message.poll.isClosed),
+          closedAt: message.poll.closedAt
+            ? message.poll.closedAt.toString()
+            : null,
+          options: (message.poll.options || []).map((option: any) => ({
+            id: option.id,
+            text: option.text,
+            count: Number(option.count || 0),
+          })),
+        }
+      : undefined,
   }
 }
 
@@ -351,6 +370,45 @@ export class ChatController {
   ) {
     return await this.chatService.clearConversationHistory({
       conversationId: body.conversationId,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Post('polls')
+  @RequireLogin()
+  async createPoll(@Body() body: CreatePollDTO, @UserInfo() userInfo: any) {
+    const result = await this.chatService.createPoll({
+      conversationId: body.conversationId,
+      question: body.question,
+      options: body.options,
+      isMultipleChoice: Boolean(body.isMultipleChoice),
+      userId: userInfo.userId,
+    })
+
+    return {
+      message: formatMessage(result.message),
+      poll: result.poll,
+    }
+  }
+
+  @Post('polls/vote')
+  @RequireLogin()
+  async submitPollVote(
+    @Body() body: SubmitPollVoteDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    return await this.chatService.submitPollVote({
+      pollId: body.pollId,
+      optionIds: body.optionIds,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Post('polls/close')
+  @RequireLogin()
+  async closePoll(@Body() body: ClosePollDTO, @UserInfo() userInfo: any) {
+    return await this.chatService.closePoll({
+      pollId: body.pollId,
       userId: userInfo.userId,
     })
   }

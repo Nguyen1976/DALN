@@ -3,6 +3,8 @@ import { Injectable } from '@nestjs/common'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   EmitToUserPayload,
+  PollClosedPayload,
+  PollUpdatedPayload,
   MessageRevokedPayload,
 } from 'libs/constant/rmq/payload'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
@@ -220,6 +222,30 @@ export class ChatEventsPublisher {
       {
         userIds,
         event: SOCKET_EVENTS.CHAT.MESSAGE_REVOKED,
+        data: payload,
+      } as EmitToUserPayload,
+    )
+  }
+
+  publishPollUpdated(payload: PollUpdatedPayload, userIds: string[]): void {
+    this.amqpConnection.publish(
+      EXCHANGE_RMQ.REALTIME_EVENTS,
+      ROUTING_RMQ.EMIT_REALTIME_EVENT,
+      {
+        userIds,
+        event: SOCKET_EVENTS.CHAT.POLL_UPDATED,
+        data: payload,
+      } as EmitToUserPayload,
+    )
+  }
+
+  publishPollClosed(payload: PollClosedPayload, userIds: string[]): void {
+    this.amqpConnection.publish(
+      EXCHANGE_RMQ.REALTIME_EVENTS,
+      ROUTING_RMQ.EMIT_REALTIME_EVENT,
+      {
+        userIds,
+        event: SOCKET_EVENTS.CHAT.POLL_CLOSED,
         data: payload,
       } as EmitToUserPayload,
     )
