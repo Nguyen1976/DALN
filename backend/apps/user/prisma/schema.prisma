@@ -18,6 +18,8 @@ model User {
   avatar    String?
   bio       String?
   lastSeen DateTime?
+  lat String?
+  lon String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
