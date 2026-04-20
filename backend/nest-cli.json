@@ -1,7 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/nest-cli",
   "collection": "@nestjs/schematics",
-
   "monorepo": true,
   "projects": {
     "chat": {
@@ -77,6 +76,15 @@
       "sourceRoot": "apps/realtime-gateway/src",
       "compilerOptions": {
         "tsConfigPath": "apps/realtime-gateway/tsconfig.app.json"
+      }
+    },
+    "recommendation": {
+      "type": "application",
+      "root": "apps/recommendation",
+      "entryFile": "main",
+      "sourceRoot": "apps/recommendation/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/recommendation/tsconfig.app.json"
       }
     },
     "redis": {
