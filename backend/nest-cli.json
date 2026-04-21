@@ -54,6 +54,15 @@
         "tsConfigPath": "libs/mailer/tsconfig.lib.json"
       }
     },
+    "neo4j": {
+      "type": "library",
+      "root": "libs/neo4j",
+      "entryFile": "index",
+      "sourceRoot": "libs/neo4j/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/neo4j/tsconfig.lib.json"
+      }
+    },
     "notification": {
       "type": "application",
       "root": "apps/notification",
@@ -67,6 +76,15 @@
           }
         ],
         "tsConfigPath": "apps/notification/tsconfig.app.json"
+      }
+    },
+    "qdrant": {
+      "type": "library",
+      "root": "libs/qdrant",
+      "entryFile": "index",
+      "sourceRoot": "libs/qdrant/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/qdrant/tsconfig.lib.json"
       }
     },
     "realtime-gateway": {
@@ -129,5 +147,8 @@
         "tsConfigPath": "libs/util/tsconfig.lib.json"
       }
     }
+  },
+  "compilerOptions": {
+    "webpack": true
   }
 }

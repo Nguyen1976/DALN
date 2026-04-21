@@ -1,6 +1,7 @@
 import { HttpException, Injectable } from '@nestjs/common'
 import { RpcException } from '@nestjs/microservices/exceptions/rpc-exception'
 import * as bcrypt from 'bcryptjs'
+import { v5 as uuidv5 } from 'uuid'
 
 @Injectable()
 export class UtilService {
@@ -44,5 +45,10 @@ export class UtilService {
         message: 'Service temporarily unavailable',
       })
     }
+  }
+
+  mongoIdToUuid(mongoId: string) {
+    const MY_NAMESPACE = '1b671a64-40d5-491e-99b0-da01ff1f3341'
+    return uuidv5(mongoId, MY_NAMESPACE)
   }
 }

@@ -18,10 +18,11 @@ model User {
   avatar    String?
   bio       String?
   lastSeen DateTime?
-  lat String?
-  lon String?
+  location Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([location], map: "location_2dsphere")
 }
 
 model Friendship {
