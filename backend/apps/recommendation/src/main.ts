@@ -3,6 +3,10 @@ import { RecommendationModule } from './recommendation.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(RecommendationModule);
-  await app.listen(process.env.port ?? 3000);
+  app.enableCors({
+    origin: true,
+    credentials: true,
+  })
+  await app.listen(process.env.port ?? 3005);
 }
 bootstrap();
