@@ -58,6 +58,13 @@ def load_model():
     return get_model()
 
 # 3. DỰ ĐOÁN VÀ TRẢ VỀ TOP-K
+# nhận vào {
+#     "candidateId": "65f...",
+#     "mutualFriends": 10,
+#     "mutualGroups": 3,
+#     "interestSimilarity": 0.92,
+#     "distanceKm": 0.5
+#   }[],
 def predict_top_k(candidates_json, k=100):
     model = load_model()
     

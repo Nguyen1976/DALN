@@ -1,1 +1,47 @@
 /models/*
+
+# --- Python Environment ---
+.venv/
+venv/
+env/
+bin/
+lib/
+include/
+pyvenv.cfg
+*.pyc
+__pycache__/
+
+# --- Jupyter Notebook ---
+.ipynb_checkpoints
+
+# --- Machine Learning Models (Quan trọng) ---
+# Không nên đẩy các file .pkl quá nặng lên Git
+# Nếu bạn muốn lưu trữ model, hãy dùng DVC hoặc lưu vào Server/S3 riêng
+models/*.pkl
+!models/latest_model.pkl  # Có thể giữ lại file symlink hoặc model base nếu cần
+
+# --- Logs & Data ---
+# Chặn các file log CSV được tạo ra hàng ngày để tránh lộ dữ liệu user
+python_core/logs/*.csv
+*.log
+
+# --- Environment Variables ---
+.env
+.env.local
+
+# --- macOS Specific ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# --- IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Distribution / Packaging ---
+dist/
+build/
+*.egg-info/
