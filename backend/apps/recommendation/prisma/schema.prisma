@@ -31,3 +31,36 @@ model Friendship {
   friendId  String   @db.ObjectId
   createdAt DateTime @default(now())
 }
+
+type Features {
+  mutualFriends Int
+  mutualGroups Int
+  interestSimilarity Float
+  distanceKm Float
+
+}
+
+model impresstionLog {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId  String   @db.ObjectId
+  candidateId String @db.ObjectId
+  features Features
+  score Int
+  rank Int
+  createdAt DateTime @default(now())
+}
+
+enum Action {
+  MESSAGE
+  FRIEND
+  IGNORE
+}
+
+model actionLog {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId  String   @db.ObjectId
+  candidateId String @db.ObjectId
+  action  Action
+  createdAt DateTime @default(now())
+}
+

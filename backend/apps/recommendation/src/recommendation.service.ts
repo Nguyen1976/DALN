@@ -84,7 +84,7 @@ export class RecommendationService {
     console.time('Giai đoạn 5: MongoDB GeoNear')
     const userLocation = currentUser?.location as any
     let suggestBasedOnNearby: Array<{ _id: string | { $oid: string } }> = []
-
+    
     if (userLocation?.coordinates) {
       suggestBasedOnNearby = (await this.prisma.user.aggregateRaw({
         pipeline: [
@@ -123,7 +123,7 @@ export class RecommendationService {
         ),
       ]
     )
-    
+
     return {
       commonFriends,
       commonGroups,
