@@ -6,6 +6,7 @@ import { ConfigModule } from '@nestjs/config/dist/config.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { QdrantModule } from '@app/qdrant/qdrant.module'
 import { UtilModule } from '@app/util'
+import { PythonRecommendationClient } from './python-recommendation.client'
 
 @Module({
   imports: [
@@ -19,6 +20,6 @@ import { UtilModule } from '@app/util'
     UtilModule,
   ],
   controllers: [RecommendationController],
-  providers: [RecommendationService],
+  providers: [RecommendationService, PythonRecommendationClient],
 })
 export class RecommendationModule {}

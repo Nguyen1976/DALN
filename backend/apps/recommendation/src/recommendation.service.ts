@@ -3,6 +3,14 @@ import { Inject, Injectable } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { QdrantService } from '@app/qdrant/qdrant.service'
 import { UtilService } from '@app/util/util.service'
+import { PythonRecommendationClient } from './python-recommendation.client'
+
+type NearbyUser = {
+  _id: string | { $oid: string }
+  dist: number
+  fullName?: string
+  username?: string
+}
 
 @Injectable()
 export class RecommendationService {
@@ -11,6 +19,7 @@ export class RecommendationService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly qdrantService: QdrantService,
     private readonly utilService: UtilService,
+    private readonly pythonClient: PythonRecommendationClient,
   ) {}
   async getHello(userId: string) {
     console.log(`--- Bắt đầu xử lý Suggest cho User: ${userId} ---`)
@@ -76,15 +85,11 @@ export class RecommendationService {
       commonGroups: r.get('commonGroups').toNumber(),
     }))
 
-    const suggestBasedOnInterest = qdrantRes.map(
-      (user) => user.payload?.mongoId,
-    )
-
     // 6. GIAI ĐOẠN CUỐI: MONGODB GEONEAR
     console.time('Giai đoạn 5: MongoDB GeoNear')
     const userLocation = currentUser?.location as any
-    let suggestBasedOnNearby: Array<{ _id: string | { $oid: string } }> = []
-    
+    let suggestBasedOnNearby: Array<NearbyUser> = []
+
     if (userLocation?.coordinates) {
       suggestBasedOnNearby = (await this.prisma.user.aggregateRaw({
         pipeline: [
@@ -113,21 +118,117 @@ export class RecommendationService {
 
     console.timeEnd('Tổng thời gian getHello')
 
-    const result = new Set<string>(
-      [
-        ...commonFriends.map((u) => u.id),
-        ...commonGroups.map((u) => u.id),
-        ...suggestBasedOnInterest,
-        ...suggestBasedOnNearby.map((u) =>
-          typeof u._id === 'string' ? u._id : u._id.$oid,
-        ),
-      ]
+    console.log({
+      commonFriends: commonFriends[0],
+      commonGroups: commonGroups[0],
+      suggestBasedOnInterest: qdrantRes[0],
+      suggestBasedOnNearby: suggestBasedOnNearby[0],
+    })
+
+    // "mutualFriends",
+    // "mutualGroups",
+    // "interestSimilarity",
+    // "distanceKm",
+
+    const map = new Map<string, any>()
+    commonFriends.forEach((u) =>
+      map.set(u.id, {
+        candidateId: u.id,
+        mutualFriends: u.commonFriends,
+        mutualGroups: 0,
+        interestSimilarity: 0,
+        distanceKm: 0,
+      }),
+    )
+    commonGroups.forEach((u) =>
+      map.set(
+        u.id,
+        map.has(u.id)
+          ? { ...map.get(u.id), mutualGroups: u.commonGroups }
+          : {
+              candidateId: u.id,
+              mutualFriends: 0,
+              mutualGroups: u.commonGroups,
+              interestSimilarity: 0,
+              distanceKm: 0,
+            },
+      ),
+    )
+    /**
+     *  suggestBasedOnInterest: {
+    id: '89e5d1fa-359f-5f66-a5fb-bc0f72a0ff5c',
+    version: 86,
+    score: 0.7603104,
+    payload: { mongoId: '69dfa12186e60bb70f816cf9', username: 'bui_khanh_5' }
+  },
+     */
+    qdrantRes.forEach((u) => {
+      const mongoId = u.payload?.mongoId as string | undefined
+      if (!mongoId) {
+        return
+      }
+
+      map.set(
+        mongoId,
+        map.has(mongoId)
+          ? {
+              ...map.get(mongoId),
+              interestSimilarity: Number(u.score ?? 0),
+            }
+          : {
+              candidateId: mongoId,
+              mutualFriends: 0,
+              mutualGroups: 0,
+              interestSimilarity: Number(u.score ?? 0),
+              distanceKm: 0,
+            },
+      )
+    })
+    /**
+     *  suggestBasedOnNearby: {
+    _id: { '$oid': '69dfa11f86e60bb70f80c62d' },
+    fullName: 'Vũ Hải Dũng',
+    username: 'dungvh',
+    dist: 0
+  }
+     */
+    const getId = (id: string | { $oid: string }) =>
+      typeof id === 'string' ? id : id.$oid
+
+    suggestBasedOnNearby.forEach((u) =>
+      map.set(
+        getId(u._id),
+        map.has(getId(u._id))
+          ? {
+              ...map.get(getId(u._id)),
+              distanceKm: u.dist / 1000, // Convert m sang km
+            }
+          : {
+              candidateId: getId(u._id),
+              mutualFriends: 0,
+              mutualGroups: 0,
+              interestSimilarity: 0,
+              distanceKm: u.dist / 1000,
+            },
+      ),
     )
 
+    console.log(map.values())
+
+    const candidatesForPython = Array.from(map.values()).filter(
+      (candidate) =>
+        typeof candidate?.candidateId === 'string' &&
+        Number.isFinite(Number(candidate?.mutualFriends)) &&
+        Number.isFinite(Number(candidate?.mutualGroups)) &&
+        Number.isFinite(Number(candidate?.interestSimilarity)) &&
+        Number.isFinite(Number(candidate?.distanceKm)),
+    )
+    const top100 = await this.pythonClient.predictTop100(candidatesForPython)
+
     return {
+      top100,
       commonFriends,
       commonGroups,
-      suggestBasedOnInterest,
       suggestBasedOnNearby,
     }
   }

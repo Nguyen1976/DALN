@@ -1,0 +1,19 @@
+import logging
+
+from app.services.logistic_service import LogisticService
+
+
+class LogisticController:
+    def __init__(self, service: LogisticService, logger: logging.Logger) -> None:
+        self.service = service
+        self.logger = logger
+
+    async def predict_top_k(self, data: list, k: int = 100) -> dict:
+        try:
+            print(data, k)
+            result = self.service.predict_top_k(data, k)
+            print("Predicted top-k candidates:", result)
+            return result
+        except Exception as exc:
+            self.logger.error("Error: %s", str(exc))
+            return {"status": "error"}

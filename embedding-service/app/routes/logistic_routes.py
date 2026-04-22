@@ -1,0 +1,16 @@
+from fastapi import APIRouter, Depends
+
+from app.controllers.logistic_controller import LogisticController
+from app.dependencies import get_logistic_controller
+from app.schemas.logistic import TopKRequest
+
+router = APIRouter(tags=["logistic"])
+
+
+@router.post("/top-k")
+async def predict_top_k(
+    payload: TopKRequest,
+    controller: LogisticController = Depends(get_logistic_controller),
+):
+    candidates = [candidate.model_dump() for candidate in payload.data]
+    return await controller.predict_top_k(candidates, payload.k)
