@@ -47,6 +47,7 @@ model impresstionLog {
   features Features
   score Int
   rank Int
+  version Int
   createdAt DateTime @default(now())
 }
 

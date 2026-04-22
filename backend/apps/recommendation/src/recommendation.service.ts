@@ -21,9 +21,29 @@ export class RecommendationService {
     private readonly utilService: UtilService,
     private readonly pythonClient: PythonRecommendationClient,
   ) {}
-  async getHello(userId: string) {
+
+  async recommendation() {
+    console.time('Tổng thời gian recommendation')
+    //hàm này sẽ lấy tạm 1k user sau dó rcm cho từng người
+
+    console.time('Bắt đầu lấy danh sách user từ MongoDB')
+    const users = await this.prisma.user.findMany({
+      take: 1000,
+      select: { id: true },
+    })
+    console.timeEnd('Bắt đầu lấy danh sách user từ MongoDB')
+    console.time('Bắt đầu vòng lặp recommendationHelper cho từng user')
+    for (const user of users) {
+      const rcm = await this.recommendationHelper(user.id)
+      console.log(`Gợi ý cho user ${user.id}:`, rcm)
+    }
+    console.timeEnd('Bắt đầu vòng lặp recommendationHelper cho từng user')
+    console.timeEnd('Tổng thời gian recommendation')
+  }
+
+  async recommendationHelper(userId: string) {
     console.log(`--- Bắt đầu xử lý Suggest cho User: ${userId} ---`)
-    console.time('Tổng thời gian getHello')
+    console.time('Tổng thời gian recommendationHelper')
 
     // 1. Lấy danh sách ID từ Neo4j
     const friendRecords = await this.neo4jService.read(
@@ -116,7 +136,7 @@ export class RecommendationService {
     }
     console.timeEnd('Giai đoạn 5: MongoDB GeoNear')
 
-    console.timeEnd('Tổng thời gian getHello')
+    console.timeEnd('Tổng thời gian recommendationHelper')
 
     console.log({
       commonFriends: commonFriends[0],
@@ -213,8 +233,6 @@ export class RecommendationService {
       ),
     )
 
-    console.log(map.values())
-
     const candidatesForPython = Array.from(map.values()).filter(
       (candidate) =>
         typeof candidate?.candidateId === 'string' &&
@@ -225,11 +243,70 @@ export class RecommendationService {
     )
     const top100 = await this.pythonClient.predictTop100(candidatesForPython)
 
-    return {
-      top100,
-      commonFriends,
-      commonGroups,
-      suggestBasedOnNearby,
-    }
+    //ghi với verstion 1
+    /**
+     * model impresstionLog {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId  String   @db.ObjectId
+  candidateId String @db.ObjectId
+  features Features
+  score Int
+  rank Int
+  version Int
+  createdAt DateTime @default(now())
+}
+
+     * 
+     * 
+     * 
+     * 
+     */
+    /**
+     * enum Action {
+  MESSAGE
+  FRIEND
+  IGNORE
+}
+
+model actionLog {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId  String   @db.ObjectId
+  candidateId String @db.ObjectId
+  action  Action
+  createdAt DateTime @default(now())
+}
+
+     * 
+     * 
+     */
+
+    top100.forEach(async (c: any, index) => {
+      await this.prisma.impresstionLog.create({
+        data: {
+          userId,
+          candidateId: c.candidateId,
+          features: {
+            mutualFriends: c.mutualFriends,
+            mutualGroups: c.mutualGroups,
+            interestSimilarity: c.interestSimilarity,
+            distanceKm: c.distanceKm,
+          },
+          score: c.score as number,
+          rank: index + 1,
+          version: 1,
+        },
+      })
+
+      await this.prisma.actionLog.create({
+        data: {
+          userId,
+          candidateId: c.candidateId,
+          action: 'IGNORE', // or some default action
+          createdAt: new Date(),
+        },
+      })
+    })
+
+    return top100
   }
 }
