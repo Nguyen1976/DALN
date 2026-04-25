@@ -294,7 +294,7 @@ model actionLog {
           action: 'IGNORE',
           score: c.score as number,
           rank: index + 1,
-          version: 1,
+          version: 2,
         },
       })
     })

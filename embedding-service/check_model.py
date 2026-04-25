@@ -7,7 +7,7 @@ import joblib
 import numpy as np
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"
-LATEST_MODEL = MODEL_DIR / "latest_model.pkl"
+LATEST_MODEL = MODEL_DIR / "latest_model_version_1.pkl"
 
 
 @dataclass
@@ -72,7 +72,7 @@ def main() -> None:
         print(f"Model directory not found: {MODEL_DIR}")
         return
 
-    versioned_models = sorted(MODEL_DIR.glob("latest_model_version_*.pkl"))
+    versioned_models = sorted(MODEL_DIR.glob("latest_model_version_2.pkl"))
 
     model_paths: list[Path] = []
     if LATEST_MODEL.exists():
@@ -88,7 +88,7 @@ def main() -> None:
     for snapshot in snapshots:
         print_snapshot(snapshot)
 
-    latest_snapshot = next((s for s in snapshots if s.path.name == "latest_model.pkl"), None)
+    latest_snapshot = next((s for s in snapshots if s.path.name == "latest_model_version_1.pkl"), None)
     newest_versioned = snapshots[-1] if snapshots else None
 
     if latest_snapshot and newest_versioned and latest_snapshot.path != newest_versioned.path:

@@ -8,10 +8,9 @@ from typing import Any
 class LogisticService:
     def __init__(self, db: Any) -> None:
         base_dir = Path(__file__).resolve().parents[2]
-        self.model_path = base_dir / "models" / "latest_model.pkl"
+        self.model_path = base_dir / "models" / "latest_model_version_1.pkl"
         self.db = db
         self.impression_collection = self.db["impresstionLog"]
-        self.action_collection = self.db["actionLog"]
 
     def _logistic_regression(self):
         sklearn_linear_model = import_module("sklearn.linear_model")
