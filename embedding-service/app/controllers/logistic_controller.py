@@ -8,6 +8,13 @@ class LogisticController:
         self.service = service
         self.logger = logger
 
+    async def evaluate_model(self, version: int) -> dict:
+        try:
+            return self.service.evaluate_model(version)
+        except Exception as exc:
+            self.logger.error("Error: %s", str(exc))
+            return {"status": "error", "message": str(exc)}
+
     async def retrain_model(self) -> dict:
         try:
             return self.service.retrain_model()

@@ -12,3 +12,7 @@ class LogisticCandidate(BaseModel):
 class TopKRequest(BaseModel):
     data: list[LogisticCandidate]
     k: int = 100
+
+
+class EvaluateRequest(BaseModel):
+    version: int

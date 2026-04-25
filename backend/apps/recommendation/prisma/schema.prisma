@@ -51,7 +51,7 @@ model impresstionLog {
   userId  String   @db.ObjectId
   candidateId String @db.ObjectId
   features Features
-  score Int
+  score Float
   rank Int
   version Int
   action  Action
