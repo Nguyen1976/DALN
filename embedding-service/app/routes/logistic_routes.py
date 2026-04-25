@@ -14,3 +14,10 @@ async def predict_top_k(
 ):
     candidates = [candidate.model_dump() for candidate in payload.data]
     return await controller.predict_top_k(candidates, payload.k)
+
+
+@router.post("/retrain")
+async def retrain_model(
+    controller: LogisticController = Depends(get_logistic_controller),
+):
+    return await controller.retrain_model()

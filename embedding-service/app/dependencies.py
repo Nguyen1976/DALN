@@ -27,7 +27,7 @@ collection = db[settings.mongo_collection_name]
 user_repository = UserRepository(collection)
 embedding_service = EmbeddingService(user_repository)
 embedding_controller = EmbeddingController(embedding_service, logger)
-logistic_service = LogisticService()
+logistic_service = LogisticService(db)
 logistic_controller = LogisticController(logistic_service, logger)
 
 

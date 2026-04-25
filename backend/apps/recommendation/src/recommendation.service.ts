@@ -291,18 +291,10 @@ model actionLog {
             interestSimilarity: c.interestSimilarity,
             distanceKm: c.distanceKm,
           },
+          action: 'IGNORE',
           score: c.score as number,
           rank: index + 1,
           version: 1,
-        },
-      })
-
-      await this.prisma.actionLog.create({
-        data: {
-          userId,
-          candidateId: c.candidateId,
-          action: 'IGNORE', // or some default action
-          createdAt: new Date(),
         },
       })
     })

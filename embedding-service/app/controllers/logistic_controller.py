@@ -8,6 +8,13 @@ class LogisticController:
         self.service = service
         self.logger = logger
 
+    async def retrain_model(self) -> dict:
+        try:
+            return self.service.retrain_model()
+        except Exception as exc:
+            self.logger.error("Error: %s", str(exc))
+            return {"status": "error", "message": str(exc)}
+
     async def predict_top_k(self, data: list, k: int = 100) -> dict:
         try:
             print(data, k)
