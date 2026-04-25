@@ -4,8 +4,9 @@ from sklearn.linear_model import LogisticRegression
 import os
 
 # Đường dẫn lưu model
-MODEL_DIR = "models"
-MODEL_NAME = "latest_model.pkl"
+MODEL_DIR = "./models"
+MODEL_NAME = os.getenv("BOOTSTRAP_MODEL_NAME", "bootstrap_model.pkl")
+ALLOW_OVERWRITE_LATEST = os.getenv("BOOTSTRAP_OVERWRITE_LATEST", "0") == "1"
 
 if not os.path.exists(MODEL_DIR):
     os.makedirs(MODEL_DIR)
@@ -29,6 +30,13 @@ def create_initial_model():
     model.classes_ = np.array([0, 1]) # 0: Bỏ qua, 1: Tương tác
 
     # 4. Lưu thành file .pkl
+    if MODEL_NAME == "latest_model.pkl" and not ALLOW_OVERWRITE_LATEST:
+        print(
+            "❌ Refuse to overwrite latest_model.pkl by default. "
+            "Set BOOTSTRAP_OVERWRITE_LATEST=1 if you really want to overwrite."
+        )
+        return
+
     model_path = os.path.join(MODEL_DIR, MODEL_NAME)
     joblib.dump(model, model_path)
     
