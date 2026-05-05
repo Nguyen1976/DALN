@@ -1,60 +1,65 @@
 (() => {
-    print("🚀 Đang chạy script update action giả lập cho dữ liệu hiện tại...");
+    print("🚀 Simulation v2 - Strong signal version");
 
-    const collectionName = "impresstionLog"; // Đổi thành actionLog nếu bạn tách collection
+    const collectionName = "impresstionLog";
     const batchSize = 1000;
 
-    // Trọng số định hướng
-    const W_FRIENDS = 0.5;
-    const W_GROUPS = 0.3;
-    const W_INTEREST = 0.8;
-    const W_DISTANCE = -0.1; 
-    const BASE_INTERCEPT = -3.0; // Ép tỷ lệ IGNORE lên mức thực tế (80-90%)
-
-    // Hàm tạo nhiễu cảm xúc (Phân phối chuẩn Normal - Thuật toán Box-Muller)
     function getNormal(mean, stdDev) {
-        let u = 1 - Math.random(); 
+        let u = 1 - Math.random();
         let v = Math.random();
         let z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
         return z * stdDev + mean;
     }
 
-    const cursor = db.getCollection(collectionName).find({version: 2});
+    // ✅ Normalize distance về 0-1 trước khi dùng
+    function normalizeDistance(km) {
+        // 0km = 1.0, 50km = 0.5, 200km+ ≈ 0
+        return Math.exp(-km / 50);
+    }
+
+    // ✅ Normalize mutualFriends về 0-1
+    function normalizeFriends(count) {
+        // 0 = 0, 5 = 0.5, 10+ ≈ 1.0
+        return 1 - Math.exp(-count / 5);
+    }
+
+    // ✅ Normalize mutualGroups về 0-1
+    function normalizeGroups(count) {
+        return 1 - Math.exp(-count / 3);
+    }
+
+    const cursor = db.getCollection(collectionName).find({ version: 3 });
     let bulkOps = [];
     let stats = { IGNORE: 0, MESSAGE: 0, FRIEND: 0 };
     let count = 0;
 
     cursor.forEach(doc => {
-        // Bỏ qua nếu doc không có object features
-        if (!doc.features) return; 
+        if (!doc.features) return;
 
-        const friends = doc.features.mutualFriends || 0;
-        const groups = doc.features.mutualGroups || 0;
-        const interest = doc.features.interestSimilarity || 0;
-        const distance = doc.features.distanceKm || 0;
+        const friends  = normalizeFriends(doc.features.mutualFriends || 0);   // 0-1
+        const groups   = normalizeGroups(doc.features.mutualGroups || 0);     // 0-1
+        const interest = doc.features.interestSimilarity || 0;                // đã 0-1
+        const distance = normalizeDistance(doc.features.distanceKm || 999);   // 0-1
 
-        // Tính điểm tuyến tính z ban đầu
-        let z = (W_FRIENDS * friends) + 
-                (W_GROUPS * groups) + 
-                (W_INTEREST * interest) + 
-                (W_DISTANCE * distance) + 
-                BASE_INTERCEPT;
+        // ✅ Weight mạnh hơn, tất cả features đã cùng scale 0-1
+        // BASE_INTERCEPT = -3.5 → P(positive) ≈ 1% khi tất cả = 0
+        let z = (1.5 * friends)   // bạn chung: signal mạnh nhất
+               + (0.8 * groups)   // nhóm chung
+               + (1.8 * interest) // sở thích: signal mạnh
+               + (0.6 * distance) // gần nhau
+               + (-3.5);          // intercept
 
-        // Thêm nhiễu ngẫu nhiên
-        z += getNormal(0.0, 1.5);
+        // ✅ Noise nhỏ hơn để không overwhelm signal
+        z += getNormal(0.0, 0.1);
 
-        // Tính xác suất P
-        let prob = 1 / (1 + Math.exp(-z));
+        const prob = 1 / (1 + Math.exp(-z));
         let newAction = "IGNORE";
 
-        // Tung đồng xu
         if (Math.random() < prob) {
             newAction = Math.random() < 0.7 ? "MESSAGE" : "FRIEND";
         }
-        
-        stats[newAction]++;
 
-        // Đẩy lệnh update vào Bulk
+        stats[newAction]++;
         bulkOps.push({
             updateOne: {
                 filter: { _id: doc._id },
@@ -63,29 +68,22 @@
         });
 
         count++;
-
-        // Flush batch
         if (count % batchSize === 0) {
             db.getCollection(collectionName).bulkWrite(bulkOps);
             print(`⏳ Đã update ${count} records...`);
-            bulkOps = []; 
+            bulkOps = [];
         }
     });
 
-    // Flush nốt phần dư
     if (bulkOps.length > 0) {
         db.getCollection(collectionName).bulkWrite(bulkOps);
     }
 
-    // In báo cáo
     print("\n✅ === HOÀN TẤT ===");
     if (count > 0) {
-        print(`Đã update action cho ${count} bản ghi có sẵn trong collection '${collectionName}'.`);
-        print("📊 Tỷ lệ phân bổ Action sau khi update:");
-        print(`   - IGNORE : ${stats.IGNORE} (${((stats.IGNORE / count) * 100).toFixed(2)}%)`);
-        print(`   - MESSAGE: ${stats.MESSAGE} (${((stats.MESSAGE / count) * 100).toFixed(2)}%)`);
-        print(`   - FRIEND : ${stats.FRIEND} (${((stats.FRIEND / count) * 100).toFixed(2)}%)`);
-    } else {
-        print("⚠️ Không tìm thấy document nào có trường 'features' để update.");
+        print(`Updated: ${count} records`);
+        print(`   IGNORE : ${stats.IGNORE} (${((stats.IGNORE/count)*100).toFixed(1)}%)`);
+        print(`   MESSAGE: ${stats.MESSAGE} (${((stats.MESSAGE/count)*100).toFixed(1)}%)`);
+        print(`   FRIEND : ${stats.FRIEND} (${((stats.FRIEND/count)*100).toFixed(1)}%)`);
     }
 })();

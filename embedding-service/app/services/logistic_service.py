@@ -13,6 +13,22 @@ class LogisticService:
         self.impression_collection = self.db["impresstionLog"]
         self.action_collection = self.db["actionLog"]
 
+    def _random_forest(self):
+        sklearn_ensemble = import_module("sklearn.ensemble")
+        return sklearn_ensemble.RandomForestClassifier
+
+    def _xgb_classifier(self):
+        xgb_module = import_module("xgboost")
+        return xgb_module.XGBClassifier
+
+    def _smote(self):
+        imblearn_over_sampling = import_module("imblearn.over_sampling")
+        return imblearn_over_sampling.SMOTE
+
+    def _smote_tomek(self):
+        imblearn_combine = import_module("imblearn.combine")
+        return imblearn_combine.SMOTETomek
+
     def _logistic_regression(self):
         sklearn_linear_model = import_module("sklearn.linear_model")
         return sklearn_linear_model.LogisticRegression
@@ -31,10 +47,85 @@ class LogisticService:
             "recall_score": sklearn_metrics.recall_score,
             "f1_score": sklearn_metrics.f1_score,
             "roc_auc_score": sklearn_metrics.roc_auc_score,
+            "average_precision_score": sklearn_metrics.average_precision_score,
+            "precision_recall_curve": sklearn_metrics.precision_recall_curve,
             "confusion_matrix": sklearn_metrics.confusion_matrix,
             "classification_report": sklearn_metrics.classification_report,
             "accuracy_score": sklearn_metrics.accuracy_score,
         }
+
+    def _build_model(self, model_name: str, y_train):
+        """Build a model based on the model_name parameter"""
+        n_neg = int((y_train == 0).sum())
+        n_pos = int((y_train == 1).sum())
+        scale_pos_weight = float(n_neg / max(1, n_pos))
+
+        if model_name == "logistic_regression":
+            LogisticRegression = self._logistic_regression()
+            return LogisticRegression(
+                max_iter=1000,
+                random_state=42,
+                class_weight="balanced",
+            )
+        elif model_name == "random_forest":
+            RandomForestClassifier = self._random_forest()
+            return RandomForestClassifier(
+                n_estimators=500,
+                max_depth=10,
+                min_samples_split=5,
+                min_samples_leaf=2,
+                random_state=42,
+                n_jobs=-1,
+                class_weight="balanced",
+            )
+        elif model_name == "xgboost":
+            XGB = self._xgb_classifier()
+            return XGB(
+                scale_pos_weight=scale_pos_weight,
+                n_estimators=500,
+                max_depth=5,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                min_child_weight=5,
+                gamma=1,
+                eval_metric="aucpr",
+                random_state=42,
+                n_jobs=-1,
+            )
+        else:
+            raise ValueError(f"Unknown model name: {model_name}")
+
+    def _resample_training_data(self, X_train, y_train):
+        if y_train.nunique() < 2:
+            return X_train, y_train
+
+        try:
+            SMOTE = self._smote()
+            SMOTETomek = self._smote_tomek()
+            smote_tomek = SMOTETomek(
+                smote=SMOTE(sampling_strategy=0.3),
+                random_state=42,
+            )
+            return smote_tomek.fit_resample(X_train, y_train)
+        except Exception:
+            return X_train, y_train
+
+    def _best_threshold_from_scores(self, y_true, y_scores):
+        metrics = self._metrics()
+        precisions, recalls, thresholds = metrics["precision_recall_curve"](
+            y_true,
+            y_scores,
+        )
+
+        if len(thresholds) == 0:
+            return 0.5
+
+        f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (
+            precisions[:-1] + recalls[:-1] + 1e-8
+        )
+        best_index = int(np.nanargmax(f1_scores))
+        return float(thresholds[min(best_index, len(thresholds) - 1)])
 
     def _latest_version(self) -> int | None:
         latest_log = self.impression_collection.find_one(
@@ -116,7 +207,8 @@ class LogisticService:
 
     def retrain_model(self) -> dict:
         joblib = self._joblib()
-        LogisticRegression = self._logistic_regression()
+        # LogisticRegression = self._logistic_regression()
+        RandomForestClassifier = self._random_forest()
 
         latest_version = self._latest_version()
         if latest_version is None:
@@ -162,8 +254,34 @@ class LogisticService:
                 "message": "Need at least 2 label classes to retrain",
             }
 
-        model = LogisticRegression(class_weight='balanced', max_iter=1000)
-        model.fit(X, y)
+        # Train XGBoost with an internal validation split and scale_pos_weight
+        X_train_full, X_val, y_train_full, y_val = self._train_test_split()(X, y, test_size=0.2, random_state=42, stratify=y)
+
+        n_neg = int((y_train_full == 0).sum())
+        n_pos = int((y_train_full == 1).sum())
+        scale_pos_weight = float(n_neg / max(1, n_pos))
+
+        XGB = self._xgb_classifier()
+        model = XGB(
+            scale_pos_weight=scale_pos_weight,
+            n_estimators=500,
+            max_depth=5,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            min_child_weight=5,
+            gamma=1,
+            eval_metric="aucpr",
+            random_state=42,
+            n_jobs=-1,
+        )
+
+        model.fit(
+            X_train_full,
+            y_train_full,
+            eval_set=[(X_val, y_val)],
+            verbose=False,
+        )
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         versioned_model_path = self.model_path.parent / f"latest_model_version_{latest_version}.pkl"
@@ -177,11 +295,11 @@ class LogisticService:
             "latestModelFile": self.model_path.name,
             "labelCounts": {str(k): int(v) for k, v in label_counts.items()},
             "rows": int(len(data)),
+            "trainedOnRows": int(len(X_train_full) + len(X_val)),
         }
 
-    def evaluate_model(self, version: int) -> dict:
+    def evaluate_model(self, version: int, model_name: str = "xgboost") -> dict:
         joblib = self._joblib()
-        LogisticRegression = self._logistic_regression()
         train_test_split = self._train_test_split()
         metrics = self._metrics()
 
@@ -191,6 +309,7 @@ class LogisticService:
                 "status": "empty",
                 "trained": False,
                 "version": version,
+                "model": model_name,
                 "message": "No impression logs found for this version",
             }
 
@@ -208,6 +327,7 @@ class LogisticService:
                 "status": "skipped",
                 "trained": False,
                 "version": version,
+                "model": model_name,
                 "labelCounts": {str(k): int(v) for k, v in label_counts.items()},
                 "message": "Not enough data points for 80/20 evaluation",
             }
@@ -217,6 +337,7 @@ class LogisticService:
                 "status": "skipped",
                 "trained": False,
                 "version": version,
+                "model": model_name,
                 "labelCounts": {str(k): int(v) for k, v in label_counts.items()},
                 "message": "Need at least 2 label classes to evaluate",
             }
@@ -226,6 +347,7 @@ class LogisticService:
                 "status": "skipped",
                 "trained": False,
                 "version": version,
+                "model": model_name,
                 "labelCounts": {str(k): int(v) for k, v in label_counts.items()},
                 "message": "Need at least 2 samples in each label for stratified 80/20 split",
             }
@@ -238,30 +360,49 @@ class LogisticService:
             stratify=y,
         )
 
-        model = LogisticRegression(class_weight='balanced', max_iter=1000)
-        model.fit(X_train, y_train)
+        # Build model based on model_name parameter
+        model = self._build_model(model_name, y_train)
+        
+        if model_name == "xgboost":
+            model.fit(
+                X_train,
+                y_train,
+                eval_set=[(X_test, y_test)],
+                verbose=False,
+            )
+        else:
+            model.fit(X_train, y_train)
 
-        y_pred = model.predict(X_test)
         y_scores = model.predict_proba(X_test)[:, 1]
+
+        # Find threshold that maximizes F1 on PR curve
+        precisions, recalls, thresholds = metrics["precision_recall_curve"](y_test, y_scores)
+        if len(thresholds) > 0:
+            f1s = 2 * precisions[:-1] * recalls[:-1] / (precisions[:-1] + recalls[:-1] + 1e-8)
+            best_idx = int(np.nanargmax(f1s))
+            best_threshold = float(thresholds[min(best_idx, len(thresholds) - 1)])
+        else:
+            best_threshold = 0.5
+        y_pred = (y_scores >= best_threshold).astype(int)
 
         precision = metrics["precision_score"](y_test, y_pred, zero_division=0)
         recall = metrics["recall_score"](y_test, y_pred, zero_division=0)
         f1_score = metrics["f1_score"](y_test, y_pred, zero_division=0)
         accuracy = metrics["accuracy_score"](y_test, y_pred)
         roc_auc = metrics["roc_auc_score"](y_test, y_scores)
+        pr_auc = metrics["average_precision_score"](y_test, y_scores)
         tn, fp, fn, tp = metrics["confusion_matrix"](y_test, y_pred).ravel()
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
-        versioned_model_path = self.model_path.parent / f"latest_model_version_{version}.pkl"
+        versioned_model_path = self.model_path.parent / f"latest_model_version_{version}_{model_name}.pkl"
         joblib.dump(model, versioned_model_path)
-        joblib.dump(model, self.model_path)
 
         return {
             "status": "ok",
             "trained": True,
             "version": version,
+            "model": model_name,
             "modelFile": versioned_model_path.name,
-            "latestModelFile": self.model_path.name,
             "rows": int(len(data)),
             "trainRows": int(len(X_train)),
             "testRows": int(len(X_test)),
@@ -272,6 +413,8 @@ class LogisticService:
                 "f1": float(f1_score),
                 "accuracy": float(accuracy),
                 "rocAuc": float(roc_auc),
+                "prAuc": float(pr_auc),
+                "bestThreshold": float(best_threshold),
                 "confusionMatrix": {
                     "tn": int(tn),
                     "fp": int(fp),

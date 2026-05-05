@@ -28,4 +28,4 @@ async def evaluate_model(
     payload: EvaluateRequest,
     controller: LogisticController = Depends(get_logistic_controller),
 ):
-    return await controller.evaluate_model(payload.version)
+    return await controller.evaluate_model(payload.version, payload.model_name)

@@ -8,9 +8,9 @@ class LogisticController:
         self.service = service
         self.logger = logger
 
-    async def evaluate_model(self, version: int) -> dict:
+    async def evaluate_model(self, version: int, model_name: str = "xgboost") -> dict:
         try:
-            return self.service.evaluate_model(version)
+            return self.service.evaluate_model(version, model_name)
         except Exception as exc:
             self.logger.error("Error: %s", str(exc))
             return {"status": "error", "message": str(exc)}

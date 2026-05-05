@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Literal
 
 
 class LogisticCandidate(BaseModel):
@@ -16,3 +17,4 @@ class TopKRequest(BaseModel):
 
 class EvaluateRequest(BaseModel):
     version: int
+    model_name: Literal["logistic_regression", "random_forest", "xgboost"] = "xgboost"

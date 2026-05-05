@@ -76,4 +76,92 @@ export class RedisService {
   async get(key: string): Promise<string | null> {
     return await this.redisClient.get(key)
   }
+
+  // Feature Hydration Cache methods
+  private getFeaturesKey(userId: string): string {
+    return `user:${userId}:features`
+  }
+
+  async getUserFeatures(userId: string): Promise<Record<string, any> | null> {
+    try {
+      const key = this.getFeaturesKey(userId)
+      const data = await this.redisClient.hgetall(key)
+      if (!data || Object.keys(data).length === 0) return null
+      return data
+    } catch (err) {
+      console.error(`[RedisService] Error getting features for ${userId}:`, err)
+      return null
+    }
+  }
+
+  async getUserFeaturesBatch(
+    userIds: string[],
+  ): Promise<Record<string, Record<string, any>>> {
+    try {
+      const keys = userIds.map((id) => this.getFeaturesKey(id))
+      const results = await this.redisClient.mget(...keys)
+
+      const featuresByUserId: Record<string, Record<string, any>> = {}
+      for (let i = 0; i < userIds.length; i++) {
+        const data = results[i]
+        if (data) {
+          try {
+            featuresByUserId[userIds[i]] = JSON.parse(data)
+          } catch {
+            featuresByUserId[userIds[i]] = data
+          }
+        }
+      }
+      return featuresByUserId
+    } catch (err) {
+      console.error(`[RedisService] Error getting features batch:`, err)
+      return {}
+    }
+  }
+
+  async setUserFeatures(
+    userId: string,
+    features: { bio?: string; location?: any },
+    ttl = 86400,
+  ): Promise<void> {
+    try {
+      const key = this.getFeaturesKey(userId)
+      const serialized = JSON.stringify(features)
+      await this.redisClient.set(key, serialized, 'EX', ttl)
+    } catch (err) {
+      console.error(`[RedisService] Error setting features for ${userId}:`, err)
+    }
+  }
+
+  async deleteUserFeatures(userId: string): Promise<void> {
+    try {
+      const key = this.getFeaturesKey(userId)
+      await this.redisClient.del(key)
+    } catch (err) {
+      console.error(
+        `[RedisService] Error deleting features for ${userId}:`,
+        err,
+      )
+    }
+  }
+
+  async setUserFeaturesBatch(
+    profiles: Array<{ id: string; bio?: string | null; location?: any }>,
+    ttl = 86400,
+  ): Promise<void> {
+    try {
+      const pipeline = this.redisClient.pipeline()
+      for (const p of profiles) {
+        const key = this.getFeaturesKey(p.id)
+        const serialized = JSON.stringify({
+          bio: p.bio ?? null,
+          location: p.location ?? null,
+        })
+        pipeline.set(key, serialized, 'EX', ttl)
+      }
+      await pipeline.exec()
+    } catch (err) {
+      console.error(`[RedisService] Error setting features batch:`, err)
+    }
+  }
 }

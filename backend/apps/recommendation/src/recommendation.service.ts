@@ -3,7 +3,9 @@ import { Inject, Injectable } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { QdrantService } from '@app/qdrant/qdrant.service'
 import { UtilService } from '@app/util/util.service'
+import { RedisService } from '@app/redis/redis.service'
 import { PythonRecommendationClient } from './python-recommendation.client'
+import * as _ from 'lodash'
 
 type NearbyUser = {
   _id: string | { $oid: string }
@@ -30,6 +32,7 @@ export class RecommendationService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly qdrantService: QdrantService,
     private readonly utilService: UtilService,
+    private readonly redisService: RedisService,
     private readonly pythonClient: PythonRecommendationClient,
   ) {}
 
@@ -110,22 +113,28 @@ export class RecommendationService {
   }
 
   async recommendation() {
-    console.time('Tổng thời gian recommendation')
-    //hàm này sẽ lấy tạm 1k user sau dó rcm cho từng người
-
+    console.time('Tổng thời gian cho 1000 User')
+    // 1. Lấy 1000 user (có thể thay đổi số lượng)
     console.time('Bắt đầu lấy danh sách user từ MongoDB')
     const users = await this.prisma.user.findMany({
       take: 1000,
       select: { id: true },
     })
     console.timeEnd('Bắt đầu lấy danh sách user từ MongoDB')
-    console.time('Bắt đầu vòng lặp recommendationHelper cho từng user')
-    for (const user of users) {
-      const rcm = await this.recommendationHelper(user.id)
-      console.log(`Gợi ý cho user ${user.id}:`, rcm)
+
+    // 2. Chia thành các lô nhỏ để giữ mức concurrency ổn định
+    const CHUNK_SIZE = 50
+    const userChunks = _.chunk(users, CHUNK_SIZE)
+
+    let processed = 0
+    for (const chunk of userChunks) {
+      // Chạy song song trong mỗi lô (khoảng CHUNK_SIZE promises)
+      await Promise.all(chunk.map((u) => this.recommendationHelper(u.id)))
+      processed += chunk.length
+      console.log(`✅ Đã xử lý xong ${processed}/${users.length} users...`)
     }
-    console.timeEnd('Bắt đầu vòng lặp recommendationHelper cho từng user')
-    console.timeEnd('Tổng thời gian recommendation')
+
+    console.timeEnd('Tổng thời gian cho 1000 User')
   }
 
   async recommendationHelper(userId: string) {
@@ -245,52 +254,53 @@ export class RecommendationService {
     )
     console.timeEnd('Giai đoạn 6: Build candidate union')
 
-    console.time('Giai đoạn 7: Enrich all candidates from graph + mongo')
-    const queryBatchCommonFriends = `
-      MATCH (me:User {userId: $userId})
-      UNWIND $candidateIds AS candidateId
-      OPTIONAL MATCH (me)-[:FRIEND]-(f:User)-[:FRIEND]-(candidate:User {userId: candidateId})
-      RETURN candidateId AS id, count(DISTINCT f) AS commonFriends
-    `
+    console.time('Giai đoạn 7: Enrich Features')
 
-    const queryBatchCommonGroups = `
-      MATCH (me:User {userId: $userId})
-      UNWIND $candidateIds AS candidateId
-      OPTIONAL MATCH (me)-[:MEMBER_OF]-(g:Group)<-[:MEMBER_OF]-(candidate:User {userId: candidateId})
-      RETURN candidateId AS id, count(DISTINCT g) AS commonGroups
-    `
+    // Giai đoạn 7a: Fetch từ Redis cache (batch)
+    const cachedFeatures =
+      await this.redisService.getUserFeaturesBatch(allCandidateIds)
+    const missingIds = allCandidateIds.filter((id) => !cachedFeatures[id])
 
-    const [batchFriendsRecords, batchGroupsRecords, candidateProfiles] =
-      allCandidateIds.length > 0
-        ? await Promise.all([
-            this.neo4jService.read(queryBatchCommonFriends, {
-              userId,
-              candidateIds: allCandidateIds,
-            }),
-            this.neo4jService.read(queryBatchCommonGroups, {
-              userId,
-              candidateIds: allCandidateIds,
-            }),
-            this.prisma.user.findMany({
-              where: { id: { in: allCandidateIds } },
-              select: { id: true, bio: true, location: true },
-            }),
-          ])
-        : [[], [], []]
+    // Giai đoạn 7b: Query Prisma cho những ID bị thiếu
+    let missingProfiles: UserProfileRow[] = []
+    if (missingIds.length > 0) {
+      missingProfiles = await this.prisma.user.findMany({
+        where: { id: { in: missingIds } },
+        select: { id: true, bio: true, location: true },
+      })
 
-    const commonFriendsById = new Map(
-      batchFriendsRecords.map((r) => [
-        String(r.get('id')),
-        Number(r.get('commonFriends')?.toNumber?.() ?? 0),
-      ]),
+      // Warm-up cache: lưu ngược trở lại Redis để tránh cache-miss cho lần tiếp theo
+      if (missingProfiles.length > 0) {
+        await this.redisService.setUserFeaturesBatch(missingProfiles)
+      }
+    }
+
+    // Giai đoạn 7c: Combine bằng Map (O(1) lookup)
+    const missingProfilesMap = new Map(missingProfiles.map((p) => [p.id, p]))
+    const candidateProfiles: UserProfileRow[] = []
+    for (const id of allCandidateIds) {
+      if (cachedFeatures[id]) {
+        const cached = cachedFeatures[id]
+        candidateProfiles.push({
+          id,
+          bio: cached.bio || null,
+          location: cached.location || null,
+        })
+      } else {
+        const profile = missingProfilesMap.get(id)
+        if (profile) candidateProfiles.push(profile as UserProfileRow)
+      }
+    }
+
+    // Giai đoạn 7d: Không gọi Neo4j nữa — dùng commonFriends & commonGroups đã lấy ở Giai đoạn 4
+    const commonFriendsById = new Map<string, number>(
+      commonFriends.map((f) => [f.id, f.commonFriends]),
+    )
+    const commonGroupsById = new Map<string, number>(
+      commonGroups.map((g) => [g.id, g.commonGroups]),
     )
 
-    const commonGroupsById = new Map(
-      batchGroupsRecords.map((r) => [
-        String(r.get('id')),
-        Number(r.get('commonGroups')?.toNumber?.() ?? 0),
-      ]),
-    )
+    console.timeEnd('Giai đoạn 7: Enrich Features')
 
     const profileByCandidateId = new Map(
       (candidateProfiles as UserProfileRow[]).map((u) => [u.id, u]),
@@ -378,43 +388,6 @@ export class RecommendationService {
         Number.isFinite(Number(candidate?.distanceKm)),
     )
     const top100 = await this.pythonClient.predictTop100(candidatesForPython)
-
-    //ghi với verstion 1
-    /**
-     * model impresstionLog {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId  String   @db.ObjectId
-  candidateId String @db.ObjectId
-  features Features
-  score Float
-  rank Int
-  version Int
-  createdAt DateTime @default(now())
-}
-
-     * 
-     * 
-     * 
-     * 
-     */
-    /**
-     * enum Action {
-  MESSAGE
-  FRIEND
-  IGNORE
-}
-
-model actionLog {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId  String   @db.ObjectId
-  candidateId String @db.ObjectId
-  action  Action
-  createdAt DateTime @default(now())
-}
-
-     * 
-     * 
-     */
 
     await this.prisma.impresstionLog.createMany({
       data: top100.map((c: any, index: number) => ({
