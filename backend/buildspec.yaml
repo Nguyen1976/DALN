@@ -6,16 +6,16 @@ phases:
       - aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin 435788423238.dkr.ecr.ap-southeast-2.amazonaws.com
   build:
     commands:
-      - docker build -t user -f apps/user/Dockerfile .
+      - docker build -t user -f backend/apps/user/Dockerfile .
       - docker tag user:latest 435788423238.dkr.ecr.ap-southeast-2.amazonaws.com/user:latest
 
-      - docker build -t realtime-gateway -f apps/realtime-gateway/Dockerfile .
+      - docker build -t realtime-gateway -f backend/apps/realtime-gateway/Dockerfile .
       - docker tag realtime-gateway:latest 435788423238.dkr.ecr.ap-southeast-2.amazonaws.com/realtime-gateway:latest
 
-      - docker build -t notification -f apps/notification/Dockerfile .
+      - docker build -t notification -f backend/apps/notification/Dockerfile .
       - docker tag notification:latest 435788423238.dkr.ecr.ap-southeast-2.amazonaws.com/notification:latest
 
-      - docker build -t chat -f apps/chat/Dockerfile .
+      - docker build -t chat -f backend/apps/chat/Dockerfile .
       - docker tag chat:latest 435788423238.dkr.ecr.ap-southeast-2.amazonaws.com/chat:latest
   post_build:
     commands:
