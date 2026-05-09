@@ -1,0 +1,17 @@
+.git
+.DS_Store
+.env
+.env.*
+node_modules
+dist
+logs
+coverage
+apps/**/node_modules
+libs/**/node_modules
+apps/**/dist
+libs/**/dist
+apps/**/test
+libs/**/test
+**/*.log
+**/*.spec.ts
+**/*.spec.js
