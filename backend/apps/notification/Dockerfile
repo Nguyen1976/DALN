@@ -7,6 +7,7 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+RUN npx prisma generate --schema=apps/notification/prisma/schema.prisma
 RUN npm run build -- notification
 
 

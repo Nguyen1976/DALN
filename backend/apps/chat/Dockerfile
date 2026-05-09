@@ -7,6 +7,7 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+RUN npx prisma generate --schema=apps/chat/prisma/schema.prisma
 RUN npm run build -- chat
 
 # ===== Stage 2: Production =====
