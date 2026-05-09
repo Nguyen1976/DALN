@@ -7,7 +7,8 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN npm run build -- notification
+
 
 # ===== Stage 2: Production =====
 FROM node:20-alpine
