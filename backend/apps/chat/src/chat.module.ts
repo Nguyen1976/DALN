@@ -53,8 +53,10 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
     ScheduleModule.forRoot(),
     BullModule.forRoot({
       connection: {
-        host: 'localhost', // Hoặc config từ file .env
-        port: 6379,
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT || 6379),
+        username: process.env.REDIS_USERNAME,
+        password: process.env.REDIS_PASSWORD,
       },
     }),
     BullModule.registerQueue({
@@ -65,6 +67,8 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
       {
         host: process.env.REDIS_HOST || 'localhost',
         port: Number(process.env.REDIS_PORT || 6379),
+        username: process.env.REDIS_USERNAME,
+        password: process.env.REDIS_PASSWORD,
         db: 0,
       },
       'REDIS_CLIENT',

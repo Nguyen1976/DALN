@@ -60,6 +60,8 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
       {
         host: process.env.REDIS_HOST || 'localhost',
         port: Number(process.env.REDIS_PORT || 6379),
+        username: process.env.REDIS_USERNAME,
+        password: process.env.REDIS_PASSWORD,
         db: 0,
       },
       'REDIS_CLIENT',

@@ -22,16 +22,18 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
 @Module({
   imports: [
     PrometheusModule.register({
-          path: '/metrics', // Endpoint để Prometheus kéo data
-          defaultMetrics: {
-            enabled: true, // Tự động lấy CPU, RAM, Heap của Node.js
-          },
-        }),
+      path: '/metrics', // Endpoint để Prometheus kéo data
+      defaultMetrics: {
+        enabled: true, // Tự động lấy CPU, RAM, Heap của Node.js
+      },
+    }),
     CommonModule,
     RedisModule.forRoot(
       {
         host: process.env.REDIS_HOST || 'localhost',
         port: Number(process.env.REDIS_PORT || 6379),
+        username: process.env.REDIS_USERNAME,
+        password: process.env.REDIS_PASSWORD,
         db: 0,
       },
       'REDIS_CLIENT',

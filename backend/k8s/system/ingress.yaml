@@ -1,0 +1,42 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: daln-backend
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /user
+            pathType: Prefix
+            backend:
+              service:
+                name: user
+                port:
+                  number: 80
+          - path: /chat
+            pathType: Prefix
+            backend:
+              service:
+                name: chat
+                port:
+                  number: 80
+          - path: /notification
+            pathType: Prefix
+            backend:
+              service:
+                name: notification
+                port:
+                  number: 80
+          - path: /realtime-gateway
+            pathType: Prefix
+            backend:
+              service:
+                name: realtime-gateway
+                port:
+                  number: 80

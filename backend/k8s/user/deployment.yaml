@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user
+  template:
+    metadata:
+      labels:
+        app: user
+    spec:
+      containers:
+        - name: user
+          image: 435788423238.dkr.ecr.ap-southeast-2.amazonaws.com/user:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3002
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: daln-backend-secret
+                  key: USER_DATABASE_URL
+          envFrom:
+            - configMapRef:
+                name: user-config
+            - secretRef:
+                name: daln-backend-secret

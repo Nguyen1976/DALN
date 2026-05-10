@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification
+  template:
+    metadata:
+      labels:
+        app: notification
+    spec:
+      containers:
+        - name: notification
+          image: 435788423238.dkr.ecr.ap-southeast-2.amazonaws.com/notification:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3004
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: LOG_LEVEL
+              value: info
+            - name: PORT
+              value: '3004'
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: daln-backend-secret
+                  key: NOTIFICATION_DATABASE_URL
+            - name: REDIS_HOST
+              value: redis-12407.c274.us-east-1-3.ec2.cloud.redislabs.com
+            - name: REDIS_PORT
+              value: '12407'
+          envFrom:
+            - secretRef:
+                name: daln-backend-secret
