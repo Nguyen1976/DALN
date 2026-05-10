@@ -1,222 +1,371 @@
-# Recommendation Pipeline
-
-Tài liệu này mô tả luồng gợi ý, train model và đánh giá model trong hệ thống hiện tại, dựa trên `backend/apps/recommendation/src/recommendation.service.ts` và `embedding-service/app/services/logistic_service.py`.
-
-## 1. Mục tiêu
-
-Pipeline recommendation có 3 nhiệm vụ chính:
-
-1. Tạo danh sách candidate cho mỗi user từ nhiều nguồn khác nhau.
-2. Hydrate feature đầy đủ cho candidate trước khi đưa vào model.
-3. Train, evaluate và predict bằng model Python.
-
-## 2. Các thành phần chính
-
-### Backend recommendation service
-
-File: `backend/apps/recommendation/src/recommendation.service.ts`
-
-Service này chịu trách nhiệm:
-
-- Lấy danh sách user cần gợi ý.
-- Tạo candidate pool từ Neo4j, Qdrant và MongoDB/Prisma.
-- Hydrate feature gồm `bio`, `location`, `mutualFriends`, `mutualGroups`, `interestSimilarity`, `distanceKm`.
-- Gửi candidate sang Python để lấy top 100.
-- Ghi kết quả vào `impresstionLog`.
-
-### Python logistic service
-
-File: `embedding-service/app/services/logistic_service.py`
-
-Service này chịu trách nhiệm:
-
-- Đọc dữ liệu train từ `impresstionLog`.
-- Kết hợp với `actionLog` khi build label dataset.
-- Train model.
-- Evaluate model.
-- Load model và dự đoán top K candidate.
-
-### Redis cache
-
-Redis được dùng để cache feature hydration cho user:
-
-- Key: `user:{userId}:features`
-- Value: JSON chứa `bio` và `location`
-
-Mục tiêu là giảm số lần query Prisma khi hydrate feature cho candidate.
-
-## 3. Luồng recommendation
-
-### Bước 1: Lấy user đầu vào
-
-Trong `recommendation()`, backend lấy một tập user từ Prisma, sau đó chia thành từng lô nhỏ bằng `lodash.chunk`.
-
-Hiện tại code đang xử lý theo chunk để tránh dồn quá nhiều request cùng lúc vào DB:
-
-- Lấy tối đa 1000 user.
-- Chia thành chunk size 50.
-- Mỗi chunk chạy song song bằng `Promise.all`.
-
-### Bước 2: Tạo candidate pool
-
-Trong `recommendationHelper(userId)`:
-
-- Neo4j lấy friend graph để tìm user liên quan.
-- Neo4j lấy common friend/common group cho candidate set.
-- Qdrant trả về candidate theo độ tương đồng interest.
-- MongoDB/Prisma lấy user hiện tại để lấy `bio` và `location`.
-- GeoNear được dùng để tìm candidate gần vị trí.
-
-Từ các nguồn trên, hệ thống tạo ra `allCandidateIds` là tập union candidate duy nhất.
-
-### Bước 3: Hydrate feature
-
-Giai đoạn 7 hiện tại làm theo thứ tự sau:
-
-1. Đọc cache từ Redis bằng batch.
-2. Tìm các ID bị miss cache.
-3. Query Prisma chỉ cho ID bị miss.
-4. Warm-up cache lại bằng `setUserFeaturesBatch`.
-5. Dùng `Map` để merge dữ liệu O(1).
-6. Không query Neo4j lại cho `commonFriends` và `commonGroups` ở stage này, mà tái sử dụng dữ liệu đã lấy trước đó.
-
-### Bước 4: Tạo feature cho model
-
-Cho mỗi candidate, backend tính 4 feature chính:
-
-- `mutualFriends`
-- `mutualGroups`
-- `interestSimilarity`
-- `distanceKm`
-
-Trong đó:
-
-- `interestSimilarity` là max của điểm Qdrant và độ giống bio.
-- `distanceKm` được tính bằng Haversine từ tọa độ user hiện tại và candidate.
-
-### Bước 5: Gọi Python để xếp hạng
-
-Backend gửi danh sách candidate đã hydrate xong sang Python thông qua `PythonRecommendationClient`.
-
-Python trả về danh sách đã sắp xếp theo score, backend lấy top 100.
-
-### Bước 6: Ghi log impression
-
-Sau khi có top 100, backend ghi vào collection `impresstionLog` với:
-
-- `userId`
-- `candidateId`
-- `features`
-- `action`
-- `score`
-- `rank`
-- `version`
-
-## 4. Luồng train model
-
-### Nguồn dữ liệu train
-
-Trong `logistic_service.py`, dữ liệu train được build từ `impresstionLog` theo `version` mới nhất.
-
-Mỗi row gồm:
-
-- `mutualFriends`
-- `mutualGroups`
-- `interestSimilarity`
-- `distanceKm`
-- `action`
-
-### Cách tạo label
-
-Label được map như sau:
-
-- `MESSAGE` và `FRIEND` -> `1`
-- các action còn lại, ví dụ `IGNORE` -> `0`
-
-### Vai trò của `actionLog`
-
-Khi build dataset, Python vẫn đọc thêm `actionLog` và có thể override action theo cặp `(userId, candidateId)` nếu tìm thấy dữ liệu phù hợp.
-
-Điều này giúp tận dụng lịch sử tương tác thật, nhưng nếu collection `actionLog` chứa dữ liệu cũ không phù hợp thì có thể làm label bị lệch.
-
-### Model dùng để train
-
-Hiện tại `retrain_model()` và `evaluate_model()` đều đang dùng `RandomForestClassifier`.
-
-Thông số hiện tại trong code:
-
-- `retrain_model()`:
-  - `n_estimators=300`
-  - `random_state=42`
-  - `class_weight="balanced"`
-  - `n_jobs=-1`
-
-- `evaluate_model()`:
-  - `n_estimators=100`
-  - `random_state=42`
-  - `class_weight="balanced"`
-  - `n_jobs=-1`
-
-Sau khi train xong, model được lưu ở:
-
-- `embedding-service/models/latest_model.pkl`
-- `embedding-service/models/latest_model_version_{version}.pkl`
-
-## 5. Luồng evaluate model
-
-Hàm `evaluate_model(version)` thực hiện:
-
-1. Lấy rows từ `impresstionLog` theo version.
-2. Tạo label từ `action`.
-3. Kiểm tra điều kiện dữ liệu tối thiểu.
-4. Chia train/test bằng `train_test_split` với `stratify=y`.
-5. Train Random Forest.
-6. Tính metric:
-   - precision
-   - recall
-   - f1
-   - accuracy
-   - ROC AUC
-   - confusion matrix
-   - classification report
-7. Lưu model đã train vào file versioned và latest.
-
-## 6. Luồng predict top 100
-
-Hàm `predict_top_k(candidates_json, k=100)`:
-
-1. Load model hiện tại từ `latest_model.pkl`.
-2. Convert candidate JSON sang DataFrame.
-3. Lấy 4 feature đầu vào.
-4. Gọi `predict_proba()`.
-5. Sort theo score giảm dần.
-6. Trả về top K, mặc định là 100.
-
-## 7. Cache warm-up cho Redis
-
-Redis cache hiện được dùng theo hướng feature hydration cache:
-
-- `getUserFeaturesBatch()` đọc batch features từ cache.
-- `setUserFeaturesBatch()` ghi ngược lại các profile bị miss.
-
-Luồng này giúp lần recommendation sau giảm đáng kể số query Prisma.
-
-## 8. Ghi chú quan trọng
-
-1. Stage 7 hiện không còn query Neo4j lại cho common friends/common groups.
-2. Cache Redis chỉ phát huy hiệu quả khi có warm-up từ dữ liệu miss.
-3. Nếu cập nhật profile user, cần đồng bộ cache Redis để tránh dữ liệu cũ.
-4. `predict_top_k()` chỉ phản ánh chất lượng model đã được train gần nhất.
-
-## 9. Tóm tắt ngắn
-
-Luồng tổng quát hiện tại là:
-
-`Neo4j + Qdrant + Prisma + Redis -> feature hydration -> Python Random Forest -> top 100 -> impresstionLog -> train/evaluate versioned model`
-
-Nếu muốn mở rộng tiếp, điểm nên làm tiếp theo là:
-
-- cập nhật Redis khi user sửa bio/location,
-- chuẩn hóa version của model,
-- thêm job retrain định kỳ,
-- thêm metrics theo từng phiên recommendation.
+# Recommendation Service - System Design
+
+Tài liệu này mô tả thiết kế recommendation service theo hướng mục tiêu. Đây là spec cho AI và người maintain hệ thống, nên có thể chứa phần chưa được triển khai đầy đủ trong code hiện tại. Nguyên tắc là: không để AI hiểu nhầm rằng các cross-service join trực tiếp đang được phép.
+
+## 1. Nguyên tắc kiến trúc
+
+Recommendation service là một microservice độc lập. Nó không query trực tiếp DB của user-service hay friend-service.
+
+Thay vào đó dùng local replica pattern:
+
+user-service DB -> RabbitMQ/Kafka -> recommendation-service DB
+friend-service DB -> RabbitMQ/Kafka -> recommendation-service DB
+
+Ý nghĩa của kiến trúc này:
+
+1. Recommendation service chỉ đọc dữ liệu replica riêng của nó.
+2. Mọi dữ liệu cần cho recommendation phải được sync qua event hoặc message queue.
+3. Không join sang DB của service khác trong runtime recommendation.
+4. Replica chỉ lưu field cần thiết cho ranking và training.
+
+## 2. Prisma Schema - Recommendation Service
+
+Schema bên dưới là khung mục tiêu cho recommendation-service.
+
+Prisma generator:
+
+```text
+generator client {
+   provider      = "prisma-client-js"
+   output        = "../src/generated"
+   binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+```
+
+Datasource:
+
+```text
+datasource db {
+   provider = "mongodb"
+   url      = env("DATABASE_URL")
+}
+```
+
+### 2.1. Local replica - UserSnapshot
+
+Chỉ lưu field cần thiết cho recommendation. Không join sang user-service DB.
+
+```text
+model UserSnapshot {
+   id          String    @id @map("_id") @db.ObjectId
+   username    String
+   fullName    String
+   avatar      String?
+   bio         String?
+   interests   String[]
+   location    Json?
+   isActive    Boolean   @default(true)
+   lastSeen    DateTime?
+   syncedAt    DateTime  @default(now())
+   createdAt   DateTime  @default(now())
+
+   @@index([interests])
+   @@index([location], map: "location_2dsphere")
+   @@index([isActive, lastSeen])
+   @@index([syncedAt])
+}
+```
+
+### 2.2. InterestTag - master data
+
+Seed một lần, admin có thể thêm sau.
+
+```text
+model InterestTag {
+   id       String @id @default(auto()) @map("_id") @db.ObjectId
+   slug     String @unique
+   label    String
+   emoji    String
+   category String
+   order    Int    @default(0)
+   isActive Boolean @default(true)
+}
+```
+
+### 2.3. ImpressionLog - core data cho training
+
+Feature set của impression log:
+
+```text
+type Features {
+   mutualFriends       Int
+   mutualGroups        Int
+   interestSimilarity   Float
+   bioSimilarity        Float
+   distanceKm           Float
+   sameCity             Int
+   avatarExists         Int
+   bioLength            Int
+   profileCompleteness  Float
+   accountAgeDays       Int
+}
+```
+
+Action enum:
+
+```text
+enum Action {
+   MESSAGE
+   FRIEND
+   IGNORE
+}
+```
+
+Impression log:
+
+```text
+model ImpressionLog {
+   id           String   @id @default(auto()) @map("_id") @db.ObjectId
+   userId       String   @db.ObjectId
+   candidateId  String   @db.ObjectId
+   features     Features
+   score        Float
+   rank         Int
+   action       Action   @default(IGNORE)
+   modelVersion String?
+   dayVersion   Int
+   createdAt    DateTime @default(now())
+
+   @@index([userId, dayVersion])
+   @@index([dayVersion, action])
+   @@index([userId, candidateId])
+}
+```
+
+### 2.4. ModelRegistry - theo dõi model tốt nhất
+
+Model types:
+
+```text
+enum ModelType {
+   XGBOOST
+   RANDOM_FOREST
+   LOGISTIC_REGRESSION
+   RULE_BASED
+}
+```
+
+Model status:
+
+```text
+enum ModelStatus {
+   TRAINING
+   EVALUATING
+   ACTIVE
+   RETIRED
+   FAILED
+}
+```
+
+Model registry:
+
+```text
+model ModelRegistry {
+   id            String      @id @default(auto()) @map("_id") @db.ObjectId
+   modelType     ModelType
+   modelFile     String
+   dayVersion    Int
+   status        ModelStatus @default(TRAINING)
+   prAuc         Float?
+   rocAuc        Float?
+   f1            Float?
+   precision     Float?
+   recall        Float?
+   threshold     Float?
+   trainRows     Int?
+   positiveRows   Int?
+   trainedAt     DateTime?
+   activatedAt   DateTime?
+   createdAt     DateTime    @default(now())
+   updatedAt     DateTime    @updatedAt
+
+   @@index([status, createdAt])
+   @@index([dayVersion])
+}
+```
+
+### 2.5. RecommendationResult - cache kết quả gợi ý
+
+TTL 24h, refresh theo cronjob hàng ngày.
+
+```text
+model RecommendationResult {
+   id           String   @id @default(auto()) @map("_id") @db.ObjectId
+   userId       String   @db.ObjectId @unique
+   candidates   Json
+   modelVersion String
+   dayVersion   Int
+   expiresAt    DateTime
+   createdAt    DateTime @default(now())
+   updatedAt    DateTime @updatedAt
+
+   @@index([userId])
+   @@index([expiresAt])
+   @@index([dayVersion])
+}
+```
+
+## 3. Event-driven Sync Architecture
+
+Recommendation service nhận event từ user-service và friend-service, rồi sync vào local replica.
+
+### 3.1. user.created
+
+Khi user được tạo mới, tạo snapshot ban đầu.
+
+```text
+@EventPattern('user.created')
+async onUserCreated(payload: UserCreatedEvent) {
+   await this.snapshotService.upsert({
+      id: payload.userId,
+      username: payload.username,
+      fullName: payload.fullName,
+      avatar: payload.avatar,
+      bio: payload.bio,
+      interests: [],
+      location: null,
+      isActive: true,
+      syncedAt: new Date()
+   });
+}
+```
+
+### 3.2. user.interests.updated
+
+Khi user chọn xong interest ở onboarding stage 2, cập nhật snapshot và trigger cold-start recommendation ngay.
+
+```text
+@EventPattern('user.interests.updated')
+async onInterestsUpdated(payload: InterestsUpdatedEvent) {
+   await this.snapshotService.update(payload.userId, {
+      interests: payload.interests,
+      syncedAt: new Date()
+   });
+
+   await this.recommendationQueue.add('cold-start', {
+      userId: payload.userId
+   }, { priority: 1 });
+}
+```
+
+### 3.3. user.location.updated
+
+```text
+@EventPattern('user.location.updated')
+async onLocationUpdated(payload: LocationUpdatedEvent) {
+   await this.snapshotService.update(payload.userId, {
+      location: {
+         lat: payload.lat,
+         lon: payload.lon,
+         country: payload.country,
+         city: payload.city,
+         district: payload.district,
+      },
+      syncedAt: new Date()
+   });
+}
+```
+
+### 3.4. user.profile.updated
+
+```text
+@EventPattern('user.profile.updated')
+async onProfileUpdated(payload: ProfileUpdatedEvent) {
+   await this.snapshotService.update(payload.userId, {
+      avatar: payload.avatar,
+      bio: payload.bio,
+      fullName: payload.fullName,
+      syncedAt: new Date()
+   });
+
+   await this.cacheService.del(`user:${payload.userId}:features`);
+}
+```
+
+### 3.5. friendship.created
+
+Friend graph được sync sang Neo4j để phục vụ mutual friend / mutual group.
+
+```text
+@EventPattern('friendship.created')
+async onFriendshipCreated(payload: FriendshipCreatedEvent) {
+   await this.neo4jService.createFriendship(
+      payload.userId,
+      payload.friendId
+   );
+}
+```
+
+## 4. Location Design
+
+Thiết kế location cần hỗ trợ cả hai hướng:
+
+1. Tọa độ trực tiếp để tính khoảng cách bằng Haversine.
+2. Location hierarchy để tính sameCity, sameDistrict mà không cần tính distance.
+
+Type location:
+
+```text
+export interface UserLocation {
+   lat: number;
+   lon: number;
+   country: string;
+   city: string;
+   district: string;
+   ward?: string;
+}
+```
+
+Haversine dùng cho `distanceKm`.
+
+Same city check dùng hierarchy.
+
+## 5. Daily Version Strategy
+
+Version theo ngày giúp trace được data và model được sinh từ hôm nào.
+
+```text
+export function getDayVersion(): number {
+   const d = new Date();
+   return d.getFullYear() * 10000 +
+             (d.getMonth() + 1) * 100 +
+             d.getDate();
+}
+```
+
+Mỗi cronjob hàng ngày chạy với `dayVersion = getDayVersion()`. Tất cả ImpressionLog và RecommendationResult trong ngày đó phải gắn cùng version.
+
+## 6. Model Learning Loop - Cronjob hàng ngày
+
+Chu kỳ mục tiêu:
+
+- 00:00: cronjob chạy recommendation cho toàn bộ user với dayVersion mới.
+- 02:00: đủ log của ngày hôm qua thì trigger retrain pipeline.
+
+Pipeline retrain:
+
+1. Lấy ImpressionLog theo dayVersion hôm qua.
+2. Check threshold tối thiểu, ví dụ positive rows >= 10k.
+3. Train 3 model song song.
+4. Evaluate và chọn model có PR-AUC cao nhất.
+5. Ghi ModelRegistry: model cũ chuyển sang RETIRED, model mới chuyển sang ACTIVE.
+6. Python service load model mới để predict.
+
+Mục tiêu là vòng lặp học liên tục, không phụ thuộc vào manual selection.
+
+## 7. Dependency summary của recommendation-service
+
+| Dependency     | Dùng để làm gì                                                   | Ghi chú                      |
+| -------------- | ---------------------------------------------------------------- | ---------------------------- |
+| MongoDB riêng  | UserSnapshot, ImpressionLog, ModelRegistry, RecommendationResult | Không share với service khác |
+| Neo4j          | Graph friends, mutual friends 2-hop                              | Sync qua event               |
+| Qdrant         | Interest và bio embedding similarity                             | Upsert khi user update       |
+| Redis          | Feature hydration cache                                          | TTL 6h                       |
+| RabbitMQ/Kafka | Nhận event từ user-service và friend-service                     | Không query trực tiếp        |
+| Python service | Train, evaluate, predict                                         | Giao tiếp qua HTTP nội bộ    |
+
+## 8. Tóm tắt cho AI
+
+Điểm quan trọng nhất là recommendation-service phải là local-replica microservice, không join trực tiếp vào DB của service khác. Dữ liệu cần được sync bằng event. Candidate generation, location feature, daily versioning, impression log, và model registry đều phải được thiết kế để phục vụ cold-start và vòng lặp học hàng ngày.
+
+Thiết kế này có thể chưa khớp 100% với code hiện tại, nhưng nó đang đi đúng hướng mà hệ thống cần.

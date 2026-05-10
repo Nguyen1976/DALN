@@ -3,16 +3,29 @@ import {
   IsEmail,
   IsEnum,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator'
+import { Type } from 'class-transformer'
+
+export class RegisterLocationDto {
+  @Type(() => Number)
+  @IsNumber()
+  lat!: number
+
+  @Type(() => Number)
+  @IsNumber()
+  lon!: number
+}
 
 export class RegisterUserDto {
   @IsEmail()
   @IsNotEmpty()
-  email: string
+  email!: string
 
   @IsNotEmpty()
   @MaxLength(20, {
@@ -21,7 +34,7 @@ export class RegisterUserDto {
   @MinLength(6, {
     message: 'Password is too short. Minimum length is $constraint1 characters',
   })
-  password: string
+  password!: string
 
   @IsNotEmpty()
   @MaxLength(30, {
@@ -30,40 +43,45 @@ export class RegisterUserDto {
   @MinLength(3, {
     message: 'Username is too short. Minimum length is $constraint1 characters',
   })
-  username: string
+  username!: string
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RegisterLocationDto)
+  location?: RegisterLocationDto
 }
 
 export class LoginUserDto {
   @IsEmail()
   @IsNotEmpty({ message: 'Email must not be empty' })
-  email: string
+  email!: string
 
   @IsNotEmpty({ message: 'Password must not be empty' })
-  password: string
+  password!: string
 }
 
 export class VerifyOtpDto {
   @IsEmail()
   @IsNotEmpty({ message: 'Email must not be empty' })
-  email: string
+  email!  : string
 
   @IsNotEmpty({ message: 'OTP must not be empty' })
   @IsString()
   @MinLength(6, { message: 'OTP must be 6 characters' })
   @MaxLength(6, { message: 'OTP must be 6 characters' })
-  otp: string
+  otp!: string
 }
 
 export class ResendOtpDto {
   @IsEmail()
   @IsNotEmpty({ message: 'Email must not be empty' })
-  email: string
+  email!: string
 }
 
 export class MakeFriendDto {
   @IsNotEmpty()
   @IsEmail()
-  email: string
+  email!: string
 }
 
 export class UpdateStatusMakeFriendDto {
@@ -71,13 +89,13 @@ export class UpdateStatusMakeFriendDto {
   @IsEnum(Status, {
     message: `Status must be one of the following values: ${Object.values(Status).join(', ')}`,
   })
-  status: Status
+  status!: Status
 
   @IsNotEmpty()
-  inviterId: string
+  inviterId!: string
 
   @IsNotEmpty()
-  inviteeName: string
+  inviteeName!: string
 }
 
 export class UpdateProfileDto {

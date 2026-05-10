@@ -2,6 +2,10 @@ export interface UserCreatedPayload {
   id: string
   email: string
   username: string
+  location?: {
+    lat: number
+    lon: number
+  }
 }
 
 export interface UserRegisterOtpPayload {

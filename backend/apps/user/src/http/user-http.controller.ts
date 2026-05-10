@@ -34,7 +34,20 @@ export class UserHttpController {
   @Post('register')
   @WithoutLogin()
   async register(@Body() dto: RegisterUserDto) {
+    console.log('[user.register] controller received dto', {
+      email: dto.email,
+      username: dto.username,
+      hasLocation: Boolean(dto.location),
+      location: dto.location ?? null,
+    })
+
     const registration = await this.userService.register(dto)
+
+    console.log('[user.register] controller completed', {
+      email: registration.email,
+      requiresOtpVerification: registration.requiresOtpVerification,
+    })
+
     return {
       email: registration.email,
       requiresOtpVerification: registration.requiresOtpVerification,

@@ -5,6 +5,25 @@ import { Inject, Injectable } from '@nestjs/common'
 export class UserRepository {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
+  private toGeoPoint(location?: { lat: number; lon: number }) {
+    if (!location) {
+      console.log('[user.repository] toGeoPoint skipped: no location payload')
+      return undefined
+    }
+
+    const geoPoint = {
+      type: 'Point',
+      coordinates: [location.lon, location.lat],
+    }
+
+    console.log('[user.repository] toGeoPoint converted', {
+      input: location,
+      output: geoPoint,
+    })
+
+    return geoPoint
+  }
+
   async findByEmail(email: string) {
     return await this.prisma.user.findUnique({
       where: { email },
@@ -37,7 +56,22 @@ export class UserRepository {
     })
   }
 
-  async create(data: { email: string; username: string; password: string }) {
+  async create(data: {
+    email: string
+    username: string
+    password: string
+    location?: {
+      lat: number
+      lon: number
+    }
+  }) {
+    console.log('[user.repository] create user payload', {
+      email: data.email,
+      username: data.username,
+      hasLocation: Boolean(data.location),
+      location: data.location ?? null,
+    })
+
     return await this.prisma.user.create({
       data: {
         email: data.email,
@@ -45,6 +79,7 @@ export class UserRepository {
         password: data.password,
         username: data.username,
         isActive: false,
+        location: this.toGeoPoint(data.location),
       },
     })
   }
@@ -53,12 +88,24 @@ export class UserRepository {
     email: string
     username: string
     password: string
+    location?: {
+      lat: number
+      lon: number
+    }
   }) {
+    console.log('[user.repository] update register info payload', {
+      email: data.email,
+      username: data.username,
+      hasLocation: Boolean(data.location),
+      location: data.location ?? null,
+    })
+
     return await this.prisma.user.update({
       where: { email: data.email },
       data: {
         username: data.username,
         password: data.password,
+        location: this.toGeoPoint(data.location),
       },
     })
   }
@@ -126,7 +173,7 @@ export class UserRepository {
   }
 
   async updateLastSeen(userId: string, lastSeen: string | null) {
-    return await this.prisma.user.update({
+    return await this.prisma.user.updateMany({
       where: { id: userId },
       data: {
         lastSeen,

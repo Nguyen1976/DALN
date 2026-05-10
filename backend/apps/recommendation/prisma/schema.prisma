@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated"
+  output = "../src/generated"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
@@ -9,36 +9,46 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
+model UserSnapshot {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  email     String   @unique
-  username  String   @unique
+  username  String
   fullName  String
-  password  String
-  isActive  Boolean  @default(false)
   avatar    String?
   bio       String?
-  lastSeen DateTime?
-  location Json?
+  interests String[]
+  location  Json?
+  isActive  Boolean  @default(true)
+  lastSeen  DateTime?
+  syncedAt  DateTime @default(now())
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
+  @@index([interests])
   @@index([location], map: "location_2dsphere")
+  @@index([isActive, lastSeen])
+  @@index([syncedAt])
 }
 
-model Friendship {
+model InterestTag {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId    String   @db.ObjectId
-  friendId  String   @db.ObjectId
-  createdAt DateTime @default(now())
+  slug      String   @unique
+  label     String
+  emoji     String
+  category  String
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
 }
 
 type Features {
-  mutualFriends Int
-  mutualGroups Int
-  interestSimilarity Float
-  distanceKm Float
-
+  mutualFriends      Int
+  mutualGroups       Int
+  interestSimilarity  Float
+  bioSimilarity      Float
+  distanceKm         Float
+  sameCity           Int
+  avatarExists       Int
+  bioLength          Int
+  profileCompleteness Float
+  accountAgeDays     Int
 }
 
 enum Action {
@@ -47,15 +57,72 @@ enum Action {
   IGNORE
 }
 
-model impresstionLog {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId  String   @db.ObjectId
-  candidateId String @db.ObjectId
-  features Features
-  score Float
-  rank Int
-  version Int
-  action  Action
+model ImpressionLog {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String   @db.ObjectId
+  candidateId  String   @db.ObjectId
+  features     Features
+  score        Float
+  rank         Int
+  action       Action   @default(IGNORE)
+  modelVersion String?
+  dayVersion   Int
   createdAt DateTime @default(now())
+
+  @@index([userId, dayVersion])
+  @@index([dayVersion, action])
+  @@index([userId, candidateId])
+}
+
+enum ModelType {
+  XGBOOST
+  RANDOM_FOREST
+  LOGISTIC_REGRESSION
+  RULE_BASED
+}
+
+enum ModelStatus {
+  TRAINING
+  EVALUATING
+  ACTIVE
+  RETIRED
+  FAILED
+}
+
+model ModelRegistry {
+  id            String      @id @default(auto()) @map("_id") @db.ObjectId
+  modelType     ModelType
+  modelFile     String
+  dayVersion    Int
+  status        ModelStatus @default(TRAINING)
+  prAuc         Float?
+  rocAuc        Float?
+  f1            Float?
+  precision     Float?
+  recall        Float?
+  threshold     Float?
+  trainRows     Int?
+  positiveRows  Int?
+  trainedAt     DateTime?
+  activatedAt   DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([status, createdAt])
+  @@index([dayVersion])
+}
+
+model RecommendationResult {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String   @db.ObjectId @unique
+  candidates   Json
+  modelVersion String
+  dayVersion   Int
+  expiresAt    DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@index([dayVersion])
 }
 

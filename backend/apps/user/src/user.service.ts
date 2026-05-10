@@ -25,6 +25,10 @@ interface UserRegisterRequest {
   email: string
   username: string
   password: string
+  location?: {
+    lat: number
+    lon: number
+  }
 }
 
 interface UserLoginRequest {
@@ -97,32 +101,68 @@ export class UserService {
     email: string
     requiresOtpVerification: boolean
   }> {
+    console.log('[user.register] service entry', {
+      email: data.email,
+      username: data.username,
+      hasLocation: Boolean(data.location),
+      location: data.location ?? null,
+    })
+
     const existingUser = await this.userRepo.findByEmail(data.email)
+    console.log('[user.register] existing user lookup', {
+      email: data.email,
+      found: Boolean(existingUser),
+      isActive: existingUser?.isActive ?? null,
+    })
 
     if (existingUser?.isActive) {
       UserErrors.emailAlreadyExists()
     }
 
     const existingUsername = await this.userRepo.findByUsername(data.username)
+    console.log('[user.register] existing username lookup', {
+      username: data.username,
+      found: Boolean(existingUsername),
+      sameEmail: existingUsername?.email === data.email,
+    })
+
     if (existingUsername && existingUsername.email !== data.email) {
       UserErrors.usernameAlreadyExists()
     }
 
     const hashedPassword = await this.utilService.hashPassword(data.password)
+    console.log('[user.register] password hashed', {
+      email: data.email,
+      hasLocation: Boolean(data.location),
+    })
 
     const user = existingUser
       ? await this.userRepo.updateRegisterInfoByEmail({
           email: data.email,
           username: data.username,
           password: hashedPassword,
+          location: data.location,
         })
       : await this.userRepo.create({
           email: data.email,
           username: data.username,
           password: hashedPassword,
+          location: data.location,
         })
 
+    console.log('[user.register] persistence finished', {
+      userId: user.id,
+      email: user.email,
+      username: user.username,
+      location: user.location ?? null,
+    })
+
     await this.sendRegistrationOtp(user.email, user.username)
+
+    console.log('[user.register] otp queued', {
+      email: user.email,
+      username: user.username,
+    })
 
     return {
       email: user.email,
@@ -150,6 +190,38 @@ export class UserService {
       id: user.id,
       email: user.email,
       username: user.username,
+      location: (() => {
+        const location = user.location as
+          | { lat?: number; lon?: number; coordinates?: [number, number] }
+          | undefined
+
+        if (!location) {
+          return undefined
+        }
+
+        if (
+          typeof location.lat === 'number' &&
+          typeof location.lon === 'number'
+        ) {
+          return { lat: location.lat, lon: location.lon }
+        }
+
+        if (
+          Array.isArray(location.coordinates) &&
+          typeof location.coordinates[0] === 'number' &&
+          typeof location.coordinates[1] === 'number'
+        ) {
+          return { lat: location.coordinates[1], lon: location.coordinates[0] }
+        }
+
+        return undefined
+      })(),
+    })
+
+    console.log('[user.verify-otp] user created event published', {
+      userId: user.id,
+      email: user.email,
+      location: user.location ?? null,
     })
 
     return { success: true }

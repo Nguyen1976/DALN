@@ -28,17 +28,84 @@ const Register = () => {
     },
   });
 
+  const getCurrentPosition = () =>
+    new Promise<{ lat: number; lon: number }>((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Trình duyệt không hỗ trợ lấy vị trí hiện tại"));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+          });
+        },
+        () => {
+          reject(
+            new Error("Vui lòng cho phép truy cập vị trí để hoàn tất đăng ký"),
+          );
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        },
+      );
+    });
+
   const onSubmit = async (data: z.infer<typeof formRegisterScheme>) => {
     const { username, email, password } = data;
 
-    const result = await registerAPI({ username, email, password });
-    if (result?.requiresOtpVerification) {
-      toast.success(
-        "Đăng ký thành công, vui lòng nhập OTP để kích hoạt tài khoản",
-      );
-      navigate("/verify-otp", { state: { email } });
+    console.log("[register] submit form payload", {
+      username,
+      email,
+      hasPassword: Boolean(password),
+    });
+
+    try {
+      let location: { lat: number; lon: number } | undefined;
+
+      try {
+        console.log("[register] requesting current browser location");
+        location = await getCurrentPosition();
+        console.log("[register] browser location resolved", location);
+      } catch (locationError) {
+        console.warn(
+          "Không lấy được vị trí hiện tại khi đăng ký",
+          locationError,
+        );
+        toast.info(
+          "Không lấy được vị trí hiện tại, tài khoản vẫn sẽ được tạo bình thường",
+        );
+      }
+
+      const result = await registerAPI({
+        username,
+        email,
+        password,
+        location,
+      });
+
+      console.log("[register] registerAPI response", {
+        email: result?.email,
+        requiresOtpVerification: result?.requiresOtpVerification,
+        sentLocation: location ?? null,
+      });
+
+      if (result?.requiresOtpVerification) {
+        toast.success(
+          "Đăng ký thành công, vui lòng nhập OTP để kích hoạt tài khoản",
+        );
+        navigate("/verify-otp", { state: { email } });
+      }
+      form.reset();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Không thể hoàn tất đăng ký";
+      toast.error(message);
     }
-    form.reset();
   };
 
   return (

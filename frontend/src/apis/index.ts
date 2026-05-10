@@ -22,6 +22,10 @@ export const registerAPI = async (data: {
   email: string;
   username: string;
   password: string;
+  location?: {
+    lat: number;
+    lon: number;
+  };
 }): Promise<{ email: string; requiresOtpVerification: boolean }> => {
   const response = await authorizeAxiosInstance.post(
     `${API_ROOT}/user/register`,
