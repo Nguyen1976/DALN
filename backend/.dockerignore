@@ -15,3 +15,4 @@ libs/**/test
 **/*.log
 **/*.spec.ts
 **/*.spec.js
+generated
