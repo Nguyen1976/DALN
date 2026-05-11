@@ -3,6 +3,7 @@ import { UtilService } from '@app/util/util.service'
 import { Inject, Injectable } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { lookup } from 'mime-types'
+import { LoggerService } from '@app/logger'
 import {
   UserRepository,
   FriendRequestRepository,
@@ -78,6 +79,7 @@ export class UserService {
     @Inject(StorageR2Service)
     private readonly storageR2Service: StorageR2Service,
     private readonly redisService: RedisService,
+    private readonly logger: LoggerService,
   ) {}
 
   private generateOtp(length = 6): string {
@@ -101,7 +103,7 @@ export class UserService {
     email: string
     requiresOtpVerification: boolean
   }> {
-    console.log('[user.register] service entry', {
+    this.logger.info('[user.register] service entry', {
       email: data.email,
       username: data.username,
       hasLocation: Boolean(data.location),
@@ -109,7 +111,7 @@ export class UserService {
     })
 
     const existingUser = await this.userRepo.findByEmail(data.email)
-    console.log('[user.register] existing user lookup', {
+    this.logger.info('[user.register] existing user lookup', {
       email: data.email,
       found: Boolean(existingUser),
       isActive: existingUser?.isActive ?? null,
@@ -120,7 +122,7 @@ export class UserService {
     }
 
     const existingUsername = await this.userRepo.findByUsername(data.username)
-    console.log('[user.register] existing username lookup', {
+    this.logger.info('[user.register] existing username lookup', {
       username: data.username,
       found: Boolean(existingUsername),
       sameEmail: existingUsername?.email === data.email,
@@ -131,7 +133,7 @@ export class UserService {
     }
 
     const hashedPassword = await this.utilService.hashPassword(data.password)
-    console.log('[user.register] password hashed', {
+    this.logger.info('[user.register] password hashed', {
       email: data.email,
       hasLocation: Boolean(data.location),
     })
@@ -150,7 +152,7 @@ export class UserService {
           location: data.location,
         })
 
-    console.log('[user.register] persistence finished', {
+    this.logger.info('[user.register] persistence finished', {
       userId: user.id,
       email: user.email,
       username: user.username,
@@ -159,7 +161,7 @@ export class UserService {
 
     await this.sendRegistrationOtp(user.email, user.username)
 
-    console.log('[user.register] otp queued', {
+    this.logger.info('[user.register] otp queued', {
       email: user.email,
       username: user.username,
     })
@@ -218,7 +220,7 @@ export class UserService {
       })(),
     })
 
-    console.log('[user.verify-otp] user created event published', {
+    this.logger.info('[user.verify-otp] user created event published', {
       userId: user.id,
       email: user.email,
       location: user.location ?? null,

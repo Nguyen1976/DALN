@@ -17,6 +17,7 @@ import {
   UserInfo,
   WithoutLogin,
 } from '@app/common/common.decorator'
+import { LoggerService } from '@app/logger'
 import {
   LoginUserDto,
   MakeFriendDto,
@@ -29,12 +30,15 @@ import {
 
 @Controller('user')
 export class UserHttpController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly logger: LoggerService,
+  ) {}
 
   @Post('register')
   @WithoutLogin()
   async register(@Body() dto: RegisterUserDto) {
-    console.log('[user.register] controller received dto', {
+    this.logger.info('[user.register] controller received dto', {
       email: dto.email,
       username: dto.username,
       hasLocation: Boolean(dto.location),
@@ -43,7 +47,7 @@ export class UserHttpController {
 
     const registration = await this.userService.register(dto)
 
-    console.log('[user.register] controller completed', {
+    this.logger.info('[user.register] controller completed', {
       email: registration.email,
       requiresOtpVerification: registration.requiresOtpVerification,
     })
@@ -69,7 +73,6 @@ export class UserHttpController {
   @WithoutLogin()
   async resendOtp(@Body() dto: ResendOtpDto) {
     const registration = await this.userService.resendRegistrationOtp(dto)
-
     return {
       email: registration.email,
       requiresOtpVerification: registration.requiresOtpVerification,
