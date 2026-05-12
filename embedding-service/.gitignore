@@ -45,3 +45,5 @@ Icon
 dist/
 build/
 *.egg-info/
+*.csv
+loc-*.txt
