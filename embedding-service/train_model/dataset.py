@@ -162,17 +162,51 @@ def create_pairs_and_features(
 
     # helper to compute pair features
     def compute_features(u, v, label):
-        neigh_u = neigh.get(u, set())
-        neigh_v = neigh.get(v, set())
-        j = jaccard(neigh_u, neigh_v)
-        c = cosine_graph(neigh_u, neigh_v)
-        aa = adamic_adar(neigh_u, neigh_v, degrees)
-        pa = preferential_attachment(neigh_u, neigh_v)
+        # for positive pairs, remove direct edge to avoid leakage
+        # (compute features as if they were not yet friends)
+        neigh_u = set(neigh.get(u, set()))
+        neigh_v = set(neigh.get(v, set()))
+        
+        if label == 1:  # positive pair
+            neigh_u.discard(v)
+            neigh_v.discard(u)
+        
+        # recompute degrees for current neighbor sets
         deg_u = degree(neigh_u)
         deg_v = degree(neigh_v)
+        
+        # for adamic-adar, use effective degrees from neighbor sets
+        degrees_eff = degrees.copy()
+        for node in set(list(neigh_u) + list(neigh_v)):
+            degrees_eff[node] = len(neigh.get(node, set()))
+            if label == 1:
+                # if this node is connected to u or v, discount by 1
+                if u in neigh.get(node, set()):
+                    degrees_eff[node] = max(1, degrees_eff[node] - 1)
+                if v in neigh.get(node, set()):
+                    degrees_eff[node] = max(1, degrees_eff[node] - 1)
+        
+        j = jaccard(neigh_u, neigh_v)
+        c = cosine_graph(neigh_u, neigh_v)
+        aa = adamic_adar(neigh_u, neigh_v, degrees_eff)
+        pa = preferential_attachment(neigh_u, neigh_v)
 
         # shortest path and connectivity: guard if nodes missing
-        if (u in G.nodes) and (v in G.nodes):
+        # for positive pairs, temporarily remove direct edge
+        if label == 1 and (u in G.nodes) and (v in G.nodes):
+            # create a copy and remove edge
+            G_temp = G.copy()
+            if G_temp.has_edge(u, v):
+                G_temp.remove_edge(u, v)
+            try:
+                sp = nx.shortest_path_length(G_temp, source=u, target=v)
+            except Exception:
+                sp = -1
+            try:
+                wcc = 1 if nx.has_path(G_temp, u, v) else 0
+            except Exception:
+                wcc = 0
+        elif (u in G.nodes) and (v in G.nodes):
             try:
                 sp = nx.shortest_path_length(G, source=u, target=v)
             except Exception:

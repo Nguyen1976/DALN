@@ -5,7 +5,6 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.svm import SVC
 from sklearn.metrics import f1_score, roc_auc_score, classification_report
 import joblib
 import os
@@ -83,6 +82,39 @@ def print_dataset_diagnostics(df, X, y):
     print(diffs.head(10).to_string())
 
 
+def extract_feature_importances(models_dict, X, feature_names, output_dir='.'):
+    """Extract and save feature importances from tree-based models."""
+    importances_dict = {}
+    
+    for name, m in models_dict.items():
+        if hasattr(m, 'feature_importances_'):
+            imp = m.feature_importances_
+            # normalize to sum to 1
+            imp_norm = imp / imp.sum()
+            importances_dict[name] = pd.DataFrame({
+                'feature': feature_names,
+                'importance': imp,
+                'importance_norm': imp_norm,
+            }).sort_values('importance', ascending=False)
+    
+    # print top 10 for each model
+    for name, df in importances_dict.items():
+        print(f"\n{name.upper()} Feature Importances (top 10):")
+        print(df.head(10).to_string(index=False))
+    
+    # save to CSV
+    if importances_dict:
+        combined = pd.concat(
+            [df.assign(model=name) for name, df in importances_dict.items()],
+            ignore_index=True
+        )
+        csv_path = os.path.join(output_dir, 'feature_importances.csv')
+        combined.to_csv(csv_path, index=False)
+        print(f"\nFeature importances saved to {csv_path}")
+    
+    return importances_dict
+
+
 def compute_scores(model, X_train_s, y_train, X_test_s, y_test):
     train_probs = model.predict_proba(X_train_s)[:, 1]
     test_probs = model.predict_proba(X_test_s)[:, 1]
@@ -127,10 +159,9 @@ def train_and_report(csv_path='dataset.csv', feature_mode='safe'):
 
     models = {
         'logreg': LogisticRegression(max_iter=1000),
-        'rf': RandomForestClassifier(n_estimators=100, n_jobs=-1),
+        'rf': RandomForestClassifier(n_estimators=100, max_depth=5, min_samples_leaf=30, n_jobs=-1),
         'gb': GradientBoostingClassifier(random_state=42),
         'knn': KNeighborsClassifier(n_neighbors=5),
-        'svm': SVC(probability=True)
     }
 
     results = {}
@@ -158,6 +189,17 @@ def train_and_report(csv_path='dataset.csv', feature_mode='safe'):
     print("Summary:")
     for name, r in results.items():
         print(f"{name}: train_F1={r['train_f1']:.4f}, train_AUC={r['train_auc']:.4f}, test_F1={r['test_f1']:.4f}, test_AUC={r['test_auc']:.4f}")
+
+    # extract and print feature importances
+    print("\n" + "="*80)
+    print("FEATURE IMPORTANCES ANALYSIS")
+    print("="*80)
+    extract_feature_importances(
+        {'rf': models['rf'], 'gb': models['gb']},
+        X,
+        X.columns.tolist(),
+        output_dir=os.path.dirname(csv_path) if csv_path else '.'
+    )
 
     return results
 
