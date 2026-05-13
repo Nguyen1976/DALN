@@ -15,7 +15,10 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(message)s",
-    handlers=[logging.FileHandler(settings.log_file)],
+    handlers=[
+        logging.FileHandler(settings.log_file),
+        logging.StreamHandler(),
+    ],
 )
 
 logger = logging.getLogger("embedding-service")

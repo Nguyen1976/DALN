@@ -17,6 +17,7 @@ import { UserSnapshotSyncSubscriber } from './rmq/subscribers/user-snapshot-sync
 import { CommonModule, AuthGuard } from '@app/common'
 import { RecommendationCron } from './background-jobs/recommendation/recommendation.cron'
 import { InterestTagService } from './services/interest-tag.service'
+import { EmbeddingNotifyService } from './services/embedding-notify.service'
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { InterestTagService } from './services/interest-tag.service'
     RecommendationService,
     PythonRecommendationClient,
     UserSnapshotSyncService,
+    EmbeddingNotifyService,
     UserSnapshotSyncSubscriber,
     RecommendationCron,
     InterestTagService,

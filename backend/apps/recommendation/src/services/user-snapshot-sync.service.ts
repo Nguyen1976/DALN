@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
+import { EmbeddingNotifyService } from './embedding-notify.service'
 import {
   UserCreatedPayload,
   UserInterestsUpdatedPayload,
@@ -8,7 +9,12 @@ import {
 
 @Injectable()
 export class UserSnapshotSyncService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(UserSnapshotSyncService.name)
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly embeddingNotify: EmbeddingNotifyService,
+  ) {}
 
   async syncUserCreated(payload: UserCreatedPayload): Promise<void> {
     const now = new Date()
@@ -61,6 +67,18 @@ export class UserSnapshotSyncService {
       where: { userId: payload.userId },
       data: updates,
     })
+
+    if (payload.bio !== undefined) {
+      const r = await this.embeddingNotify.notifyBioEmbedded(
+        payload.userId,
+        payload.bio ?? '',
+      )
+      if (!r.ok) {
+        this.logger.error(
+          `[snapshot] bio saved but embedding/Qdrant notify failed userId=${payload.userId} detail=${r.detail ?? ''}`,
+        )
+      }
+    }
   }
 
   async syncUserInterestsUpdated(

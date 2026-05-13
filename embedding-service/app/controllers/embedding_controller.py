@@ -14,9 +14,10 @@ class EmbeddingController:
             result = self.service.embed_and_save(data.users)
             if result.get("status") == "ok":
                 self.logger.info(
-                    "Done: %s | Match: %s",
+                    "Done: updated=%s matched=%s qdrant_upserted=%s",
                     result.get("updated", 0),
                     result.get("matched", 0),
+                    result.get("qdrant_upserted", 0),
                 )
             return result
         except Exception as exc:

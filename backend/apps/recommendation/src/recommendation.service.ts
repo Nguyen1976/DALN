@@ -437,10 +437,17 @@ export class RecommendationService {
   }
 
   private embeddingServiceBaseUrl(): string {
-    return (process.env.EMBEDDING_SERVICE_URL ?? 'http://127.0.0.1:8000').replace(
-      /\/$/,
-      '',
-    )
+    const explicit = process.env.EMBEDDING_SERVICE_URL?.trim().replace(/\/+$/, '')
+    if (explicit) return explicit
+    const topk = process.env.PYTHON_TOPK_URL?.trim()
+    if (topk) {
+      try {
+        return new URL(topk).origin
+      } catch {
+        /* ignore */
+      }
+    }
+    return 'http://127.0.0.1:8000'
   }
 
   private async countFriendsExclusive(userId: string): Promise<number> {

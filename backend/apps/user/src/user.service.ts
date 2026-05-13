@@ -76,9 +76,6 @@ interface CompleteInterestOnboardingRequest {
 export class UserService {
   private readonly recommendationServiceUrl =
     process.env.RECOMMENDATION_SERVICE_URL ?? 'http://127.0.0.1:3005'
-  private readonly embeddingServiceBaseUrl = (
-    process.env.EMBEDDING_SERVICE_URL ?? 'http://127.0.0.1:8000'
-  ).replace(/\/$/, '')
 
   constructor(
     private readonly userRepo: UserRepository,
@@ -93,22 +90,76 @@ export class UserService {
     private readonly logger: LoggerService,
   ) {}
 
+  /** Same resolution as recommendation `EmbeddingNotifyService`. */
+  private embeddingServiceBaseUrl(): string {
+    const explicit = process.env.EMBEDDING_SERVICE_URL?.trim().replace(/\/+$/, '')
+    if (explicit) return explicit
+    const topk = process.env.PYTHON_TOPK_URL?.trim()
+    if (topk) {
+      try {
+        return new URL(topk).origin
+      } catch {
+        /* ignore */
+      }
+    }
+    return 'http://127.0.0.1:8000'
+  }
+
   private generateOtp(length = 6): string {
     return Array.from({ length }, () => Math.floor(Math.random() * 10)).join('')
   }
 
-  /** Fire-and-forget: embedding-service updates Mongo `profile_vector` + Qdrant `user_bios`. */
-  private notifyEmbeddingServiceBio(userId: string, bio: string): void {
-    const url = `${this.embeddingServiceBaseUrl}/embed-and-save`
-    void fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        users: [{ id: userId, bio: bio || '', age: 0 }],
-      }),
-    }).catch((err: unknown) => {
-      this.logger.error('[user] embed-and-save notify failed', String(err))
-    })
+  /** Calls embedding-service: Mongo `profile_vector` + Qdrant `user_bios`. */
+  private async notifyEmbeddingServiceBio(
+    userId: string,
+    bio: string,
+  ): Promise<void> {
+    const url = `${this.embeddingServiceBaseUrl()}/embed-and-save`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 30_000)
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          users: [{ id: userId, bio: bio || '', age: 0 }],
+        }),
+        signal: controller.signal,
+      })
+      const text = await res.text()
+      let qdrant = 0
+      let status: string | undefined
+      try {
+        const j = text ? (JSON.parse(text) as { status?: string; qdrant_upserted?: number }) : {}
+        status = j.status
+        qdrant = Number(j.qdrant_upserted ?? 0)
+      } catch {
+        /* ignore */
+      }
+      if (!res.ok) {
+        this.logger.error(
+          `[user] embed-and-save HTTP ${res.status} url=${url} body=${text.slice(0, 400)}`,
+        )
+        return
+      }
+      if (status !== 'ok') {
+        this.logger.error(
+          `[user] embed-and-save bad status url=${url} body=${text.slice(0, 400)}`,
+        )
+        return
+      }
+      this.logger.info('[user] embed-and-save ok', {
+        userId,
+        qdrant_upserted: qdrant,
+      })
+    } catch (err: unknown) {
+      this.logger.error(
+        '[user] embed-and-save request failed',
+        err instanceof Error ? err.message : String(err),
+      )
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   private async sendRegistrationOtp(
@@ -669,7 +720,7 @@ export class UserService {
     })
 
     if (data.bio !== undefined) {
-      this.notifyEmbeddingServiceBio(user.id, user.bio ?? '')
+      await this.notifyEmbeddingServiceBio(user.id, user.bio ?? '')
     }
 
     return {
