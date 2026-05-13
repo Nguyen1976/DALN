@@ -35,18 +35,51 @@ export class QdrantService implements OnModuleInit {
     }
   }
 
-  // Đẩy dữ liệu vào (Thực hiện khi User cập nhật Bio)
-  async upsertVector(userId: string, vector: number[], payload: any) {
+  /**
+   * Upsert one bio vector. Point `id` must be the **Qdrant point id** (uuid v5 of mongo ObjectId),
+   * same as `UtilService.mongoIdToUuid`, with `payload.mongoId` for filters — not the raw mongo id.
+   */
+  async upsertVector(qdrantPointId: string, vector: number[], payload: any) {
     return this.client.upsert(this.COLLECTION_NAME, {
       wait: true,
       points: [
         {
-          id: userId, // Dùng ID của Mongo/Prisma
+          id: qdrantPointId,
           vector: vector,
-          payload: payload, // Lưu thêm thông tin tĩnh như username, age...
+          payload: payload,
         },
       ],
     })
+  }
+
+  /** Cosine similarity search against arbitrary vector (live cold-start, etc.). */
+  async searchSimilarByVector(
+    vector: number[],
+    limit: number,
+    excludeMongoIds: string[],
+  ) {
+    if (!vector?.length) return []
+    try {
+      return await this.client.search(this.COLLECTION_NAME, {
+        vector,
+        limit,
+        with_payload: true,
+        filter:
+          excludeMongoIds.length > 0
+            ? {
+                must_not: [
+                  {
+                    key: 'mongoId',
+                    match: { any: excludeMongoIds },
+                  },
+                ],
+              }
+            : undefined,
+      })
+    } catch (error) {
+      console.error('[QdrantService] searchSimilarByVector failed', error)
+      return []
+    }
   }
 
   async recommendSimilar(

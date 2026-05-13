@@ -49,6 +49,7 @@ export interface UserUpdatedPayload {
   userId: string
   avatar?: string
   fullName?: string
+  bio?: string
 }
 
 export interface UserInterestsUpdatedPayload {

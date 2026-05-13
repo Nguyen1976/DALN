@@ -53,6 +53,10 @@ export class UserSnapshotSyncService {
       updates.fullName = payload.fullName
     }
 
+    if (payload.bio !== undefined) {
+      updates.bio = payload.bio
+    }
+
     await this.prisma.userSnapshot.update({
       where: { userId: payload.userId },
       data: updates,

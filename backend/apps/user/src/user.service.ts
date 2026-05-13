@@ -76,6 +76,9 @@ interface CompleteInterestOnboardingRequest {
 export class UserService {
   private readonly recommendationServiceUrl =
     process.env.RECOMMENDATION_SERVICE_URL ?? 'http://127.0.0.1:3005'
+  private readonly embeddingServiceBaseUrl = (
+    process.env.EMBEDDING_SERVICE_URL ?? 'http://127.0.0.1:8000'
+  ).replace(/\/$/, '')
 
   constructor(
     private readonly userRepo: UserRepository,
@@ -92,6 +95,20 @@ export class UserService {
 
   private generateOtp(length = 6): string {
     return Array.from({ length }, () => Math.floor(Math.random() * 10)).join('')
+  }
+
+  /** Fire-and-forget: embedding-service updates Mongo `profile_vector` + Qdrant `user_bios`. */
+  private notifyEmbeddingServiceBio(userId: string, bio: string): void {
+    const url = `${this.embeddingServiceBaseUrl}/embed-and-save`
+    void fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        users: [{ id: userId, bio: bio || '', age: 0 }],
+      }),
+    }).catch((err: unknown) => {
+      this.logger.error('[user] embed-and-save notify failed', String(err))
+    })
   }
 
   private async sendRegistrationOtp(
@@ -648,7 +665,12 @@ export class UserService {
       userId: user.id,
       fullName: data.fullName || undefined,
       avatar: avatarUrl || undefined,
+      bio: user.bio ?? undefined,
     })
+
+    if (data.bio !== undefined) {
+      this.notifyEmbeddingServiceBio(user.id, user.bio ?? '')
+    }
 
     return {
       fullName: user.fullName,

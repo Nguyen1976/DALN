@@ -3,6 +3,7 @@ from importlib import import_module
 from app.config import settings
 from app.repositories.user_repository import UserRepository
 from app.schemas.embedding import UserData
+from app.services.qdrant_user_bios_sync import upsert_user_bio_vectors
 
 
 class EmbeddingService:
@@ -55,4 +56,10 @@ class EmbeddingService:
             payload.append((user.id, embeddings_list[index]))
 
         updated, matched = self.repository.bulk_update_profile_vectors(payload)
-        return {"status": "ok", "updated": updated, "matched": matched}
+        q_upserted = upsert_user_bio_vectors(payload)
+        return {
+            "status": "ok",
+            "updated": updated,
+            "matched": matched,
+            "qdrant_upserted": q_upserted,
+        }

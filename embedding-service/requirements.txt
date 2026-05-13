@@ -1,0 +1,8 @@
+# Runtime deps for embedding-service (FastAPI app under app/)
+fastapi
+uvicorn[standard]
+pydantic
+pymongo
+sentence-transformers
+torch
+qdrant-client>=1.7.0

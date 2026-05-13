@@ -366,7 +366,7 @@ export class RecommendationService {
   ): Promise<string[]> {
     if (!interestSlugs.length) return []
     try {
-      const rows = (await this.prisma.userSnapshot.aggregateRaw({
+      const raw = await this.prisma.userSnapshot.aggregateRaw({
         pipeline: [
           {
             $match: {
@@ -377,7 +377,8 @@ export class RecommendationService {
           { $limit: 220 },
           { $project: { userId: 1, _id: 0 } },
         ],
-      })) as { userId?: string }[]
+      })
+      const rows = raw as unknown as { userId?: string }[]
       if (!Array.isArray(rows)) return []
       return rows
         .map((r) => r.userId)
@@ -394,7 +395,7 @@ export class RecommendationService {
     limit: number,
   ): Promise<string[]> {
     try {
-      const rows = (await this.prisma.userSnapshot.aggregateRaw({
+      const raw = await this.prisma.userSnapshot.aggregateRaw({
         pipeline: [
           {
             $geoNear: {
@@ -407,7 +408,8 @@ export class RecommendationService {
           { $limit: limit },
           { $project: { userId: 1, _id: 0 } },
         ],
-      })) as { userId?: string }[]
+      })
+      const rows = raw as unknown as { userId?: string }[]
       if (!Array.isArray(rows)) return []
       return rows
         .map((r) => r.userId)
@@ -416,6 +418,264 @@ export class RecommendationService {
       console.warn('[recommendation] cold-start geo ring failed', e)
       return []
     }
+  }
+
+  private readonly heuristicPoolLimit = 3
+
+  /** Qdrant retrieve/search may return a plain number[] or a named-vector wrapper. */
+  private extractDenseVector(raw: unknown): number[] | null {
+    if (Array.isArray(raw) && raw.length && typeof raw[0] === 'number') {
+      return raw as number[]
+    }
+    if (raw && typeof raw === 'object' && 'default' in (raw as object)) {
+      const inner = (raw as { default?: unknown }).default
+      if (Array.isArray(inner) && inner.length && typeof inner[0] === 'number') {
+        return inner as number[]
+      }
+    }
+    return null
+  }
+
+  private embeddingServiceBaseUrl(): string {
+    return (process.env.EMBEDDING_SERVICE_URL ?? 'http://127.0.0.1:8000').replace(
+      /\/$/,
+      '',
+    )
+  }
+
+  private async countFriendsExclusive(userId: string): Promise<number> {
+    try {
+      const rows = await this.neo4jService.read(
+        `MATCH (me:User {userId: $userId})-[:FRIEND]-(f:User)
+         RETURN count(DISTINCT f) AS c`,
+        { userId },
+      )
+      if (!rows.length) return 0
+      const c = rows[0].get('c')
+      if (c != null && typeof (c as { toNumber?: () => number }).toNumber === 'function') {
+        return (c as { toNumber: () => number }).toNumber()
+      }
+      const n = Number(c)
+      return Number.isFinite(n) ? n : 0
+    } catch {
+      return 0
+    }
+  }
+
+  private async requestEmbedAndSave(
+    userId: string,
+    bio: string,
+  ): Promise<boolean> {
+    const url = `${this.embeddingServiceBaseUrl()}/embed-and-save`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15_000)
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          users: [{ id: userId, bio: bio || '', age: 0 }],
+        }),
+        signal: controller.signal,
+      })
+      const body = (await res.json().catch(() => null)) as {
+        status?: string
+      } | null
+      return res.ok && body?.status === 'ok'
+    } catch {
+      return false
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  private async fetchTopInterestOverlapUserIds(
+    excludeIds: string[],
+    interestSlugs: string[],
+    limit: number,
+  ): Promise<string[]> {
+    if (!interestSlugs.length) return []
+    try {
+      const raw = await this.prisma.userSnapshot.aggregateRaw({
+        pipeline: [
+          {
+            $match: {
+              userId: { $nin: excludeIds },
+              interests: { $in: interestSlugs },
+            },
+          },
+          {
+            $addFields: {
+              overlap: {
+                $size: {
+                  $ifNull: [
+                    { $setIntersection: ['$interests', interestSlugs] },
+                    [],
+                  ],
+                },
+              },
+            },
+          },
+          { $match: { overlap: { $gt: 0 } } },
+          { $sort: { overlap: -1, userId: 1 } },
+          { $limit: limit },
+          { $project: { userId: 1, _id: 0 } },
+        ],
+      })
+      const rows = raw as unknown as { userId?: string }[]
+      if (!Array.isArray(rows)) return []
+      return rows
+        .map((r) => r.userId)
+        .filter((id): id is string => typeof id === 'string')
+    } catch (e) {
+      console.warn('[recommendation] top interest overlap failed', e)
+      return []
+    }
+  }
+
+  private buildHeuristicCandidateRow(
+    candidateId: string,
+    score: number,
+    profile: {
+      userId: string
+      username: string
+      fullName: string
+      avatar: string | null
+      bio: string | null
+      location: unknown
+      isActive: boolean
+      lastSeen: Date | null
+    },
+  ) {
+    return {
+      candidateId,
+      score,
+      jaccard: 0,
+      cosine_graph: 0,
+      adamic_adar: 0,
+      pref_attach: 0,
+      deg_u: 0,
+      deg_v: 0,
+      dist_km: 0,
+      dist_bucket: 0,
+      bio_cosine: 0,
+      bio_dot: 0,
+      bio_l2: 0,
+      same_cluster: 0,
+      group_inter: 0,
+      group_jaccard: 0,
+      same_group: 0,
+      profile: {
+        userId: profile.userId,
+        username: profile.username,
+        fullName: profile.fullName,
+        avatar: profile.avatar,
+        bio: profile.bio,
+        location: profile.location,
+        isActive: profile.isActive,
+        lastSeen: profile.lastSeen,
+      },
+    }
+  }
+
+  /**
+   * Read-time cold start: no persisted top-K yet and user has no friends in Neo4j.
+   * Pool = 3 Qdrant (similar bio) + 3 $geoNear + 3 best interest overlap, de-duplicated. No Python GB model.
+   */
+  private async getLiveHeuristicColdStartRecommendations(
+    userId: string,
+  ): Promise<any[]> {
+    const me = await this.prisma.userSnapshot.findUnique({
+      where: { userId },
+      select: {
+        bio: true,
+        location: true,
+        interests: true,
+        username: true,
+        fullName: true,
+        avatar: true,
+        isActive: true,
+        lastSeen: true,
+      },
+    })
+    if (!me) return []
+
+    const excludeIds = [userId]
+    const k = this.heuristicPoolLimit
+    let fromBio: string[] = []
+
+    if ((me.bio ?? '').trim()) {
+      const qid = this.utilService.mongoIdToUuid(userId)
+      let rows = await this.qdrantService.getVectorsBatch([qid])
+      let vec = this.extractDenseVector(rows[0]?.vector)
+      if (!vec || !vec.length) {
+        await this.requestEmbedAndSave(userId, me.bio ?? '')
+        rows = await this.qdrantService.getVectorsBatch([qid])
+        vec = this.extractDenseVector(rows[0]?.vector)
+      }
+      if (vec?.length) {
+        const hits = await this.qdrantService.searchSimilarByVector(
+          vec,
+          k,
+          excludeIds,
+        )
+        fromBio = hits
+          .map((h) => {
+            const mid = h.payload && (h.payload as Record<string, unknown>).mongoId
+            return typeof mid === 'string' ? mid : null
+          })
+          .filter((id): id is string => id !== null)
+      }
+    }
+
+    const nearPoint = this.toGeoNearNearField(me.location)
+    let fromGeo: string[] = []
+    if (nearPoint) {
+      fromGeo = await this.fetchColdStartGeoRing(excludeIds, nearPoint, k)
+    }
+
+    const fromInterest = await this.fetchTopInterestOverlapUserIds(
+      excludeIds,
+      me.interests ?? [],
+      k,
+    )
+
+    const mergedIds = this.orderedUniqueCandidates(
+      [fromBio, fromGeo, fromInterest],
+      64,
+    )
+    if (!mergedIds.length) return []
+
+    const profiles = await this.prisma.userSnapshot.findMany({
+      where: { userId: { in: mergedIds } },
+      select: {
+        userId: true,
+        username: true,
+        fullName: true,
+        avatar: true,
+        bio: true,
+        location: true,
+        isActive: true,
+        lastSeen: true,
+      },
+    })
+    const byId = new Map(profiles.map((p) => [p.userId, p]))
+
+    const out: any[] = []
+    let rank = 0
+    for (const id of mergedIds) {
+      const profile = byId.get(id)
+      if (!profile) continue
+      rank += 1
+      out.push(
+        this.buildHeuristicCandidateRow(
+          profile.userId,
+          1 - rank * 0.01,
+          profile,
+        ),
+      )
+    }
+    return out
   }
 
   private toStoredScore(score: unknown): number {
@@ -435,6 +695,39 @@ export class RecommendationService {
       where: { userId },
     })
 
+    const storedCandidates = Array.isArray(result?.candidates)
+      ? (result!.candidates as RecommendationFeatureRow[])
+      : []
+
+    const candidateIds = storedCandidates
+      .map((candidate) => candidate?.candidateId)
+      .filter(
+        (candidateId): candidateId is string => typeof candidateId === 'string',
+      )
+
+    const noStoredList = !result || candidateIds.length === 0
+
+    if (noStoredList) {
+      const friendEx = await this.countFriendsExclusive(userId)
+      if (friendEx === 0) {
+        const live = await this.getLiveHeuristicColdStartRecommendations(userId)
+        if (live.length > 0) {
+          const now = new Date()
+          return {
+            status: 'ok',
+            source: 'live_heuristic',
+            userId,
+            topK: live.length,
+            dayVersion: this.getDayVersion(),
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+            createdAt: now,
+            updatedAt: now,
+            candidates: live,
+          }
+        }
+      }
+    }
+
     if (!result) {
       return {
         status: 'empty',
@@ -445,15 +738,7 @@ export class RecommendationService {
       }
     }
 
-    const candidates = Array.isArray(result.candidates)
-      ? (result.candidates as RecommendationFeatureRow[])
-      : []
-
-    const candidateIds = candidates
-      .map((candidate) => candidate?.candidateId)
-      .filter(
-        (candidateId): candidateId is string => typeof candidateId === 'string',
-      )
+    const candidates = storedCandidates
 
     const profiles = await this.prisma.userSnapshot.findMany({
       where: { userId: { in: candidateIds } },
@@ -717,9 +1002,12 @@ export class RecommendationService {
       uuidToMongoId.set(qdrantUserUuids[i], userIdsForBioVectors[i])
     }
 
-    // Fetch vectors từ Qdrant
-    const vectorPoints =
-      await this.qdrantService.getVectorsBatch(qdrantUserUuids)
+    let vectorPoints: any[] = []
+    try {
+      vectorPoints = await this.qdrantService.getVectorsBatch(qdrantUserUuids)
+    } catch (e) {
+      console.warn('[recommendation] getVectorsBatch failed', e)
+    }
     const bioVectorsByUserId = new Map<string, number[]>()
     for (const point of vectorPoints) {
       const mongoId = uuidToMongoId.get(String(point.id))
@@ -918,7 +1206,6 @@ export class RecommendationService {
         candidateProfile?.bio ?? null,
       )
       const qdrantScore = qdrantScoreById.get(candidateId) ?? 0
-      const interestSimilarity = Math.max(qdrantScore, bioSimilarity)
 
       const candidateCoordinates = this.getLngLatPair(
         candidateProfile?.location,
@@ -1034,39 +1321,38 @@ export class RecommendationService {
     const candidatesForPython = Array.from(map.values())
       .map((c) => stripColdMeta(c as Record<string, unknown>))
       .filter(
-      (candidate) =>
-        typeof candidate?.candidateId === 'string' &&
-        Number.isFinite(Number(candidate?.jaccard)) &&
-        Number.isFinite(Number(candidate?.cosine_graph)) &&
-        Number.isFinite(Number(candidate?.adamic_adar)) &&
-        Number.isFinite(Number(candidate?.pref_attach)) &&
-        Number.isFinite(Number(candidate?.deg_u)) &&
-        Number.isFinite(Number(candidate?.deg_v)) &&
-        Number.isFinite(Number(candidate?.dist_km)) &&
-        Number.isFinite(Number(candidate?.dist_bucket)) &&
-        Number.isFinite(Number(candidate?.bio_cosine)) &&
-        Number.isFinite(Number(candidate?.bio_dot)) &&
-        Number.isFinite(Number(candidate?.bio_l2)) &&
-        Number.isFinite(Number(candidate?.same_cluster)) &&
-        Number.isFinite(Number(candidate?.group_inter)) &&
-        Number.isFinite(Number(candidate?.group_jaccard)) &&
-        Number.isFinite(Number(candidate?.same_group)),
-    )
+        (candidate) =>
+          typeof candidate?.candidateId === 'string' &&
+          Number.isFinite(Number(candidate?.jaccard)) &&
+          Number.isFinite(Number(candidate?.cosine_graph)) &&
+          Number.isFinite(Number(candidate?.adamic_adar)) &&
+          Number.isFinite(Number(candidate?.pref_attach)) &&
+          Number.isFinite(Number(candidate?.deg_u)) &&
+          Number.isFinite(Number(candidate?.deg_v)) &&
+          Number.isFinite(Number(candidate?.dist_km)) &&
+          Number.isFinite(Number(candidate?.dist_bucket)) &&
+          Number.isFinite(Number(candidate?.bio_cosine)) &&
+          Number.isFinite(Number(candidate?.bio_dot)) &&
+          Number.isFinite(Number(candidate?.bio_l2)) &&
+          Number.isFinite(Number(candidate?.same_cluster)) &&
+          Number.isFinite(Number(candidate?.group_inter)) &&
+          Number.isFinite(Number(candidate?.group_jaccard)) &&
+          Number.isFinite(Number(candidate?.same_group)),
+      ) as any
 
-    let topKCandidates =
-      await this.pythonClient.predictTop100(candidatesForPython)
+    let topKCandidates = await this.pythonClient.predictTop100(
+      candidatesForPython,
+    )
 
     const priorValues = Array.from(coldPriorById.values())
     const maxColdPrior = Math.max(1e-9, ...priorValues)
 
-    const blendWithColdPrior = (
-      rows: RecommendationFeatureRow[],
-    ): RecommendationFeatureRow[] => {
+    const blendWithColdPrior = (rows: any[]): any[] => {
       if (!rows.length || !coldPriorById.size) return rows
       const alphaModel = coldStart ? 0.44 : 0.86
       return [...rows]
         .map((row) => {
-          const pid = row.candidateId
+          const pid = String(row.candidateId)
           const coldN =
             (coldPriorById.get(pid) ?? 0) / (maxColdPrior || 1e-9)
           const modelScore = this.toStoredScore(row.score)
@@ -1075,7 +1361,9 @@ export class RecommendationService {
             score: modelScore * alphaModel + coldN * (1 - alphaModel),
           }
         })
-        .sort((a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score))
+        .sort(
+          (a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score),
+        )
         .slice(0, 100)
     }
 
@@ -1083,18 +1371,21 @@ export class RecommendationService {
 
     if (!topKCandidates.length && candidatesForPython.length) {
       topKCandidates = [...candidatesForPython]
-        .map((c) => ({
+        .map((c: any) => ({
           ...c,
-          score: (coldPriorById.get(c.candidateId) ?? 0) / maxColdPrior,
+          score:
+            (coldPriorById.get(String(c.candidateId)) ?? 0) / maxColdPrior,
         }))
         .sort(
           (a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score),
         )
-        .slice(0, 100) as RecommendationFeatureRow[]
+        .slice(0, 100)
     }
 
     const dayVersion = this.getDayVersion()
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+
+    const featuresForAudit = Array.from(map.values())
 
     await this.prisma.recommendationResult.upsert({
       where: { userId },
@@ -1102,14 +1393,14 @@ export class RecommendationService {
         userId,
         topK: topKCandidates.length,
         candidates: topKCandidates,
-        features: candidatesForPython,
+        features: featuresForAudit,
         dayVersion,
         expiresAt,
       },
       update: {
         topK: topKCandidates.length,
         candidates: topKCandidates,
-        features: candidatesForPython,
+        features: featuresForAudit,
         dayVersion,
         expiresAt,
       },

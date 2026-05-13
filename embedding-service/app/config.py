@@ -12,6 +12,16 @@ class Settings:
     )
     embedding_batch_size: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "256"))
     log_file: str = os.getenv("EMBEDDING_LOG_FILE", "sync_process.log")
+    # Qdrant (same collection name / vector size as Nest @app/qdrant)
+    qdrant_enabled: bool = os.getenv("QDRANT_ENABLED", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    qdrant_host: str = os.getenv("QDRANT_HOST", "localhost")
+    qdrant_port: int = int(os.getenv("QDRANT_PORT", "6333"))
+    qdrant_collection: str = os.getenv("QDRANT_COLLECTION", "user_bios")
+    qdrant_vector_size: int = int(os.getenv("QDRANT_VECTOR_SIZE", "384"))
 
 
 settings = Settings()
