@@ -8,7 +8,14 @@ export class QdrantService implements OnModuleInit {
 
   async onModuleInit() {
     this.client = new QdrantClient({ host: 'localhost', port: 6333 })
-    await this.createCollection()
+    try {
+      await this.createCollection()
+    } catch (error) {
+      console.error(
+        '[QdrantService] Skipping collection init (Qdrant unreachable). Recommendation will start in degraded mode.',
+        error,
+      )
+    }
   }
 
   // Tạo "Bảng" (Collection) để chứa Vector

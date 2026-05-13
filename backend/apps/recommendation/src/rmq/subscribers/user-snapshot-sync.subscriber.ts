@@ -7,6 +7,7 @@ import { safeExecute } from '@app/common/rpc/safe-execute'
 import { UserSnapshotSyncService } from '../../services/user-snapshot-sync.service'
 import type {
   UserCreatedPayload,
+  UserInterestsUpdatedPayload,
   UserUpdatedPayload,
 } from 'libs/constant/rmq/payload'
 
@@ -35,6 +36,19 @@ export class UserSnapshotSyncSubscriber {
   async handleUserUpdated(payload: UserUpdatedPayload): Promise<void> {
     await safeExecute(() =>
       this.userSnapshotSyncService.syncUserUpdated(payload),
+    )
+  }
+
+  @RabbitSubscribe({
+    exchange: EXCHANGE_RMQ.USER_EVENTS,
+    routingKey: ROUTING_RMQ.USER_INTERESTS_UPDATED,
+    queue: QUEUE_RMQ.RECOMMENDATION_USER_INTERESTS_UPDATED,
+  })
+  async handleUserInterestsUpdated(
+    payload: UserInterestsUpdatedPayload,
+  ): Promise<void> {
+    await safeExecute(() =>
+      this.userSnapshotSyncService.syncUserInterestsUpdated(payload),
     )
   }
 }

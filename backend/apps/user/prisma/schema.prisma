@@ -17,6 +17,10 @@ model User {
   isActive  Boolean  @default(false)
   avatar    String?
   bio       String?
+  /// Interest tag slugs (e.g. "gaming") aligned with recommendation InterestTag.slug
+  interests                        String[] @default([])
+  /// After first onboarding selection; existing users without the field are treated as true in API responses
+  hasCompletedInterestOnboarding   Boolean  @default(false)
   lastSeen DateTime?
   location Json?
   createdAt DateTime @default(now())

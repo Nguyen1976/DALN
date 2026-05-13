@@ -16,6 +16,7 @@ import { UserSnapshotSyncService } from './services/user-snapshot-sync.service'
 import { UserSnapshotSyncSubscriber } from './rmq/subscribers/user-snapshot-sync.subscriber'
 import { CommonModule, AuthGuard } from '@app/common'
 import { RecommendationCron } from './background-jobs/recommendation/recommendation.cron'
+import { InterestTagService } from './services/interest-tag.service'
 
 @Module({
   imports: [
@@ -45,7 +46,7 @@ import { RecommendationCron } from './background-jobs/recommendation/recommendat
         },
       ],
       uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
-      connectionInitOptions: { wait: true },
+      connectionInitOptions: { wait: false },
     }),
   ],
   controllers: [RecommendationController],
@@ -59,6 +60,7 @@ import { RecommendationCron } from './background-jobs/recommendation/recommendat
     UserSnapshotSyncService,
     UserSnapshotSyncSubscriber,
     RecommendationCron,
+    InterestTagService,
   ],
 })
 export class RecommendationModule {}

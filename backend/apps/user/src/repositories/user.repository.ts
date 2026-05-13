@@ -180,4 +180,40 @@ export class UserRepository {
       },
     })
   }
+
+  async completeInterestOnboarding(userId: string, slugs: string[]) {
+    return await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        interests: slugs,
+        hasCompletedInterestOnboarding: true,
+      },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        fullName: true,
+        avatar: true,
+        bio: true,
+        interests: true,
+        hasCompletedInterestOnboarding: true,
+      },
+    })
+  }
+
+  async findSessionFieldsById(userId: string) {
+    return await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        fullName: true,
+        avatar: true,
+        bio: true,
+        interests: true,
+        hasCompletedInterestOnboarding: true,
+      },
+    })
+  }
 }

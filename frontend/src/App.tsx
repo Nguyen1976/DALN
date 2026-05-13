@@ -30,6 +30,7 @@ import {
 import NotificationSettingsPage from "./pages/NotificationSettings";
 import { useChatSocketEvents } from "./hooks/useChatSocketEvents";
 import VerifyOtpPage from "./pages/VerifyOtp";
+import InterestOnboardingPage from "./pages/InterestOnboarding";
 
 const router = createBrowserRouter([
   {
@@ -39,6 +40,14 @@ const router = createBrowserRouter([
   {
     path: "/verify-otp",
     element: <VerifyOtpPage />,
+  },
+  {
+    path: "/onboarding/interests",
+    element: (
+      <ProtectedRoute>
+        <InterestOnboardingPage />
+      </ProtectedRoute>
+    ),
   },
   {
     path: "/",

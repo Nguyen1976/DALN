@@ -1,7 +1,10 @@
 import { socket } from "@/lib/socket";
-import { selectUser } from "@/redux/slices/userSlice";
+import {
+  fetchCurrentUserAPI,
+  selectUser,
+} from "@/redux/slices/userSlice";
 import { useDispatch, useSelector } from "react-redux";
-import { Navigate, useParams } from "react-router";
+import { Navigate, useLocation, useParams } from "react-router";
 import { useEffect, useRef } from "react";
 import { getConversationByIdAPI } from "@/apis";
 import {
@@ -28,6 +31,8 @@ import notificationSound from "@/assets/notification.mp3";
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { conversationId } = useParams();
+  const location = useLocation();
+  const bootstrappedMe = useRef(false);
 
   const selectedChatIdRef = useRef<string | null>(conversationId);
   const knownConversationIdsRef = useRef<Set<string>>(new Set());
@@ -38,6 +43,16 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const user = useSelector(selectUser);
   const conversations = useSelector(selectConversation);
   const conversationsRef = useRef(conversations);
+
+  useEffect(() => {
+    if (!user?.id) {
+      bootstrappedMe.current = false;
+      return;
+    }
+    if (bootstrappedMe.current) return;
+    bootstrappedMe.current = true;
+    void dispatch(fetchCurrentUserAPI());
+  }, [dispatch, user?.id]);
 
   useEffect(() => {
     knownConversationIdsRef.current = new Set(
@@ -398,6 +413,13 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   if (!user?.id) {
     console.log("no user");
     return <Navigate to="/auth" replace />;
+  }
+
+  if (
+    user.hasCompletedInterestOnboarding === false &&
+    !location.pathname.startsWith("/onboarding/interests")
+  ) {
+    return <Navigate to="/onboarding/interests" replace />;
   }
 
   return children;

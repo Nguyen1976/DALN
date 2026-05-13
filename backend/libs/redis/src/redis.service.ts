@@ -121,7 +121,7 @@ export class RedisService {
 
   async setUserFeatures(
     userId: string,
-    features: { bio?: string; location?: any },
+    features: { bio?: string; location?: any; interests?: string[] },
     ttl = 86400,
   ): Promise<void> {
     try {
@@ -146,7 +146,12 @@ export class RedisService {
   }
 
   async setUserFeaturesBatch(
-    profiles: Array<{ id: string; bio?: string | null; location?: any }>,
+    profiles: Array<{
+      id: string
+      bio?: string | null
+      location?: any
+      interests?: string[]
+    }>,
     ttl = 86400,
   ): Promise<void> {
     try {
@@ -156,6 +161,7 @@ export class RedisService {
         const serialized = JSON.stringify({
           bio: p.bio ?? null,
           location: p.location ?? null,
+          interests: p.interests ?? [],
         })
         pipeline.set(key, serialized, 'EX', ttl)
       }

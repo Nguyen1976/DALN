@@ -67,8 +67,16 @@ interface UpdateProfileRequest {
   avatarFilename?: string
 }
 
+interface CompleteInterestOnboardingRequest {
+  userId: string
+  slugs: string[]
+}
+
 @Injectable()
 export class UserService {
+  private readonly recommendationServiceUrl =
+    process.env.RECOMMENDATION_SERVICE_URL ?? 'http://127.0.0.1:3005'
+
   constructor(
     private readonly userRepo: UserRepository,
     private readonly friendRequestRepo: FriendRequestRepository,
@@ -288,9 +296,34 @@ export class UserService {
 
     return {
       userId: user.id,
-      ...user,
+      email: user.email,
+      username: user.username,
+      fullName: user.fullName,
+      avatar: user.avatar,
+      bio: user.bio,
+      interests: user.interests ?? [],
+      hasCompletedInterestOnboarding:
+        user.hasCompletedInterestOnboarding ?? true,
       accessToken,
       refreshToken,
+    }
+  }
+
+  async getMe(userId: string) {
+    const user = await this.userRepo.findSessionFieldsById(userId)
+    if (!user) {
+      UserErrors.userNotFound()
+    }
+    return {
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      fullName: user.fullName ?? '',
+      avatar: user.avatar ?? '',
+      bio: user.bio ?? '',
+      interests: user.interests ?? [],
+      hasCompletedInterestOnboarding:
+        user.hasCompletedInterestOnboarding ?? true,
     }
   }
 
@@ -514,6 +547,80 @@ export class UserService {
     return {
       ...friendRequest,
       fromUser: fromUser as any,
+    }
+  }
+
+  private async fetchAllowedInterestSlugs(): Promise<Set<string>> {
+    const base = this.recommendationServiceUrl.replace(/\/$/, '')
+    const url = `${base}/recommendation/interest-tags`
+    let res: globalThis.Response
+    try {
+      res = await fetch(url, { signal: AbortSignal.timeout(8_000) })
+    } catch {
+      UserErrors.recommendationCatalogUnavailable()
+    }
+    if (!res.ok) {
+      UserErrors.recommendationCatalogUnavailable()
+    }
+    let body: unknown
+    try {
+      body = await res.json()
+    } catch {
+      UserErrors.recommendationCatalogUnavailable()
+    }
+    const rows = (body as { data?: unknown })?.data
+    if (!Array.isArray(rows)) {
+      UserErrors.recommendationCatalogUnavailable()
+    }
+    return new Set(
+      rows
+        .map((r) =>
+          typeof (r as { slug?: string })?.slug === 'string'
+            ? (r as { slug: string }).slug
+            : '',
+        )
+        .filter(Boolean),
+    )
+  }
+
+  async completeInterestOnboarding(
+    data: CompleteInterestOnboardingRequest,
+  ): Promise<{
+    interests: string[]
+    hasCompletedInterestOnboarding: boolean
+  }> {
+    const user = await this.userRepo.findById(data.userId)
+    if (!user) {
+      UserErrors.userNotFound()
+    }
+
+    if (user.hasCompletedInterestOnboarding === true) {
+      UserErrors.interestOnboardingAlreadyCompleted()
+    }
+
+    const allowed = await this.fetchAllowedInterestSlugs()
+    const unique = [...new Set(data.slugs.map((s) => s.trim()).filter(Boolean))]
+    const filtered = unique.filter((slug) => allowed.has(slug))
+
+    if (!filtered.length) {
+      UserErrors.invalidInterestSelection()
+    }
+
+    const updated = await this.userRepo.completeInterestOnboarding(
+      data.userId,
+      filtered,
+    )
+
+    this.eventsPublisher.publishUserInterestsUpdated({
+      userId: data.userId,
+      interests: filtered,
+    })
+
+    return {
+      interests: updated.interests ?? [],
+      hasCompletedInterestOnboarding: Boolean(
+        updated.hasCompletedInterestOnboarding,
+      ),
     }
   }
 

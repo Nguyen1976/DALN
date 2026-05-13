@@ -26,6 +26,7 @@ import {
   UpdateProfileDto,
   UpdateStatusMakeFriendDto,
   VerifyOtpDto,
+  CompleteInterestOnboardingDto,
 } from './user-http.dto'
 
 @Controller('user')
@@ -105,6 +106,9 @@ export class UserHttpController {
       fullName: session.fullName || '',
       avatar: session.avatar || '',
       bio: session.bio || '',
+      interests: session.interests ?? [],
+      hasCompletedInterestOnboarding:
+        session.hasCompletedInterestOnboarding ?? true,
       accessToken: session.accessToken,
       refreshToken: session.refreshToken,
     }
@@ -116,6 +120,24 @@ export class UserHttpController {
     response.clearCookie('accessToken')
     response.clearCookie('refreshToken')
     return { message: 'Logout successful' }
+  }
+
+  @Get('me')
+  @RequireLogin()
+  async getMe(@UserInfo() user: any) {
+    return this.userService.getMe(user.userId)
+  }
+
+  @Post('interest-onboarding')
+  @RequireLogin()
+  async completeInterestOnboarding(
+    @Body() dto: CompleteInterestOnboardingDto,
+    @UserInfo() user: any,
+  ) {
+    return this.userService.completeInterestOnboarding({
+      userId: user.userId,
+      slugs: dto.slugs,
+    })
   }
 
   @Get('')

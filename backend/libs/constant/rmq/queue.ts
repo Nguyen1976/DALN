@@ -16,4 +16,6 @@ export const QUEUE_RMQ = {
   CHAT_UPDATE_MESSAGE_READ: 'chat_queue_update_message_read',
   RECOMMENDATION_USER_CREATED: 'recommendation_queue_user_created',
   RECOMMENDATION_USER_UPDATED: 'recommendation_queue_user_updated',
+  RECOMMENDATION_USER_INTERESTS_UPDATED:
+    'recommendation_queue_user_interests_updated',
 }

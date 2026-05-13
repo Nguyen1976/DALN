@@ -51,6 +51,11 @@ export interface UserUpdatedPayload {
   fullName?: string
 }
 
+export interface UserInterestsUpdatedPayload {
+  userId: string
+  interests: string[]
+}
+
 export interface EmitToUserPayload {
   userIds: string[]
   event: string

@@ -23,6 +23,7 @@ type UserProfileRow = {
   userId: string
   bio: string | null
   location: unknown
+  interests?: string[]
 }
 
 type RecommendationFeatureRow = {
@@ -268,6 +269,155 @@ export class RecommendationService {
     return earthRadiusKm * c
   }
 
+  /** GeoJSON Point for $geoNear — supports legacy `{ lat, lon }` snapshots. */
+  private toGeoNearNearField(location: unknown): {
+    type: 'Point'
+    coordinates: [number, number]
+  } | null {
+    const fromCoordinates = this.getCoordinates(location)
+    if (fromCoordinates) {
+      return { type: 'Point', coordinates: fromCoordinates }
+    }
+    const lo = location as { lat?: unknown; lon?: unknown } | null
+    const lat = typeof lo?.lat === 'number' ? lo.lat : Number(lo?.lat)
+    const lon = typeof lo?.lon === 'number' ? lo.lon : Number(lo?.lon)
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return { type: 'Point', coordinates: [lon, lat] }
+    }
+    return null
+  }
+
+  private getLngLatPair(location: unknown): [number, number] | null {
+    const fromCoordinates = this.getCoordinates(location)
+    if (fromCoordinates) {
+      return fromCoordinates
+    }
+    const lo = location as { lat?: unknown; lon?: unknown } | null
+    const lat = typeof lo?.lat === 'number' ? lo.lat : Number(lo?.lat)
+    const lon = typeof lo?.lon === 'number' ? lo.lon : Number(lo?.lon)
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return [lon, lat]
+    }
+    return null
+  }
+
+  private computeInterestJaccard(a: string[], b: string[]): number {
+    if (!a?.length || !b?.length) return 0
+    const setA = new Set(a)
+    const setB = new Set(b)
+    let inter = 0
+    for (const x of setA) {
+      if (setB.has(x)) inter++
+    }
+    const union = setA.size + setB.size - inter
+    return union > 0 ? inter / union : 0
+  }
+
+  /**
+   * Cold-start prior: interests + text bio + geography + weak vector signal.
+   * Used to blend with GB model when graph features are sparse.
+   */
+  private computeColdStartPrior(params: {
+    interestJaccard: number
+    bioTokenSim: number
+    distKm: number
+    vecSignal: number
+  }): number {
+    const hasDist = Number.isFinite(params.distKm) && params.distKm > 0
+    const geo = hasDist
+      ? Math.exp(-Math.min(params.distKm, 500) / 130)
+      : 0.32
+    return (
+      0.38 * params.interestJaccard +
+      0.28 * params.bioTokenSim +
+      0.22 * geo +
+      0.12 * Math.min(1, Math.max(0, params.vecSignal))
+    )
+  }
+
+  private orderedUniqueCandidates(lists: string[][], max: number): string[] {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const list of lists) {
+      for (const id of list) {
+        if (!id || seen.has(id)) continue
+        seen.add(id)
+        out.push(id)
+        if (out.length >= max) return out
+      }
+    }
+    return out
+  }
+
+  private isColdStartUser(params: {
+    friendCount: number
+    graphOnlyCandidates: number
+    unionSizeBeforeCold: number
+  }): boolean {
+    if (params.friendCount <= 2) return true
+    if (params.graphOnlyCandidates < 6) return true
+    if (params.unionSizeBeforeCold < 28) return true
+    return false
+  }
+
+  private async fetchColdStartInterestMatches(
+    excludeIds: string[],
+    interestSlugs: string[],
+  ): Promise<string[]> {
+    if (!interestSlugs.length) return []
+    try {
+      const rows = (await this.prisma.userSnapshot.aggregateRaw({
+        pipeline: [
+          {
+            $match: {
+              userId: { $nin: excludeIds },
+              interests: { $in: interestSlugs },
+            },
+          },
+          { $limit: 220 },
+          { $project: { userId: 1, _id: 0 } },
+        ],
+      })) as { userId?: string }[]
+      if (!Array.isArray(rows)) return []
+      return rows
+        .map((r) => r.userId)
+        .filter((id): id is string => typeof id === 'string')
+    } catch (e) {
+      console.warn('[recommendation] cold-start interest match failed', e)
+      return []
+    }
+  }
+
+  private async fetchColdStartGeoRing(
+    excludeIds: string[],
+    near: { type: 'Point'; coordinates: [number, number] },
+    limit: number,
+  ): Promise<string[]> {
+    try {
+      const rows = (await this.prisma.userSnapshot.aggregateRaw({
+        pipeline: [
+          {
+            $geoNear: {
+              near,
+              distanceField: 'dist',
+              spherical: true,
+              query: { userId: { $nin: excludeIds } },
+            },
+          },
+          { $limit: limit },
+          { $project: { userId: 1, _id: 0 } },
+        ],
+      })) as { userId?: string }[]
+      if (!Array.isArray(rows)) return []
+      return rows
+        .map((r) => r.userId)
+        .filter((id): id is string => typeof id === 'string')
+    } catch (e) {
+      console.warn('[recommendation] cold-start geo ring failed', e)
+      return []
+    }
+  }
+
   private toStoredScore(score: unknown): number {
     const rawScore = Number(score)
     return Number.isFinite(rawScore) ? rawScore : 0
@@ -385,24 +535,28 @@ export class RecommendationService {
     console.log(`--- Bắt đầu xử lý Suggest cho User: ${userId} ---`)
     console.time('Tổng thời gian recommendationHelper')
 
-    // 1. Lấy danh sách ID từ Neo4j
-    const friendRecords = await this.neo4jService.read(
-      `
+    // 1. Bạn bè từ Neo4j (cold start: có thể không có node / lỗi kết nối)
+    let friendRecords: any[] = []
+    try {
+      friendRecords = await this.neo4jService.read(
+        `
     MATCH (me:User {userId: $userId})-[:FRIEND]-(friend:User)
     RETURN friend.userId AS friendId
   `,
-      { userId },
-    )
+        { userId },
+      )
+    } catch (e) {
+      console.warn('[recommendation] neo4j friend list failed', e)
+    }
 
-    // Vệ sinh friendIds: Chỉ lấy string, bỏ null/undefined
     const friendIds: string[] = friendRecords
       .map((r) => r.get('friendId'))
       .filter((id) => id && typeof id === 'string')
 
-    friendIds.push(userId) // Luôn loại trừ chính mình
+    const friendCountExclusive = friendIds.length
+    friendIds.push(userId)
     const uniqueExcludeIds = Array.from(new Set(friendIds))
 
-    // 2. Định nghĩa các Query cho Neo4j
     const queryCommonFriends = `
     MATCH (me:User {userId: $userId})-[:FRIEND]-(friend: User)-[:FRIEND]-(stranger:User)
     WHERE NOT (me)-[:FRIEND]-(stranger) AND me <> stranger
@@ -417,66 +571,81 @@ export class RecommendationService {
     ORDER BY commonGroups DESC LIMIT 300
   `
 
-    // 3. Convert userId sang UUID cho Qdrant
     const qdrantUuid = await this.utilService.mongoIdToUuid(userId)
 
-    // 4. CHẠY SONG SONG
     console.time('Giai đoạn xử lý song song')
-    const [commonFriendsRecords, commonGroupsRecords, qdrantRes, currentUser] =
-      await Promise.all([
-        this.neo4jService.read(queryCommonFriends, { userId }),
-        this.neo4jService.read(queryCommonGroups, { userId }),
-        this.qdrantService.recommendSimilar(qdrantUuid, 200, uniqueExcludeIds),
-        this.prisma.userSnapshot.findUnique({
-          where: { userId },
-          select: { location: true, bio: true },
-        }),
-      ])
+    const settled = await Promise.allSettled([
+      this.neo4jService.read(queryCommonFriends, { userId }),
+      this.neo4jService.read(queryCommonGroups, { userId }),
+      this.qdrantService.recommendSimilar(qdrantUuid, 200, uniqueExcludeIds),
+      this.prisma.userSnapshot.findUnique({
+        where: { userId },
+        select: { location: true, bio: true, interests: true },
+      }),
+    ])
     console.timeEnd('Giai đoạn xử lý song song')
 
-    // 5. MAP DỮ LIỆU
+    const commonFriendsRecords =
+      settled[0].status === 'fulfilled' ? settled[0].value : []
+    if (settled[0].status === 'rejected') {
+      console.warn('[recommendation] neo4j commonFriends failed', settled[0].reason)
+    }
+
+    const commonGroupsRecords =
+      settled[1].status === 'fulfilled' ? settled[1].value : []
+    if (settled[1].status === 'rejected') {
+      console.warn('[recommendation] neo4j commonGroups failed', settled[1].reason)
+    }
+
+    const qdrantRes = settled[2].status === 'fulfilled' ? settled[2].value : []
+    if (settled[2].status === 'rejected') {
+      console.warn('[recommendation] qdrant recommendSimilar failed', settled[2].reason)
+    }
+
+    const currentUser =
+      settled[3].status === 'fulfilled' ? settled[3].value : null
+    if (settled[3].status === 'rejected') {
+      console.warn('[recommendation] prisma currentUser failed', settled[3].reason)
+    }
+
     const commonFriends = commonFriendsRecords.map((r) => ({
       id: r.get('id'),
-      commonFriends: r.get('commonFriends').toNumber(),
+      commonFriends: r.get('commonFriends')?.toNumber?.() ?? 0,
     }))
 
     const commonGroups = commonGroupsRecords.map((r) => ({
       id: r.get('id'),
-      commonGroups: r.get('commonGroups').toNumber(),
+      commonGroups: r.get('commonGroups')?.toNumber?.() ?? 0,
     }))
 
-    // 6. GIAI ĐOẠN CUỐI: MONGODB GEONEAR
     console.time('Giai đoạn 5: MongoDB GeoNear')
-    const userLocation = currentUser?.location as any
+    const nearPoint = this.toGeoNearNearField(currentUser?.location)
     let suggestBasedOnNearby: Array<NearbyUser> = []
 
-    if (userLocation?.coordinates) {
-      suggestBasedOnNearby = (await this.prisma.userSnapshot.aggregateRaw({
-        pipeline: [
-          {
-            $geoNear: {
-              near: {
-                type: 'Point',
-                coordinates: [
-                  userLocation.coordinates[0],
-                  userLocation.coordinates[1],
-                ],
-              },
-              distanceField: 'dist',
-              spherical: true,
-              query: {
-                userId: { $nin: uniqueExcludeIds },
+    if (nearPoint) {
+      try {
+        suggestBasedOnNearby = (await this.prisma.userSnapshot.aggregateRaw({
+          pipeline: [
+            {
+              $geoNear: {
+                near: nearPoint,
+                distanceField: 'dist',
+                spherical: true,
+                query: {
+                  userId: { $nin: uniqueExcludeIds },
+                },
               },
             },
-          },
-          { $limit: 200 },
-          { $project: { userId: 1, username: 1, fullName: 1, dist: 1 } },
-        ],
-      })) as any
+            { $limit: 220 },
+            { $project: { userId: 1, username: 1, fullName: 1, dist: 1 } },
+          ],
+        })) as any
+      } catch (e) {
+        console.warn('[recommendation] MongoDB GeoNear failed', e)
+      }
     }
     console.timeEnd('Giai đoạn 5: MongoDB GeoNear')
 
-    // 7. Union candidate IDs từ các heuristic để enrich đầy đủ 4 feature.
     console.time('Giai đoạn 6: Build candidate union')
     const candidateIdsFromGraph = [
       ...commonFriends.map((u) => u.id),
@@ -487,13 +656,46 @@ export class RecommendationService {
       .map((u) => u.payload?.mongoId as string | undefined)
       .filter((id): id is string => typeof id === 'string')
 
-    const allCandidateIds = Array.from(
-      new Set([
-        ...candidateIdsFromGraph,
-        ...candidateIdsFromNearby,
-        ...candidateIdsFromQdrant,
-      ]),
+    const graphOnlyUnique = new Set(
+      [...commonFriends.map((u) => u.id), ...commonGroups.map((u) => u.id)].filter(
+        (id): id is string => typeof id === 'string',
+      ),
     )
+
+    let orderedCandidateIds = this.orderedUniqueCandidates(
+      [candidateIdsFromGraph, candidateIdsFromNearby, candidateIdsFromQdrant],
+      520,
+    )
+
+    const coldStart = this.isColdStartUser({
+      friendCount: friendCountExclusive,
+      graphOnlyCandidates: graphOnlyUnique.size,
+      unionSizeBeforeCold: orderedCandidateIds.length,
+    })
+
+    let coldInterestIds: string[] = []
+    let coldGeoIdsExtra: string[] = []
+    if (coldStart || orderedCandidateIds.length < 36) {
+      const myInterests = currentUser?.interests ?? []
+      coldInterestIds = await this.fetchColdStartInterestMatches(
+        uniqueExcludeIds,
+        myInterests,
+      )
+      if (nearPoint) {
+        coldGeoIdsExtra = await this.fetchColdStartGeoRing(
+          uniqueExcludeIds,
+          nearPoint,
+          260,
+        )
+      }
+    }
+
+    orderedCandidateIds = this.orderedUniqueCandidates(
+      [orderedCandidateIds, coldInterestIds, coldGeoIdsExtra],
+      480,
+    )
+
+    const allCandidateIds = orderedCandidateIds
     console.timeEnd('Giai đoạn 6: Build candidate union')
 
     // Giai đoạn 6.5: Lấy bio embedding vectors từ Qdrant
@@ -539,7 +741,7 @@ export class RecommendationService {
     if (missingIds.length > 0) {
       missingProfiles = await this.prisma.userSnapshot.findMany({
         where: { userId: { in: missingIds } },
-        select: { userId: true, bio: true, location: true },
+        select: { userId: true, bio: true, location: true, interests: true },
       })
 
       // Warm-up cache: lưu ngược trở lại Redis để tránh cache-miss cho lần tiếp theo
@@ -549,6 +751,7 @@ export class RecommendationService {
             id: profile.userId,
             bio: profile.bio,
             location: profile.location,
+            interests: profile.interests ?? [],
           })),
         )
       }
@@ -566,6 +769,7 @@ export class RecommendationService {
           userId: id,
           bio: cached.bio || null,
           location: cached.location || null,
+          interests: Array.isArray(cached.interests) ? cached.interests : [],
         })
       } else {
         const profile = missingProfilesMap.get(id)
@@ -574,6 +778,7 @@ export class RecommendationService {
             userId: profile.userId,
             bio: profile.bio,
             location: profile.location,
+            interests: profile.interests ?? [],
           })
       }
     }
@@ -581,22 +786,33 @@ export class RecommendationService {
     // Giai đoạn 7d: Fetch neighbors (friends) của current user + tất cả candidates từ Neo4j
     console.time('Giai đoạn 7d: Fetch neighbors from Neo4j')
     const userIdsForNeighbors = [userId, ...allCandidateIds]
-    const neighborsRecords = await this.neo4jService.read(
-      `
+    let neighborsRecords: any[] = []
+    try {
+      neighborsRecords = await this.neo4jService.read(
+        `
       UNWIND $userIds AS userId
       MATCH (u:User {userId: userId})-[:FRIEND]-(friend:User)
       RETURN userId, collect(friend.userId) AS friendIds
     `,
-      { userIds: userIdsForNeighbors },
-    )
+        { userIds: userIdsForNeighbors },
+      )
+    } catch (e) {
+      console.warn('[recommendation] neo4j neighbors batch failed', e)
+    }
 
     // Build map: userId -> Set<friendIds> and degrees map
     const neighborsByUserId = new Map<string, Set<string>>()
     const degreesByUserId = new Map<string, number>()
     for (const record of neighborsRecords) {
       const uid = record.get('userId')
-      const friendIds = record.get('friendIds') as string[]
-      const friendSet = new Set(friendIds)
+      const friendIdsRaw = record.get('friendIds')
+      const friendSet = new Set(
+        Array.isArray(friendIdsRaw)
+          ? (friendIdsRaw as string[])
+          : typeof friendIdsRaw === 'string'
+            ? [friendIdsRaw]
+            : [],
+      )
       neighborsByUserId.set(uid, friendSet)
       degreesByUserId.set(uid, friendSet.size)
     }
@@ -611,20 +827,30 @@ export class RecommendationService {
 
     // Giai đoạn 7d.5: Fetch groups (MEMBER_OF) của current user + tất cả candidates từ Neo4j
     console.time('Giai đoạn 7d.5: Fetch groups from Neo4j')
-    const groupsRecords = await this.neo4jService.read(
-      `
+    let groupsRecords: any[] = []
+    try {
+      groupsRecords = await this.neo4jService.read(
+        `
       UNWIND $userIds AS userId
       MATCH (u:User {userId: userId})-[:MEMBER_OF]-(group:Group)
       RETURN userId, collect(group.id) AS groupIds
     `,
-      { userIds: userIdsForNeighbors },
-    )
+        { userIds: userIdsForNeighbors },
+      )
+    } catch (e) {
+      console.warn('[recommendation] neo4j groups batch failed', e)
+    }
 
     // Build map: userId -> Set<groupIds>
     const groupsByUserId = new Map<string, Set<string>>()
     for (const record of groupsRecords) {
       const uid = record.get('userId')
-      const groupIds = record.get('groupIds') as string[]
+      const groupIdsRaw = record.get('groupIds')
+      const groupIds = Array.isArray(groupIdsRaw)
+        ? (groupIdsRaw as string[])
+        : typeof groupIdsRaw === 'string'
+          ? [groupIdsRaw]
+          : []
       groupsByUserId.set(uid, new Set(groupIds))
     }
 
@@ -660,22 +886,23 @@ export class RecommendationService {
     )
 
     const currentUserBio = currentUser?.bio ?? null
-    const currentUserCoordinates = this.getCoordinates(currentUser?.location)
-    console.timeEnd('Giai đoạn 7: Enrich all candidates from graph + mongo')
-
-    console.timeEnd('Tổng thời gian recommendationHelper')
+    const currentUserCoordinates = this.getLngLatPair(currentUser?.location)
+    const currentUserInterests = currentUser?.interests ?? []
 
     console.log({
       commonFriends: commonFriends[0],
       commonGroups: commonGroups[0],
       suggestBasedOnInterest: qdrantRes[0],
       suggestBasedOnNearby: suggestBasedOnNearby[0],
+      coldStart,
+      candidatePool: allCandidateIds.length,
     })
 
     const currentUserNeighbors = neighborsByUserId.get(userId) ?? new Set()
     const currentUserBioVector = bioVectorsByUserId.get(userId) ?? null
 
     const map = new Map<string, any>()
+    const coldPriorById = new Map<string, number>()
     /**
      *  suggestBasedOnInterest: {
     id: '89e5d1fa-359f-5f66-a5fb-bc0f72a0ff5c',
@@ -693,8 +920,12 @@ export class RecommendationService {
       const qdrantScore = qdrantScoreById.get(candidateId) ?? 0
       const interestSimilarity = Math.max(qdrantScore, bioSimilarity)
 
-      const candidateCoordinates = this.getCoordinates(
+      const candidateCoordinates = this.getLngLatPair(
         candidateProfile?.location,
+      )
+      const interestJaccard = this.computeInterestJaccard(
+        currentUserInterests,
+        candidateProfile?.interests ?? [],
       )
       const distanceKm =
         currentUserCoordinates && candidateCoordinates
@@ -755,6 +986,15 @@ export class RecommendationService {
         candidateGroups,
       )
 
+      const vecSignal = Math.max(bioCosine, Math.min(1, qdrantScore))
+      const coldPrior = this.computeColdStartPrior({
+        interestJaccard,
+        bioTokenSim: bioSimilarity,
+        distKm: distanceKm,
+        vecSignal,
+      })
+      coldPriorById.set(candidateId, coldPrior)
+
       map.set(candidateId, {
         candidateId,
         jaccard,
@@ -772,6 +1012,8 @@ export class RecommendationService {
         group_inter: groupInter,
         group_jaccard: groupJaccard,
         same_group: sameGroup,
+        interest_jaccard: interestJaccard,
+        cold_prior: coldPrior,
       })
     }
     /**
@@ -784,7 +1026,14 @@ export class RecommendationService {
      */
     // distanceKm đã được tính batch từ location, không ghi đè bằng geonear ở bước này.
 
-    const candidatesForPython = Array.from(map.values()).filter(
+    const stripColdMeta = (c: Record<string, unknown>) => {
+      const { interest_jaccard: _i, cold_prior: _cp, ...rest } = c
+      return rest
+    }
+
+    const candidatesForPython = Array.from(map.values())
+      .map((c) => stripColdMeta(c as Record<string, unknown>))
+      .filter(
       (candidate) =>
         typeof candidate?.candidateId === 'string' &&
         Number.isFinite(Number(candidate?.jaccard)) &&
@@ -803,8 +1052,47 @@ export class RecommendationService {
         Number.isFinite(Number(candidate?.group_jaccard)) &&
         Number.isFinite(Number(candidate?.same_group)),
     )
-    const topKCandidates =
+
+    let topKCandidates =
       await this.pythonClient.predictTop100(candidatesForPython)
+
+    const priorValues = Array.from(coldPriorById.values())
+    const maxColdPrior = Math.max(1e-9, ...priorValues)
+
+    const blendWithColdPrior = (
+      rows: RecommendationFeatureRow[],
+    ): RecommendationFeatureRow[] => {
+      if (!rows.length || !coldPriorById.size) return rows
+      const alphaModel = coldStart ? 0.44 : 0.86
+      return [...rows]
+        .map((row) => {
+          const pid = row.candidateId
+          const coldN =
+            (coldPriorById.get(pid) ?? 0) / (maxColdPrior || 1e-9)
+          const modelScore = this.toStoredScore(row.score)
+          return {
+            ...row,
+            score: modelScore * alphaModel + coldN * (1 - alphaModel),
+          }
+        })
+        .sort((a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score))
+        .slice(0, 100)
+    }
+
+    topKCandidates = blendWithColdPrior(topKCandidates)
+
+    if (!topKCandidates.length && candidatesForPython.length) {
+      topKCandidates = [...candidatesForPython]
+        .map((c) => ({
+          ...c,
+          score: (coldPriorById.get(c.candidateId) ?? 0) / maxColdPrior,
+        }))
+        .sort(
+          (a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score),
+        )
+        .slice(0, 100) as RecommendationFeatureRow[]
+    }
+
     const dayVersion = this.getDayVersion()
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
 
@@ -827,6 +1115,7 @@ export class RecommendationService {
       },
     })
 
+    console.timeEnd('Tổng thời gian recommendationHelper')
     return topKCandidates
   }
 }

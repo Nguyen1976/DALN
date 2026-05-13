@@ -1,6 +1,56 @@
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
 import { API_ROOT } from "@/utils/constant";
 
+export interface InterestTagItem {
+  id: string;
+  slug: string;
+  label: string;
+  emoji: string;
+  category: string;
+  order: number;
+}
+
+function parseInterestTagsPayload(body: unknown): InterestTagItem[] {
+  if (Array.isArray(body)) {
+    return body as InterestTagItem[];
+  }
+  if (body && typeof body === "object" && "data" in body) {
+    const rows = (body as { data?: unknown }).data;
+    if (Array.isArray(rows)) {
+      return rows as InterestTagItem[];
+    }
+  }
+  return [];
+}
+
+/**
+ * Public catalog (no auth). Uses same origin as Kong as other APIs.
+ * Backend may return either a raw array (legacy) or `{ data: [...] }` (ResponseInterceptor).
+ */
+export async function getInterestTagsAPI(): Promise<InterestTagItem[]> {
+  const res = await fetch(`${API_ROOT}/recommendation/interest-tags`, {
+    method: "GET",
+    mode: "cors",
+    credentials: "include",
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(
+      `interest-tags HTTP ${res.status}: ${text.slice(0, 160) || res.statusText}`,
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error("interest-tags: phản hồi không phải JSON hợp lệ");
+  }
+
+  return parseInterestTagsPayload(body);
+}
+
 export const makeFriendRequest = async (
   email: string,
 ): Promise<{ status: string }> => {

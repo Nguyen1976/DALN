@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
 import {
   UserCreatedPayload,
+  UserInterestsUpdatedPayload,
   UserUpdatedPayload,
 } from 'libs/constant/rmq/payload'
 
@@ -22,8 +23,8 @@ export class UserSnapshotSyncService {
         bio: null,
         location: payload.location
           ? {
-              lat: payload.location.lat,
-              lon: payload.location.lon,
+              type: 'Point',
+              coordinates: [payload.location.lon, payload.location.lat],
             }
           : null,
         isActive: true,
@@ -55,6 +56,33 @@ export class UserSnapshotSyncService {
     await this.prisma.userSnapshot.update({
       where: { userId: payload.userId },
       data: updates,
+    })
+  }
+
+  async syncUserInterestsUpdated(
+    payload: UserInterestsUpdatedPayload,
+  ): Promise<void> {
+    const now = new Date()
+
+    const validTags = await this.prisma.interestTag.findMany({
+      where: {
+        slug: { in: payload.interests },
+        isActive: true,
+      },
+      select: { slug: true },
+    })
+
+    const slugs = validTags.map((t) => t.slug)
+    if (!slugs.length) {
+      return
+    }
+
+    await this.prisma.userSnapshot.updateMany({
+      where: { userId: payload.userId },
+      data: {
+        interests: slugs,
+        syncedAt: now,
+      },
     })
   }
 }

@@ -12,6 +12,8 @@ export interface UserEntity {
   fullName: string | null
   bio: string | null
   avatar: string | null
+  interests?: string[]
+  hasCompletedInterestOnboarding?: boolean | null
   createdAt: Date
   updatedAt: Date
   lastSeen: Date | null
@@ -24,6 +26,8 @@ export interface AuthSession {
   fullName: string | null
   avatar: string | null
   bio: string | null
+  interests: string[]
+  hasCompletedInterestOnboarding: boolean
   accessToken: string
   refreshToken: string
 }

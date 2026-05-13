@@ -54,6 +54,8 @@ services:
               hide_client_headers: false
 
   - name: recommendation-http
+    # Nest recommendation must be listening on host port 3005 (not in this compose file).
+    # If Qdrant/Rabbit/Redis were blocking startup, Kong returned 502 — recommendation main + qdrant init were fixed for that.
     url: http://host.docker.internal:3005
     routes:
       - name: recommendation-route
@@ -75,6 +77,7 @@ plugins:
     config:
       origins:
         - http://localhost:5173
+        - http://127.0.0.1:5173
       methods:
         - GET
         - POST

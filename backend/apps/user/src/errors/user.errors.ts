@@ -71,4 +71,25 @@ export class UserErrors {
       message: 'Friend request already responded',
     })
   }
+
+  static interestOnboardingAlreadyCompleted(): never {
+    throw new RpcException({
+      code: status.ALREADY_EXISTS,
+      message: 'Bạn đã hoàn tất bước chọn sở thích',
+    })
+  }
+
+  static invalidInterestSelection(): never {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'Danh sách sở thích không hợp lệ. Vui lòng chọn từ danh mục có sẵn',
+    })
+  }
+
+  static recommendationCatalogUnavailable(): never {
+    throw new RpcException({
+      code: status.UNAVAILABLE,
+      message: 'Không tải được danh mục sở thích, vui lòng thử lại sau',
+    })
+  }
 }

@@ -11,6 +11,8 @@ export interface UserState {
   avatar?: string;
   bio?: string;
   token?: string;
+  interests: string[];
+  hasCompletedInterestOnboarding: boolean;
 }
 
 const initialState: UserState = {
@@ -20,6 +22,8 @@ const initialState: UserState = {
   fullName: "",
   bio: "",
   avatar: "",
+  interests: [],
+  hasCompletedInterestOnboarding: true,
 };
 
 export const loginAPI = createAsyncThunk(
@@ -44,11 +48,50 @@ export const loginAPI = createAsyncThunk(
 );
 
 export const logoutAPI = createAsyncThunk(`/user/logout`, async () => {
-  //clear cookies
   await authorizeAxiosInstance.post(`${API_ROOT}/user/logout`);
-  //clear data
   return {};
 });
+
+export const fetchCurrentUserAPI = createAsyncThunk(
+  `user/me`,
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await authorizeAxiosInstance.get(
+        `${API_ROOT}/user/me`,
+      );
+      return response.data.data;
+    } catch (error: any) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error?.message ||
+        error?.message ||
+        "Đã xảy ra lỗi";
+
+      return rejectWithValue(backendMessage);
+    }
+  },
+);
+
+export const completeInterestOnboardingAPI = createAsyncThunk(
+  `user/interest-onboarding`,
+  async (slugs: string[], { rejectWithValue }) => {
+    try {
+      const response = await authorizeAxiosInstance.post(
+        `${API_ROOT}/user/interest-onboarding`,
+        { slugs },
+      );
+      return response.data.data;
+    } catch (error: any) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error?.message ||
+        error?.message ||
+        "Đã xảy ra lỗi";
+
+      return rejectWithValue(backendMessage);
+    }
+  },
+);
 
 export const updateProfileAPI = createAsyncThunk(
   `/user/update-profile`,
@@ -85,18 +128,19 @@ export const userSlice = createSlice({
       Object.assign(state, initialState);
     });
 
-    builder.addCase(
-      loginAPI.fulfilled,
-      (state, action: PayloadAction<UserState>) => {
-        const { token, ...user } = action.payload;
-        Object.assign(state, initialState, user);
-        if (token) {
-          localStorage.setItem("token", token);
-        } else {
-          localStorage.removeItem("token");
-        }
-      },
-    );
+    builder.addCase(loginAPI.fulfilled, (state, action: PayloadAction<any>) => {
+      const { token, accessToken, refreshToken, ...user } = action.payload;
+      Object.assign(state, initialState, user);
+      const bearer = accessToken || token;
+      if (bearer) {
+        localStorage.setItem("token", bearer);
+      } else {
+        localStorage.removeItem("token");
+      }
+      state.interests = action.payload.interests ?? [];
+      state.hasCompletedInterestOnboarding =
+        action.payload.hasCompletedInterestOnboarding ?? true;
+    });
     builder.addCase(loginAPI.rejected, (state) => {
       Object.assign(state, initialState);
       localStorage.removeItem("token");
@@ -118,14 +162,40 @@ export const userSlice = createSlice({
     });
     builder.addCase(
       updateProfileAPI.fulfilled,
-      (state, action: PayloadAction<UserState>) => {
+      (state, action: PayloadAction<Partial<UserState>>) => {
         Object.assign(state, action.payload);
       },
     );
     builder.addCase(
       fetchUserByIdAPI.fulfilled,
-      (state, action: PayloadAction<UserState>) => {
+      (state, action: PayloadAction<Partial<UserState>>) => {
         Object.assign(state, action.payload);
+      },
+    );
+    builder.addCase(
+      fetchCurrentUserAPI.fulfilled,
+      (state, action: PayloadAction<any>) => {
+        const d = action.payload;
+        if (!d?.id) return;
+        state.id = d.id;
+        state.email = d.email;
+        state.username = d.username;
+        state.fullName = d.fullName ?? "";
+        state.avatar = d.avatar ?? "";
+        state.bio = d.bio ?? "";
+        state.interests = d.interests ?? [];
+        state.hasCompletedInterestOnboarding =
+          d.hasCompletedInterestOnboarding ?? true;
+      },
+    );
+    builder.addCase(
+      completeInterestOnboardingAPI.fulfilled,
+      (state, action: PayloadAction<any>) => {
+        if (Array.isArray(action.payload?.interests)) {
+          state.interests = action.payload.interests;
+        }
+        state.hasCompletedInterestOnboarding =
+          action.payload?.hasCompletedInterestOnboarding ?? true;
       },
     );
   },
@@ -135,5 +205,4 @@ export const selectUser = (state: { user: UserState }) => {
   return state.user;
 };
 
-// export const {} = userSlice.actions
 export default userSlice.reducer;

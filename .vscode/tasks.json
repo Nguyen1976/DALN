@@ -62,13 +62,24 @@
       }
     },
     {
+      "label": "recommendation",
+      "type": "shell",
+      "command": "cd ./backend; npm run start:dev recommendation",
+      "problemMatcher": [],
+      "presentation": {
+        "panel": "new",
+        "focus": false
+      }
+    },
+    {
       "label": "start-all",
       "dependsOn": [
         "frontend",
         "user",
         "notification",
         "chat",
-        "realtime-gateway"
+        "recommendation",
+        "realtime-gateway",
       ],
       "dependsOrder": "parallel"
     }

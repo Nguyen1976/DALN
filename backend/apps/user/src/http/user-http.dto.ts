@@ -1,5 +1,9 @@
 import { Status } from 'apps/user/src/generated'
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
   IsEmail,
   IsEnum,
   IsNotEmpty,
@@ -110,4 +114,14 @@ export class UpdateProfileDto {
   @IsString()
   @MaxLength(500)
   bio?: string
+}
+
+export class CompleteInterestOnboardingDto {
+  @IsArray()
+  @ArrayMinSize(1, { message: 'Vui lòng chọn ít nhất một sở thích' })
+  @ArrayMaxSize(24)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  slugs!: string[]
 }
