@@ -8,7 +8,7 @@ import { PythonRecommendationClient } from './python-recommendation.client'
 import * as _ from 'lodash'
 
 type NearbyUser = {
-  _id: string | { $oid: string }
+  userId: string
   dist: number
   fullName?: string
   username?: string
@@ -112,13 +112,20 @@ export class RecommendationService {
     return Number.isFinite(rawScore) ? rawScore : 0
   }
 
+  private getDayVersion(): number {
+    const now = new Date()
+    return (
+      now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate()
+    )
+  }
+
   async recommendation() {
     console.time('Tổng thời gian cho 1000 User')
     // 1. Lấy 1000 user (có thể thay đổi số lượng)
     console.time('Bắt đầu lấy danh sách user từ MongoDB')
-    const users = await this.prisma.user.findMany({
+    const users = await this.prisma.userSnapshot.findMany({
       take: 1000,
-      select: { id: true },
+      select: { userId: true },
     })
     console.timeEnd('Bắt đầu lấy danh sách user từ MongoDB')
 
@@ -129,7 +136,7 @@ export class RecommendationService {
     let processed = 0
     for (const chunk of userChunks) {
       // Chạy song song trong mỗi lô (khoảng CHUNK_SIZE promises)
-      await Promise.all(chunk.map((u) => this.recommendationHelper(u.id)))
+      await Promise.all(chunk.map((u) => this.recommendationHelper(u.userId)))
       processed += chunk.length
       console.log(`✅ Đã xử lý xong ${processed}/${users.length} users...`)
     }
@@ -183,8 +190,8 @@ export class RecommendationService {
         this.neo4jService.read(queryCommonFriends, { userId }),
         this.neo4jService.read(queryCommonGroups, { userId }),
         this.qdrantService.recommendSimilar(qdrantUuid, 200, uniqueExcludeIds),
-        this.prisma.user.findUnique({
-          where: { id: userId },
+        this.prisma.userSnapshot.findUnique({
+          where: { userId },
           select: { location: true, bio: true },
         }),
       ])
@@ -207,7 +214,7 @@ export class RecommendationService {
     let suggestBasedOnNearby: Array<NearbyUser> = []
 
     if (userLocation?.coordinates) {
-      suggestBasedOnNearby = (await this.prisma.user.aggregateRaw({
+      suggestBasedOnNearby = (await this.prisma.userSnapshot.aggregateRaw({
         pipeline: [
           {
             $geoNear: {
@@ -221,12 +228,12 @@ export class RecommendationService {
               distanceField: 'dist',
               spherical: true,
               query: {
-                _id: { $nin: uniqueExcludeIds.map((id) => ({ $oid: id })) },
+                userId: { $nin: uniqueExcludeIds },
               },
             },
           },
           { $limit: 200 },
-          { $project: { _id: 1, username: 1, fullName: 1, dist: 1 } },
+          { $project: { userId: 1, username: 1, fullName: 1, dist: 1 } },
         ],
       })) as any
     }
@@ -238,9 +245,7 @@ export class RecommendationService {
       ...commonFriends.map((u) => u.id),
       ...commonGroups.map((u) => u.id),
     ]
-    const candidateIdsFromNearby = suggestBasedOnNearby.map((u) =>
-      typeof u._id === 'string' ? u._id : u._id.$oid,
-    )
+    const candidateIdsFromNearby = suggestBasedOnNearby.map((u) => u.userId)
     const candidateIdsFromQdrant = qdrantRes
       .map((u) => u.payload?.mongoId as string | undefined)
       .filter((id): id is string => typeof id === 'string')
@@ -264,9 +269,9 @@ export class RecommendationService {
     // Giai đoạn 7b: Query Prisma cho những ID bị thiếu
     let missingProfiles: UserProfileRow[] = []
     if (missingIds.length > 0) {
-      missingProfiles = await this.prisma.user.findMany({
-        where: { id: { in: missingIds } },
-        select: { id: true, bio: true, location: true },
+      missingProfiles = await this.prisma.userSnapshot.findMany({
+        where: { userId: { in: missingIds } },
+        select: { userId: true, bio: true, location: true },
       })
 
       // Warm-up cache: lưu ngược trở lại Redis để tránh cache-miss cho lần tiếp theo
@@ -276,7 +281,9 @@ export class RecommendationService {
     }
 
     // Giai đoạn 7c: Combine bằng Map (O(1) lookup)
-    const missingProfilesMap = new Map(missingProfiles.map((p) => [p.id, p]))
+    const missingProfilesMap = new Map(
+      missingProfiles.map((p) => [p.userId, p]),
+    )
     const candidateProfiles: UserProfileRow[] = []
     for (const id of allCandidateIds) {
       if (cachedFeatures[id]) {
@@ -288,7 +295,12 @@ export class RecommendationService {
         })
       } else {
         const profile = missingProfilesMap.get(id)
-        if (profile) candidateProfiles.push(profile as UserProfileRow)
+        if (profile)
+          candidateProfiles.push({
+            id: profile.userId,
+            bio: profile.bio,
+            location: profile.location,
+          })
       }
     }
 
@@ -387,25 +399,28 @@ export class RecommendationService {
         Number.isFinite(Number(candidate?.interestSimilarity)) &&
         Number.isFinite(Number(candidate?.distanceKm)),
     )
-    const top100 = await this.pythonClient.predictTop100(candidatesForPython)
+    const topKCandidates =
+      await this.pythonClient.predictTop100(candidatesForPython)
+    const dayVersion = this.getDayVersion()
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
 
-    await this.prisma.impresstionLog.createMany({
-      data: top100.map((c: any, index: number) => ({
+    await this.prisma.recommendationResult.upsert({
+      where: { userId },
+      create: {
         userId,
-        candidateId: c.candidateId,
-        features: {
-          mutualFriends: c.mutualFriends,
-          mutualGroups: c.mutualGroups,
-          interestSimilarity: c.interestSimilarity,
-          distanceKm: c.distanceKm,
-        },
-        action: 'IGNORE',
-        score: this.toStoredScore(c.score),
-        rank: index + 1,
-        version: 3,
-      })),
+        topK: topKCandidates.length,
+        candidates: topKCandidates,
+        dayVersion,
+        expiresAt,
+      },
+      update: {
+        topK: topKCandidates.length,
+        candidates: topKCandidates,
+        dayVersion,
+        expiresAt,
+      },
     })
 
-    return top100
+    return topKCandidates
   }
 }

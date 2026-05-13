@@ -11,11 +11,12 @@ datasource db {
 
 model UserSnapshot {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @unique @db.ObjectId
   username  String
   fullName  String
   avatar    String?
   bio       String?
-  interests String[]
+  interests String[] @default([])
   location  Json?
   isActive  Boolean  @default(true)
   lastSeen  DateTime?
@@ -38,89 +39,15 @@ model InterestTag {
   isActive  Boolean  @default(true)
 }
 
-type Features {
-  mutualFriends      Int
-  mutualGroups       Int
-  interestSimilarity  Float
-  bioSimilarity      Float
-  distanceKm         Float
-  sameCity           Int
-  avatarExists       Int
-  bioLength          Int
-  profileCompleteness Float
-  accountAgeDays     Int
-}
-
-enum Action {
-  MESSAGE
-  FRIEND
-  IGNORE
-}
-
-model ImpressionLog {
-  id           String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId       String   @db.ObjectId
-  candidateId  String   @db.ObjectId
-  features     Features
-  score        Float
-  rank         Int
-  action       Action   @default(IGNORE)
-  modelVersion String?
-  dayVersion   Int
-  createdAt DateTime @default(now())
-
-  @@index([userId, dayVersion])
-  @@index([dayVersion, action])
-  @@index([userId, candidateId])
-}
-
-enum ModelType {
-  XGBOOST
-  RANDOM_FOREST
-  LOGISTIC_REGRESSION
-  RULE_BASED
-}
-
-enum ModelStatus {
-  TRAINING
-  EVALUATING
-  ACTIVE
-  RETIRED
-  FAILED
-}
-
-model ModelRegistry {
-  id            String      @id @default(auto()) @map("_id") @db.ObjectId
-  modelType     ModelType
-  modelFile     String
-  dayVersion    Int
-  status        ModelStatus @default(TRAINING)
-  prAuc         Float?
-  rocAuc        Float?
-  f1            Float?
-  precision     Float?
-  recall        Float?
-  threshold     Float?
-  trainRows     Int?
-  positiveRows  Int?
-  trainedAt     DateTime?
-  activatedAt   DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-
-  @@index([status, createdAt])
-  @@index([dayVersion])
-}
-
 model RecommendationResult {
   id           String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId       String   @db.ObjectId @unique
+  userId       String   @unique @db.ObjectId
+  topK         Int      @default(100)
   candidates   Json
-  modelVersion String
   dayVersion   Int
   expiresAt    DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([expiresAt])
   @@index([dayVersion])

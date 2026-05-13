@@ -14,4 +14,6 @@ export const QUEUE_RMQ = {
   USER_NEO4J_UPDATE_STATUS_MAKE_FRIEND:
     'user_neo4j_queue_update_status_make_friend',
   CHAT_UPDATE_MESSAGE_READ: 'chat_queue_update_message_read',
+  RECOMMENDATION_USER_CREATED: 'recommendation_queue_user_created',
+  RECOMMENDATION_USER_UPDATED: 'recommendation_queue_user_updated',
 }
