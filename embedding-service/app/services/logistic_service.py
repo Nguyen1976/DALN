@@ -449,41 +449,56 @@ class LogisticService:
     def predict_top_k(self, candidates_json: list[dict], k: int = 100) -> dict:
         if not candidates_json:
             return {"status": "empty", "data": []}
-
         model = self.load_model()
-        df = pd.DataFrame(candidates_json)
-        
-        # All 17 features used by the model
+
+        # Map incoming candidate keys (camelCase) to the snake_case features expected by the trained model (safe feature set)
         feature_columns = [
-            "mutualFriends",
-            "mutualGroups",
-            "interestSimilarity",
-            "distanceKm",
-            "jaccard",
-            "cosineGraph",
-            "adamicAdar",
-            "prefAttach",
-            "degreeU",
-            "degreeV",
-            "bioCosine",
-            "bioDot",
-            "bioL2",
-            "distanceBucket",
-            "sameGroup",
-            "groupInter",
-            "groupJaccard",
+            'jaccard', 'cosine_graph', 'adamic_adar', 'pref_attach', 'deg_u', 'deg_v',
+            'dist_km', 'dist_bucket', 'bio_cosine', 'bio_dot', 'bio_l2',
+            'same_cluster', 'group_inter', 'group_jaccard', 'same_group'
         ]
-        
-        # Ensure all features exist in the dataframe
+
+        mapped_rows = []
+        for cand in candidates_json:
+            mapped = {
+                'jaccard': cand.get('jaccard', 0),
+                'cosine_graph': cand.get('cosineGraph', 0),
+                'adamic_adar': cand.get('adamicAdar', 0),
+                'pref_attach': cand.get('prefAttach', 0),
+                'deg_u': cand.get('degreeU', cand.get('deg_u', 0)),
+                'deg_v': cand.get('degreeV', cand.get('deg_v', 0)),
+                'dist_km': cand.get('distanceKm', cand.get('dist_km', 0)),
+                'dist_bucket': cand.get('distanceBucket', cand.get('dist_bucket', 0)),
+                'bio_cosine': cand.get('bioCosine', cand.get('bio_cosine', 0)),
+                'bio_dot': cand.get('bioDot', cand.get('bio_dot', 0)),
+                'bio_l2': cand.get('bioL2', cand.get('bio_l2', 0)),
+                'same_cluster': cand.get('sameCluster', cand.get('same_cluster', 0)),
+                'group_inter': cand.get('groupInter', cand.get('group_inter', 0)),
+                'group_jaccard': cand.get('groupJaccard', cand.get('group_jaccard', 0)),
+                'same_group': cand.get('sameGroup', cand.get('same_group', 0)),
+            }
+            mapped_rows.append(mapped)
+
+        df_features = pd.DataFrame(mapped_rows)
+
+        # Ensure all columns present
         for col in feature_columns:
-            if col not in df.columns:
-                df[col] = 0
-        
-        features = df[feature_columns]
+            if col not in df_features.columns:
+                df_features[col] = 0
 
-        scores = model.predict_proba(features)[:, 1]
-        df["score"] = scores
-        top_k = df.sort_values(by="score", ascending=False).head(k)
+        X = df_features[feature_columns].fillna(0)
 
-        return {"status": "ok", "data": top_k.to_dict(orient="records")}
+        # Predict scores
+        scores = model.predict_proba(X)[:, 1]
+
+        # Merge scores back into original candidate objects to preserve keys
+        results = []
+        for i, cand in enumerate(candidates_json):
+            out = dict(cand)
+            out['score'] = float(scores[i])
+            results.append(out)
+
+        # Return top-k sorted by score
+        results_sorted = sorted(results, key=lambda r: r.get('score', 0), reverse=True)[:k]
+        return {"status": "ok", "data": results_sorted}
     

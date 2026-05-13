@@ -1160,3 +1160,6 @@ Error message(s): ["dlopen(/Users/nguyenn/Documents/Source/project/DALN/embeddin
 2026-05-05 15:48:16,067 - HTTP Request: HEAD https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main/1_Pooling/config.json "HTTP/1.1 307 Temporary Redirect"
 2026-05-05 15:48:16,081 - HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/e8f8c211226b894fcb81acc59f3b34ba3efd5f42/1_Pooling%2Fconfig.json "HTTP/1.1 200 OK"
 2026-05-05 15:48:16,384 - HTTP Request: GET https://huggingface.co/api/models/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 "HTTP/1.1 200 OK"
+2026-05-13 17:28:12,784 - Error: X has 17 features, but GradientBoostingClassifier is expecting 15 features as input.
+2026-05-13 17:28:27,515 - Error: X has 17 features, but GradientBoostingClassifier is expecting 15 features as input.
+2026-05-13 17:32:41,007 - Error: X has 17 features, but GradientBoostingClassifier is expecting 15 features as input.
