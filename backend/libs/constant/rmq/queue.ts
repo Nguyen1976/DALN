@@ -10,5 +10,8 @@ export const QUEUE_RMQ = {
   CHAT_SEND_MESSAGE: 'chat_queue_send_message',
   USER_ONLINE: 'user_online_queue',
   USER_OFFLINE: 'user_offline_queue',
+  USER_NEO4J_CREATED: 'user_neo4j_queue_created',
+  USER_NEO4J_UPDATE_STATUS_MAKE_FRIEND:
+    'user_neo4j_queue_update_status_make_friend',
   CHAT_UPDATE_MESSAGE_READ: 'chat_queue_update_message_read',
 }

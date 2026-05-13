@@ -5,6 +5,7 @@ import { AuthGuard, CommonModule } from '@app/common'
 import { UtilModule } from '@app/util'
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
+import { Neo4jModule } from '@app/neo4j'
 import { StorageR2Module } from '@app/storage-r2'
 import { ConfigModule } from '@nestjs/config'
 import { r2Config } from './storage-r2.config'
@@ -16,6 +17,8 @@ import {
 import { UserEventsPublisher } from './rmq/publishers/user-events.publisher'
 import { LoggerModule } from '@app/logger/logger.module'
 import { MessageSubscriber } from './rmq/subcribers/user-subcribers'
+import { Neo4jSyncSubscriber } from './rmq/subcribers/neo4j-sync.subscriber'
+import { Neo4jGraphSyncService } from './services/neo4j-graph-sync.service'
 import { UserHttpController } from './http/user-http.controller'
 import { APP_GUARD } from '@nestjs/core'
 import { PrismaModule } from '../prisma/prisma.module'
@@ -32,6 +35,7 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
     PrismaModule,
     CommonModule,
     UtilModule,
+    Neo4jModule,
     RabbitMQModule.forRoot({
       exchanges: [
         {
@@ -79,6 +83,8 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
     UserEventsPublisher,
     FriendShipRepository,
     MessageSubscriber,
+    Neo4jGraphSyncService,
+    Neo4jSyncSubscriber,
   ],
 })
 export class UserModule {}
