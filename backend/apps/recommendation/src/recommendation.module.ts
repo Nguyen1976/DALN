@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common'
+import { APP_GUARD } from '@nestjs/core'
+import { ScheduleModule } from '@nestjs/schedule'
 import { RecommendationController } from './recommendation.controller'
 import { RecommendationService } from './recommendation.service'
 import { Neo4jModule } from '@app/neo4j'
@@ -12,11 +14,15 @@ import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { UserSnapshotSyncService } from './services/user-snapshot-sync.service'
 import { UserSnapshotSyncSubscriber } from './rmq/subscribers/user-snapshot-sync.subscriber'
+import { CommonModule, AuthGuard } from '@app/common'
+import { RecommendationCron } from './background-jobs/recommendation/recommendation.cron'
 
 @Module({
   imports: [
     PrismaModule,
     Neo4jModule,
+    CommonModule,
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: process.cwd() + '/apps/recommendation/.env',
@@ -44,10 +50,15 @@ import { UserSnapshotSyncSubscriber } from './rmq/subscribers/user-snapshot-sync
   ],
   controllers: [RecommendationController],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
+    },
     RecommendationService,
     PythonRecommendationClient,
     UserSnapshotSyncService,
     UserSnapshotSyncSubscriber,
+    RecommendationCron,
   ],
 })
 export class RecommendationModule {}

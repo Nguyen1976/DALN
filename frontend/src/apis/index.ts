@@ -11,6 +11,57 @@ export const makeFriendRequest = async (
   return response.data;
 };
 
+export interface RecommendationCandidateProfile {
+  userId: string;
+  username: string;
+  fullName: string;
+  avatar?: string | null;
+  bio?: string | null;
+  location?: unknown;
+  isActive?: boolean;
+  lastSeen?: string | null;
+}
+
+export interface RecommendationCandidateItem {
+  candidateId: string;
+  score: number;
+  jaccard: number;
+  cosine_graph: number;
+  adamic_adar: number;
+  pref_attach: number;
+  deg_u: number;
+  deg_v: number;
+  dist_km: number;
+  dist_bucket: number;
+  bio_cosine: number;
+  bio_dot: number;
+  bio_l2: number;
+  same_cluster: number;
+  group_inter: number;
+  group_jaccard: number;
+  same_group: number;
+  profile: RecommendationCandidateProfile;
+}
+
+export interface RecommendationResponse {
+  status: string;
+  userId: string;
+  topK: number;
+  dayVersion: number;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  candidates: RecommendationCandidateItem[];
+}
+
+export const getMyRecommendationsAPI =
+  async (): Promise<RecommendationResponse> => {
+    const response = await authorizeAxiosInstance.get(
+      `${API_ROOT}/recommendation/me`,
+    );
+    return response.data.data ?? response.data;
+  };
+
 export const getFriendRequestDetail = async (friendRequestId: string) => {
   const response = await authorizeAxiosInstance.get(
     `${API_ROOT}/user/detail-friend-request?friendRequestId=${friendRequestId}`,

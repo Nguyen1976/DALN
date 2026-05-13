@@ -72,7 +72,7 @@ export class QdrantService implements OnModuleInit {
       return await this.client.retrieve(this.COLLECTION_NAME, {
         ids: userIds.map((id) => id),
         with_payload: true,
-        with_vectors: true,
+        with_vector: true,
       })
     } catch (error) {
       console.error('Error retrieving vectors from Qdrant:', error)

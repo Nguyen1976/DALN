@@ -5,7 +5,7 @@ import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { safeExecute } from '@app/common/rpc/safe-execute'
 import { UserSnapshotSyncService } from '../../services/user-snapshot-sync.service'
-import {
+import type {
   UserCreatedPayload,
   UserUpdatedPayload,
 } from 'libs/constant/rmq/payload'

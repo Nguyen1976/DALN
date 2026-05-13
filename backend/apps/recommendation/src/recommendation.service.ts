@@ -20,9 +20,29 @@ type UserBioRow = {
 }
 
 type UserProfileRow = {
-  id: string
+  userId: string
   bio: string | null
   location: unknown
+}
+
+type RecommendationFeatureRow = {
+  candidateId: string
+  score?: number
+  jaccard?: number
+  cosine_graph?: number
+  adamic_adar?: number
+  pref_attach?: number
+  deg_u?: number
+  deg_v?: number
+  dist_km?: number
+  dist_bucket?: number
+  bio_cosine?: number
+  bio_dot?: number
+  bio_l2?: number
+  same_cluster?: number
+  group_inter?: number
+  group_jaccard?: number
+  same_group?: number
 }
 
 @Injectable()
@@ -260,12 +280,88 @@ export class RecommendationService {
     )
   }
 
+  async getRecommendationForUser(userId: string) {
+    const result = await this.prisma.recommendationResult.findUnique({
+      where: { userId },
+    })
+
+    if (!result) {
+      return {
+        status: 'empty',
+        userId,
+        topK: 0,
+        dayVersion: this.getDayVersion(),
+        candidates: [],
+      }
+    }
+
+    const candidates = Array.isArray(result.candidates)
+      ? (result.candidates as RecommendationFeatureRow[])
+      : []
+
+    const candidateIds = candidates
+      .map((candidate) => candidate?.candidateId)
+      .filter(
+        (candidateId): candidateId is string => typeof candidateId === 'string',
+      )
+
+    const profiles = await this.prisma.userSnapshot.findMany({
+      where: { userId: { in: candidateIds } },
+      select: {
+        userId: true,
+        username: true,
+        fullName: true,
+        avatar: true,
+        bio: true,
+        location: true,
+        isActive: true,
+        lastSeen: true,
+      },
+    })
+
+    const profileByUserId = new Map(
+      profiles.map((profile) => [profile.userId, profile]),
+    )
+
+    return {
+      status: 'ok',
+      userId,
+      topK: result.topK,
+      dayVersion: result.dayVersion,
+      expiresAt: result.expiresAt,
+      createdAt: result.createdAt,
+      updatedAt: result.updatedAt,
+      candidates: candidates
+        .map((candidate) => {
+          const profile = profileByUserId.get(candidate.candidateId)
+          if (!profile) return null
+
+          return {
+            ...candidate,
+            profile: {
+              userId: profile.userId,
+              username: profile.username,
+              fullName: profile.fullName,
+              avatar: profile.avatar,
+              bio: profile.bio,
+              location: profile.location,
+              isActive: profile.isActive,
+              lastSeen: profile.lastSeen,
+            },
+          }
+        })
+        .filter(
+          (candidate): candidate is NonNullable<typeof candidate> =>
+            candidate !== null,
+        ),
+    }
+  }
+
   async recommendation() {
     console.time('Tổng thời gian cho 1000 User')
     // 1. Lấy 1000 user (có thể thay đổi số lượng)
     console.time('Bắt đầu lấy danh sách user từ MongoDB')
     const users = await this.prisma.userSnapshot.findMany({
-      take: 1000,
       select: { userId: true },
     })
     console.timeEnd('Bắt đầu lấy danh sách user từ MongoDB')
@@ -448,7 +544,13 @@ export class RecommendationService {
 
       // Warm-up cache: lưu ngược trở lại Redis để tránh cache-miss cho lần tiếp theo
       if (missingProfiles.length > 0) {
-        await this.redisService.setUserFeaturesBatch(missingProfiles)
+        await this.redisService.setUserFeaturesBatch(
+          missingProfiles.map((profile) => ({
+            id: profile.userId,
+            bio: profile.bio,
+            location: profile.location,
+          })),
+        )
       }
     }
 
@@ -461,7 +563,7 @@ export class RecommendationService {
       if (cachedFeatures[id]) {
         const cached = cachedFeatures[id]
         candidateProfiles.push({
-          id,
+          userId: id,
           bio: cached.bio || null,
           location: cached.location || null,
         })
@@ -469,7 +571,7 @@ export class RecommendationService {
         const profile = missingProfilesMap.get(id)
         if (profile)
           candidateProfiles.push({
-            id: profile.userId,
+            userId: profile.userId,
             bio: profile.bio,
             location: profile.location,
           })
@@ -546,7 +648,7 @@ export class RecommendationService {
     console.timeEnd('Giai đoạn 7: Enrich Features')
 
     const profileByCandidateId = new Map(
-      (candidateProfiles as UserProfileRow[]).map((u) => [u.id, u]),
+      (candidateProfiles as UserProfileRow[]).map((u) => [u.userId, u]),
     )
     const qdrantScoreById = new Map(
       qdrantRes

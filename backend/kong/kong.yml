@@ -53,6 +53,23 @@ services:
               fault_tolerant: true
               hide_client_headers: false
 
+  - name: recommendation-http
+    url: http://host.docker.internal:3005
+    routes:
+      - name: recommendation-route
+        paths:
+          - /recommendation
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 200
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+              hide_client_headers: false
+
 plugins:
   - name: cors
     config:

@@ -1,4 +1,4 @@
-import { Users, MessageSquare, LogOut } from "lucide-react";
+import { Users, MessageSquare, LogOut, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import ProfileSetting from "../ChatSidebar/ProfileSetting";
@@ -57,6 +57,20 @@ export function LeftNavigation() {
           onClick={() => navigate("/friends")}
         >
           <Users className="w-6 h-6" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "w-12 h-12 rounded-lg transition-colors",
+            pathname === "/recommendations" &&
+              "bg-primary text-primary-foreground",
+          )}
+          title="Gợi ý bạn bè"
+          onClick={() => navigate("/recommendations")}
+        >
+          <Sparkles className="w-6 h-6" />
         </Button>
 
         {/* Other Navigation Items */}

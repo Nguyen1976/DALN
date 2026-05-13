@@ -1,16 +1,14 @@
-import { Body, Controller, Get } from '@nestjs/common'
+import { Controller, Get } from '@nestjs/common'
+import { RequireLogin, UserInfo } from '@app/common/common.decorator'
 import { RecommendationService } from './recommendation.service'
 
-@Controller()
+@Controller('recommendation')
 export class RecommendationController {
   constructor(private readonly recommendationService: RecommendationService) {}
 
   @Get()
-  recommendation() {
-    try {
-      return this.recommendationService.recommendation()
-    } catch (error) {
-      console.error('Error in recommendation controller:', error)
-    }
+  @RequireLogin()
+  async getMyRecommendations(@UserInfo() user: any) {
+    return this.recommendationService.getRecommendationForUser(user.userId)
   }
 }

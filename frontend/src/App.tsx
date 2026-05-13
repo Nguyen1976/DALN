@@ -9,6 +9,7 @@ import { FriendsPage } from "./pages/Friend/FriendPage";
 import ListFriend from "./pages/Friend/ListFriend";
 import ListGroupCommunity from "./pages/Friend/ListGroupCommunity";
 import ListFriendRequests from "./pages/Friend/ListFriendRequests";
+import RecommendationPage from "./pages/Recommendation";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch } from "./redux/store";
 import { useSound } from "use-sound";
@@ -90,6 +91,14 @@ const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <NotificationSettingsPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/recommendations",
+    element: (
+      <ProtectedRoute>
+        <RecommendationPage />
       </ProtectedRoute>
     ),
   },
