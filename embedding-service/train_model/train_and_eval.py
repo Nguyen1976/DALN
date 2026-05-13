@@ -4,6 +4,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import f1_score, roc_auc_score, classification_report
 import joblib
@@ -160,6 +161,7 @@ def train_and_report(csv_path='dataset.csv', feature_mode='safe'):
     models = {
         'logreg': LogisticRegression(max_iter=1000),
         'rf': RandomForestClassifier(n_estimators=100, max_depth=5, min_samples_leaf=30, n_jobs=-1),
+        'j45': DecisionTreeClassifier(criterion='entropy', max_depth=5, min_samples_leaf=30, random_state=42),
         'gb': GradientBoostingClassifier(random_state=42),
         'knn': KNeighborsClassifier(n_neighbors=5),
     }
@@ -195,7 +197,7 @@ def train_and_report(csv_path='dataset.csv', feature_mode='safe'):
     print("FEATURE IMPORTANCES ANALYSIS")
     print("="*80)
     extract_feature_importances(
-        {'rf': models['rf'], 'gb': models['gb']},
+        {'rf': models['rf'], 'j45': models['j45'], 'gb': models['gb']},
         X,
         X.columns.tolist(),
         output_dir=os.path.dirname(csv_path) if csv_path else '.'

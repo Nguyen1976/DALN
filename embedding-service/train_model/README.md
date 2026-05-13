@@ -19,6 +19,14 @@ python -m train_model.train_and_eval  # safe mode (logreg, rf, gb, knn, svm)
 # python -c "from train_model.train_and_eval import train_and_report; train_and_report(feature_mode='full')"
 ```
 
+Current model set in `train_and_eval` / `train_fast`:
+
+- `logreg`
+- `rf` (Random Forest)
+- `j45` (DecisionTreeClassifier with `criterion='entropy'`, used as a J45/C4.5-style tree)
+- `gb` (Gradient Boosting)
+- `knn`
+
 Environment variables:
 
 - `NEO4J_URI` (default `bolt://localhost:7687`)
