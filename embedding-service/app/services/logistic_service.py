@@ -9,6 +9,7 @@ class LogisticService:
     def __init__(self, db: Any) -> None:
         base_dir = Path(__file__).resolve().parents[2]
         self.model_path = base_dir / "models" / "latest_model.pkl"
+        self.gb_model_path = base_dir / "train_model" / "models" / "gb.joblib"
         self.db = db
         self.impression_collection = self.db["impresstionLog"]
         self.action_collection = self.db["actionLog"]
@@ -201,8 +202,22 @@ class LogisticService:
 
     def load_model(self):
         joblib = self._joblib()
+        # Priority 1: Load GB model from train_model (newest)
+        if self.gb_model_path.exists():
+            try:
+                model_data = joblib.load(self.gb_model_path)
+                # gb.joblib contains {'model': model, 'scaler': scaler}
+                if isinstance(model_data, dict) and 'model' in model_data:
+                    return model_data['model']
+                return model_data
+            except Exception as e:
+                print(f"Error loading GB model from {self.gb_model_path}: {e}")
+        
+        # Priority 2: Fall back to latest model if exists
         if self.model_path.exists():
             return joblib.load(self.model_path)
+        
+        # Priority 3: Return default model
         return self.get_model()
 
     def retrain_model(self) -> dict:
@@ -437,12 +452,34 @@ class LogisticService:
 
         model = self.load_model()
         df = pd.DataFrame(candidates_json)
-        features = df[[
+        
+        # All 17 features used by the model
+        feature_columns = [
             "mutualFriends",
             "mutualGroups",
             "interestSimilarity",
             "distanceKm",
-        ]]
+            "jaccard",
+            "cosineGraph",
+            "adamicAdar",
+            "prefAttach",
+            "degreeU",
+            "degreeV",
+            "bioCosine",
+            "bioDot",
+            "bioL2",
+            "distanceBucket",
+            "sameGroup",
+            "groupInter",
+            "groupJaccard",
+        ]
+        
+        # Ensure all features exist in the dataframe
+        for col in feature_columns:
+            if col not in df.columns:
+                df[col] = 0
+        
+        features = df[feature_columns]
 
         scores = model.predict_proba(features)[:, 1]
         df["score"] = scores

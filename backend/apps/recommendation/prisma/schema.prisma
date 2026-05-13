@@ -44,6 +44,8 @@ model RecommendationResult {
   userId       String   @unique @db.ObjectId
   topK         Int      @default(100)
   candidates   Json
+  // features: full candidate features pool used to generate ranking (audit/debug)
+  features     Json?
   dayVersion   Int
   expiresAt    DateTime
   createdAt    DateTime @default(now())

@@ -36,6 +36,147 @@ export class RecommendationService {
     private readonly pythonClient: PythonRecommendationClient,
   ) {}
 
+  /**
+   * Graph Features Computation
+   */
+
+  private computeJaccard(neighU: Set<string>, neighV: Set<string>): number {
+    if (neighU.size === 0 && neighV.size === 0) return 0
+    const intersection = new Set([...neighU].filter((x) => neighV.has(x)))
+    const union = new Set([...neighU, ...neighV])
+    return union.size > 0 ? intersection.size / union.size : 0
+  }
+
+  private computeCosineGraph(neighU: Set<string>, neighV: Set<string>): number {
+    const intersection = new Set([...neighU].filter((x) => neighV.has(x)))
+    const denominator = Math.sqrt(neighU.size * neighV.size)
+    return denominator > 0 ? intersection.size / denominator : 0
+  }
+
+  private computeAdamicAdar(
+    neighU: Set<string>,
+    neighV: Set<string>,
+    degrees: Map<string, number>,
+  ): number {
+    const common = new Set([...neighU].filter((x) => neighV.has(x)))
+    let score = 0
+    for (const z of common) {
+      const deg = degrees.get(z) ?? 1
+      if (deg > 1) {
+        score += 1 / Math.log(deg)
+      }
+    }
+    return score
+  }
+
+  private computePreferentialAttachment(
+    neighU: Set<string>,
+    neighV: Set<string>,
+  ): number {
+    return neighU.size * neighV.size
+  }
+
+  private computeDegree(neighbors: Set<string>): number {
+    return neighbors.size
+  }
+
+  /**
+   * Bio Embedding Features Computation
+   */
+
+  private computeBioCosine(
+    bioA: number[] | null,
+    bioB: number[] | null,
+  ): number {
+    if (!bioA || !bioB || bioA.length === 0 || bioB.length === 0) return 0
+    if (bioA.length !== bioB.length) return 0
+
+    let dotProduct = 0
+    let normA = 0
+    let normB = 0
+
+    for (let i = 0; i < bioA.length; i++) {
+      dotProduct += bioA[i] * bioB[i]
+      normA += bioA[i] * bioA[i]
+      normB += bioB[i] * bioB[i]
+    }
+
+    const denominator = Math.sqrt(normA) * Math.sqrt(normB)
+    return denominator > 0 ? dotProduct / denominator : 0
+  }
+
+  private computeBioDot(bioA: number[] | null, bioB: number[] | null): number {
+    if (!bioA || !bioB || bioA.length === 0 || bioB.length === 0) return 0
+    if (bioA.length !== bioB.length) return 0
+
+    let dotProduct = 0
+    for (let i = 0; i < bioA.length; i++) {
+      dotProduct += bioA[i] * bioB[i]
+    }
+    return dotProduct
+  }
+
+  private computeBioL2(bioA: number[] | null, bioB: number[] | null): number {
+    if (!bioA || !bioB || bioA.length === 0 || bioB.length === 0) return 0
+    if (bioA.length !== bioB.length) return 0
+
+    let sumSquaredDiff = 0
+    for (let i = 0; i < bioA.length; i++) {
+      const diff = bioA[i] - bioB[i]
+      sumSquaredDiff += diff * diff
+    }
+    return Math.sqrt(sumSquaredDiff)
+  }
+
+  /**
+   * Distance & Community Features Computation
+   */
+
+  private computeDistanceBucket(km: number): number {
+    // buckets: 0-1=0, 1-5=1, 5-20=2, 20-100=3, 100+=4
+    if (km <= 1) return 0
+    if (km <= 5) return 1
+    if (km <= 20) return 2
+    if (km <= 100) return 3
+    return 4
+  }
+
+  private computeSameGroup(
+    userGroups: Set<string>,
+    candidateGroups: Set<string>,
+  ): number {
+    // Returns 1 if they have at least 1 group in common, 0 otherwise
+    for (const group of userGroups) {
+      if (candidateGroups.has(group)) return 1
+    }
+    return 0
+  }
+
+  private computeGroupIntersection(
+    userGroups: Set<string>,
+    candidateGroups: Set<string>,
+  ): number {
+    // Count of common groups
+    let count = 0
+    for (const group of userGroups) {
+      if (candidateGroups.has(group)) count++
+    }
+    return count
+  }
+
+  private computeGroupJaccard(
+    userGroups: Set<string>,
+    candidateGroups: Set<string>,
+  ): number {
+    // Jaccard similarity of group sets
+    if (userGroups.size === 0 && candidateGroups.size === 0) return 0
+    const intersection = new Set(
+      [...userGroups].filter((x) => candidateGroups.has(x)),
+    )
+    const union = new Set([...userGroups, ...candidateGroups])
+    return union.size > 0 ? intersection.size / union.size : 0
+  }
+
   private tokenizeBio(text: string): Set<string> {
     return new Set(
       text
@@ -259,6 +400,37 @@ export class RecommendationService {
     )
     console.timeEnd('Giai đoạn 6: Build candidate union')
 
+    // Giai đoạn 6.5: Lấy bio embedding vectors từ Qdrant
+    console.time('Giai đoạn 6.5: Fetch bio vectors from Qdrant')
+    const userIdsForBioVectors = [userId, ...allCandidateIds]
+    const qdrantUserUuids: string[] = []
+    for (const id of userIdsForBioVectors) {
+      try {
+        const uuid = await this.utilService.mongoIdToUuid(id)
+        qdrantUserUuids.push(uuid)
+      } catch {
+        // Skip if conversion fails
+      }
+    }
+
+    // Map UUID -> MongoDB ID
+    const uuidToMongoId = new Map<string, string>()
+    for (let i = 0; i < userIdsForBioVectors.length; i++) {
+      uuidToMongoId.set(qdrantUserUuids[i], userIdsForBioVectors[i])
+    }
+
+    // Fetch vectors từ Qdrant
+    const vectorPoints =
+      await this.qdrantService.getVectorsBatch(qdrantUserUuids)
+    const bioVectorsByUserId = new Map<string, number[]>()
+    for (const point of vectorPoints) {
+      const mongoId = uuidToMongoId.get(String(point.id))
+      if (mongoId && point.vector) {
+        bioVectorsByUserId.set(mongoId, point.vector as number[])
+      }
+    }
+    console.timeEnd('Giai đoạn 6.5: Fetch bio vectors from Qdrant')
+
     console.time('Giai đoạn 7: Enrich Features')
 
     // Giai đoạn 7a: Fetch từ Redis cache (batch)
@@ -304,7 +476,66 @@ export class RecommendationService {
       }
     }
 
-    // Giai đoạn 7d: Không gọi Neo4j nữa — dùng commonFriends & commonGroups đã lấy ở Giai đoạn 4
+    // Giai đoạn 7d: Fetch neighbors (friends) của current user + tất cả candidates từ Neo4j
+    console.time('Giai đoạn 7d: Fetch neighbors from Neo4j')
+    const userIdsForNeighbors = [userId, ...allCandidateIds]
+    const neighborsRecords = await this.neo4jService.read(
+      `
+      UNWIND $userIds AS userId
+      MATCH (u:User {userId: userId})-[:FRIEND]-(friend:User)
+      RETURN userId, collect(friend.userId) AS friendIds
+    `,
+      { userIds: userIdsForNeighbors },
+    )
+
+    // Build map: userId -> Set<friendIds> and degrees map
+    const neighborsByUserId = new Map<string, Set<string>>()
+    const degreesByUserId = new Map<string, number>()
+    for (const record of neighborsRecords) {
+      const uid = record.get('userId')
+      const friendIds = record.get('friendIds') as string[]
+      const friendSet = new Set(friendIds)
+      neighborsByUserId.set(uid, friendSet)
+      degreesByUserId.set(uid, friendSet.size)
+    }
+
+    // Ensure current user is in the map
+    if (!neighborsByUserId.has(userId)) {
+      neighborsByUserId.set(userId, new Set())
+      degreesByUserId.set(userId, 0)
+    }
+
+    console.timeEnd('Giai đoạn 7d: Fetch neighbors from Neo4j')
+
+    // Giai đoạn 7d.5: Fetch groups (MEMBER_OF) của current user + tất cả candidates từ Neo4j
+    console.time('Giai đoạn 7d.5: Fetch groups from Neo4j')
+    const groupsRecords = await this.neo4jService.read(
+      `
+      UNWIND $userIds AS userId
+      MATCH (u:User {userId: userId})-[:MEMBER_OF]-(group:Group)
+      RETURN userId, collect(group.id) AS groupIds
+    `,
+      { userIds: userIdsForNeighbors },
+    )
+
+    // Build map: userId -> Set<groupIds>
+    const groupsByUserId = new Map<string, Set<string>>()
+    for (const record of groupsRecords) {
+      const uid = record.get('userId')
+      const groupIds = record.get('groupIds') as string[]
+      groupsByUserId.set(uid, new Set(groupIds))
+    }
+
+    // Ensure all users are in the map
+    for (const id of userIdsForNeighbors) {
+      if (!groupsByUserId.has(id)) {
+        groupsByUserId.set(id, new Set())
+      }
+    }
+
+    console.timeEnd('Giai đoạn 7d.5: Fetch groups from Neo4j')
+
+    // Giai đoạn 7e: Không gọi Neo4j nữa — dùng commonFriends & commonGroups đã lấy ở Giai đoạn 4
     const commonFriendsById = new Map<string, number>(
       commonFriends.map((f) => [f.id, f.commonFriends]),
     )
@@ -339,10 +570,8 @@ export class RecommendationService {
       suggestBasedOnNearby: suggestBasedOnNearby[0],
     })
 
-    // "mutualFriends",
-    // "mutualGroups",
-    // "interestSimilarity",
-    // "distanceKm",
+    const currentUserNeighbors = neighborsByUserId.get(userId) ?? new Set()
+    const currentUserBioVector = bioVectorsByUserId.get(userId) ?? null
 
     const map = new Map<string, any>()
     /**
@@ -373,12 +602,79 @@ export class RecommendationService {
             )
           : 0
 
+      // Graph Features
+      const candidateNeighbors = neighborsByUserId.get(candidateId) ?? new Set()
+      const degreeU = this.computeDegree(currentUserNeighbors)
+      const degreeV = this.computeDegree(candidateNeighbors)
+      const jaccard = this.computeJaccard(
+        currentUserNeighbors,
+        candidateNeighbors,
+      )
+      const cosineGraph = this.computeCosineGraph(
+        currentUserNeighbors,
+        candidateNeighbors,
+      )
+      const adamicAdar = this.computeAdamicAdar(
+        currentUserNeighbors,
+        candidateNeighbors,
+        degreesByUserId,
+      )
+      const prefAttach = this.computePreferentialAttachment(
+        currentUserNeighbors,
+        candidateNeighbors,
+      )
+
+      // Bio Embedding Features
+      const candidateBioVector = bioVectorsByUserId.get(candidateId) ?? null
+      const bioCosine = this.computeBioCosine(
+        currentUserBioVector,
+        candidateBioVector,
+      )
+      const bioDot = this.computeBioDot(
+        currentUserBioVector,
+        candidateBioVector,
+      )
+      const bioL2 = this.computeBioL2(currentUserBioVector, candidateBioVector)
+
+      // Distance & Community Features
+      const distanceBucket = this.computeDistanceBucket(distanceKm)
+      const currentUserGroups = groupsByUserId.get(userId) ?? new Set()
+      const candidateGroups = groupsByUserId.get(candidateId) ?? new Set()
+      const sameGroup = this.computeSameGroup(
+        currentUserGroups,
+        candidateGroups,
+      )
+      const groupInter = this.computeGroupIntersection(
+        currentUserGroups,
+        candidateGroups,
+      )
+      const groupJaccard = this.computeGroupJaccard(
+        currentUserGroups,
+        candidateGroups,
+      )
+
       map.set(candidateId, {
         candidateId,
         mutualFriends: commonFriendsById.get(candidateId) ?? 0,
         mutualGroups: commonGroupsById.get(candidateId) ?? 0,
         interestSimilarity,
         distanceKm,
+        // Graph Features
+        jaccard,
+        cosineGraph,
+        adamicAdar,
+        prefAttach,
+        degreeU,
+        degreeV,
+        // Bio Embedding Features
+        bioCosine,
+        bioDot,
+        bioL2,
+        // Distance & Community Features
+        distanceBucket,
+        sameGroup,
+        groupInter,
+        groupJaccard,
       })
     }
     /**
@@ -397,7 +693,20 @@ export class RecommendationService {
         Number.isFinite(Number(candidate?.mutualFriends)) &&
         Number.isFinite(Number(candidate?.mutualGroups)) &&
         Number.isFinite(Number(candidate?.interestSimilarity)) &&
-        Number.isFinite(Number(candidate?.distanceKm)),
+        Number.isFinite(Number(candidate?.distanceKm)) &&
+        Number.isFinite(Number(candidate?.jaccard)) &&
+        Number.isFinite(Number(candidate?.cosineGraph)) &&
+        Number.isFinite(Number(candidate?.adamicAdar)) &&
+        Number.isFinite(Number(candidate?.prefAttach)) &&
+        Number.isFinite(Number(candidate?.degreeU)) &&
+        Number.isFinite(Number(candidate?.degreeV)) &&
+        Number.isFinite(Number(candidate?.bioCosine)) &&
+        Number.isFinite(Number(candidate?.bioDot)) &&
+        Number.isFinite(Number(candidate?.bioL2)) &&
+        Number.isFinite(Number(candidate?.distanceBucket)) &&
+        Number.isFinite(Number(candidate?.sameGroup)) &&
+        Number.isFinite(Number(candidate?.groupInter)) &&
+        Number.isFinite(Number(candidate?.groupJaccard)),
     )
     const topKCandidates =
       await this.pythonClient.predictTop100(candidatesForPython)
@@ -410,12 +719,14 @@ export class RecommendationService {
         userId,
         topK: topKCandidates.length,
         candidates: topKCandidates,
+        features: candidatesForPython,
         dayVersion,
         expiresAt,
       },
       update: {
         topK: topKCandidates.length,
         candidates: topKCandidates,
+        features: candidatesForPython,
         dayVersion,
         expiresAt,
       },

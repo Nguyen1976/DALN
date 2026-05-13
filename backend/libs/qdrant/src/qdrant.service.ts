@@ -64,4 +64,19 @@ export class QdrantService implements OnModuleInit {
       with_payload: true,
     })
   }
+
+  // Lấy vectors của nhiều users (để tính bio_cosine, bio_dot, bio_l2)
+  async getVectorsBatch(userIds: string[]) {
+    if (!userIds.length) return []
+    try {
+      return await this.client.retrieve(this.COLLECTION_NAME, {
+        ids: userIds.map((id) => id),
+        with_payload: true,
+        with_vectors: true,
+      })
+    } catch (error) {
+      console.error('Error retrieving vectors from Qdrant:', error)
+      return []
+    }
+  }
 }

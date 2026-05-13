@@ -2,10 +2,27 @@ import { Injectable, Logger } from '@nestjs/common'
 
 type CandidateFeatures = {
   candidateId: string
+  // Original 4 features
   mutualFriends: number
   mutualGroups: number
   interestSimilarity: number
   distanceKm: number
+  // Graph Features (6)
+  jaccard: number
+  cosineGraph: number
+  adamicAdar: number
+  prefAttach: number
+  degreeU: number
+  degreeV: number
+  // Bio Embedding Features (3)
+  bioCosine: number
+  bioDot: number
+  bioL2: number
+  // Distance & Community Features (4)
+  distanceBucket: number
+  sameGroup: number
+  groupInter: number
+  groupJaccard: number
 }
 
 @Injectable()
