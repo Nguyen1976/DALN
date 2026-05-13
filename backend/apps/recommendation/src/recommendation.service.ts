@@ -655,26 +655,21 @@ export class RecommendationService {
 
       map.set(candidateId, {
         candidateId,
-        mutualFriends: commonFriendsById.get(candidateId) ?? 0,
-        mutualGroups: commonGroupsById.get(candidateId) ?? 0,
-        interestSimilarity,
-        distanceKm,
-        // Graph Features
         jaccard,
-        cosineGraph,
-        adamicAdar,
-        prefAttach,
-        degreeU,
-        degreeV,
-        // Bio Embedding Features
-        bioCosine,
-        bioDot,
-        bioL2,
-        // Distance & Community Features
-        distanceBucket,
-        sameGroup,
-        groupInter,
-        groupJaccard,
+        cosine_graph: cosineGraph,
+        adamic_adar: adamicAdar,
+        pref_attach: prefAttach,
+        deg_u: degreeU,
+        deg_v: degreeV,
+        dist_km: distanceKm,
+        dist_bucket: distanceBucket,
+        bio_cosine: bioCosine,
+        bio_dot: bioDot,
+        bio_l2: bioL2,
+        same_cluster: 0,
+        group_inter: groupInter,
+        group_jaccard: groupJaccard,
+        same_group: sameGroup,
       })
     }
     /**
@@ -690,23 +685,21 @@ export class RecommendationService {
     const candidatesForPython = Array.from(map.values()).filter(
       (candidate) =>
         typeof candidate?.candidateId === 'string' &&
-        Number.isFinite(Number(candidate?.mutualFriends)) &&
-        Number.isFinite(Number(candidate?.mutualGroups)) &&
-        Number.isFinite(Number(candidate?.interestSimilarity)) &&
-        Number.isFinite(Number(candidate?.distanceKm)) &&
         Number.isFinite(Number(candidate?.jaccard)) &&
-        Number.isFinite(Number(candidate?.cosineGraph)) &&
-        Number.isFinite(Number(candidate?.adamicAdar)) &&
-        Number.isFinite(Number(candidate?.prefAttach)) &&
-        Number.isFinite(Number(candidate?.degreeU)) &&
-        Number.isFinite(Number(candidate?.degreeV)) &&
-        Number.isFinite(Number(candidate?.bioCosine)) &&
-        Number.isFinite(Number(candidate?.bioDot)) &&
-        Number.isFinite(Number(candidate?.bioL2)) &&
-        Number.isFinite(Number(candidate?.distanceBucket)) &&
-        Number.isFinite(Number(candidate?.sameGroup)) &&
-        Number.isFinite(Number(candidate?.groupInter)) &&
-        Number.isFinite(Number(candidate?.groupJaccard)),
+        Number.isFinite(Number(candidate?.cosine_graph)) &&
+        Number.isFinite(Number(candidate?.adamic_adar)) &&
+        Number.isFinite(Number(candidate?.pref_attach)) &&
+        Number.isFinite(Number(candidate?.deg_u)) &&
+        Number.isFinite(Number(candidate?.deg_v)) &&
+        Number.isFinite(Number(candidate?.dist_km)) &&
+        Number.isFinite(Number(candidate?.dist_bucket)) &&
+        Number.isFinite(Number(candidate?.bio_cosine)) &&
+        Number.isFinite(Number(candidate?.bio_dot)) &&
+        Number.isFinite(Number(candidate?.bio_l2)) &&
+        Number.isFinite(Number(candidate?.same_cluster)) &&
+        Number.isFinite(Number(candidate?.group_inter)) &&
+        Number.isFinite(Number(candidate?.group_jaccard)) &&
+        Number.isFinite(Number(candidate?.same_group)),
     )
     const topKCandidates =
       await this.pythonClient.predictTop100(candidatesForPython)

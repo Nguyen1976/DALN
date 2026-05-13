@@ -1,37 +1,25 @@
 from pydantic import BaseModel
-from typing import Literal
 
 
-class LogisticCandidate(BaseModel):
+class RankingCandidate(BaseModel):
     candidateId: str
-    # Original 4 features
-    mutualFriends: int
-    mutualGroups: int
-    interestSimilarity: float
-    distanceKm: float
-    # Graph Features (6)
     jaccard: float
-    cosineGraph: float
-    adamicAdar: float
-    prefAttach: float
-    degreeU: int
-    degreeV: int
-    # Bio Embedding Features (3)
-    bioCosine: float
-    bioDot: float
-    bioL2: float
-    # Distance & Community Features (4)
-    distanceBucket: int
-    sameGroup: int
-    groupInter: int
-    groupJaccard: float
+    cosine_graph: float
+    adamic_adar: float
+    pref_attach: float
+    deg_u: float
+    deg_v: float
+    dist_km: float
+    dist_bucket: float
+    bio_cosine: float
+    bio_dot: float
+    bio_l2: float
+    same_cluster: float = 0
+    group_inter: float
+    group_jaccard: float
+    same_group: float
 
 
 class TopKRequest(BaseModel):
-    data: list[LogisticCandidate]
+    data: list[RankingCandidate]
     k: int = 100
-
-
-class EvaluateRequest(BaseModel):
-    version: int
-    model_name: Literal["logistic_regression", "random_forest", "xgboost"] = "xgboost"
