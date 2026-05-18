@@ -25,6 +25,11 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Recommendation (RCM)
+
+Hướng dẫn vận hành gợi ý bạn bè (cold start, model Python, Mongo/Qdrant, cron): **[README.RCM.md](./README.RCM.md)**.  
+Thiết kế dài hạn: [README.RECOMMENDATION.md](./README.RECOMMENDATION.md).
+
 ## Kong Edge Gateway (api-gateway removed)
 
 Project now runs without the `api-gateway` service in Docker runtime.

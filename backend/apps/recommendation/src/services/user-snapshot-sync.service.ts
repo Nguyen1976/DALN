@@ -63,9 +63,22 @@ export class UserSnapshotSyncService {
       updates.bio = payload.bio
     }
 
-    await this.prisma.userSnapshot.update({
+    await this.prisma.userSnapshot.upsert({
       where: { userId: payload.userId },
-      data: updates,
+      create: {
+        userId: payload.userId,
+        username: payload.userId,
+        fullName: payload.fullName ?? payload.userId,
+        avatar: payload.avatar ?? null,
+        bio: payload.bio ?? null,
+        interests: [],
+        location: null,
+        isActive: true,
+        lastSeen: now,
+        syncedAt: now,
+        ...updates,
+      },
+      update: updates,
     })
 
     if (payload.bio !== undefined) {

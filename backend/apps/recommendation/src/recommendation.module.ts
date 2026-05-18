@@ -18,6 +18,7 @@ import { CommonModule, AuthGuard } from '@app/common'
 import { RecommendationCron } from './background-jobs/recommendation/recommendation.cron'
 import { InterestTagService } from './services/interest-tag.service'
 import { EmbeddingNotifyService } from './services/embedding-notify.service'
+import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { EmbeddingNotifyService } from './services/embedding-notify.service'
     PythonRecommendationClient,
     UserSnapshotSyncService,
     EmbeddingNotifyService,
+    UserSnapshotHydrateService,
     UserSnapshotSyncSubscriber,
     RecommendationCron,
     InterestTagService,

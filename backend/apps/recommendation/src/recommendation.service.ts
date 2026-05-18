@@ -5,6 +5,7 @@ import { QdrantService } from '@app/qdrant/qdrant.service'
 import { UtilService } from '@app/util/util.service'
 import { RedisService } from '@app/redis/redis.service'
 import { PythonRecommendationClient } from './python-recommendation.client'
+import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
 import * as _ from 'lodash'
 
 type NearbyUser = {
@@ -55,6 +56,7 @@ export class RecommendationService {
     private readonly utilService: UtilService,
     private readonly redisService: RedisService,
     private readonly pythonClient: PythonRecommendationClient,
+    private readonly userSnapshotHydrate: UserSnapshotHydrateService,
   ) {}
 
   /**
@@ -586,12 +588,15 @@ export class RecommendationService {
   }
 
   /**
-   * Read-time cold start: no persisted top-K yet and user has no friends in Neo4j.
+   * Read-time cold start when there is no stored recommendation list.
    * Pool = 3 Qdrant (similar bio) + 3 $geoNear + 3 best interest overlap, de-duplicated. No Python GB model.
    */
   private async getLiveHeuristicColdStartRecommendations(
     userId: string,
   ): Promise<any[]> {
+    await this.userSnapshotHydrate.ensureUserSnapshot(userId)
+    await this.userSnapshotHydrate.hydratePeerSnapshotsIfNeeded(1)
+
     const me = await this.prisma.userSnapshot.findUnique({
       where: { userId },
       select: {
@@ -647,10 +652,21 @@ export class RecommendationService {
       k,
     )
 
-    const mergedIds = this.orderedUniqueCandidates(
+    let mergedIds = this.orderedUniqueCandidates(
       [fromBio, fromGeo, fromInterest],
       64,
     )
+
+    if (!mergedIds.length) {
+      const fallback = await this.prisma.userSnapshot.findMany({
+        where: { userId: { not: userId } },
+        take: this.heuristicPoolLimit * 3,
+        orderBy: { syncedAt: 'desc' },
+        select: { userId: true },
+      })
+      mergedIds = fallback.map((r) => r.userId)
+    }
+
     if (!mergedIds.length) return []
 
     const profiles = await this.prisma.userSnapshot.findMany({
@@ -715,22 +731,39 @@ export class RecommendationService {
     const noStoredList = !result || candidateIds.length === 0
 
     if (noStoredList) {
-      const friendEx = await this.countFriendsExclusive(userId)
-      if (friendEx === 0) {
-        const live = await this.getLiveHeuristicColdStartRecommendations(userId)
-        if (live.length > 0) {
-          const now = new Date()
-          return {
-            status: 'ok',
-            source: 'live_heuristic',
+      const live = await this.getLiveHeuristicColdStartRecommendations(userId)
+      if (live.length > 0) {
+        const now = new Date()
+        const dayVersion = this.getDayVersion()
+        const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+        await this.prisma.recommendationResult.upsert({
+          where: { userId },
+          create: {
             userId,
             topK: live.length,
-            dayVersion: this.getDayVersion(),
-            expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
-            createdAt: now,
-            updatedAt: now,
             candidates: live,
-          }
+            features: [],
+            dayVersion,
+            expiresAt,
+          },
+          update: {
+            topK: live.length,
+            candidates: live,
+            features: [],
+            dayVersion,
+            expiresAt,
+          },
+        })
+        return {
+          status: 'ok',
+          source: 'live_heuristic',
+          userId,
+          topK: live.length,
+          dayVersion,
+          expiresAt,
+          createdAt: now,
+          updatedAt: now,
+          candidates: live,
         }
       }
     }
@@ -765,6 +798,68 @@ export class RecommendationService {
       profiles.map((profile) => [profile.userId, profile]),
     )
 
+    const enriched = candidates
+      .map((candidate) => {
+        const profile = profileByUserId.get(candidate.candidateId)
+        if (!profile) return null
+
+        return {
+          ...candidate,
+          profile: {
+            userId: profile.userId,
+            username: profile.username,
+            fullName: profile.fullName,
+            avatar: profile.avatar,
+            bio: profile.bio,
+            location: profile.location,
+            isActive: profile.isActive,
+            lastSeen: profile.lastSeen,
+          },
+        }
+      })
+      .filter(
+        (candidate): candidate is NonNullable<typeof candidate> =>
+          candidate !== null,
+      )
+
+    if (enriched.length === 0) {
+      const live = await this.getLiveHeuristicColdStartRecommendations(userId)
+      if (live.length > 0) {
+        const now = new Date()
+        const dayVersion = this.getDayVersion()
+        const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+        await this.prisma.recommendationResult.upsert({
+          where: { userId },
+          create: {
+            userId,
+            topK: live.length,
+            candidates: live,
+            features: [],
+            dayVersion,
+            expiresAt,
+          },
+          update: {
+            topK: live.length,
+            candidates: live,
+            features: [],
+            dayVersion,
+            expiresAt,
+          },
+        })
+        return {
+          status: 'ok',
+          source: 'live_heuristic',
+          userId,
+          topK: live.length,
+          dayVersion,
+          expiresAt,
+          createdAt: now,
+          updatedAt: now,
+          candidates: live,
+        }
+      }
+    }
+
     return {
       status: 'ok',
       userId,
@@ -773,29 +868,7 @@ export class RecommendationService {
       expiresAt: result.expiresAt,
       createdAt: result.createdAt,
       updatedAt: result.updatedAt,
-      candidates: candidates
-        .map((candidate) => {
-          const profile = profileByUserId.get(candidate.candidateId)
-          if (!profile) return null
-
-          return {
-            ...candidate,
-            profile: {
-              userId: profile.userId,
-              username: profile.username,
-              fullName: profile.fullName,
-              avatar: profile.avatar,
-              bio: profile.bio,
-              location: profile.location,
-              isActive: profile.isActive,
-              lastSeen: profile.lastSeen,
-            },
-          }
-        })
-        .filter(
-          (candidate): candidate is NonNullable<typeof candidate> =>
-            candidate !== null,
-        ),
+      candidates: enriched,
     }
   }
 
