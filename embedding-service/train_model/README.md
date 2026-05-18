@@ -33,7 +33,14 @@ Environment variables:
 - `NEO4J_USER` (default `neo4j`)
 - `NEO4J_PASSWORD` (default `password123`)
 
-Dependencies: see `requirements.txt`.
+Dependencies: see `train_model/requirements.txt` (training). Runtime API deps: `../requirements.txt` in repo root of `embedding-service/`.
+
+## HTTP runtime (backend contract)
+
+Production FastAPI only exposes **`POST /embed-and-save`** and **`POST /top-k`**.  
+See **[`../CONTRACT.md`](../CONTRACT.md)** and run `python embedding-service/scripts/check_backend_contract.py` from repo root to verify Nest still references those paths.
+
+Inference uses **`train_model/models/gb.joblib`** — train with this package so that file exists before calling `/top-k`.
 
 ## Feature Modes
 

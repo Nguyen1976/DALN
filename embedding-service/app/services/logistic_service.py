@@ -3,7 +3,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-
 SAFE_FEATURES = [
     'jaccard',
     'cosine_graph',
@@ -24,10 +23,11 @@ SAFE_FEATURES = [
 
 
 class LogisticService:
-    def __init__(self, db: Any) -> None:
+    """Loads `train_model/models/gb.joblib` only — no DB (inference contract for `/top-k`)."""
+
+    def __init__(self) -> None:
         base_dir = Path(__file__).resolve().parents[2]
         self.gb_model_path = base_dir / 'train_model' / 'models' / 'gb.joblib'
-        self.db = db
 
     def _joblib(self):
         return import_module('joblib')

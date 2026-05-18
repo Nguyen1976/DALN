@@ -125,6 +125,8 @@ Nếu không set `EMBEDDING_SERVICE_URL`, code dùng **origin** của `PYTHON_TO
 
 **Model Python:** `embedding-service/train_model/models/gb.joblib` (không commit git; cần train hoặc copy vào máy).
 
+**Hợp đồng HTTP Python (chỉ 2 endpoint):** [`embedding-service/CONTRACT.md`](../embedding-service/CONTRACT.md). Kiểm tra Nest vẫn gọi đúng: từ root repo chạy `python embedding-service/scripts/check_backend_contract.py`.
+
 ---
 
 ## 6. Kiểm tra dữ liệu Mongo (mongosh)

@@ -24,6 +24,13 @@ models/*.pkl
 # Chặn các file log CSV được tạo ra hàng ngày để tránh lộ dữ liệu user
 python_core/logs/*.csv
 *.log
+sync_process.log
+
+# Root-level experiment dumps (training outputs belong under train_model/)
+/dataset.csv
+/feature_importances.csv
+/neo4j_*.csv
+/brightkite*.csv
 
 # --- Environment Variables ---
 .env
