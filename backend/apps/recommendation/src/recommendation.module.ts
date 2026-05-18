@@ -19,6 +19,8 @@ import { RecommendationCron } from './background-jobs/recommendation/recommendat
 import { InterestTagService } from './services/interest-tag.service'
 import { EmbeddingNotifyService } from './services/embedding-notify.service'
 import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
+import { RecommendationFriendshipService } from './services/recommendation-friendship.service'
+import { FriendshipRecommendationSubscriber } from './rmq/subscribers/friendship-recommendation.subscriber'
 
 @Module({
   imports: [
@@ -62,7 +64,9 @@ import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.ser
     UserSnapshotSyncService,
     EmbeddingNotifyService,
     UserSnapshotHydrateService,
+    RecommendationFriendshipService,
     UserSnapshotSyncSubscriber,
+    FriendshipRecommendationSubscriber,
     RecommendationCron,
     InterestTagService,
   ],

@@ -202,7 +202,20 @@ Khi cold live: thêm field **`source: "live_heuristic"`** (không có trong resp
 
 ---
 
-## 10. Hạn chế / việc tiếp theo
+## 10. Kết bạn → xóa khỏi danh sách gợi ý
+
+Khi lời mời được **chấp nhận** (`USER_UPDATE_STATUS_MAKE_FRIEND`, `status: ACCEPTED`):
+
+- RabbitMQ → `FriendshipRecommendationSubscriber` → xóa user khỏi `RecommendationResult.candidates` (và `features`) **cả hai chiều** (A khỏi list B, B khỏi list A).
+- `GET /recommendation/me` còn lọc thêm theo Neo4j `FRIEND` và ghi lại Mongo nếu cache còn sót.
+
+File: `services/recommendation-friendship.service.ts`, `rmq/subscribers/friendship-recommendation.subscriber.ts`.
+
+Sau khi bên kia accept, user nên **tải lại** trang gợi ý (FE đã có nút “Tải lại”) để thấy list mới.
+
+---
+
+## 11. Hạn chế / việc tiếp theo
 
 - **Cron chỉ chạy 1 lần/ngày** — user mới / đổi bio có thể cần trigger `recommendationHelper` sau event (chưa có queue riêng).
 - **`UserSnapshot` rỗng** → batch không xử lý ai; GET cold start cũng không tìm thấy `me`.

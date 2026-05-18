@@ -6,6 +6,7 @@ import { UtilService } from '@app/util/util.service'
 import { RedisService } from '@app/redis/redis.service'
 import { PythonRecommendationClient } from './python-recommendation.client'
 import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
+import { RecommendationFriendshipService } from './services/recommendation-friendship.service'
 import * as _ from 'lodash'
 
 type NearbyUser = {
@@ -57,6 +58,7 @@ export class RecommendationService {
     private readonly redisService: RedisService,
     private readonly pythonClient: PythonRecommendationClient,
     private readonly userSnapshotHydrate: UserSnapshotHydrateService,
+    private readonly recommendationFriendship: RecommendationFriendshipService,
   ) {}
 
   /**
@@ -452,23 +454,33 @@ export class RecommendationService {
     return 'http://127.0.0.1:8000'
   }
 
-  private async countFriendsExclusive(userId: string): Promise<number> {
+  private async getFriendIdsExclusive(userId: string): Promise<string[]> {
     try {
       const rows = await this.neo4jService.read(
         `MATCH (me:User {userId: $userId})-[:FRIEND]-(f:User)
-         RETURN count(DISTINCT f) AS c`,
+         RETURN DISTINCT f.userId AS friendId`,
         { userId },
       )
-      if (!rows.length) return 0
-      const c = rows[0].get('c')
-      if (c != null && typeof (c as { toNumber?: () => number }).toNumber === 'function') {
-        return (c as { toNumber: () => number }).toNumber()
-      }
-      const n = Number(c)
-      return Number.isFinite(n) ? n : 0
+      return rows
+        .map((r) => r.get('friendId'))
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
     } catch {
-      return 0
+      return []
     }
+  }
+
+  private async countFriendsExclusive(userId: string): Promise<number> {
+    const ids = await this.getFriendIdsExclusive(userId)
+    return ids.length
+  }
+
+  private filterCandidatesExcludingFriends<T extends { candidateId?: string }>(
+    rows: T[],
+    friendIds: string[],
+  ): T[] {
+    if (!friendIds.length) return rows
+    const exclude = new Set(friendIds)
+    return rows.filter((r) => !exclude.has(String(r.candidateId ?? '')))
   }
 
   private async requestEmbedAndSave(
@@ -612,7 +624,8 @@ export class RecommendationService {
     })
     if (!me) return []
 
-    const excludeIds = [userId]
+    const friendIds = await this.getFriendIdsExclusive(userId)
+    const excludeIds = [userId, ...friendIds]
     const k = this.heuristicPoolLimit
     let fromBio: string[] = []
 
@@ -714,13 +727,23 @@ export class RecommendationService {
   }
 
   async getRecommendationForUser(userId: string) {
+    const friendIds = await this.getFriendIdsExclusive(userId)
+    await this.recommendationFriendship.stripFriendsFromStoredRecommendations(
+      userId,
+      friendIds,
+    )
+
     const result = await this.prisma.recommendationResult.findUnique({
       where: { userId },
     })
 
-    const storedCandidates = Array.isArray(result?.candidates)
+    let storedCandidates = Array.isArray(result?.candidates)
       ? (result!.candidates as RecommendationFeatureRow[])
       : []
+    storedCandidates = this.filterCandidatesExcludingFriends(
+      storedCandidates,
+      friendIds,
+    )
 
     const candidateIds = storedCandidates
       .map((candidate) => candidate?.candidateId)
@@ -731,7 +754,10 @@ export class RecommendationService {
     const noStoredList = !result || candidateIds.length === 0
 
     if (noStoredList) {
-      const live = await this.getLiveHeuristicColdStartRecommendations(userId)
+      const live = this.filterCandidatesExcludingFriends(
+        await this.getLiveHeuristicColdStartRecommendations(userId),
+        friendIds,
+      )
       if (live.length > 0) {
         const now = new Date()
         const dayVersion = this.getDayVersion()
@@ -823,7 +849,10 @@ export class RecommendationService {
       )
 
     if (enriched.length === 0) {
-      const live = await this.getLiveHeuristicColdStartRecommendations(userId)
+      const live = this.filterCandidatesExcludingFriends(
+        await this.getLiveHeuristicColdStartRecommendations(userId),
+        friendIds,
+      )
       if (live.length > 0) {
         const now = new Date()
         const dayVersion = this.getDayVersion()
@@ -860,15 +889,17 @@ export class RecommendationService {
       }
     }
 
+    const visible = this.filterCandidatesExcludingFriends(enriched, friendIds)
+
     return {
       status: 'ok',
       userId,
-      topK: result.topK,
+      topK: visible.length,
       dayVersion: result.dayVersion,
       expiresAt: result.expiresAt,
       createdAt: result.createdAt,
       updatedAt: result.updatedAt,
-      candidates: enriched,
+      candidates: visible,
     }
   }
 
