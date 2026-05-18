@@ -9,7 +9,7 @@ Thiết kế dài hạn / mục tiêu kiến trúc: [`README.RECOMMENDATION.md`]
 
 | Thành phần | Trong code | Lưu trữ (persist) | Ghi chú kiểm tra môi trường local (máy dev) |
 |------------|------------|-------------------|---------------------------------------------|
-| **RCM theo model Python (GB)** | Có — `recommendationHelper` → `POST /top-k` | Có — Mongo `recommendation-service.RecommendationResult` | **Chưa có bản ghi** nếu chưa chạy batch/cron hoặc `UserSnapshot` rỗng |
+| **RCM theo model Python (GB)** | Có — `recommendationHelper` → `POST /recommend/rank` | Có — Mongo `recommendation-service.RecommendationResult` | **Chưa có bản ghi** nếu chưa chạy batch/cron hoặc `UserSnapshot` rỗng |
 | **Cold start khi GET** (heuristic, không model) | Có — `getLiveHeuristicColdStartRecommendations` | **Không** lưu DB; trả live `source: live_heuristic` | Cần `UserSnapshot` + location/interests/bio; Qdrant bio cần có point |
 | **Cold blend trong batch** | Có — blend `cold_prior` khi graph thưa | Nằm trong `RecommendationResult` sau cron | `α` model thấp hơn khi `isColdStartUser` |
 | **Bio → vector Mongo + Qdrant** | Có — `embedding-service` `/embed-and-save` | `user-service.User.profile_vector` + Qdrant `user_bios` | Qdrant **0 point** = chưa embed/upsert thành công |
@@ -36,7 +36,7 @@ flowchart LR
   end
   subgraph py [embedding-service :8000]
     EM[embed-and-save]
-    TK[/top-k gb.joblib]
+    TK[/recommend/rank gb.joblib]
   end
   subgraph stores [Stores]
     N4j[(Neo4j graph)]
@@ -63,7 +63,7 @@ flowchart LR
 1. `RecommendationCron` — mỗi ngày 00:00 (`CronExpression.EVERY_DAY_AT_MIDNIGHT`) gọi `recommendation()`.
 2. Lấy mọi `userId` từ **`UserSnapshot`**, chunk 50, gọi `recommendationHelper(userId)` song song.
 3. Helper thu thập ứng viên: Neo4j (bạn chung / nhóm), Qdrant `recommend`, Mongo `$geoNear`, cold mở rộng (interest + geo).
-4. Tính 15 feature (`SAFE_FEATURES` trong Python), gọi **`PYTHON_TOPK_URL`** (mặc định `http://127.0.0.1:8000/top-k`).
+4. Tính 15 feature (`SAFE_FEATURES` trong Python), gọi **`PYTHON_RECOMMEND_URL`** (mặc định `http://127.0.0.1:8000/recommend/rank`; vẫn đọc được **`PYTHON_TOPK_URL`** nếu set full URL cũ).
 5. Blend với `cold_prior` nếu cold start; fallback xếp theo cold prior nếu Python trả rỗng.
 6. **`prisma.recommendationResult.upsert`** — lưu `candidates` (top ~100), `features` (audit), `dayVersion`, `expiresAt` (+24h).
 
@@ -105,11 +105,12 @@ Không chạy `gb.joblib`, không ghi `RecommendationResult`.
 
 ```env
 EMBEDDING_SERVICE_URL=http://127.0.0.1:8000
-PYTHON_TOPK_URL=http://127.0.0.1:8000/top-k
+PYTHON_RECOMMEND_URL=http://127.0.0.1:8000/recommend/rank
+# (tuỳ chọn, legacy) PYTHON_TOPK_URL=http://127.0.0.1:8000/recommend/rank
 RABBITMQ_URL=amqp://user:user@localhost:5672
 ```
 
-Nếu không set `EMBEDDING_SERVICE_URL`, code dùng **origin** của `PYTHON_TOPK_URL`.
+Nếu không set `EMBEDDING_SERVICE_URL`, code dùng **origin** của `PYTHON_RECOMMEND_URL` hoặc `PYTHON_TOPK_URL`.
 
 ---
 
@@ -118,7 +119,7 @@ Nếu không set `EMBEDDING_SERVICE_URL`, code dùng **origin** của `PYTHON_TO
 | Dịch vụ | URL | Kỳ vọng |
 |---------|-----|---------|
 | embedding-service | `http://127.0.0.1:8000/docs` | HTTP 200 |
-| Python top-k | `POST http://127.0.0.1:8000/top-k` | `status: ok` (cần `train_model/models/gb.joblib`) |
+| Python GB rank | `POST http://127.0.0.1:8000/recommend/rank` | `status: ok` (cần `train_model/models/gb.joblib`) |
 | Qdrant | `http://127.0.0.1:6333/collections` | collection `user_bios`, size 384, Cosine |
 | recommendation | `http://127.0.0.1:3005/recommendation/interest-tags` | HTTP 200 |
 | Kong | `http://127.0.0.1:8080/recommendation/interest-tags` | HTTP 200 |
@@ -186,7 +187,7 @@ curl -s http://127.0.0.1:6333/collections/user_bios | python3 -m json.tool
 | Embed notify | `apps/recommendation/src/services/embedding-notify.service.ts` |
 | Snapshot RMQ | `apps/recommendation/src/rmq/subscribers/user-snapshot-sync.subscriber.ts` |
 | Qdrant | `libs/qdrant/src/qdrant.service.ts` |
-| Python top-k / embed | `embedding-service/app/services/logistic_service.py`, `embedding_service.py`, `qdrant_user_bios_sync.py` |
+| Python recommend/rank + embed | `embedding-service/app/services/recommendation_rank_service.py`, `embedding_service.py`, `qdrant_user_bios_sync.py` |
 | Kong route | `kong/kong.yml` → `host.docker.internal:3005` |
 | Prisma | `apps/recommendation/prisma/schema.prisma` |
 

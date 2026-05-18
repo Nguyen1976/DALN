@@ -3,6 +3,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+# Must match Nest candidate strip + `RankingCandidate` / GB training `SAFE_FEATURES`.
 SAFE_FEATURES = [
     'jaccard',
     'cosine_graph',
@@ -22,8 +23,11 @@ SAFE_FEATURES = [
 ]
 
 
-class LogisticService:
-    """Loads `train_model/models/gb.joblib` only — no DB (inference contract for `/top-k`)."""
+class RecommendationRankService:
+    """
+    Gradient Boosting inference from `train_model/models/gb.joblib`.
+    Contract: POST /recommend/rank — no DB; model bundle only.
+    """
 
     def __init__(self) -> None:
         base_dir = Path(__file__).resolve().parents[2]
@@ -36,7 +40,8 @@ class LogisticService:
         joblib = self._joblib()
         if not self.gb_model_path.exists():
             raise FileNotFoundError(
-                f'GB model not found at {self.gb_model_path}. Train the model before calling /top-k.'
+                f'GB model not found at {self.gb_model_path}. '
+                'Train with train_model/ then call /recommend/rank.'
             )
 
         bundle = joblib.load(self.gb_model_path)
@@ -44,7 +49,7 @@ class LogisticService:
             return bundle.get('model'), bundle.get('scaler')
         return bundle, None
 
-    def predict_top_k(self, candidates_json: list[dict], k: int = 100) -> dict:
+    def rank_top_k(self, candidates_json: list[dict], k: int = 100) -> dict:
         if not candidates_json:
             return {'status': 'empty', 'data': []}
 
@@ -52,7 +57,10 @@ class LogisticService:
 
         rows = []
         for candidate in candidates_json:
-            row = {feature: float(candidate.get(feature, 0) or 0) for feature in SAFE_FEATURES}
+            row = {
+                feature: float(candidate.get(feature, 0) or 0)
+                for feature in SAFE_FEATURES
+            }
             row['candidateId'] = candidate.get('candidateId')
             rows.append(row)
 

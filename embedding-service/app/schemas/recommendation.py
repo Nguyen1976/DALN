@@ -2,6 +2,8 @@ from pydantic import BaseModel
 
 
 class RankingCandidate(BaseModel):
+    """Feature row for one candidate; must match Nest + GB `SAFE_FEATURES`."""
+
     candidateId: str
     jaccard: float
     cosine_graph: float
@@ -20,6 +22,8 @@ class RankingCandidate(BaseModel):
     same_group: float
 
 
-class TopKRequest(BaseModel):
+class RankRequest(BaseModel):
+    """Body for POST /recommend/rank (Gradient Boosting ranker, `gb.joblib`)."""
+
     data: list[RankingCandidate]
     k: int = 100

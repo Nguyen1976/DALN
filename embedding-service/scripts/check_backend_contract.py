@@ -13,8 +13,8 @@ BACKEND = REPO_ROOT / "backend"
 
 REQUIRED = [
     ("embed-and-save", ["user.service.ts", "embedding-notify.service.ts", "recommendation.service.ts"]),
-    ("PYTHON_TOPK_URL", ["python-recommendation.client.ts"]),
-    ("/top-k", ["python-recommendation.client.ts"]),
+    ("PYTHON_RECOMMEND_URL", ["python-recommendation.client.ts"]),
+    ("/recommend/rank", ["python-recommendation.client.ts"]),
 ]
 
 

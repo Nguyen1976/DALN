@@ -19,7 +19,7 @@ Tài liệu ngắn để AI khác nắm kiến trúc, thay đổi đã làm và 
 ## Recommendation & embedding (logic chính)
 
 - **Recommendation DB (Mongo, Prisma riêng):** `UserSnapshot`, `InterestTag`, `RecommendationResult`.
-- **Luồng ranking:** Neo4j (bạn chung / nhóm) + Qdrant (`user_bios`, similar) + Mongo `$geoNear` + feature (graph, distance, bio vector) → HTTP **`PYTHON_TOPK_URL`** (embedding-service `/top-k`, GB `SAFE_FEATURES`).
+- **Luồng ranking:** Neo4j (bạn chung / nhóm) + Qdrant (`user_bios`, similar) + Mongo `$geoNear` + feature (graph, distance, bio vector) → HTTP **`PYTHON_RECOMMEND_URL`** (embedding-service **`/recommend/rank`**, GB `SAFE_FEATURES`).
 - **Cron:** `RecommendationCron` — mỗi ngày nửa đêm gọi `recommendation()` → `recommendationHelper` từng user.
 - **Spec thiết kế:** `backend/README.RECOMMENDATION.md` (local replica, event — có thể chưa khớp 100% code).
 
@@ -86,7 +86,7 @@ Tài liệu ngắn để AI khác nắm kiến trúc, thay đổi đã làm và 
 |--------|-----------|
 | Recommendation helper + cold start | `backend/apps/recommendation/src/recommendation.service.ts` |
 | Cron | `backend/apps/recommendation/src/background-jobs/recommendation/recommendation.cron.ts` |
-| Python top-k / SAFE_FEATURES | `embedding-service/app/services/logistic_service.py` |
+| Python recommend/rank / SAFE_FEATURES | `embedding-service/app/services/recommendation_rank_service.py` |
 | Qdrant lib | `backend/libs/qdrant/src/qdrant.service.ts` |
 | User HTTP | `backend/apps/user/src/http/user-http.controller.ts` |
 | User snapshot sync | `backend/apps/recommendation/src/services/user-snapshot-sync.service.ts` |

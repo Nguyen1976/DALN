@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 
 /**
  * Calls embedding-service `/embed-and-save` so Mongo `profile_vector` + Qdrant `user_bios` stay in sync.
- * Base URL: `EMBEDDING_SERVICE_URL`, else origin of `PYTHON_TOPK_URL`, else http://127.0.0.1:8000
+ * Base URL: `EMBEDDING_SERVICE_URL`, else origin of `PYTHON_RECOMMEND_URL` or `PYTHON_TOPK_URL`, else http://127.0.0.1:8000
  */
 @Injectable()
 export class EmbeddingNotifyService {
@@ -11,12 +11,14 @@ export class EmbeddingNotifyService {
   embeddingBaseUrl(): string {
     const explicit = process.env.EMBEDDING_SERVICE_URL?.trim().replace(/\/+$/, '')
     if (explicit) return explicit
-    const topk = process.env.PYTHON_TOPK_URL?.trim()
-    if (topk) {
-      try {
-        return new URL(topk).origin
-      } catch {
-        /* ignore */
+    for (const key of ['PYTHON_RECOMMEND_URL', 'PYTHON_TOPK_URL'] as const) {
+      const raw = process.env[key]?.trim()
+      if (raw) {
+        try {
+          return new URL(raw).origin
+        } catch {
+          /* ignore */
+        }
       }
     }
     return 'http://127.0.0.1:8000'

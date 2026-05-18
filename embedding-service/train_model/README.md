@@ -37,10 +37,10 @@ Dependencies: see `train_model/requirements.txt` (training). Runtime API deps: `
 
 ## HTTP runtime (backend contract)
 
-Production FastAPI only exposes **`POST /embed-and-save`** and **`POST /top-k`**.  
-See **[`../CONTRACT.md`](../CONTRACT.md)** and run `python embedding-service/scripts/check_backend_contract.py` from repo root to verify Nest still references those paths.
+Production FastAPI only exposes **`POST /embed-and-save`** and **`POST /recommend/rank`** (GB ranker).  
+See **[`../CONTRACT.md`](../CONTRACT.md)** and run `python embedding-service/scripts/check_backend_contract.py` from repo root.
 
-Inference uses **`train_model/models/gb.joblib`** — train with this package so that file exists before calling `/top-k`.
+Inference uses **`train_model/models/gb.joblib`** — train with this package so that file exists before calling `/recommend/rank`.
 
 ## Feature Modes
 

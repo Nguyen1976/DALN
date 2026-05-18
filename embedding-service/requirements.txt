@@ -6,7 +6,7 @@ pymongo
 sentence-transformers
 torch
 qdrant-client>=1.7.0
-# POST /top-k — gb.joblib + sklearn pipeline
+# POST /recommend/rank — gb.joblib (Gradient Boosting) + sklearn pipeline
 numpy
 pandas
 scikit-learn

@@ -443,12 +443,14 @@ export class RecommendationService {
   private embeddingServiceBaseUrl(): string {
     const explicit = process.env.EMBEDDING_SERVICE_URL?.trim().replace(/\/+$/, '')
     if (explicit) return explicit
-    const topk = process.env.PYTHON_TOPK_URL?.trim()
-    if (topk) {
-      try {
-        return new URL(topk).origin
-      } catch {
-        /* ignore */
+    for (const key of ['PYTHON_RECOMMEND_URL', 'PYTHON_TOPK_URL'] as const) {
+      const raw = process.env[key]?.trim()
+      if (raw) {
+        try {
+          return new URL(raw).origin
+        } catch {
+          /* ignore */
+        }
       }
     }
     return 'http://127.0.0.1:8000'
