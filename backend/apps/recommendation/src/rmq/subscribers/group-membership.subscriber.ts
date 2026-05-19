@@ -5,7 +5,10 @@ import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { safeExecute } from '@app/common/rpc/safe-execute'
 import { RecommendationGroupMembershipService } from '../../services/recommendation-group-membership.service'
-import type { UserJoinGroupPayload, UserLeftGroupPayload } from 'libs/constant/rmq/payload'
+import type {
+  UserJoinGroupPayload,
+  UserLeftGroupPayload,
+} from 'libs/constant/rmq/payload'
 
 @Injectable()
 export class GroupMembershipSubscriber {

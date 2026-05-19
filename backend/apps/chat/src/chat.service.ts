@@ -160,6 +160,25 @@ export class ChatService {
       memberIds,
     })
 
+    // publish RMQ events for initial group members so recommendation/neo4j stays in sync
+    try {
+      const membersToPublish = uniqueMembers || []
+      for (const m of membersToPublish) {
+        this.eventsPublisher.publishUserJoinedGroup({
+          userId: m.userId,
+          groupId: conversation.id,
+          conversationId: conversation.id,
+          groupName: conversation.groupName,
+          createdAt: new Date().toISOString(),
+        })
+      }
+    } catch (e) {
+      console.warn(
+        '[chat-service] publishUserJoinedGroup (createConversation) failed',
+        e,
+      )
+    }
+
     return res
   }
 
@@ -360,6 +379,21 @@ export class ChatService {
       }),
     )
 
+    // publish RMQ events for recommendation / neo4j sync for each new member
+    try {
+      for (const m of newMembers) {
+        this.eventsPublisher.publishUserJoinedGroup({
+          userId: m.userId,
+          groupId: dto.conversationId,
+          conversationId: dto.conversationId,
+          groupName: conversation.groupName,
+          createdAt: new Date().toISOString(),
+        })
+      }
+    } catch (e) {
+      console.warn('[chat-service] publishUserJoinedGroup failed', e)
+    }
+
     return {
       status: 'SUCCESS',
     }
@@ -455,6 +489,18 @@ export class ChatService {
       }),
     )
 
+    // publish RMQ event for recommendation / neo4j sync
+    try {
+      this.eventsPublisher.publishUserLeftGroup({
+        userId: dto.targetUserId,
+        groupId: dto.conversationId,
+        conversationId: dto.conversationId,
+        leftAt: new Date().toISOString(),
+      })
+    } catch (e) {
+      console.warn('[chat-service] publishUserLeftGroup failed', e)
+    }
+
     return {
       status: 'SUCCESS',
     }
@@ -522,6 +568,18 @@ export class ChatService {
         ),
       }),
     )
+
+    // publish RMQ event for recommendation / neo4j sync
+    try {
+      this.eventsPublisher.publishUserLeftGroup({
+        userId: dto.userId,
+        groupId: dto.conversationId,
+        conversationId: dto.conversationId,
+        leftAt: new Date().toISOString(),
+      })
+    } catch (e) {
+      console.warn('[chat-service] publishUserLeftGroup failed', e)
+    }
 
     return {
       status: 'SUCCESS',

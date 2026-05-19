@@ -6,6 +6,8 @@ import {
   PollClosedPayload,
   PollUpdatedPayload,
   MessageRevokedPayload,
+  UserJoinGroupPayload,
+  UserLeftGroupPayload,
 } from 'libs/constant/rmq/payload'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
@@ -249,5 +251,29 @@ export class ChatEventsPublisher {
         data: payload,
       } as EmitToUserPayload,
     )
+  }
+
+  publishUserJoinedGroup(payload: UserJoinGroupPayload): void {
+    try {
+      this.amqpConnection.publish(
+        EXCHANGE_RMQ.USER_EVENTS,
+        ROUTING_RMQ.USER_JOINED_GROUP,
+        payload,
+      )
+    } catch (e) {
+      console.warn('[chat-events] publishUserJoinedGroup failed', e)
+    }
+  }
+
+  publishUserLeftGroup(payload: UserLeftGroupPayload): void {
+    try {
+      this.amqpConnection.publish(
+        EXCHANGE_RMQ.USER_EVENTS,
+        ROUTING_RMQ.USER_LEFT_GROUP,
+        payload,
+      )
+    } catch (e) {
+      console.warn('[chat-events] publishUserLeftGroup failed', e)
+    }
   }
 }

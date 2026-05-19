@@ -67,6 +67,22 @@ export class UserEventsPublisher {
     )
   }
 
+  publishUserJoinedGroup(payload: UserJoinGroupPayload): void {
+    this.amqpConnection.publish(
+      EXCHANGE_RMQ.USER_EVENTS,
+      ROUTING_RMQ.USER_JOINED_GROUP,
+      payload,
+    )
+  }
+
+  publishUserLeftGroup(payload: UserLeftGroupPayload): void {
+    this.amqpConnection.publish(
+      EXCHANGE_RMQ.USER_EVENTS,
+      ROUTING_RMQ.USER_LEFT_GROUP,
+      payload,
+    )
+  }
+
   publisherUserOnline(payload: { userIds: string[]; userId: string }): void {
     this.amqpConnection.publish(
       EXCHANGE_RMQ.REALTIME_EVENTS,
