@@ -16,6 +16,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { socket } from "@/lib/socket";
+import { SOCKET_EVENTS } from "@/lib/socket.events";
 
 export default function RecommendationPage() {
   const user = useSelector(selectUser);
@@ -23,6 +25,7 @@ export default function RecommendationPage() {
   const [recommendations, setRecommendations] = useState<
     RecommendationCandidateItem[]
   >([]);
+  const [pendingCandidateIds, setPendingCandidateIds] = useState<string[]>([]);
 
   const loadRecommendations = async () => {
     try {
@@ -42,7 +45,41 @@ export default function RecommendationPage() {
     void loadRecommendations();
   }, [user?.id]);
 
+  useEffect(() => {
+    const handleNotification = (payload: { message?: string } | null) => {
+      const message = String(payload?.message ?? "").toLowerCase();
+      if (
+        message.includes("lời mời kết bạn") &&
+        message.includes("chấp nhận")
+      ) {
+        void loadRecommendations();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      if (!user?.id) return;
+      void loadRecommendations();
+    };
+
+    socket.on(SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION, handleNotification);
+    window.addEventListener("focus", handleWindowFocus);
+
+    return () => {
+      socket.off(
+        SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
+        handleNotification,
+      );
+      window.removeEventListener("focus", handleWindowFocus);
+    };
+  }, [user?.id]);
+
   const handleMakeFriend = async (candidate: RecommendationCandidateItem) => {
+    const candidateId = candidate.candidateId;
+    if (pendingCandidateIds.includes(candidateId)) {
+      return;
+    }
+
+    setPendingCandidateIds((prev) => [...prev, candidateId]);
     try {
       const profile = await getUserProfileByIdAPI(candidate.candidateId);
       if (!profile?.email) {
@@ -55,6 +92,7 @@ export default function RecommendationPage() {
     } catch (error) {
       console.log(error);
       toast.error("Không thể gửi lời mời kết bạn");
+      setPendingCandidateIds((prev) => prev.filter((id) => id !== candidateId));
     }
   };
 
@@ -167,9 +205,16 @@ export default function RecommendationPage() {
                             <Button
                               className="interceptor-loading"
                               onClick={() => void handleMakeFriend(candidate)}
+                              disabled={pendingCandidateIds.includes(
+                                candidate.candidateId,
+                              )}
                             >
                               <UserPlus className="mr-2 h-4 w-4" />
-                              Kết bạn
+                              {pendingCandidateIds.includes(
+                                candidate.candidateId,
+                              )
+                                ? "Đã gửi lời mời"
+                                : "Kết bạn"}
                             </Button>
                           </div>
                         </div>

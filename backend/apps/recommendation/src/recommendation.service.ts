@@ -1521,12 +1521,20 @@ export class RecommendationService {
         .slice(0, 100)
     }
 
-    topKCandidates = this.dedupeByCandidateId(topKCandidates).slice(0, 100)
+    const latestFriendIds = await this.getFriendIdsExclusive(userId)
+
+    topKCandidates = this.filterCandidatesExcludingFriends(
+      this.dedupeByCandidateId(topKCandidates),
+      latestFriendIds,
+    ).slice(0, 100)
 
     const dayVersion = this.getDayVersion()
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
 
-    const featuresForAudit = Array.from(map.values())
+    const featuresForAudit = this.filterCandidatesExcludingFriends(
+      Array.from(map.values()),
+      latestFriendIds,
+    )
 
     await this.prisma.recommendationResult.upsert({
       where: { userId },
