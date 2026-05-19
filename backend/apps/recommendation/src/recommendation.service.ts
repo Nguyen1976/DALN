@@ -328,9 +328,7 @@ export class RecommendationService {
     vecSignal: number
   }): number {
     const hasDist = Number.isFinite(params.distKm) && params.distKm > 0
-    const geo = hasDist
-      ? Math.exp(-Math.min(params.distKm, 500) / 130)
-      : 0.32
+    const geo = hasDist ? Math.exp(-Math.min(params.distKm, 500) / 130) : 0.32
     return (
       0.38 * params.interestJaccard +
       0.28 * params.bioTokenSim +
@@ -433,7 +431,11 @@ export class RecommendationService {
     }
     if (raw && typeof raw === 'object' && 'default' in (raw as object)) {
       const inner = (raw as { default?: unknown }).default
-      if (Array.isArray(inner) && inner.length && typeof inner[0] === 'number') {
+      if (
+        Array.isArray(inner) &&
+        inner.length &&
+        typeof inner[0] === 'number'
+      ) {
         return inner as number[]
       }
     }
@@ -441,7 +443,10 @@ export class RecommendationService {
   }
 
   private embeddingServiceBaseUrl(): string {
-    const explicit = process.env.EMBEDDING_SERVICE_URL?.trim().replace(/\/+$/, '')
+    const explicit = process.env.EMBEDDING_SERVICE_URL?.trim().replace(
+      /\/+$/,
+      '',
+    )
     if (explicit) return explicit
     for (const key of ['PYTHON_RECOMMEND_URL', 'PYTHON_TOPK_URL'] as const) {
       const raw = process.env[key]?.trim()
@@ -648,7 +653,8 @@ export class RecommendationService {
         )
         fromBio = hits
           .map((h) => {
-            const mid = h.payload && (h.payload as Record<string, unknown>).mongoId
+            const mid =
+              h.payload && (h.payload as Record<string, unknown>).mongoId
             return typeof mid === 'string' ? mid : null
           })
           .filter((id): id is string => id !== null)
@@ -921,7 +927,14 @@ export class RecommendationService {
     let processed = 0
     for (const chunk of userChunks) {
       // Chạy song song trong mỗi lô (khoảng CHUNK_SIZE promises)
-      await Promise.all(chunk.map((u) => this.recommendationHelper(u.userId)))
+      await Promise.all(
+        chunk.map((u) =>
+          this.recommendationHelper(u.userId, {
+            enableColdStartAugmentation: false,
+            enableColdPriorBlend: false,
+          }),
+        ),
+      )
       processed += chunk.length
       console.log(`✅ Đã xử lý xong ${processed}/${users.length} users...`)
     }
@@ -929,7 +942,13 @@ export class RecommendationService {
     console.timeEnd('Tổng thời gian cho 1000 User')
   }
 
-  async recommendationHelper(userId: string) {
+  async recommendationHelper(
+    userId: string,
+    options?: {
+      enableColdStartAugmentation?: boolean
+      enableColdPriorBlend?: boolean
+    },
+  ) {
     console.log(`--- Bắt đầu xử lý Suggest cho User: ${userId} ---`)
     console.time('Tổng thời gian recommendationHelper')
 
@@ -954,6 +973,9 @@ export class RecommendationService {
     const friendCountExclusive = friendIds.length
     friendIds.push(userId)
     const uniqueExcludeIds = Array.from(new Set(friendIds))
+    const enableColdStartAugmentation =
+      options?.enableColdStartAugmentation ?? true
+    const enableColdPriorBlend = options?.enableColdPriorBlend ?? true
 
     const queryCommonFriends = `
     MATCH (me:User {userId: $userId})-[:FRIEND]-(friend: User)-[:FRIEND]-(stranger:User)
@@ -986,24 +1008,36 @@ export class RecommendationService {
     const commonFriendsRecords =
       settled[0].status === 'fulfilled' ? settled[0].value : []
     if (settled[0].status === 'rejected') {
-      console.warn('[recommendation] neo4j commonFriends failed', settled[0].reason)
+      console.warn(
+        '[recommendation] neo4j commonFriends failed',
+        settled[0].reason,
+      )
     }
 
     const commonGroupsRecords =
       settled[1].status === 'fulfilled' ? settled[1].value : []
     if (settled[1].status === 'rejected') {
-      console.warn('[recommendation] neo4j commonGroups failed', settled[1].reason)
+      console.warn(
+        '[recommendation] neo4j commonGroups failed',
+        settled[1].reason,
+      )
     }
 
     const qdrantRes = settled[2].status === 'fulfilled' ? settled[2].value : []
     if (settled[2].status === 'rejected') {
-      console.warn('[recommendation] qdrant recommendSimilar failed', settled[2].reason)
+      console.warn(
+        '[recommendation] qdrant recommendSimilar failed',
+        settled[2].reason,
+      )
     }
 
     const currentUser =
       settled[3].status === 'fulfilled' ? settled[3].value : null
     if (settled[3].status === 'rejected') {
-      console.warn('[recommendation] prisma currentUser failed', settled[3].reason)
+      console.warn(
+        '[recommendation] prisma currentUser failed',
+        settled[3].reason,
+      )
     }
 
     const commonFriends = commonFriendsRecords.map((r) => ({
@@ -1055,9 +1089,10 @@ export class RecommendationService {
       .filter((id): id is string => typeof id === 'string')
 
     const graphOnlyUnique = new Set(
-      [...commonFriends.map((u) => u.id), ...commonGroups.map((u) => u.id)].filter(
-        (id): id is string => typeof id === 'string',
-      ),
+      [
+        ...commonFriends.map((u) => u.id),
+        ...commonGroups.map((u) => u.id),
+      ].filter((id): id is string => typeof id === 'string'),
     )
 
     let orderedCandidateIds = this.orderedUniqueCandidates(
@@ -1073,7 +1108,10 @@ export class RecommendationService {
 
     let coldInterestIds: string[] = []
     let coldGeoIdsExtra: string[] = []
-    if (coldStart || orderedCandidateIds.length < 36) {
+    if (
+      enableColdStartAugmentation &&
+      (coldStart || orderedCandidateIds.length < 36)
+    ) {
       const myInterests = currentUser?.interests ?? []
       coldInterestIds = await this.fetchColdStartInterestMatches(
         uniqueExcludeIds,
@@ -1234,7 +1272,7 @@ export class RecommendationService {
         `
       UNWIND $userIds AS userId
       MATCH (u:User {userId: userId})-[:MEMBER_OF]-(group:Group)
-      RETURN userId, collect(group.id) AS groupIds
+      RETURN userId, collect(group.conversationId) AS groupIds
     `,
         { userIds: userIdsForNeighbors },
       )
@@ -1247,11 +1285,18 @@ export class RecommendationService {
     for (const record of groupsRecords) {
       const uid = record.get('userId')
       const groupIdsRaw = record.get('groupIds')
-      const groupIds = Array.isArray(groupIdsRaw)
-        ? (groupIdsRaw as string[])
-        : typeof groupIdsRaw === 'string'
-          ? [groupIdsRaw]
-          : []
+      const groupIds = (
+        Array.isArray(groupIdsRaw)
+          ? groupIdsRaw
+          : typeof groupIdsRaw === 'string'
+            ? [groupIdsRaw]
+            : []
+      )
+        .map((value) => (typeof value === 'string' ? value : null))
+        .filter(
+          (value): value is string =>
+            typeof value === 'string' && value.length > 0,
+        )
       groupsByUserId.set(uid, new Set(groupIds))
     }
 
@@ -1453,9 +1498,8 @@ export class RecommendationService {
           Number.isFinite(Number(candidate?.same_group)),
       ) as any
 
-    let topKCandidates = await this.pythonClient.predictTop100(
-      candidatesForPython,
-    )
+    let topKCandidates =
+      await this.pythonClient.predictTop100(candidatesForPython)
 
     const priorValues = Array.from(coldPriorById.values())
     const maxColdPrior = Math.max(1e-9, ...priorValues)
@@ -1466,8 +1510,7 @@ export class RecommendationService {
       return [...rows]
         .map((row) => {
           const pid = String(row.candidateId)
-          const coldN =
-            (coldPriorById.get(pid) ?? 0) / (maxColdPrior || 1e-9)
+          const coldN = (coldPriorById.get(pid) ?? 0) / (maxColdPrior || 1e-9)
           const modelScore = this.toStoredScore(row.score)
           return {
             ...row,
@@ -1480,19 +1523,43 @@ export class RecommendationService {
         .slice(0, 100)
     }
 
-    topKCandidates = blendWithColdPrior(topKCandidates)
+    if (enableColdPriorBlend) {
+      topKCandidates = blendWithColdPrior(topKCandidates)
+    }
 
     if (!topKCandidates.length && candidatesForPython.length) {
-      topKCandidates = [...candidatesForPython]
-        .map((c: any) => ({
-          ...c,
-          score:
-            (coldPriorById.get(String(c.candidateId)) ?? 0) / maxColdPrior,
-        }))
-        .sort(
-          (a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score),
-        )
-        .slice(0, 100)
+      if (enableColdPriorBlend) {
+        topKCandidates = [...candidatesForPython]
+          .map((c: any) => ({
+            ...c,
+            score:
+              (coldPriorById.get(String(c.candidateId)) ?? 0) / maxColdPrior,
+          }))
+          .sort(
+            (a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score),
+          )
+          .slice(0, 100)
+      } else {
+        topKCandidates = [...candidatesForPython]
+          .map((c: any) => {
+            const distKm = Number(c.dist_km ?? 0)
+            const distSignal = 1 / (1 + Math.max(0, distKm))
+            const score =
+              0.3 * Number(c.jaccard ?? 0) +
+              0.25 * Number(c.cosine_graph ?? 0) +
+              0.2 * Number(c.group_jaccard ?? 0) +
+              0.15 * Number(c.bio_cosine ?? 0) +
+              0.1 * distSignal
+            return {
+              ...c,
+              score,
+            }
+          })
+          .sort(
+            (a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score),
+          )
+          .slice(0, 100)
+      }
     }
 
     const dayVersion = this.getDayVersion()
