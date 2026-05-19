@@ -16,11 +16,6 @@ type NearbyUser = {
   username?: string
 }
 
-type UserBioRow = {
-  id: string
-  bio: string | null
-}
-
 type UserProfileRow = {
   userId: string
   bio: string | null
@@ -347,6 +342,20 @@ export class RecommendationService {
         out.push(id)
         if (out.length >= max) return out
       }
+    }
+    return out
+  }
+
+  private dedupeByCandidateId<T extends { candidateId?: unknown }>(
+    rows: T[],
+  ): T[] {
+    const seen = new Set<string>()
+    const out: T[] = []
+    for (const row of rows) {
+      const candidateId = String(row?.candidateId ?? '')
+      if (!candidateId || seen.has(candidateId)) continue
+      seen.add(candidateId)
+      out.push(row)
     }
     return out
   }
@@ -927,14 +936,7 @@ export class RecommendationService {
     let processed = 0
     for (const chunk of userChunks) {
       // Chạy song song trong mỗi lô (khoảng CHUNK_SIZE promises)
-      await Promise.all(
-        chunk.map((u) =>
-          this.recommendationHelper(u.userId, {
-            enableColdStartAugmentation: false,
-            enableColdPriorBlend: false,
-          }),
-        ),
-      )
+      await Promise.all(chunk.map((u) => this.recommendationHelper(u.userId)))
       processed += chunk.length
       console.log(`✅ Đã xử lý xong ${processed}/${users.length} users...`)
     }
@@ -942,13 +944,7 @@ export class RecommendationService {
     console.timeEnd('Tổng thời gian cho 1000 User')
   }
 
-  async recommendationHelper(
-    userId: string,
-    options?: {
-      enableColdStartAugmentation?: boolean
-      enableColdPriorBlend?: boolean
-    },
-  ) {
+  async recommendationHelper(userId: string) {
     console.log(`--- Bắt đầu xử lý Suggest cho User: ${userId} ---`)
     console.time('Tổng thời gian recommendationHelper')
 
@@ -973,9 +969,6 @@ export class RecommendationService {
     const friendCountExclusive = friendIds.length
     friendIds.push(userId)
     const uniqueExcludeIds = Array.from(new Set(friendIds))
-    const enableColdStartAugmentation =
-      options?.enableColdStartAugmentation ?? true
-    const enableColdPriorBlend = options?.enableColdPriorBlend ?? true
 
     const queryCommonFriends = `
     MATCH (me:User {userId: $userId})-[:FRIEND]-(friend: User)-[:FRIEND]-(stranger:User)
@@ -1108,10 +1101,7 @@ export class RecommendationService {
 
     let coldInterestIds: string[] = []
     let coldGeoIdsExtra: string[] = []
-    if (
-      enableColdStartAugmentation &&
-      (coldStart || orderedCandidateIds.length < 36)
-    ) {
+    if (coldStart || orderedCandidateIds.length < 36) {
       const myInterests = currentUser?.interests ?? []
       coldInterestIds = await this.fetchColdStartInterestMatches(
         uniqueExcludeIds,
@@ -1309,14 +1299,6 @@ export class RecommendationService {
 
     console.timeEnd('Giai đoạn 7d.5: Fetch groups from Neo4j')
 
-    // Giai đoạn 7e: Không gọi Neo4j nữa — dùng commonFriends & commonGroups đã lấy ở Giai đoạn 4
-    const commonFriendsById = new Map<string, number>(
-      commonFriends.map((f) => [f.id, f.commonFriends]),
-    )
-    const commonGroupsById = new Map<string, number>(
-      commonGroups.map((g) => [g.id, g.commonGroups]),
-    )
-
     console.timeEnd('Giai đoạn 7: Enrich Features')
 
     const profileByCandidateId = new Map(
@@ -1476,7 +1458,9 @@ export class RecommendationService {
       return rest
     }
 
-    const candidatesForPython = Array.from(map.values())
+    const candidatesForPython = this.dedupeByCandidateId(
+      Array.from(map.values()),
+    )
       .map((c) => stripColdMeta(c as Record<string, unknown>))
       .filter(
         (candidate) =>
@@ -1523,44 +1507,21 @@ export class RecommendationService {
         .slice(0, 100)
     }
 
-    if (enableColdPriorBlend) {
-      topKCandidates = blendWithColdPrior(topKCandidates)
-    }
+    topKCandidates = blendWithColdPrior(topKCandidates)
 
     if (!topKCandidates.length && candidatesForPython.length) {
-      if (enableColdPriorBlend) {
-        topKCandidates = [...candidatesForPython]
-          .map((c: any) => ({
-            ...c,
-            score:
-              (coldPriorById.get(String(c.candidateId)) ?? 0) / maxColdPrior,
-          }))
-          .sort(
-            (a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score),
-          )
-          .slice(0, 100)
-      } else {
-        topKCandidates = [...candidatesForPython]
-          .map((c: any) => {
-            const distKm = Number(c.dist_km ?? 0)
-            const distSignal = 1 / (1 + Math.max(0, distKm))
-            const score =
-              0.3 * Number(c.jaccard ?? 0) +
-              0.25 * Number(c.cosine_graph ?? 0) +
-              0.2 * Number(c.group_jaccard ?? 0) +
-              0.15 * Number(c.bio_cosine ?? 0) +
-              0.1 * distSignal
-            return {
-              ...c,
-              score,
-            }
-          })
-          .sort(
-            (a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score),
-          )
-          .slice(0, 100)
-      }
+      topKCandidates = [...candidatesForPython]
+        .map((c: any) => ({
+          ...c,
+          score: (coldPriorById.get(String(c.candidateId)) ?? 0) / maxColdPrior,
+        }))
+        .sort(
+          (a, b) => this.toStoredScore(b.score) - this.toStoredScore(a.score),
+        )
+        .slice(0, 100)
     }
+
+    topKCandidates = this.dedupeByCandidateId(topKCandidates).slice(0, 100)
 
     const dayVersion = this.getDayVersion()
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
