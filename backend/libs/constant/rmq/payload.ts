@@ -2,6 +2,10 @@ export interface UserCreatedPayload {
   id: string
   email: string
   username: string
+  /** Optional profile fields so recommendation can hydrate snapshot + Qdrant on signup */
+  fullName?: string
+  avatar?: string
+  bio?: string
   location?: {
     lat: number
     lon: number
@@ -55,6 +59,22 @@ export interface UserUpdatedPayload {
 export interface UserInterestsUpdatedPayload {
   userId: string
   interests: string[]
+}
+
+export interface UserJoinGroupPayload {
+  userId: string
+  groupId: string
+  // optional metadata — conversationId in DB, group name, timestamp
+  conversationId?: string
+  groupName?: string
+  createdAt?: string
+}
+
+export interface UserLeftGroupPayload {
+  userId: string
+  groupId: string
+  conversationId?: string
+  leftAt?: string
 }
 
 export interface EmitToUserPayload {

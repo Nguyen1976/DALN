@@ -11,6 +11,7 @@ import {
 } from './repositories'
 import { UserErrors } from './errors/user.errors'
 import { UserEventsPublisher } from './rmq/publishers/user-events.publisher'
+import type { UserUpdatedPayload } from 'libs/constant/rmq/payload'
 import {
   AuthSession,
   UserEntity,
@@ -270,6 +271,13 @@ export class UserService {
       id: user.id,
       email: user.email,
       username: user.username,
+      ...(user.fullName != null && user.fullName !== ''
+        ? { fullName: user.fullName }
+        : {}),
+      ...(user.avatar ? { avatar: user.avatar } : {}),
+      ...(user.bio != null && String(user.bio).trim() !== ''
+        ? { bio: user.bio as string }
+        : {}),
       location: (() => {
         const location = user.location as
           | { lat?: number; lon?: number; coordinates?: [number, number] }
@@ -714,15 +722,21 @@ export class UserService {
       avatar: avatarUrl,
     })
 
-    this.eventsPublisher.publishUserUpdated({
-      userId: user.id,
-      fullName: data.fullName || undefined,
-      avatar: avatarUrl || undefined,
-      bio: user.bio ?? undefined,
-    })
-
+    const updatedPayload: UserUpdatedPayload = { userId: user.id }
+    if (data.fullName !== undefined) {
+      updatedPayload.fullName = data.fullName
+    }
     if (data.bio !== undefined) {
-      await this.notifyEmbeddingServiceBio(user.id, user.bio ?? '')
+      updatedPayload.bio = user.bio ?? ''
+    }
+    if (avatarUrl) {
+      updatedPayload.avatar = avatarUrl
+    }
+    this.eventsPublisher.publishUserUpdated(updatedPayload)
+
+    const bioTrimmed = (user.bio ?? '').trim()
+    if (bioTrimmed) {
+      await this.notifyEmbeddingServiceBio(user.id, bioTrimmed)
     }
 
     return {

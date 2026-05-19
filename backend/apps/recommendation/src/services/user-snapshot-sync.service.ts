@@ -24,9 +24,9 @@ export class UserSnapshotSyncService {
       create: {
         userId: payload.id,
         username: payload.username,
-        fullName: payload.username,
-        avatar: null,
-        bio: null,
+        fullName: payload.fullName ?? payload.username,
+        avatar: payload.avatar ?? null,
+        bio: payload.bio ?? null,
         location: payload.location
           ? {
               type: 'Point',
@@ -40,8 +40,21 @@ export class UserSnapshotSyncService {
       update: {
         syncedAt: now,
         isActive: true,
+        ...(payload.fullName !== undefined && { fullName: payload.fullName }),
+        ...(payload.avatar !== undefined && { avatar: payload.avatar }),
+        ...(payload.bio !== undefined && { bio: payload.bio }),
       },
     })
+
+    const bio = (payload.bio ?? '').trim()
+    if (bio) {
+      const r = await this.embeddingNotify.notifyBioEmbedded(payload.id, bio)
+      if (!r.ok) {
+        this.logger.error(
+          `[snapshot] USER_CREATED bio embed/Qdrant failed userId=${payload.id} detail=${r.detail ?? ''}`,
+        )
+      }
+    }
   }
 
   async syncUserUpdated(payload: UserUpdatedPayload): Promise<void> {

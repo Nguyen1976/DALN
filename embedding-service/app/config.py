@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 
 class Settings:
@@ -18,7 +19,9 @@ class Settings:
         "true",
         "yes",
     )
-    qdrant_host: str = os.getenv("QDRANT_HOST", "localhost")
+    # Prefer 127.0.0.1 over "localhost" — some stacks resolve ::1 first while Qdrant listens on IPv4 only.
+    qdrant_url: Optional[str] = (os.getenv("QDRANT_URL") or "").strip() or None
+    qdrant_host: str = os.getenv("QDRANT_HOST", "127.0.0.1")
     qdrant_port: int = int(os.getenv("QDRANT_PORT", "6333"))
     qdrant_collection: str = os.getenv("QDRANT_COLLECTION", "user_bios")
     qdrant_vector_size: int = int(os.getenv("QDRANT_VECTOR_SIZE", "384"))

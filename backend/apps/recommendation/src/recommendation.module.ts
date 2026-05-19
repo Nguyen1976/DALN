@@ -21,6 +21,8 @@ import { EmbeddingNotifyService } from './services/embedding-notify.service'
 import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
 import { RecommendationFriendshipService } from './services/recommendation-friendship.service'
 import { FriendshipRecommendationSubscriber } from './rmq/subscribers/friendship-recommendation.subscriber'
+import { RecommendationGroupMembershipService } from './services/recommendation-group-membership.service'
+import { GroupMembershipSubscriber } from './rmq/subscribers/group-membership.subscriber'
 
 @Module({
   imports: [
@@ -67,6 +69,8 @@ import { FriendshipRecommendationSubscriber } from './rmq/subscribers/friendship
     RecommendationFriendshipService,
     UserSnapshotSyncSubscriber,
     FriendshipRecommendationSubscriber,
+    RecommendationGroupMembershipService,
+    GroupMembershipSubscriber,
     RecommendationCron,
     InterestTagService,
   ],

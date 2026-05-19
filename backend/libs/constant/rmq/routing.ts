@@ -6,6 +6,8 @@ export const ROUTING_RMQ = {
   MESSAGE_SEND: 'message.send',
   USER_UPDATED: 'user.updated',
   USER_INTERESTS_UPDATED: 'user.interests.updated',
+  USER_JOINED_GROUP: 'user.joinedGroup',
+  USER_LEFT_GROUP: 'user.leftGroup',
   EMIT_REALTIME_EVENT: 'realtime.emitEvent',
   SEND_MESSAGE: 'realtime.sendMessage',
   USER_OFFLINE: 'user.offline',

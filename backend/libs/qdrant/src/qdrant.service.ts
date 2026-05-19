@@ -7,7 +7,12 @@ export class QdrantService implements OnModuleInit {
   private readonly COLLECTION_NAME = 'user_bios'
 
   async onModuleInit() {
-    this.client = new QdrantClient({ host: 'localhost', port: 6333 })
+    const host = process.env.QDRANT_HOST?.trim() || '127.0.0.1'
+    const port = Number(process.env.QDRANT_PORT || 6333)
+    const url = process.env.QDRANT_URL?.trim()
+    this.client = url
+      ? new QdrantClient({ url })
+      : new QdrantClient({ host, port })
     try {
       await this.createCollection()
     } catch (error) {

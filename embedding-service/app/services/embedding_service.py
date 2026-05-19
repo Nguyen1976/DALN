@@ -37,7 +37,17 @@ class EmbeddingService:
         if not users:
             return {"status": "empty"}
 
-        texts = [f"Tieu su: {u.bio}. Doi tuong: {u.age} tuoi." for u in users]
+        substantial = [u for u in users if (u.bio or "").strip()]
+        if not substantial:
+            return {
+                "status": "ok",
+                "updated": 0,
+                "matched": 0,
+                "qdrant_upserted": 0,
+                "skipped_empty_bio": True,
+            }
+
+        texts = [f"Tieu su: {u.bio}. Doi tuong: {u.age} tuoi." for u in substantial]
 
         torch = self._torch()
         model = self._get_model()
@@ -52,11 +62,16 @@ class EmbeddingService:
 
         payload: list[tuple[str, list[float]]] = []
         embeddings_list = embeddings.tolist()
-        for index, user in enumerate(users):
+        for index, user in enumerate(substantial):
             payload.append((user.id, embeddings_list[index]))
 
         updated, matched = self.repository.bulk_update_profile_vectors(payload)
         q_upserted = upsert_user_bio_vectors(payload)
+        if settings.qdrant_enabled and len(payload) > 0 and q_upserted == 0:
+            raise RuntimeError(
+                "Qdrant upsert returned 0 points while QDRANT_ENABLED=true "
+                "(invalid mongo ids in payload or Qdrant rejected write)."
+            )
         return {
             "status": "ok",
             "updated": updated,

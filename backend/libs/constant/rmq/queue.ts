@@ -20,4 +20,6 @@ export const QUEUE_RMQ = {
     'recommendation_queue_user_interests_updated',
   RECOMMENDATION_USER_UPDATE_STATUS_MAKE_FRIEND:
     'recommendation_queue_user_update_status_make_friend',
+  RECOMMENDATION_USER_JOINED_GROUP: 'recommendation_queue_user_joined_group',
+  RECOMMENDATION_USER_LEFT_GROUP: 'recommendation_queue_user_left_group',
 }
