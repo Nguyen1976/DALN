@@ -5,7 +5,7 @@ import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { safeExecute } from '@app/common/rpc/safe-execute'
 import { Neo4jGraphSyncService } from '../../services/neo4j-graph-sync.service'
-import {
+import type {
   UserCreatedPayload,
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'

@@ -5,6 +5,8 @@ import {
   EmitToUserPayload,
   UserCreatedPayload,
   UserInterestsUpdatedPayload,
+  UserJoinGroupPayload,
+  UserLeftGroupPayload,
   UserMakeFriendPayload,
   UserRegisterOtpPayload,
   UserUpdatedPayload,

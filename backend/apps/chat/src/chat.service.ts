@@ -168,7 +168,7 @@ export class ChatService {
           userId: m.userId,
           groupId: conversation.id,
           conversationId: conversation.id,
-          groupName: conversation.groupName,
+          groupName: conversation.groupName ?? undefined,
           createdAt: new Date().toISOString(),
         })
       }
@@ -386,7 +386,7 @@ export class ChatService {
           userId: m.userId,
           groupId: dto.conversationId,
           conversationId: dto.conversationId,
-          groupName: conversation.groupName,
+          groupName: conversation.groupName ?? undefined,
           createdAt: new Date().toISOString(),
         })
       }
