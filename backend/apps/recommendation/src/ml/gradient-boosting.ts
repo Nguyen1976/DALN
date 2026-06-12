@@ -206,39 +206,35 @@ export function f1Score(yTrue: number[], yPred: number[]): number {
 }
 
 export function rocAucScore(yTrue: number[], yScore: number[]): number {
-  const pairs = yTrue
-    .map((label, i) => ({ label, score: yScore[i] }))
-    .sort((a, b) => b.score - a.score)
-
+  // Mann-Whitney U / rank-sum AUC (tie-aware). Robust and bounded in [0, 1].
+  const n = yTrue.length
   let nPos = 0
   let nNeg = 0
-  for (const pair of pairs) {
-    if (pair.label === 1) nPos++
+  for (const label of yTrue) {
+    if (label === 1) nPos++
     else nNeg++
   }
   if (nPos === 0 || nNeg === 0) return Number.NaN
 
-  let tp = 0
-  let fp = 0
-  let prevTp = 0
-  let prevFp = 0
-  let auc = 0
-  let prevScore = Number.POSITIVE_INFINITY
+  const order = yScore
+    .map((score, i) => ({ score, label: yTrue[i] }))
+    .sort((a, b) => a.score - b.score)
 
-  for (const pair of pairs) {
-    if (pair.score !== prevScore) {
-      auc +=
-        (fp - prevFp) * (tp + prevTp) +
-        (tp - prevTp) * (fp - prevFp) * 0.5
-      prevScore = pair.score
-      prevTp = tp
-      prevFp = fp
-    }
-    if (pair.label === 1) tp++
-    else fp++
+  // Assign average ranks (1-based), handling ties.
+  const ranks = new Array<number>(n)
+  let i = 0
+  while (i < n) {
+    let j = i
+    while (j + 1 < n && order[j + 1].score === order[i].score) j++
+    const avgRank = (i + 1 + (j + 1)) / 2
+    for (let k = i; k <= j; k++) ranks[k] = avgRank
+    i = j + 1
   }
 
-  auc +=
-    (fp - prevFp) * (tp + prevTp) + (tp - prevTp) * (fp - prevFp) * 0.5
-  return auc / (nPos * nNeg)
+  let rankSumPos = 0
+  for (let idx = 0; idx < n; idx++) {
+    if (order[idx].label === 1) rankSumPos += ranks[idx]
+  }
+
+  return (rankSumPos - (nPos * (nPos + 1)) / 2) / (nPos * nNeg)
 }
