@@ -3,7 +3,6 @@ import { APP_GUARD } from '@nestjs/core'
 import { ScheduleModule } from '@nestjs/schedule'
 import { RecommendationController } from './recommendation.controller'
 import { RecommendationService } from './recommendation.service'
-import { Neo4jModule } from '@app/neo4j'
 import { ConfigModule } from '@nestjs/config/dist/config.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { QdrantModule } from '@app/qdrant/qdrant.module'
@@ -27,11 +26,11 @@ import { RecommendationFriendshipService } from './services/recommendation-frien
 import { FriendshipRecommendationSubscriber } from './rmq/subscribers/friendship-recommendation.subscriber'
 import { RecommendationGroupMembershipService } from './services/recommendation-group-membership.service'
 import { GroupMembershipSubscriber } from './rmq/subscribers/group-membership.subscriber'
+import { FriendGraphService } from './services/friend-graph.service'
 
 @Module({
   imports: [
     PrismaModule,
-    Neo4jModule,
     CommonModule,
     ScheduleModule.forRoot(),
     ConfigModule.forRoot({
@@ -66,6 +65,7 @@ import { GroupMembershipSubscriber } from './rmq/subscribers/group-membership.su
       useClass: AuthGuard,
     },
     RecommendationService,
+    FriendGraphService,
     EmbeddingService,
     FeatureService,
     GbRankerService,

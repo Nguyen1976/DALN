@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common'
-import { Neo4jService } from '@app/neo4j/neo4j.service'
+import { Injectable, Logger } from '@nestjs/common'
+import { FriendGraphService } from './friend-graph.service'
 
 @Injectable()
 export class RecommendationGroupMembershipService {
-  constructor(private readonly neo4jService: Neo4jService) {}
+  private readonly logger = new Logger(RecommendationGroupMembershipService.name)
+
+  constructor(private readonly friendGraph: FriendGraphService) {}
 
   async onUserJoinedGroup(payload: {
     userId: string
@@ -12,20 +14,15 @@ export class RecommendationGroupMembershipService {
     groupName?: string
     createdAt?: string
   }): Promise<void> {
-    const { userId, groupId, groupName } = payload
-
-    const cypher = `
-      MERGE (g:Group {conversationId: $groupId})
-      SET g.name = coalesce($groupName, g.name), g.updatedAt = timestamp()
-      MERGE (u:User {userId: $userId})
-      MERGE (u)-[r:MEMBER_OF]->(g)
-      RETURN g, u
-    `
-
+    const conversationId = payload.conversationId ?? payload.groupId
     try {
-      await this.neo4jService.write(cypher, { userId, groupId, groupName })
+      await this.friendGraph.upsertGroupMembership(
+        payload.userId,
+        conversationId,
+        payload.groupName,
+      )
     } catch (e) {
-      console.warn('[recommendation] neo4j upsert group membership failed', e)
+      this.logger.warn(`upsert group membership failed: ${String(e)}`)
     }
   }
 
@@ -35,17 +32,11 @@ export class RecommendationGroupMembershipService {
     conversationId?: string
     leftAt?: string
   }): Promise<void> {
-    const { userId, groupId } = payload
-
-    const cypher = `
-      MATCH (u:User {userId: $userId})-[r:MEMBER_OF]->(g:Group {conversationId: $groupId})
-      DELETE r
-    `
-
+    const conversationId = payload.conversationId ?? payload.groupId
     try {
-      await this.neo4jService.write(cypher, { userId, groupId })
+      await this.friendGraph.removeGroupMembership(payload.userId, conversationId)
     } catch (e) {
-      console.warn('[recommendation] neo4j remove group membership failed', e)
+      this.logger.warn(`remove group membership failed: ${String(e)}`)
     }
   }
 }

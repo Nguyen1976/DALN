@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { Neo4jService } from '@app/neo4j/neo4j.service'
 import { QdrantService } from '@app/qdrant/qdrant.service'
 import { UtilService } from '@app/util/util.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { FeatureService, SAFE_FEATURES } from './feature.service'
+import { FriendGraphService } from './friend-graph.service'
 
 export type TrainingRow = {
   u: string
@@ -22,11 +22,11 @@ export class DatasetBuilderService {
   private readonly logger = new Logger(DatasetBuilderService.name)
 
   constructor(
-    private readonly neo4jService: Neo4jService,
     private readonly qdrantService: QdrantService,
     private readonly utilService: UtilService,
     private readonly prisma: PrismaService,
     private readonly featureService: FeatureService,
+    private readonly friendGraph: FriendGraphService,
   ) {}
 
   private pairKey(a: string, b: string): string {
@@ -113,45 +113,13 @@ export class DatasetBuilderService {
   private async fetchFriendEdges(): Promise<
     Array<{ user1: string; user2: string }>
   > {
-    const rows = await this.neo4jService.read(
-      `MATCH (u:User)-[:FRIEND]-(v:User)
-       WHERE u.userId < v.userId
-       RETURN u.userId AS user1, v.userId AS user2`,
-      {},
-    )
-    return rows
-      .map((row) => ({
-        user1: String(row.get('user1') ?? ''),
-        user2: String(row.get('user2') ?? ''),
-      }))
-      .filter((row) => row.user1 && row.user2)
+    return this.friendGraph.getAllFriendEdges()
   }
 
   private async fetchGroupsByUser(
     userIds: string[],
   ): Promise<Map<string, Set<string>>> {
-    const groupsByUser = new Map<string, Set<string>>()
-    for (const userId of userIds) {
-      groupsByUser.set(userId, new Set())
-    }
-    if (!userIds.length) return groupsByUser
-
-    const rows = await this.neo4jService.read(
-      `UNWIND $userIds AS userId
-       MATCH (u:User {userId: userId})-[:MEMBER_OF]-(g:Group)
-       RETURN userId, collect(DISTINCT g.conversationId) AS groups`,
-      { userIds },
-    )
-
-    for (const row of rows) {
-      const userId = String(row.get('userId') ?? '')
-      const groupsRaw = row.get('groups')
-      const groups = Array.isArray(groupsRaw)
-        ? groupsRaw.map((g) => String(g)).filter(Boolean)
-        : []
-      groupsByUser.set(userId, new Set(groups))
-    }
-    return groupsByUser
+    return this.friendGraph.getGroupsBatch(userIds)
   }
 
   private async fetchSnapshots(userIds: string[]) {
@@ -228,7 +196,7 @@ export class DatasetBuilderService {
 
     const edges = await this.fetchFriendEdges()
     if (!edges.length) {
-      throw new Error('No friend edges found in Neo4j')
+      throw new Error('No friend edges found in MongoDB friendship replica')
     }
 
     const neighbors = this.buildNeighborDict(edges)

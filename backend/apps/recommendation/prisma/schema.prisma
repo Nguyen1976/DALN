@@ -39,6 +39,34 @@ model InterestTag {
   isActive  Boolean  @default(true)
 }
 
+/// Local replica of the user-service friendship graph (source of truth = MongoDB
+/// in user-service). Stored bidirectionally (one row per direction) so friend
+/// lookups and friend-of-friend queries can run entirely in MongoDB.
+model Friendship {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String
+  friendId  String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, friendId])
+  @@index([userId])
+  @@index([friendId])
+}
+
+/// Local replica of group membership (source of truth = chat-service). Replaces
+/// the previous Neo4j (:User)-[:MEMBER_OF]->(:Group) edges.
+model GroupMembership {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String
+  conversationId String
+  groupName      String?
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, conversationId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
 model RecommendationResult {
   id           String   @id @default(auto()) @map("_id") @db.ObjectId
   userId       String   @unique @db.ObjectId

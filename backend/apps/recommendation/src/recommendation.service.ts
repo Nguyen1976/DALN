@@ -1,4 +1,3 @@
-import { Neo4jService } from '@app/neo4j/neo4j.service'
 import { Inject, Injectable } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { QdrantService } from '@app/qdrant/qdrant.service'
@@ -6,6 +5,7 @@ import { UtilService } from '@app/util/util.service'
 import { RedisService } from '@app/redis/redis.service'
 import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
 import { RecommendationFriendshipService } from './services/recommendation-friendship.service'
+import { FriendGraphService } from './services/friend-graph.service'
 import { EmbeddingService } from './services/embedding.service'
 import { FeatureService } from './services/feature.service'
 import { GbRankerService } from './services/gb-ranker.service'
@@ -48,7 +48,6 @@ type RecommendationFeatureRow = {
 @Injectable()
 export class RecommendationService {
   constructor(
-    private readonly neo4jService: Neo4jService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly qdrantService: QdrantService,
     private readonly utilService: UtilService,
@@ -58,6 +57,7 @@ export class RecommendationService {
     private readonly gbRankerService: GbRankerService,
     private readonly userSnapshotHydrate: UserSnapshotHydrateService,
     private readonly recommendationFriendship: RecommendationFriendshipService,
+    private readonly friendGraph: FriendGraphService,
   ) {}
 
   private tokenizeBio(text: string): Set<string> {
@@ -280,14 +280,10 @@ export class RecommendationService {
 
   private async getFriendIdsExclusive(userId: string): Promise<string[]> {
     try {
-      const rows = await this.neo4jService.read(
-        `MATCH (me:User {userId: $userId})-[:FRIEND]-(f:User)
-         RETURN DISTINCT f.userId AS friendId`,
-        { userId },
+      const ids = await this.friendGraph.getFriendIds(userId)
+      return ids.filter(
+        (id): id is string => typeof id === 'string' && id.length > 0,
       )
-      return rows
-        .map((r) => r.get('friendId'))
-        .filter((id): id is string => typeof id === 'string' && id.length > 0)
     } catch {
       return []
     }
@@ -734,48 +730,24 @@ export class RecommendationService {
     console.log(`--- Bắt đầu xử lý Suggest cho User: ${userId} ---`)
     console.time('Tổng thời gian recommendationHelper')
 
-    // 1. Bạn bè từ Neo4j (cold start: có thể không có node / lỗi kết nối)
-    let friendRecords: any[] = []
+    // 1. Bạn bè từ MongoDB (cold start: có thể không có dữ liệu)
+    let friendIds: string[] = []
     try {
-      friendRecords = await this.neo4jService.read(
-        `
-    MATCH (me:User {userId: $userId})-[:FRIEND]-(friend:User)
-    RETURN friend.userId AS friendId
-  `,
-        { userId },
-      )
+      friendIds = await this.friendGraph.getFriendIds(userId)
     } catch (e) {
-      console.warn('[recommendation] neo4j friend list failed', e)
+      console.warn('[recommendation] friend list failed', e)
     }
-
-    const friendIds: string[] = friendRecords
-      .map((r) => r.get('friendId'))
-      .filter((id) => id && typeof id === 'string')
+    friendIds = friendIds.filter((id) => id && typeof id === 'string')
 
     const friendCountExclusive = friendIds.length
-    friendIds.push(userId)
-    const uniqueExcludeIds = Array.from(new Set(friendIds))
-
-    const queryCommonFriends = `
-    MATCH (me:User {userId: $userId})-[:FRIEND]-(friend: User)-[:FRIEND]-(stranger:User)
-    WHERE NOT (me)-[:FRIEND]-(stranger) AND me <> stranger
-    RETURN stranger.userId AS id, count(friend) AS commonFriends
-    ORDER BY commonFriends DESC LIMIT 300
-  `
-
-    const queryCommonGroups = `
-    MATCH (me:User {userId: $userId})-[:MEMBER_OF]-(group:Group)<-[:MEMBER_OF]-(stranger:User)
-    WHERE NOT (me)-[:FRIEND]-(stranger) AND me <> stranger
-    RETURN stranger.userId AS id, count(group) AS commonGroups
-    ORDER BY commonGroups DESC LIMIT 300
-  `
+    const uniqueExcludeIds = Array.from(new Set([...friendIds, userId]))
 
     const qdrantUuid = await this.utilService.mongoIdToUuid(userId)
 
     console.time('Giai đoạn xử lý song song')
     const settled = await Promise.allSettled([
-      this.neo4jService.read(queryCommonFriends, { userId }),
-      this.neo4jService.read(queryCommonGroups, { userId }),
+      this.friendGraph.getCommonFriends(userId, 300),
+      this.friendGraph.getCommonGroups(userId, 300),
       this.qdrantService.recommendSimilar(qdrantUuid, 200, uniqueExcludeIds),
       this.prisma.userSnapshot.findUnique({
         where: { userId },
@@ -784,22 +756,16 @@ export class RecommendationService {
     ])
     console.timeEnd('Giai đoạn xử lý song song')
 
-    const commonFriendsRecords =
+    const commonFriends =
       settled[0].status === 'fulfilled' ? settled[0].value : []
     if (settled[0].status === 'rejected') {
-      console.warn(
-        '[recommendation] neo4j commonFriends failed',
-        settled[0].reason,
-      )
+      console.warn('[recommendation] commonFriends failed', settled[0].reason)
     }
 
-    const commonGroupsRecords =
+    const commonGroups =
       settled[1].status === 'fulfilled' ? settled[1].value : []
     if (settled[1].status === 'rejected') {
-      console.warn(
-        '[recommendation] neo4j commonGroups failed',
-        settled[1].reason,
-      )
+      console.warn('[recommendation] commonGroups failed', settled[1].reason)
     }
 
     const qdrantRes = settled[2].status === 'fulfilled' ? settled[2].value : []
@@ -818,16 +784,6 @@ export class RecommendationService {
         settled[3].reason,
       )
     }
-
-    const commonFriends = commonFriendsRecords.map((r) => ({
-      id: r.get('id'),
-      commonFriends: r.get('commonFriends')?.toNumber?.() ?? 0,
-    }))
-
-    const commonGroups = commonGroupsRecords.map((r) => ({
-      id: r.get('id'),
-      commonGroups: r.get('commonGroups')?.toNumber?.() ?? 0,
-    }))
 
     console.time('Giai đoạn 5: MongoDB GeoNear')
     const nearPoint = this.toGeoNearNearField(currentUser?.location)
@@ -998,92 +954,43 @@ export class RecommendationService {
       }
     }
 
-    // Giai đoạn 7d: Fetch neighbors (friends) của current user + tất cả candidates từ Neo4j
-    console.time('Giai đoạn 7d: Fetch neighbors from Neo4j')
+    // Giai đoạn 7d: Fetch neighbors (friends) của current user + candidates từ MongoDB
+    console.time('Giai đoạn 7d: Fetch neighbors from MongoDB')
     const userIdsForNeighbors = [userId, ...allCandidateIds]
-    let neighborsRecords: any[] = []
+    let neighborsByUserId = new Map<string, Set<string>>()
     try {
-      neighborsRecords = await this.neo4jService.read(
-        `
-      UNWIND $userIds AS userId
-      MATCH (u:User {userId: userId})-[:FRIEND]-(friend:User)
-      RETURN userId, collect(friend.userId) AS friendIds
-    `,
-        { userIds: userIdsForNeighbors },
-      )
+      neighborsByUserId =
+        await this.friendGraph.getNeighborsBatch(userIdsForNeighbors)
     } catch (e) {
-      console.warn('[recommendation] neo4j neighbors batch failed', e)
+      console.warn('[recommendation] neighbors batch failed', e)
     }
 
-    // Build map: userId -> Set<friendIds> and degrees map
-    const neighborsByUserId = new Map<string, Set<string>>()
     const degreesByUserId = new Map<string, number>()
-    for (const record of neighborsRecords) {
-      const uid = record.get('userId')
-      const friendIdsRaw = record.get('friendIds')
-      const friendSet = new Set(
-        Array.isArray(friendIdsRaw)
-          ? (friendIdsRaw as string[])
-          : typeof friendIdsRaw === 'string'
-            ? [friendIdsRaw]
-            : [],
-      )
-      neighborsByUserId.set(uid, friendSet)
+    for (const [uid, friendSet] of neighborsByUserId) {
       degreesByUserId.set(uid, friendSet.size)
     }
-
-    // Ensure current user is in the map
     if (!neighborsByUserId.has(userId)) {
       neighborsByUserId.set(userId, new Set())
       degreesByUserId.set(userId, 0)
     }
 
-    console.timeEnd('Giai đoạn 7d: Fetch neighbors from Neo4j')
+    console.timeEnd('Giai đoạn 7d: Fetch neighbors from MongoDB')
 
-    // Giai đoạn 7d.5: Fetch groups (MEMBER_OF) của current user + tất cả candidates từ Neo4j
-    console.time('Giai đoạn 7d.5: Fetch groups from Neo4j')
-    let groupsRecords: any[] = []
+    // Giai đoạn 7d.5: Fetch groups của current user + candidates từ MongoDB
+    console.time('Giai đoạn 7d.5: Fetch groups from MongoDB')
+    let groupsByUserId = new Map<string, Set<string>>()
     try {
-      groupsRecords = await this.neo4jService.read(
-        `
-      UNWIND $userIds AS userId
-      MATCH (u:User {userId: userId})-[:MEMBER_OF]-(group:Group)
-      RETURN userId, collect(group.conversationId) AS groupIds
-    `,
-        { userIds: userIdsForNeighbors },
-      )
+      groupsByUserId = await this.friendGraph.getGroupsBatch(userIdsForNeighbors)
     } catch (e) {
-      console.warn('[recommendation] neo4j groups batch failed', e)
+      console.warn('[recommendation] groups batch failed', e)
     }
-
-    // Build map: userId -> Set<groupIds>
-    const groupsByUserId = new Map<string, Set<string>>()
-    for (const record of groupsRecords) {
-      const uid = record.get('userId')
-      const groupIdsRaw = record.get('groupIds')
-      const groupIds = (
-        Array.isArray(groupIdsRaw)
-          ? groupIdsRaw
-          : typeof groupIdsRaw === 'string'
-            ? [groupIdsRaw]
-            : []
-      )
-        .map((value) => (typeof value === 'string' ? value : null))
-        .filter(
-          (value): value is string =>
-            typeof value === 'string' && value.length > 0,
-        )
-      groupsByUserId.set(uid, new Set(groupIds))
-    }
-
-    // Ensure all users are in the map
     for (const id of userIdsForNeighbors) {
       if (!groupsByUserId.has(id)) {
         groupsByUserId.set(id, new Set())
       }
     }
 
-    console.timeEnd('Giai đoạn 7d.5: Fetch groups from Neo4j')
+    console.timeEnd('Giai đoạn 7d.5: Fetch groups from MongoDB')
 
     console.timeEnd('Giai đoạn 7: Enrich Features')
 
