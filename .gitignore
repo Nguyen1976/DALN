@@ -1,0 +1,10 @@
+# OS
+.DS_Store
+
+# Datasets (large, downloaded separately)
+loc-brightkite_edges (1).txt*
+
+# Python training pipeline
+training/.venv/
+**/__pycache__/
+*.pyc
