@@ -91,33 +91,23 @@ export class UserService {
     private readonly logger: LoggerService,
   ) {}
 
-  /** Same resolution as recommendation `EmbeddingNotifyService`. */
-  private embeddingServiceBaseUrl(): string {
-    const explicit = process.env.EMBEDDING_SERVICE_URL?.trim().replace(/\/+$/, '')
-    if (explicit) return explicit
-    for (const key of ['PYTHON_RECOMMEND_URL', 'PYTHON_TOPK_URL'] as const) {
-      const raw = process.env[key]?.trim()
-      if (raw) {
-        try {
-          return new URL(raw).origin
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    return 'http://127.0.0.1:8000'
+  private recommendationServiceBaseUrl(): string {
+    return (
+      process.env.RECOMMENDATION_SERVICE_URL?.trim().replace(/\/+$/, '') ||
+      'http://127.0.0.1:3005'
+    )
   }
 
   private generateOtp(length = 6): string {
     return Array.from({ length }, () => Math.floor(Math.random() * 10)).join('')
   }
 
-  /** Calls embedding-service: Mongo `profile_vector` + Qdrant `user_bios`. */
+  /** Calls recommendation service: Qdrant `user_bios` embedding upsert. */
   private async notifyEmbeddingServiceBio(
     userId: string,
     bio: string,
   ): Promise<void> {
-    const url = `${this.embeddingServiceBaseUrl()}/embed-and-save`
+    const url = `${this.recommendationServiceBaseUrl()}/recommendation/embed-and-save`
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 30_000)
     try {
