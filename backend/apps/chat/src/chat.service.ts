@@ -160,7 +160,7 @@ export class ChatService {
       memberIds,
     })
 
-    // publish RMQ events for initial group members so recommendation/neo4j stays in sync
+    // publish RMQ events for initial group members so recommendation stays in sync
     try {
       const membersToPublish = uniqueMembers || []
       for (const m of membersToPublish) {
@@ -379,7 +379,7 @@ export class ChatService {
       }),
     )
 
-    // publish RMQ events for recommendation / neo4j sync for each new member
+    // publish RMQ events for recommendation sync for each new member
     try {
       for (const m of newMembers) {
         this.eventsPublisher.publishUserJoinedGroup({
@@ -489,7 +489,7 @@ export class ChatService {
       }),
     )
 
-    // publish RMQ event for recommendation / neo4j sync
+    // publish RMQ event for recommendation sync
     try {
       this.eventsPublisher.publishUserLeftGroup({
         userId: dto.targetUserId,
@@ -569,7 +569,7 @@ export class ChatService {
       }),
     )
 
-    // publish RMQ event for recommendation / neo4j sync
+    // publish RMQ event for recommendation sync
     try {
       this.eventsPublisher.publishUserLeftGroup({
         userId: dto.userId,
