@@ -9,7 +9,11 @@ import { PrismaModule } from '../prisma/prisma.module'
 import { QdrantModule } from '@app/qdrant/qdrant.module'
 import { UtilModule } from '@app/util'
 import { RedisModule } from '@app/redis'
-import { PythonRecommendationClient } from './python-recommendation.client'
+import { EmbeddingService } from './services/embedding.service'
+import { FeatureService } from './services/feature.service'
+import { GbRankerService } from './services/gb-ranker.service'
+import { DatasetBuilderService } from './services/dataset-builder.service'
+import { ModelTrainingService } from './services/model-training.service'
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { UserSnapshotSyncService } from './services/user-snapshot-sync.service'
@@ -62,7 +66,11 @@ import { GroupMembershipSubscriber } from './rmq/subscribers/group-membership.su
       useClass: AuthGuard,
     },
     RecommendationService,
-    PythonRecommendationClient,
+    EmbeddingService,
+    FeatureService,
+    GbRankerService,
+    DatasetBuilderService,
+    ModelTrainingService,
     UserSnapshotSyncService,
     EmbeddingNotifyService,
     UserSnapshotHydrateService,
