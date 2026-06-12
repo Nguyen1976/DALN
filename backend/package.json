@@ -9,6 +9,7 @@
     "proto:gen": "protoc -I ./proto   --ts_proto_out=interfaces   --ts_proto_opt=nestJs=true,addGrpcMetadata=true   ./proto/*.proto",
     "db:normalize-chat-legacy": "ts-node scripts/normalize-chat-legacy.ts",
     "db:backfill-conversation-member-profile": "ts-node scripts/backfill-conversation-member-profile.ts",
+    "rcm:train-bootstrap": "ts-node --compiler-options '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' scripts/train-rcm-from-dataset.ts",
     "build": "nest build",
     "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
     "start": "nest start",
