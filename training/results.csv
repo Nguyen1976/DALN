@@ -1,0 +1,6 @@
+Mô hình (Model),Train F1,Train AUC,Test F1,Test AUC
+Logistic Regression (logreg),0.821,0.9077,0.8218,0.9087
+Random Forest (rf),0.8499,0.9318,0.8516,0.9312
+Gradient Boosting (gb),0.8506,0.9308,0.851,0.9315
+K-Nearest Neighbors (knn),0.8635,0.9284,0.8393,0.9005
+J45/C4.5,0.8485,0.9305,0.8479,0.9298
