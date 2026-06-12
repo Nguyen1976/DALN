@@ -4,9 +4,11 @@ import { PrismaService } from '../prisma/prisma.service'
 import { QdrantService } from '@app/qdrant/qdrant.service'
 import { UtilService } from '@app/util/util.service'
 import { RedisService } from '@app/redis/redis.service'
-import { PythonRecommendationClient } from './python-recommendation.client'
 import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
 import { RecommendationFriendshipService } from './services/recommendation-friendship.service'
+import { EmbeddingService } from './services/embedding.service'
+import { FeatureService } from './services/feature.service'
+import { GbRankerService } from './services/gb-ranker.service'
 import * as _ from 'lodash'
 
 type NearbyUser = {
@@ -51,151 +53,12 @@ export class RecommendationService {
     private readonly qdrantService: QdrantService,
     private readonly utilService: UtilService,
     private readonly redisService: RedisService,
-    private readonly pythonClient: PythonRecommendationClient,
+    private readonly embeddingService: EmbeddingService,
+    private readonly featureService: FeatureService,
+    private readonly gbRankerService: GbRankerService,
     private readonly userSnapshotHydrate: UserSnapshotHydrateService,
     private readonly recommendationFriendship: RecommendationFriendshipService,
   ) {}
-
-  /**
-   * Graph Features Computation
-   */
-
-  private computeJaccard(neighU: Set<string>, neighV: Set<string>): number {
-    if (neighU.size === 0 && neighV.size === 0) return 0
-    const intersection = new Set([...neighU].filter((x) => neighV.has(x)))
-    const union = new Set([...neighU, ...neighV])
-    return union.size > 0 ? intersection.size / union.size : 0
-  }
-
-  private computeCosineGraph(neighU: Set<string>, neighV: Set<string>): number {
-    const intersection = new Set([...neighU].filter((x) => neighV.has(x)))
-    const denominator = Math.sqrt(neighU.size * neighV.size)
-    return denominator > 0 ? intersection.size / denominator : 0
-  }
-
-  private computeAdamicAdar(
-    neighU: Set<string>,
-    neighV: Set<string>,
-    degrees: Map<string, number>,
-  ): number {
-    const common = new Set([...neighU].filter((x) => neighV.has(x)))
-    let score = 0
-    for (const z of common) {
-      const deg = degrees.get(z) ?? 1
-      if (deg > 1) {
-        score += 1 / Math.log(deg)
-      }
-    }
-    return score
-  }
-
-  private computePreferentialAttachment(
-    neighU: Set<string>,
-    neighV: Set<string>,
-  ): number {
-    return neighU.size * neighV.size
-  }
-
-  private computeDegree(neighbors: Set<string>): number {
-    return neighbors.size
-  }
-
-  /**
-   * Bio Embedding Features Computation
-   */
-
-  private computeBioCosine(
-    bioA: number[] | null,
-    bioB: number[] | null,
-  ): number {
-    if (!bioA || !bioB || bioA.length === 0 || bioB.length === 0) return 0
-    if (bioA.length !== bioB.length) return 0
-
-    let dotProduct = 0
-    let normA = 0
-    let normB = 0
-
-    for (let i = 0; i < bioA.length; i++) {
-      dotProduct += bioA[i] * bioB[i]
-      normA += bioA[i] * bioA[i]
-      normB += bioB[i] * bioB[i]
-    }
-
-    const denominator = Math.sqrt(normA) * Math.sqrt(normB)
-    return denominator > 0 ? dotProduct / denominator : 0
-  }
-
-  private computeBioDot(bioA: number[] | null, bioB: number[] | null): number {
-    if (!bioA || !bioB || bioA.length === 0 || bioB.length === 0) return 0
-    if (bioA.length !== bioB.length) return 0
-
-    let dotProduct = 0
-    for (let i = 0; i < bioA.length; i++) {
-      dotProduct += bioA[i] * bioB[i]
-    }
-    return dotProduct
-  }
-
-  private computeBioL2(bioA: number[] | null, bioB: number[] | null): number {
-    if (!bioA || !bioB || bioA.length === 0 || bioB.length === 0) return 0
-    if (bioA.length !== bioB.length) return 0
-
-    let sumSquaredDiff = 0
-    for (let i = 0; i < bioA.length; i++) {
-      const diff = bioA[i] - bioB[i]
-      sumSquaredDiff += diff * diff
-    }
-    return Math.sqrt(sumSquaredDiff)
-  }
-
-  /**
-   * Distance & Community Features Computation
-   */
-
-  private computeDistanceBucket(km: number): number {
-    // buckets: 0-1=0, 1-5=1, 5-20=2, 20-100=3, 100+=4
-    if (km <= 1) return 0
-    if (km <= 5) return 1
-    if (km <= 20) return 2
-    if (km <= 100) return 3
-    return 4
-  }
-
-  private computeSameGroup(
-    userGroups: Set<string>,
-    candidateGroups: Set<string>,
-  ): number {
-    // Returns 1 if they have at least 1 group in common, 0 otherwise
-    for (const group of userGroups) {
-      if (candidateGroups.has(group)) return 1
-    }
-    return 0
-  }
-
-  private computeGroupIntersection(
-    userGroups: Set<string>,
-    candidateGroups: Set<string>,
-  ): number {
-    // Count of common groups
-    let count = 0
-    for (const group of userGroups) {
-      if (candidateGroups.has(group)) count++
-    }
-    return count
-  }
-
-  private computeGroupJaccard(
-    userGroups: Set<string>,
-    candidateGroups: Set<string>,
-  ): number {
-    // Jaccard similarity of group sets
-    if (userGroups.size === 0 && candidateGroups.size === 0) return 0
-    const intersection = new Set(
-      [...userGroups].filter((x) => candidateGroups.has(x)),
-    )
-    const union = new Set([...userGroups, ...candidateGroups])
-    return union.size > 0 ? intersection.size / union.size : 0
-  }
 
   private tokenizeBio(text: string): Set<string> {
     return new Set(
@@ -246,28 +109,6 @@ export class RecommendationService {
     return [lng, lat]
   }
 
-  private haversineDistanceKm(
-    from: [number, number],
-    to: [number, number],
-  ): number {
-    const [fromLng, fromLat] = from
-    const [toLng, toLat] = to
-
-    const toRad = (deg: number) => (deg * Math.PI) / 180
-    const earthRadiusKm = 6371
-
-    const dLat = toRad(toLat - fromLat)
-    const dLng = toRad(toLng - fromLng)
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(fromLat)) *
-        Math.cos(toRad(toLat)) *
-        Math.sin(dLng / 2) ** 2
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-
-    return earthRadiusKm * c
-  }
-
   /** GeoJSON Point for $geoNear — supports legacy `{ lat, lon }` snapshots. */
   private toGeoNearNearField(location: unknown): {
     type: 'Point'
@@ -282,20 +123,6 @@ export class RecommendationService {
     const lon = typeof lo?.lon === 'number' ? lo.lon : Number(lo?.lon)
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
       return { type: 'Point', coordinates: [lon, lat] }
-    }
-    return null
-  }
-
-  private getLngLatPair(location: unknown): [number, number] | null {
-    const fromCoordinates = this.getCoordinates(location)
-    if (fromCoordinates) {
-      return fromCoordinates
-    }
-    const lo = location as { lat?: unknown; lon?: unknown } | null
-    const lat = typeof lo?.lat === 'number' ? lo.lat : Number(lo?.lat)
-    const lon = typeof lo?.lon === 'number' ? lo.lon : Number(lo?.lon)
-    if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      return [lon, lat]
     }
     return null
   }
@@ -451,25 +278,6 @@ export class RecommendationService {
     return null
   }
 
-  private embeddingServiceBaseUrl(): string {
-    const explicit = process.env.EMBEDDING_SERVICE_URL?.trim().replace(
-      /\/+$/,
-      '',
-    )
-    if (explicit) return explicit
-    for (const key of ['PYTHON_RECOMMEND_URL', 'PYTHON_TOPK_URL'] as const) {
-      const raw = process.env[key]?.trim()
-      if (raw) {
-        try {
-          return new URL(raw).origin
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    return 'http://127.0.0.1:8000'
-  }
-
   private async getFriendIdsExclusive(userId: string): Promise<string[]> {
     try {
       const rows = await this.neo4jService.read(
@@ -485,11 +293,6 @@ export class RecommendationService {
     }
   }
 
-  private async countFriendsExclusive(userId: string): Promise<number> {
-    const ids = await this.getFriendIdsExclusive(userId)
-    return ids.length
-  }
-
   private filterCandidatesExcludingFriends<T extends { candidateId?: string }>(
     rows: T[],
     friendIds: string[],
@@ -503,27 +306,10 @@ export class RecommendationService {
     userId: string,
     bio: string,
   ): Promise<boolean> {
-    const url = `${this.embeddingServiceBaseUrl()}/embed-and-save`
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 15_000)
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          users: [{ id: userId, bio: bio || '', age: 0 }],
-        }),
-        signal: controller.signal,
-      })
-      const body = (await res.json().catch(() => null)) as {
-        status?: string
-      } | null
-      return res.ok && body?.status === 'ok'
-    } catch {
-      return false
-    } finally {
-      clearTimeout(timer)
-    }
+    const result = await this.embeddingService.embedAndSave([
+      { id: userId, bio: bio || '', age: 0 },
+    ])
+    return result.status === 'ok'
   }
 
   private async fetchTopInterestOverlapUserIds(
@@ -1314,7 +1100,9 @@ export class RecommendationService {
     )
 
     const currentUserBio = currentUser?.bio ?? null
-    const currentUserCoordinates = this.getLngLatPair(currentUser?.location)
+    const currentUserCoordinates = this.featureService.getLngLatPair(
+      currentUser?.location,
+    )
     const currentUserInterests = currentUser?.interests ?? []
 
     console.log({
@@ -1347,7 +1135,7 @@ export class RecommendationService {
       )
       const qdrantScore = qdrantScoreById.get(candidateId) ?? 0
 
-      const candidateCoordinates = this.getLngLatPair(
+      const candidateCoordinates = this.featureService.getLngLatPair(
         candidateProfile?.location,
       )
       const interestJaccard = this.computeInterestJaccard(
@@ -1356,7 +1144,7 @@ export class RecommendationService {
       )
       const distanceKm =
         currentUserCoordinates && candidateCoordinates
-          ? this.haversineDistanceKm(
+          ? this.featureService.haversineDistanceKm(
               currentUserCoordinates,
               candidateCoordinates,
             )
@@ -1364,51 +1152,54 @@ export class RecommendationService {
 
       // Graph Features
       const candidateNeighbors = neighborsByUserId.get(candidateId) ?? new Set()
-      const degreeU = this.computeDegree(currentUserNeighbors)
-      const degreeV = this.computeDegree(candidateNeighbors)
-      const jaccard = this.computeJaccard(
+      const degreeU = this.featureService.computeDegree(currentUserNeighbors)
+      const degreeV = this.featureService.computeDegree(candidateNeighbors)
+      const jaccard = this.featureService.computeJaccard(
         currentUserNeighbors,
         candidateNeighbors,
       )
-      const cosineGraph = this.computeCosineGraph(
+      const cosineGraph = this.featureService.computeCosineGraph(
         currentUserNeighbors,
         candidateNeighbors,
       )
-      const adamicAdar = this.computeAdamicAdar(
+      const adamicAdar = this.featureService.computeAdamicAdar(
         currentUserNeighbors,
         candidateNeighbors,
         degreesByUserId,
       )
-      const prefAttach = this.computePreferentialAttachment(
+      const prefAttach = this.featureService.computePreferentialAttachment(
         currentUserNeighbors,
         candidateNeighbors,
       )
 
       // Bio Embedding Features
       const candidateBioVector = bioVectorsByUserId.get(candidateId) ?? null
-      const bioCosine = this.computeBioCosine(
+      const bioCosine = this.featureService.computeBioCosine(
         currentUserBioVector,
         candidateBioVector,
       )
-      const bioDot = this.computeBioDot(
+      const bioDot = this.featureService.computeBioDot(
         currentUserBioVector,
         candidateBioVector,
       )
-      const bioL2 = this.computeBioL2(currentUserBioVector, candidateBioVector)
+      const bioL2 = this.featureService.computeBioL2(
+        currentUserBioVector,
+        candidateBioVector,
+      )
 
       // Distance & Community Features
-      const distanceBucket = this.computeDistanceBucket(distanceKm)
+      const distanceBucket = this.featureService.computeDistanceBucket(distanceKm)
       const currentUserGroups = groupsByUserId.get(userId) ?? new Set()
       const candidateGroups = groupsByUserId.get(candidateId) ?? new Set()
-      const sameGroup = this.computeSameGroup(
+      const sameGroup = this.featureService.computeSameGroup(
         currentUserGroups,
         candidateGroups,
       )
-      const groupInter = this.computeGroupIntersection(
+      const groupInter = this.featureService.computeGroupIntersection(
         currentUserGroups,
         candidateGroups,
       )
-      const groupJaccard = this.computeGroupJaccard(
+      const groupJaccard = this.featureService.computeGroupJaccard(
         currentUserGroups,
         candidateGroups,
       )
@@ -1483,7 +1274,7 @@ export class RecommendationService {
       ) as any
 
     let topKCandidates =
-      await this.pythonClient.predictTop100(candidatesForPython)
+      await this.gbRankerService.predictTop100(candidatesForPython)
 
     const priorValues = Array.from(coldPriorById.values())
     const maxColdPrior = Math.max(1e-9, ...priorValues)

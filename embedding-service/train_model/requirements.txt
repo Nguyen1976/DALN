@@ -1,7 +1,0 @@
-neo4j
-pandas
-numpy
-scikit-learn
-joblib
-networkx
-tqdm

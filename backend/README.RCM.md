@@ -9,10 +9,10 @@ Thiết kế dài hạn / mục tiêu kiến trúc: [`README.RECOMMENDATION.md`]
 
 | Thành phần | Trong code | Lưu trữ (persist) | Ghi chú kiểm tra môi trường local (máy dev) |
 |------------|------------|-------------------|---------------------------------------------|
-| **RCM theo model Python (GB)** | Có — `recommendationHelper` → `POST /recommend/rank` | Có — Mongo `recommendation-service.RecommendationResult` | **Chưa có bản ghi** nếu chưa chạy batch/cron hoặc `UserSnapshot` rỗng |
+| **RCM theo model GB (NestJS)** | Có — `recommendationHelper` → `GbRankerService` in-process | Có — Mongo `recommendation-service.RecommendationResult` | **Chưa có bản ghi** nếu chưa chạy batch/cron hoặc `UserSnapshot` rỗng |
 | **Cold start khi GET** (heuristic, không model) | Có — `getLiveHeuristicColdStartRecommendations` | **Không** lưu DB; trả live `source: live_heuristic` | Cần `UserSnapshot` + location/interests/bio; Qdrant bio cần có point |
 | **Cold blend trong batch** | Có — blend `cold_prior` khi graph thưa | Nằm trong `RecommendationResult` sau cron | `α` model thấp hơn khi `isColdStartUser` |
-| **Bio → vector Mongo + Qdrant** | Có — `embedding-service` `/embed-and-save` | `user-service.User.profile_vector` + Qdrant `user_bios` | Qdrant **0 point** = chưa embed/upsert thành công |
+| **Bio → vector Qdrant** | Có — `POST /recommendation/embed-and-save` (NestJS) | Qdrant `user_bios` | Qdrant **0 point** = chưa embed/upsert thành công |
 | **Replica user → recommendation** | Có — RMQ `USER_CREATED` / `USER_UPDATED` / `USER_INTERESTS_UPDATED` | `UserSnapshot` | **0 snapshot** = Rabbit/event hoặc user tạo trước khi bật subscriber |
 
 **Kết luận:** Bài toán **đã được implement** (model path + cold start path + lưu kết quả batch). Trên DB local hiện tại **chưa có dữ liệu chạy thật** (`UserSnapshot: 0`, `RecommendationResult: 0`, Qdrant `user_bios`: 0 points) — cần sync snapshot, embed bio, rồi chạy ranking một lần (cron hoặc gọi helper).
@@ -34,16 +34,17 @@ flowchart LR
     R[RecommendationResult]
     H[recommendationHelper]
   end
-  subgraph py [embedding-service :8000]
+  subgraph rcm_ml [recommendation ML in-process]
     EM[embed-and-save]
-    TK[/recommend/rank gb.joblib]
+    TK[GbRankerService gb.json]
+    TR[model/train + model/evaluate]
   end
   subgraph stores [Stores]
     N4j[(Neo4j graph)]
     Qd[(Qdrant user_bios)]
   end
   U --> E --> S
-  U --> EM --> U
+  U -->|HTTP| EM
   EM --> Qd
   S --> H
   N4j --> H
@@ -52,19 +53,19 @@ flowchart LR
   H --> R
 ```
 
-**Cổng mặc định (host):** user `3002`, chat `3003`, notification `3004`, recommendation `3005`, Kong `8080`, embedding `8000`, Qdrant `6333`.
+**Cổng mặc định (host):** user `3002`, chat `3003`, notification `3004`, recommendation `3005`, Kong `8080`, Qdrant `6333`.
 
 ---
 
 ## 3. Hai đường gợi ý (đừng nhầm)
 
-### 3.1. Đường model Python (batch / cron) — có lưu DB
+### 3.1. Đường model GB (batch / cron) — có lưu DB
 
 1. `RecommendationCron` — mỗi ngày 00:00 (`CronExpression.EVERY_DAY_AT_MIDNIGHT`) gọi `recommendation()`.
 2. Lấy mọi `userId` từ **`UserSnapshot`**, chunk 50, gọi `recommendationHelper(userId)` song song.
 3. Helper thu thập ứng viên: Neo4j (bạn chung / nhóm), Qdrant `recommend`, Mongo `$geoNear`, cold mở rộng (interest + geo).
-4. Tính 15 feature (`SAFE_FEATURES` trong Python), gọi **`PYTHON_RECOMMEND_URL`** (mặc định `http://127.0.0.1:8000/recommend/rank`; vẫn đọc được **`PYTHON_TOPK_URL`** nếu set full URL cũ).
-5. Blend với `cold_prior` nếu cold start; fallback xếp theo cold prior nếu Python trả rỗng.
+4. Tính 15 feature (`SAFE_FEATURES` trong `FeatureService`), gọi **`GbRankerService`** in-process (model `apps/recommendation/models/gb.json`).
+5. Blend với `cold_prior` nếu cold start; fallback xếp theo cold prior nếu ranker trả rỗng.
 6. **`prisma.recommendationResult.upsert`** — lưu `candidates` (top ~100), `features` (audit), `dayVersion`, `expiresAt` (+24h).
 
 **API đọc kết quả:** `GET /recommendation` hoặc `GET /recommendation/me` (auth) → `getRecommendationForUser` đọc `RecommendationResult` + enrich `profile` từ `UserSnapshot`.
@@ -88,7 +89,7 @@ Hành vi:
 - **3** từ interest overlap (Jaccard trên slug),
 - Gộp, **dedupe**, trả `source: 'live_heuristic'`.
 
-Không chạy `gb.joblib`, không ghi `RecommendationResult`.
+Không chạy GB ranker, không ghi `RecommendationResult`.
 
 ---
 
@@ -98,19 +99,17 @@ Không chạy `gb.joblib`, không ghi `RecommendationResult`.
 |------|----------------|---------|
 | User cập nhật bio | `POST /user/update-profile` | Mongo user + RMQ `USER_UPDATED` (có `bio`) |
 | Sync snapshot | `UserSnapshotSyncService.syncUserUpdated` | `UserSnapshot.bio` |
-| Embed | User service + recommendation `EmbeddingNotifyService` → `POST /embed-and-save` | `profile_vector` trong `user-service` |
-| Qdrant | `embedding-service` `upsert_user_bio_vectors` | Collection `user_bios`, point id = uuid v5(mongoId), payload `mongoId` |
+| Embed | User service → `POST /recommendation/embed-and-save`; recommendation `EmbeddingNotifyService` in-process | Qdrant `user_bios` |
+| Qdrant | `EmbeddingService` + `QdrantService.upsertVector` | Collection `user_bios`, point id = uuid v5(mongoId), payload `mongoId` |
 
 **Env gợi ý (recommendation + user):**
 
 ```env
-EMBEDDING_SERVICE_URL=http://127.0.0.1:8000
-PYTHON_RECOMMEND_URL=http://127.0.0.1:8000/recommend/rank
-# (tuỳ chọn, legacy) PYTHON_TOPK_URL=http://127.0.0.1:8000/recommend/rank
+RECOMMENDATION_SERVICE_URL=http://127.0.0.1:3005
+GB_MODEL_PATH=apps/recommendation/models/gb.json
+EMBEDDING_MODEL_NAME=Xenova/paraphrase-multilingual-MiniLM-L12-v2
 RABBITMQ_URL=amqp://user:user@localhost:5672
 ```
-
-Nếu không set `EMBEDDING_SERVICE_URL`, code dùng **origin** của `PYTHON_RECOMMEND_URL` hoặc `PYTHON_TOPK_URL`.
 
 ---
 
@@ -118,15 +117,14 @@ Nếu không set `EMBEDDING_SERVICE_URL`, code dùng **origin** của `PYTHON_RE
 
 | Dịch vụ | URL | Kỳ vọng |
 |---------|-----|---------|
-| embedding-service | `http://127.0.0.1:8000/docs` | HTTP 200 |
-| Python GB rank | `POST http://127.0.0.1:8000/recommend/rank` | `status: ok` (cần `train_model/models/gb.joblib`) |
+| Embed API | `POST http://127.0.0.1:3005/recommendation/embed-and-save` | `status: ok` |
+| Train model | `POST http://127.0.0.1:3005/recommendation/model/train` | `status: ok` (tạo `gb.json`) |
+| Evaluate model | `POST http://127.0.0.1:3005/recommendation/model/evaluate` | metrics F1/AUC |
 | Qdrant | `http://127.0.0.1:6333/collections` | collection `user_bios`, size 384, Cosine |
 | recommendation | `http://127.0.0.1:3005/recommendation/interest-tags` | HTTP 200 |
 | Kong | `http://127.0.0.1:8080/recommendation/interest-tags` | HTTP 200 |
 
-**Model Python:** `embedding-service/train_model/models/gb.joblib` (không commit git; cần train hoặc copy vào máy).
-
-**Hợp đồng HTTP Python (chỉ 2 endpoint):** [`embedding-service/CONTRACT.md`](../embedding-service/CONTRACT.md). Kiểm tra Nest vẫn gọi đúng: từ root repo chạy `python embedding-service/scripts/check_backend_contract.py`.
+**Model GB:** `apps/recommendation/models/gb.json` (không commit git; train qua `POST /recommendation/model/train`).
 
 ---
 
@@ -165,14 +163,15 @@ curl -s http://127.0.0.1:6333/collections/user_bios | python3 -m json.tool
    - Cập nhật profile (trigger `USER_UPDATED`).
 3. **Seed interest tags** (đã có ~40 tag nếu chạy seed):  
    `cd backend/apps/recommendation && npx prisma db seed` (theo script trong repo).
-4. **Embed bio** (backfill Qdrant + `profile_vector`):
+4. **Embed bio** (backfill Qdrant):
    - Cập nhật bio qua app, hoặc
-   - `POST http://127.0.0.1:8000/embed-and-save` body `{ "users": [{ "id": "<mongoId>", "bio": "...", "age": 0 }] }`, hoặc
+   - `POST http://127.0.0.1:3005/recommendation/embed-and-save` body `{ "users": [{ "id": "<mongoId>", "bio": "...", "age": 0 }] }`, hoặc
    - Script `database/sync_data_profile_embedding.js`.
-5. **Chạy ranking batch một lần** (lưu `RecommendationResult`):
+5. **Train model** (lần đầu): `POST http://127.0.0.1:3005/recommendation/model/train`.
+6. **Chạy ranking batch một lần** (lưu `RecommendationResult`):
    - Đợi cron nửa đêm, hoặc
    - Gọi tạm từ code/console: `recommendationService.recommendation()` (cần `UserSnapshot` > 0).
-6. **GET gợi ý** qua Kong: `GET http://localhost:8080/recommendation/me` (cookie đăng nhập).
+7. **GET gợi ý** qua Kong: `GET http://localhost:8080/recommendation/me` (cookie đăng nhập).
 
 ---
 
@@ -183,11 +182,14 @@ curl -s http://127.0.0.1:6333/collections/user_bios | python3 -m json.tool
 | GET + cold start live | `apps/recommendation/src/recommendation.service.ts` — `getRecommendationForUser`, `getLiveHeuristicColdStartRecommendations` |
 | Batch + lưu Mongo | `recommendationHelper`, `recommendation()` |
 | Cron | `apps/recommendation/src/background-jobs/recommendation/recommendation.cron.ts` |
-| Python client | `apps/recommendation/src/python-recommendation.client.ts` |
+| GB ranker | `apps/recommendation/src/services/gb-ranker.service.ts` |
+| Embedding | `apps/recommendation/src/services/embedding.service.ts` |
+| Train/eval | `apps/recommendation/src/services/model-training.service.ts` |
+| Features | `apps/recommendation/src/services/feature.service.ts` |
 | Embed notify | `apps/recommendation/src/services/embedding-notify.service.ts` |
 | Snapshot RMQ | `apps/recommendation/src/rmq/subscribers/user-snapshot-sync.subscriber.ts` |
 | Qdrant | `libs/qdrant/src/qdrant.service.ts` |
-| Python recommend/rank + embed | `embedding-service/app/services/recommendation_rank_service.py`, `embedding_service.py`, `qdrant_user_bios_sync.py` |
+| ML core | `apps/recommendation/src/ml/gradient-boosting.ts` |
 | Kong route | `kong/kong.yml` → `host.docker.internal:3005` |
 | Prisma | `apps/recommendation/prisma/schema.prisma` |
 
