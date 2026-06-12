@@ -22,11 +22,11 @@ async function run() {
 
             if (batch.length === BATCH_SIZE) {
                 // Chỉ gửi đi, không cần xử lý kết quả trả về nặng nề
-                console.time("PythonRequest");
-                await axios.post("http://127.0.0.1:8000/embed-and-save", { users: batch });
+                console.time("EmbedRequest");
+                await axios.post("http://127.0.0.1:3005/recommendation/embed-and-save", { users: batch });
                 batch = [];
-                console.timeEnd("PythonRequest");
-                console.log(`🚀 Đã đẩy ${BATCH_SIZE} users sang Python... `);
+                console.timeEnd("EmbedRequest");
+                console.log(`🚀 Đã đẩy ${BATCH_SIZE} users sang recommendation service... `);
             }
         }
         console.timeEnd("SpeedTest");
