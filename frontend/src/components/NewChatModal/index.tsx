@@ -122,7 +122,7 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
           />
           <div className="flex items-center gap-2">
             <Avatar
-              className="w-12 h-12 mb-4 flex items-center justify-center bg-muted"
+              className="w-12 h-12 mb-4 flex items-center justify-center bg-muted border border-button cursor-pointer hover:bg-button transition-colors"
               onClick={() => inputRef.current?.click()}
             >
               {!preview ? (
@@ -132,20 +132,20 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
               )}
             </Avatar>
             <Input
-              className="border-none mb-4 focus:ring-bg-box-message-out! bg-button! text-text outline-none"
+              className="mb-4 bg-background! border border-button text-text outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 focus-visible:border-violet-500"
               type="text"
               placeholder="Tên nhóm"
               {...register("groupName", { required: "Vui lòng nhập tên nhóm" })}
             />
           </div>
           <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
             <input
               type="text"
               placeholder="Tìm người dùng..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-button text-text placeholder:text-gray-500 rounded-lg pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-bg-box-message-out"
+              className="w-full bg-background border border-button text-text placeholder:text-muted-foreground rounded-lg pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
             />
           </div>
 
@@ -157,6 +157,7 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
               >
                 <Checkbox
                   id={`${user.id}`}
+                  className="size-5 border-2 border-muted-foreground bg-background data-[state=checked]:bg-violet-600 data-[state=checked]:border-violet-600 data-[state=checked]:text-white"
                   checked={slectedFriends.includes(user.id)}
                   onCheckedChange={(checked) => {
                     if (checked) {
@@ -183,7 +184,9 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
           </div>
           <div className="w-full flex items-center justify-center my-4">
             <Button
-              className="interceptor-loading bg-transparent hover:bg-[#00000032]"
+              type="button"
+              variant="ghost"
+              className="interceptor-loading text-text hover:bg-button"
               onClick={() => {
                 loadMoreFriends();
               }}
