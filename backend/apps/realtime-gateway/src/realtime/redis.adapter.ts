@@ -9,7 +9,10 @@ export class RedisIoAdapter extends IoAdapter {
 
   async connectToRedis(): Promise<void> {
     // Tạo 2 client kết nối đến Redis: 1 cái để hét (Pub), 1 cái để nghe (Sub)
-    const pubClient = createClient({ url: 'redis://localhost:6379' });
+    const redisUrl =
+      process.env.REDIS_URL ||
+      `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`;
+    const pubClient = createClient({ url: redisUrl });
     const subClient = pubClient.duplicate();
 
     await Promise.all([pubClient.connect(), subClient.connect()]);

@@ -3,7 +3,7 @@ _transform: true
 
 services:
   - name: user-http
-    url: http://host.docker.internal:3002
+    url: http://user:3002
     routes:
       - name: user-route
         paths:
@@ -20,7 +20,7 @@ services:
               hide_client_headers: false
 
   - name: chat-http
-    url: http://host.docker.internal:3003
+    url: http://chat:3003
     routes:
       - name: chat-route
         paths:
@@ -37,7 +37,7 @@ services:
               hide_client_headers: false
 
   - name: notification-http
-    url: http://host.docker.internal:3004
+    url: http://notification:3004
     routes:
       - name: notification-route
         paths:
@@ -54,9 +54,7 @@ services:
               hide_client_headers: false
 
   - name: recommendation-http
-    # Nest recommendation must be listening on host port 3005 (not in this compose file).
-    # If Qdrant/Rabbit/Redis were blocking startup, Kong returned 502 — recommendation main + qdrant init were fixed for that.
-    url: http://host.docker.internal:3005
+    url: http://recommendation:3005
     routes:
       - name: recommendation-route
         paths:
@@ -71,6 +69,16 @@ services:
               limit_by: ip
               fault_tolerant: true
               hide_client_headers: false
+
+  - name: realtime-http
+    url: http://realtime-gateway:3001
+    routes:
+      - name: realtime-route
+        paths:
+          - /realtime
+          - /socket.io
+        strip_path: false
+        preserve_host: true
 
 plugins:
   - name: cors
@@ -95,8 +103,3 @@ plugins:
         - Set-Cookie
       credentials: true
       max_age: 3600
-  - name: prometheus
-    config:
-      latency_metrics: true
-      status_code_metrics: true
-      bandwidth_metrics: true

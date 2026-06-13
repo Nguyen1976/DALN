@@ -1,0 +1,257 @@
+# ============================================================================
+# Docker Compose - môi trường DEV cho NestJS monorepo microservices.
+#
+#   docker compose up -d        -> build (lần đầu) + chạy toàn bộ hệ thống
+#   docker compose logs -f chat -> xem log 1 service
+#   docker compose down         -> dừng & xoá container (DỮ LIỆU VẪN CÒN)
+#   docker compose down -v      -> dừng & XOÁ luôn dữ liệu (named volumes)
+#
+# - Code được mount (./ -> /app): sửa code dev là container tự reload (watch).
+# - node_modules dùng anonymous volume để không bị host ghi đè (đúng linux deps).
+# - Dữ liệu infra nằm trong named volumes => bật/tắt không mất, chỉ mất khi -v.
+# ============================================================================
+
+name: daln-backend
+
+# ---- Cấu hình dùng chung cho 5 app service (NestJS) ----
+# LƯU Ý: chỉ service `user` có khối `build` để build image 1 lần.
+# 4 service còn lại chỉ `image:` dùng lại -> tránh 5 build song song
+# cùng export 1 tag gây lỗi "image already exists".
+x-app-common: &app-common
+  image: daln-backend-dev:latest # 1 image dev dùng chung cho mọi service
+  restart: unless-stopped
+  env_file:
+    - .env          # secrets có sẵn (SMTP, DATABASE_URL nếu bạn điền)
+    - .env.docker   # cấu hình kết nối infra (ghi đè .env) - bắt buộc
+  volumes:
+    - ./:/app # mount source để hot-reload
+    - /app/node_modules # giữ node_modules của container (linux)
+  networks:
+    - backend
+  depends_on:
+    mongo-init:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    neo4j:
+      condition: service_healthy
+    qdrant:
+      condition: service_started
+
+services:
+  # ==========================================================================
+  # INFRASTRUCTURE
+  # ==========================================================================
+  mongo:
+    image: mongo:7
+    container_name: daln-mongo
+    restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # Khởi tạo replica set (Prisma MongoDB bắt buộc). Chạy 1 lần rồi thoát.
+  mongo-init:
+    image: mongo:7
+    container_name: daln-mongo-init
+    restart: "no"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - backend
+    entrypoint:
+      - bash
+      - -c
+      - |
+        mongosh --host mongo:27017 --quiet --eval "
+          try {
+            const s = rs.status();
+            if (s.ok === 1) { print('Replica set already initialized'); quit(0); }
+          } catch (e) {}
+          rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
+          print('Replica set initialized');
+        "
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: daln-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: user
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: daln-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: daln-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/password123
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_apoc_export_file_enabled: "true"
+      NEO4J_apoc_import_file_enabled: "true"
+    ports:
+      - "7474:7474" # HTTP / Browser UI
+      - "7687:7687" # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p password123 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: daln-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333" # REST
+      - "6334:6334" # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - backend
+
+  kong:
+    image: kong:3.7
+    container_name: daln-kong
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    ports:
+      - "8000:8000" # proxy (client gọi qua đây)
+      - "8001:8001" # admin API
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    networks:
+      - backend
+    depends_on:
+      - user
+      - chat
+      - notification
+      - realtime-gateway
+      - recommendation
+
+  # ==========================================================================
+  # APP SERVICES (NestJS) - cùng 1 image dev, khác nhau ở biến SERVICE + PORT
+  # ==========================================================================
+  user:
+    <<: *app-common
+    container_name: daln-user
+    # Chỉ service này build image; các service khác dùng lại image đã build.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      SERVICE: user
+      PORT: 3002
+      DATABASE_URL: mongodb://mongo:27017/user-service?replicaSet=rs0
+    ports:
+      - "3002:3002"
+
+  chat:
+    <<: *app-common
+    container_name: daln-chat
+    environment:
+      SERVICE: chat
+      PORT: 3003
+      DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
+    ports:
+      - "3003:3003"
+
+  notification:
+    <<: *app-common
+    container_name: daln-notification
+    environment:
+      SERVICE: notification
+      PORT: 3004
+      DATABASE_URL: mongodb://mongo:27017/notification-service?replicaSet=rs0
+    ports:
+      - "3004:3004"
+
+  realtime-gateway:
+    <<: *app-common
+    container_name: daln-realtime
+    environment:
+      SERVICE: realtime-gateway
+      # realtime-gateway đọc cả `port` (thường) lẫn PORT - set cả 2 cho chắc
+      port: 3001
+      PORT: 3001
+    ports:
+      - "3001:3001"
+
+  recommendation:
+    <<: *app-common
+    container_name: daln-recommendation
+    environment:
+      SERVICE: recommendation
+      PORT: 3005
+      DATABASE_URL: mongodb://mongo:27017/recommendation-service?replicaSet=rs0
+      USER_MONGO_URI: mongodb://mongo:27017/user-service?replicaSet=rs0
+    ports:
+      - "3005:3005"
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  rabbitmq_data:
+  redis_data:
+  neo4j_data:
+  neo4j_logs:
+  qdrant_data:
