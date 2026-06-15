@@ -12,6 +12,8 @@ import {
 } from './repositories'
 import { ChatEventsPublisher } from './rmq/publishers/chat-events.publisher'
 import { MessageSubscriber } from './rmq/subcribers/chat-subcribers'
+import { ChatSagaSubscriber } from './rmq/subcribers/chat-saga.subscriber'
+import { ChatOutboxRelay } from './rmq/chat-outbox.relay'
 import { RmqModule } from './rmq.module'
 import { LoggerModule } from '@app/logger'
 import { StorageR2Module } from '@app/storage-r2/storage-r2.module'
@@ -87,6 +89,8 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
     PollRepository,
     ChatEventsPublisher,
     MessageSubscriber,
+    ChatSagaSubscriber,
+    ChatOutboxRelay,
   ],
 })
 export class ChatModule {}

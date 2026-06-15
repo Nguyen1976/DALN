@@ -20,18 +20,23 @@ export class MessageSubscriber {
     private readonly chatEventsPublisher: ChatEventsPublisher,
   ) {}
 
-  @RabbitSubscribe({
-    exchange: EXCHANGE_RMQ.USER_EVENTS,
-    routingKey: ROUTING_RMQ.USER_UPDATE_STATUS_MAKE_FRIEND,
-    queue: QUEUE_RMQ.CHAT_USER_UPDATE_STATUS_MAKE_FRIEND,
-  })
-  async createConversationWhenAcceptFriend(
-    data: UserUpdateStatusMakeFriendPayload,
-  ): Promise<void> {
-    await safeExecute(() =>
-      this.chatService.createConversationWhenAcceptFriend(data),
-    )
-  }
+  // NOTE: Việc tạo conversation khi accept friend đã được chuyển sang
+  // saga orchestration (ChatSagaSubscriber.createConversation) để có outbox +
+  // idempotency + compensation. Subscriber choreography cũ được vô hiệu hoá để
+  // tránh tạo conversation trùng.
+  //
+  // @RabbitSubscribe({
+  //   exchange: EXCHANGE_RMQ.USER_EVENTS,
+  //   routingKey: ROUTING_RMQ.USER_UPDATE_STATUS_MAKE_FRIEND,
+  //   queue: QUEUE_RMQ.CHAT_USER_UPDATE_STATUS_MAKE_FRIEND,
+  // })
+  // async createConversationWhenAcceptFriend(
+  //   data: UserUpdateStatusMakeFriendPayload,
+  // ): Promise<void> {
+  //   await safeExecute(() =>
+  //     this.chatService.createConversationWhenAcceptFriend(data),
+  //   )
+  // }
 
   @RabbitSubscribe({
     exchange: EXCHANGE_RMQ.USER_EVENTS,

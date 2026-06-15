@@ -6,7 +6,10 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 @Module({
   imports: [
     RabbitMQModule.forRoot({
-      exchanges: [{ name: EXCHANGE_RMQ.CHAT_EVENTS, type: 'topic' }],
+      exchanges: [
+        { name: EXCHANGE_RMQ.CHAT_EVENTS, type: 'topic' },
+        { name: EXCHANGE_RMQ.SAGA_EVENTS, type: 'topic' },
+      ],
       uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: true },
     }),
