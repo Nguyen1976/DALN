@@ -22,4 +22,10 @@ export const QUEUE_RMQ = {
     'recommendation_queue_user_update_status_make_friend',
   RECOMMENDATION_USER_JOINED_GROUP: 'recommendation_queue_user_joined_group',
   RECOMMENDATION_USER_LEFT_GROUP: 'recommendation_queue_user_left_group',
+  SAGA_ORCHESTRATOR_TRIGGER: 'saga_orchestrator_trigger',
+  SAGA_ORCHESTRATOR_REPLY: 'saga_orchestrator_reply',
+  SAGA_CHAT_CREATE_CONVERSATION: 'saga_chat_create_conversation',
+  SAGA_CHAT_DELETE_CONVERSATION: 'saga_chat_delete_conversation',
+  SAGA_NOTIFICATION_NOTIFY_ACCEPTED: 'saga_notification_notify_accepted',
+  SAGA_USER_REVERT_FRIENDSHIP: 'saga_user_revert_friendship',
 }
