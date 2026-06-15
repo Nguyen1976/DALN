@@ -50,3 +50,40 @@ model friendRequest {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
+
+enum OutboxStatus {
+  NEW
+  PUBLISHED
+  FAILED
+  DEAD
+}
+
+// Transactional Outbox: ghi cùng transaction với business write, relay publish sau.
+model OutboxEvent {
+  id            String       @id @default(auto()) @map("_id") @db.ObjectId
+  messageId     String       @unique
+  exchange      String
+  routingKey    String
+  payload       Json
+  status        OutboxStatus @default(NEW)
+  attempt       Int          @default(0)
+  maxAttempts   Int          @default(10)
+  nextAttemptAt DateTime?
+  publishedAt   DateTime?
+  error         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([status, nextAttemptAt, createdAt])
+}
+
+// Inbox idempotency: messageId UNIQUE chặn xử lý trùng (race condition 100%).
+model InboxMessage {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  messageId String   @unique
+  consumer  String
+  sagaId    String?
+  createdAt DateTime @default(now())
+
+  @@index([sagaId])
+}

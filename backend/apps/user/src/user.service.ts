@@ -12,6 +12,16 @@ import {
 import { UserErrors } from './errors/user.errors'
 import { UserEventsPublisher } from './rmq/publishers/user-events.publisher'
 import type { UserUpdatedPayload } from 'libs/constant/rmq/payload'
+import { PrismaService } from 'apps/user/prisma/prisma.service'
+import { enqueueOutbox } from '@app/saga'
+import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
+import {
+  buildTrigger,
+  SAGA_ROUTING,
+  SAGA_STEP,
+  SAGA_TYPE,
+  type FriendshipAcceptTriggerPayload,
+} from 'libs/constant/rmq/saga'
 import {
   AuthSession,
   UserEntity,
@@ -89,6 +99,7 @@ export class UserService {
     private readonly storageR2Service: StorageR2Service,
     private readonly redisService: RedisService,
     private readonly logger: LoggerService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   private recommendationServiceBaseUrl(): string {
@@ -453,33 +464,81 @@ export class UserService {
       UserErrors.friendRequestAlreadyResponded()
     }
 
-    await this.friendRequestRepo.updateStatus(
-      data.inviterId,
-      data.inviteeId,
-      data.status as Status,
-    )
+    const friendRequestId =
+      friendRequests.find((r) => r.status === Status.PENDING)?.id ??
+      friendRequests[0]?.id
+
+    let inviterUpdate
+    let inviteeUpdate
+
+    if (data.status === Status.ACCEPTED) {
+      inviterUpdate = await this.userRepo.findById(data.inviterId)
+      inviteeUpdate = await this.userRepo.findById(data.inviteeId)
+
+      const members: FriendshipAcceptTriggerPayload['members'] = [
+        {
+          userId: data.inviterId,
+          username: inviterUpdate?.username || '',
+          avatar: inviterUpdate?.avatar || '',
+          fullName: inviterUpdate?.fullName || '',
+        },
+        {
+          userId: data.inviteeId,
+          username: inviteeUpdate?.username || '',
+          avatar: inviteeUpdate?.avatar || '',
+          fullName: inviteeUpdate?.fullName || '',
+        },
+      ]
+
+      // Atomic: cập nhật trạng thái + tạo friendship 2 chiều + ghi trigger saga
+      // vào outbox trong CÙNG 1 transaction. Relay sẽ publish trigger sau đó.
+      await this.prisma.$transaction(async (tx) => {
+        await tx.friendRequest.updateMany({
+          where: { fromUserId: data.inviterId, toUserId: data.inviteeId },
+          data: { status: Status.ACCEPTED },
+        })
+        await tx.friendship.create({
+          data: { userId: data.inviterId, friendId: data.inviteeId },
+        })
+        await tx.friendship.create({
+          data: { userId: data.inviteeId, friendId: data.inviterId },
+        })
+
+        const sagaId = `${SAGA_TYPE.FRIENDSHIP_ACCEPT}:${friendRequestId}`
+        const trigger = buildTrigger<FriendshipAcceptTriggerPayload>(
+          sagaId,
+          SAGA_TYPE.FRIENDSHIP_ACCEPT,
+          SAGA_STEP.CREATE_CONVERSATION,
+          {
+            inviterId: data.inviterId,
+            inviteeId: data.inviteeId,
+            inviteeName: data.inviteeName,
+            friendRequestId: String(friendRequestId),
+            members,
+          },
+        )
+        await enqueueOutbox(tx as any, {
+          messageId: trigger.messageId,
+          exchange: EXCHANGE_RMQ.SAGA_EVENTS,
+          routingKey: SAGA_ROUTING.FRIENDSHIP_ACCEPT_REQUESTED,
+          payload: trigger,
+        })
+      })
+    } else {
+      await this.friendRequestRepo.updateStatus(
+        data.inviterId,
+        data.inviteeId,
+        data.status as Status,
+      )
+    }
 
     const updatedRequest = await this.friendRequestRepo.findByUsers(
       data.inviterId,
       data.inviteeId,
     )
 
-    let inviterUpdate
-    let inviteeUpdate
-
-    if (data.status === Status.ACCEPTED) {
-      await this.friendShipRepo.create({
-        userId: data.inviterId,
-        friendId: data.inviteeId,
-      })
-      await this.friendShipRepo.create({
-        userId: data.inviteeId,
-        friendId: data.inviterId,
-      })
-      inviterUpdate = await this.userRepo.findById(data.inviterId)
-      inviteeUpdate = await this.userRepo.findById(data.inviteeId)
-    }
-
+    // Giữ event choreography cho recommendation (friend-graph) + notify REJECTED.
+    // Việc tạo conversation và notify ACCEPTED đã do saga đảm nhiệm.
     this.eventsPublisher.publishUserUpdateStatusMakeFriend({
       inviterId: data.inviterId,
       inviteeId: data.inviteeId,

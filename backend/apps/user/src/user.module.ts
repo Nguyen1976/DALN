@@ -16,6 +16,8 @@ import {
 import { UserEventsPublisher } from './rmq/publishers/user-events.publisher'
 import { LoggerModule } from '@app/logger/logger.module'
 import { MessageSubscriber } from './rmq/subcribers/user-subcribers'
+import { UserSagaSubscriber } from './rmq/subcribers/user-saga.subscriber'
+import { UserOutboxRelay } from './rmq/user-outbox.relay'
 import { UserHttpController } from './http/user-http.controller'
 import { APP_GUARD } from '@nestjs/core'
 import { PrismaModule } from '../prisma/prisma.module'
@@ -36,6 +38,10 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
       exchanges: [
         {
           name: EXCHANGE_RMQ.USER_EVENTS,
+          type: 'topic',
+        },
+        {
+          name: EXCHANGE_RMQ.SAGA_EVENTS,
           type: 'topic',
         },
       ],
@@ -79,6 +85,8 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
     UserEventsPublisher,
     FriendShipRepository,
     MessageSubscriber,
+    UserSagaSubscriber,
+    UserOutboxRelay,
   ],
 })
 export class UserModule {}
