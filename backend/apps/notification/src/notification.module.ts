@@ -16,6 +16,8 @@ import {
 } from './repositories'
 import { NotificationEventsPublisher } from './rmq/publishers/notification-events.publisher'
 import { NotificationSubscriber } from './rmq/subcribers/notification-subscribers'
+import { NotificationSagaSubscriber } from './rmq/notification-saga.subscriber'
+import { NotificationOutboxRelay } from './rmq/notification-outbox.relay'
 import { PrismaModule } from '../prisma/prisma.module'
 import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
 
@@ -50,6 +52,10 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
           name: EXCHANGE_RMQ.NOTIFICATION_EVENTS,
           type: 'topic',
         },
+        {
+          name: EXCHANGE_RMQ.SAGA_EVENTS,
+          type: 'topic',
+        },
       ],
       uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: true },
@@ -68,6 +74,8 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
     NotificationPreferenceRepository,
     NotificationEventsPublisher,
     NotificationSubscriber,
+    NotificationSagaSubscriber,
+    NotificationOutboxRelay,
   ],
 })
 export class NotificationModule {}

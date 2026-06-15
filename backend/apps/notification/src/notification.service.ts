@@ -125,6 +125,13 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   }
 
   async handleUpdateStatusMakeFriend(data: UserUpdateStatusMakeFriendPayload) {
+    // Thông báo cho trường hợp ACCEPTED đã được saga orchestration đảm nhiệm
+    // (NotificationSagaSubscriber.notifyAccepted). Ở đây chỉ xử lý REJECTED để
+    // tránh gửi thông báo trùng.
+    if (data.status === 'ACCEPTED') {
+      return
+    }
+
     const createdNotification = await this.createNotification({
       userId: data.inviterId,
       message: `Lời mời kết bạn của ${data.inviteeName} đã được ${
