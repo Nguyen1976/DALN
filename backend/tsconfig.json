@@ -64,6 +64,12 @@
       "@app/redis/*": [
         "libs/redis/src/*"
       ],
+      "@app/saga": [
+        "libs/saga/src"
+      ],
+      "@app/saga/*": [
+        "libs/saga/src/*"
+      ],
       "@app/storage-r2": [
         "libs/storage-r2/src"
       ],
