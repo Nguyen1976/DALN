@@ -244,6 +244,14 @@ services:
     ports:
       - "3005:3005"
 
+  # Saga orchestrator: RMQ-only (không expose HTTP), điều phối luồng accept friend.
+  saga-orchestrator:
+    <<: *app-common
+    container_name: daln-saga-orchestrator
+    environment:
+      SERVICE: saga-orchestrator
+      DATABASE_URL: mongodb://mongo:27017/saga-orchestrator-service?replicaSet=rs0
+
 networks:
   backend:
     driver: bridge

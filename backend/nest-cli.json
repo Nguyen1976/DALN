@@ -114,6 +114,30 @@
         "tsConfigPath": "libs/redis/tsconfig.lib.json"
       }
     },
+    "saga": {
+      "type": "library",
+      "root": "libs/saga",
+      "entryFile": "index",
+      "sourceRoot": "libs/saga/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/saga/tsconfig.lib.json"
+      }
+    },
+    "saga-orchestrator": {
+      "type": "application",
+      "root": "apps/saga-orchestrator",
+      "entryFile": "main",
+      "sourceRoot": "apps/saga-orchestrator/src",
+      "compilerOptions": {
+        "assets": [
+          {
+            "include": "generated/**/*",
+            "outDir": "dist/apps/saga-orchestrator/apps/saga-orchestrator/src"
+          }
+        ],
+        "tsConfigPath": "apps/saga-orchestrator/tsconfig.app.json"
+      }
+    },
     "storage-r2": {
       "type": "library",
       "root": "libs/storage-r2",

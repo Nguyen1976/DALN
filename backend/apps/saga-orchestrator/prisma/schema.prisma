@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum SagaState {
+  STARTED
+  CONVERSATION_CREATED
+  COMPLETED
+  COMPENSATING
+  COMPENSATED
+  FAILED
+}
+
+enum OutboxStatus {
+  NEW
+  PUBLISHED
+  FAILED
+  DEAD
+}
+
+// State machine cho saga chấp nhận kết bạn (1 row = 1 tiến trình saga).
+model FriendshipAcceptSaga {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  sagaId          String    @unique
+  state           SagaState @default(STARTED)
+  inviterId       String
+  inviteeId       String
+  inviteeName     String
+  friendRequestId String
+  members         Json
+  conversationId  String?
+  notifyAttempts  Int       @default(0)
+  lastError       String?
+  correlationId   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([state, updatedAt])
+}
+
+// Transactional Outbox cho command/compensation orchestrator phát đi.
+model OutboxEvent {
+  id            String       @id @default(auto()) @map("_id") @db.ObjectId
+  messageId     String       @unique
+  exchange      String
+  routingKey    String
+  payload       Json
+  status        OutboxStatus @default(NEW)
+  attempt       Int          @default(0)
+  maxAttempts   Int          @default(10)
+  nextAttemptAt DateTime?
+  publishedAt   DateTime?
+  error         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([status, nextAttemptAt, createdAt])
+}
+
+// Inbox idempotency: messageId UNIQUE chặn xử lý trùng trigger/reply.
+model InboxMessage {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  messageId String   @unique
+  consumer  String
+  sagaId    String?
+  createdAt DateTime @default(now())
+
+  @@index([sagaId])
+}
