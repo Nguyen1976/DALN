@@ -8,3 +8,5 @@ loc-brightkite_edges (1).txt*
 training/.venv/
 **/__pycache__/
 *.pyc
+.codegraph
+/backend/apps/**/generated/
