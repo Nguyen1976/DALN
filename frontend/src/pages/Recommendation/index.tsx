@@ -18,6 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { socket } from "@/lib/socket";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
+import { showErrorToast } from "@/utils/toastError";
 
 export default function RecommendationPage() {
   const user = useSelector(selectUser);
@@ -33,8 +34,7 @@ export default function RecommendationPage() {
       const response = await getMyRecommendationsAPI();
       setRecommendations(response.candidates || []);
     } catch (error) {
-      console.log(error);
-      toast.error("Không tải được danh sách gợi ý bạn bè");
+      showErrorToast(error, "Không tải được danh sách gợi ý bạn bè");
     } finally {
       setIsLoading(false);
     }
@@ -90,8 +90,7 @@ export default function RecommendationPage() {
       await makeFriendRequest(profile.email);
       toast.success(`Đã gửi lời mời kết bạn đến ${candidate.profile.username}`);
     } catch (error) {
-      console.log(error);
-      toast.error("Không thể gửi lời mời kết bạn");
+      showErrorToast(error, "Không thể gửi lời mời kết bạn");
       setPendingCandidateIds((prev) => prev.filter((id) => id !== candidateId));
     }
   };

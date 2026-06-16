@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { ModeToggle } from "@/components/ModeToggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,11 +57,8 @@ export default function InterestOnboardingPage() {
         if (!cancelled) setTags(data);
       } catch (e) {
         if (!cancelled) {
-          console.error("[interest-tags]", e);
           toast.error(
-            e instanceof Error
-              ? e.message
-              : "Không tải được danh sách sở thích",
+            getErrorMessage(e, "Không tải được danh sách sở thích"),
           );
         }
       } finally {

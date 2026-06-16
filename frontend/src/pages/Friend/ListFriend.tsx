@@ -29,8 +29,9 @@ import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
-import { toast } from "sonner";
 import { formatLastSeen } from "@/utils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { showErrorToast } from "@/utils/toastError";
 
 const ListFriend = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -44,7 +45,7 @@ const ListFriend = () => {
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [keyword, setKeyword] = useState("");
-  const [debouncedKeyword, setDebouncedKeyword] = useState("");
+  const debouncedKeyword = useDebouncedValue(keyword);
   const [searchResults, setSearchResults] = useState<SearchFriendItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
@@ -63,14 +64,6 @@ const ListFriend = () => {
       void handleSelectFriend(firstFriend);
     }
   }, [friends, selectedFriendId]);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setDebouncedKeyword(keyword.trim());
-    }, 400);
-
-    return () => clearTimeout(timeout);
-  }, [keyword]);
 
   useEffect(() => {
     if (!debouncedKeyword) {
@@ -94,8 +87,7 @@ const ListFriend = () => {
         }
       } catch (error) {
         if (!cancelled) {
-          console.log(error);
-          toast.error("Không thể tìm kiếm bạn bè");
+          showErrorToast(error, "Không thể tìm kiếm bạn bè");
         }
       } finally {
         if (!cancelled) setIsSearching(false);
@@ -126,8 +118,7 @@ const ListFriend = () => {
       const profile = await getUserProfileByIdAPI(friend.id);
       setSelectedProfile(profile);
     } catch (error) {
-      console.log(error);
-      toast.error("Không lấy được thông tin người dùng");
+      showErrorToast(error, "Không lấy được thông tin người dùng");
     } finally {
       setIsLoadingProfile(false);
     }
@@ -160,8 +151,7 @@ const ListFriend = () => {
         state: { conversation },
       });
     } catch (error) {
-      console.log(error);
-      toast.error("Không thể mở cuộc trò chuyện");
+      showErrorToast(error, "Không thể mở cuộc trò chuyện");
     } finally {
       setIsStartingChat(false);
     }

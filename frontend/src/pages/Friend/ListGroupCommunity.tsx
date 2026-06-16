@@ -15,14 +15,15 @@ import { Search, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
-import { toast } from "sonner";
+import { showErrorToast } from "@/utils/toastError";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 const ListGroupCommunity = () => {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
   const conversations = useSelector(selectConversation);
   const [keyword, setKeyword] = useState("");
-  const [debouncedKeyword, setDebouncedKeyword] = useState("");
+  const debouncedKeyword = useDebouncedValue(keyword);
   const [searchResults, setSearchResults] = useState<SearchConversationItem[]>(
     [],
   );
@@ -33,14 +34,6 @@ const ListGroupCommunity = () => {
       dispatch(getConversations({ limit: 20, cursor: null }));
     }
   }, [dispatch, conversations.length]);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setDebouncedKeyword(keyword.trim());
-    }, 400);
-
-    return () => clearTimeout(timeout);
-  }, [keyword]);
 
   useEffect(() => {
     if (!debouncedKeyword) {
@@ -61,8 +54,7 @@ const ListGroupCommunity = () => {
         );
       } catch (error) {
         if (!cancelled) {
-          console.log(error);
-          toast.error("Không thể tìm kiếm cuộc trò chuyện");
+          showErrorToast(error, "Không thể tìm kiếm cuộc trò chuyện");
         }
       } finally {
         if (!cancelled) setIsSearching(false);

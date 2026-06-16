@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getFriendRequestsAPI, type FriendRequestListItem } from "@/apis";
 import FriendRequestModal from "@/components/FriendRequestModal";
 import { formatDateTime } from "@/utils/formatDateTime";
-import { toast } from "sonner";
+import { showErrorToast } from "@/utils/toastError";
 import { UserPlus } from "lucide-react";
 
 const ListFriendRequests = () => {
@@ -36,8 +36,7 @@ const ListFriendRequests = () => {
       });
       setPage(nextPage);
     } catch (error) {
-      console.log(error);
-      toast.error("Không thể tải danh sách lời mời kết bạn");
+      showErrorToast(error, "Không thể tải danh sách lời mời kết bạn");
     } finally {
       setIsLoading(false);
     }
