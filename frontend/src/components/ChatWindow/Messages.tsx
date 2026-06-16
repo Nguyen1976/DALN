@@ -234,14 +234,14 @@ const MessageComponent = ({
               )}
             >
               {!isMine && showAvatar ? (
-                <Avatar className="w-10 h-10 border border-bg-box-message-incoming">
+                <Avatar className="size-9 border border-border">
                   <AvatarImage src={message.senderMember?.avatar} />
                   <AvatarFallback>
-                    <User />
+                    <User className="size-4" />
                   </AvatarFallback>
                 </Avatar>
               ) : (
-                !isMine && <div className="w-10 h-10" />
+                !isMine && <div className="size-9 shrink-0" />
               )}
 
               <div
@@ -298,15 +298,15 @@ const MessageComponent = ({
                         href={media.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="mb-2 block rounded-lg border border-bg-box-message-incoming px-3 py-2 hover:opacity-90"
+                        className="mb-2 block rounded-lg border border-border/60 bg-background/40 px-3 py-2 transition-colors hover:bg-background/70"
                       >
                         <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 shrink-0 text-blue-300" />
+                          <FileText className="h-4 w-4 shrink-0 text-primary" />
                           <div className="min-w-0">
-                            <p className="truncate text-sm text-blue-300">
+                            <p className="truncate text-sm font-medium">
                               {getFileNameFromUrl(media.url)}
                             </p>
-                            <p className="text-xs text-gray-400">
+                            <p className="text-xs opacity-70">
                               {formatBytes(media.size) || "Mở tệp"}
                             </p>
                           </div>

@@ -23,30 +23,24 @@ const MenuCustome = () => {
       {showNewChat && <NewChatModal onClose={() => setShowNewChat(false)} />}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Menu />
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Tạo mới"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Menu className="size-5" />
+          </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-fit bg-black-bland" align="start">
+        <DropdownMenuContent className="w-48" align="end">
           <DropdownMenuGroup>
-            <DropdownMenuItem>
-              <Button
-                variant="ghost"
-                onClick={() => setShowNewChat(true)}
-                className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
-              >
-                <Plus className="w-5 h-5" />
-                <p>Tạo nhóm mới</p>
-              </Button>
+            <DropdownMenuItem onClick={() => setShowNewChat(true)}>
+              <Plus className="size-4" />
+              Tạo nhóm mới
             </DropdownMenuItem>
-            <DropdownMenuItem>
-              {" "}
-              <Button
-                variant="ghost"
-                onClick={() => setShowMakeFriend(true)}
-                className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
-              >
-                <UserRoundPlus className="w-5 h-5" />
-                <p>Thêm bạn bè</p>
-              </Button>
+            <DropdownMenuItem onClick={() => setShowMakeFriend(true)}>
+              <UserRoundPlus className="size-4" />
+              Thêm bạn bè
             </DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>

@@ -7,13 +7,14 @@ import {
   Paperclip,
   Smile,
   Send,
-  CircleChevronDown,
+  ChevronDown,
   Trash2,
   Plus,
   X,
   Settings,
   Lock,
   ListChecks,
+  ArrowLeft,
 } from "lucide-react";
 import {
   addConversation,
@@ -89,6 +90,7 @@ interface ChatWindowProps {
   conversationId?: string;
   onToggleProfile: () => void;
   onVoiceCall: () => void;
+  onBack?: () => void;
   focusMessageId?: string | null;
   onFocusHandled?: () => void;
 }
@@ -97,6 +99,7 @@ export default function ChatWindow({
   conversationId,
   onToggleProfile,
   onVoiceCall,
+  onBack,
   focusMessageId,
   onFocusHandled,
 }: ChatWindowProps) {
@@ -1024,45 +1027,62 @@ export default function ChatWindow({
   );
 
   return (
-    <div className="flex-1 flex flex-col bg-bg-box-chat">
+    <div className="relative flex min-w-0 flex-1 flex-col bg-bg-box-chat">
       {/* Header */}
-      <div className="h-16 bg-black-bland border-b border-bg-box-message-incoming flex items-center justify-between px-6">
-        <button
-          onClick={onToggleProfile}
-          className="flex items-center gap-3 hover:opacity-80 transition-opacity"
-        >
-          <Avatar className="w-10 h-10">
-            <AvatarImage
-              src={conversationAvatar || "/placeholder.svg"}
-              alt={conversationName || "Ảnh đại diện nhóm"}
-            />
-            <AvatarFallback>{conversationName?.[0]}</AvatarFallback>
-          </Avatar>
-          <div className="text-left">
-            <div className="font-medium text-text">{conversationName}</div>
-            <div className="text-xs text-gray-400">
-              {effectiveConversation?.type === "DIRECT"
-                ? "Trò chuyện trực tiếp"
-                : "Nhóm"}
+      <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-border bg-sidebar px-3 sm:px-6">
+        <div className="flex min-w-0 items-center gap-1">
+          {onBack && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onBack}
+              aria-label="Quay lại danh sách"
+              className="shrink-0 text-muted-foreground hover:text-foreground md:hidden"
+            >
+              <ArrowLeft className="size-5" />
+            </Button>
+          )}
+          <button
+            onClick={onToggleProfile}
+            className="flex min-w-0 items-center gap-3 rounded-lg p-1 text-left transition-opacity hover:opacity-80"
+          >
+            <Avatar className="size-10 shrink-0">
+              <AvatarImage
+                src={conversationAvatar || "/placeholder.svg"}
+                alt={conversationName || "Ảnh đại diện nhóm"}
+              />
+              <AvatarFallback>{conversationName?.[0]}</AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <div className="truncate font-medium text-foreground">
+                {conversationName}
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
+                {effectiveConversation?.type === "DIRECT"
+                  ? "Trò chuyện trực tiếp"
+                  : "Nhóm"}
+              </div>
             </div>
-          </div>
-        </button>
+          </button>
+        </div>
 
-        <div className="flex gap-2">
+        <div className="flex shrink-0 items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
             onClick={onVoiceCall}
-            className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
+            aria-label="Gọi thoại"
+            className="text-muted-foreground hover:text-foreground"
           >
-            <Phone className="w-5 h-5" />
+            <Phone className="size-5" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
+            aria-label="Gọi video"
+            className="hidden text-muted-foreground hover:text-foreground sm:inline-flex"
           >
-            <Video className="w-5 h-5" />
+            <Video className="size-5" />
           </Button>
 
           <DropdownMenu>
@@ -1070,12 +1090,13 @@ export default function ChatWindow({
               <Button
                 variant="ghost"
                 size="icon"
-                className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
+                aria-label="Tùy chọn cuộc trò chuyện"
+                className="text-muted-foreground hover:text-foreground"
               >
-                <MoreVertical className="w-5 h-5" />
+                <MoreVertical className="size-5" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 bg-popover">
+            <DropdownMenuContent align="end" className="w-64">
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={onToggleProfile}>
                   Xem chi tiết đoạn chat
@@ -1095,7 +1116,7 @@ export default function ChatWindow({
 
       {/* Messages */}
       <div
-        className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar"
+        className="custom-scrollbar flex-1 space-y-4 overflow-y-auto p-4 sm:p-6"
         ref={containerRef}
         onScroll={() => {
           const el = containerRef.current;
@@ -1129,8 +1150,22 @@ export default function ChatWindow({
         <div ref={bottomRef} />
       </div>
 
+      {/* Scroll to bottom */}
+      {!isAtBottom && (
+        <button
+          type="button"
+          aria-label="Cuộn xuống tin nhắn mới nhất"
+          onClick={() =>
+            bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+          }
+          className="absolute bottom-20 left-1/2 z-10 flex size-10 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-lg transition-colors hover:bg-accent"
+        >
+          <ChevronDown className="size-5" />
+        </button>
+      )}
+
       {!canSendMessage && (
-        <div className="px-6 py-2 text-sm text-amber-300 bg-amber-500/10 border-t border-amber-500/20">
+        <div className="border-t border-warning/30 bg-warning/10 px-6 py-2 text-sm text-warning-foreground">
           {membershipStatus === "REMOVED"
             ? "Bạn không còn trong nhóm này"
             : "Bạn đã rời khỏi nhóm này"}
@@ -1138,114 +1173,106 @@ export default function ChatWindow({
       )}
 
       {/* Input */}
-      {!isAtBottom && (
-        <button
-          onClick={() =>
-            bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-          }
-          className="flex justify-center mx-auto bg-transparent"
-        >
-          <CircleChevronDown className="text-bg-box-message-out animate-bounce w-8 h-8" />
-        </button>
-      )}
-      <div className="h-16 bg-black-bland border-t border-bg-box-message-incoming flex items-center gap-3 px-6">
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            void handleUploadMedia(file);
-            e.currentTarget.value = "";
-          }}
-        />
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={!canSendMessage}
-          className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
-        >
-          <Paperclip className="w-5 h-5" />
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={!canSendMessage}
-          onClick={handleOpenCreatePollDialog}
-          className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
-        >
-          <ListChecks className="w-5 h-5" />
-        </Button>
-
-        <input
-          type="text"
-          placeholder="Nhập tin nhắn..."
-          disabled={!canSendMessage}
-          className="flex-1 bg-transparent text-text placeholder:text-gray-500 outline-none text-sm"
-          onChange={(e) => {
-            setMsg(e.target.value);
-            handleTyping(e.target.value); // Emit typing indicator
-          }}
-          value={msg}
-          onFocus={handleInputFocus}
-          onBlur={handleInputBlur}
-          onKeyDown={(e) => {
-            // Nếu đang trong quá trình gõ tiếng Việt (IME composition), không gửi
-            if (e.nativeEvent.isComposing) return;
-
-            if (e.key === "Enter" && !e.shiftKey) {
-              // Thường Shift+Enter là xuống dòng
-              e.preventDefault();
-              handleSendMessage();
-            }
-          }}
-        />
-
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="
-        text-gray-400 
-        hover:text-text 
-        hover:bg-bg-box-message-incoming
-      "
-            >
-              <Smile className="w-5 h-5" />
-            </Button>
-          </PopoverTrigger>
-
-          <PopoverContent
-            side="top"
-            align="end"
-            className="p-0 border-none shadow-none bg-transparent"
+      <div className="shrink-0 border-t border-border bg-sidebar p-3 sm:px-4">
+        <div className="flex items-center gap-1 rounded-2xl border border-border bg-background px-2 py-1.5">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              void handleUploadMedia(file);
+              e.currentTarget.value = "";
+            }}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!canSendMessage}
+            aria-label="Đính kèm tệp"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
           >
-            <EmojiPicker
-              height={360}
-              width={300}
-              searchDisabled={false}
-              skinTonesDisabled
-              previewConfig={{ showPreview: false }}
-              onEmojiClick={(emoji) => {
-                // TODO: insert emoji vào input
-                setMsg((prev) => prev + emoji.emoji);
-                //đóng popover sau khi chọn
-              }}
-            />
-          </PopoverContent>
-        </Popover>
+            <Paperclip className="size-5" />
+          </Button>
 
-        <Button
-          size="icon"
-          className="bg-bg-box-message-out hover:bg-purple-700 text-text rounded-full"
-          onClick={handleSendMessage}
-        >
-          <Send className="w-5 h-5" />
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={!canSendMessage}
+            onClick={handleOpenCreatePollDialog}
+            aria-label="Tạo bình chọn"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <ListChecks className="size-5" />
+          </Button>
+
+          <input
+            type="text"
+            placeholder="Nhập tin nhắn..."
+            disabled={!canSendMessage}
+            aria-label="Nhập tin nhắn"
+            className="min-w-0 flex-1 bg-transparent px-1 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+            onChange={(e) => {
+              setMsg(e.target.value);
+              handleTyping(e.target.value); // Emit typing indicator
+            }}
+            value={msg}
+            onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
+            onKeyDown={(e) => {
+              // Nếu đang trong quá trình gõ tiếng Việt (IME composition), không gửi
+              if (e.nativeEvent.isComposing) return;
+
+              if (e.key === "Enter" && !e.shiftKey) {
+                // Thường Shift+Enter là xuống dòng
+                e.preventDefault();
+                handleSendMessage();
+              }
+            }}
+          />
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Chèn biểu tượng cảm xúc"
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <Smile className="size-5" />
+              </Button>
+            </PopoverTrigger>
+
+            <PopoverContent
+              side="top"
+              align="end"
+              className="border-none bg-transparent p-0 shadow-none"
+            >
+              <EmojiPicker
+                height={360}
+                width={300}
+                searchDisabled={false}
+                skinTonesDisabled
+                previewConfig={{ showPreview: false }}
+                onEmojiClick={(emoji) => {
+                  setMsg((prev) => prev + emoji.emoji);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+
+          <Button
+            size="icon"
+            disabled={!canSendMessage || msg.trim() === ""}
+            aria-label="Gửi tin nhắn"
+            className="shrink-0 rounded-full"
+            onClick={handleSendMessage}
+          >
+            <Send className="size-5" />
+          </Button>
+        </div>
       </div>
 
       <Dialog

@@ -21,7 +21,10 @@ const ProfileSetting = () => {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Avatar>
+          <Avatar
+            aria-label="Mở menu hồ sơ"
+            className="size-10 cursor-pointer ring-offset-background transition-shadow hover:ring-2 hover:ring-ring hover:ring-offset-2"
+          >
             <AvatarImage
               src={user.avatar || "/placeholder.svg"}
               alt={user.username}

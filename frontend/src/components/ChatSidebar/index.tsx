@@ -1,10 +1,10 @@
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { ModeToggle } from "../ModeToggle";
 import type { AppDispatch } from "@/redux/store";
 import { useDispatch, useSelector } from "react-redux";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getConversations,
   selectConversation,
@@ -15,8 +15,9 @@ import MenuCustome from "./Menu";
 import { NotificationsDropdown } from "../NotificationDropdown";
 import { useNavigate, useParams } from "react-router";
 import { selectUser } from "@/redux/slices/userSlice";
+import { MessagesSquare } from "lucide-react";
 
-export function ChatSidebar() {
+export function ChatSidebar({ className }: { className?: string }) {
   const user = useSelector(selectUser);
 
   const selectedChatId = useParams().conversationId || "";
@@ -27,25 +28,62 @@ export function ChatSidebar() {
 
   const navigate = useNavigate();
 
+  const [initialLoading, setInitialLoading] = useState(
+    conversations.length === 0,
+  );
+  const isFetchingMoreRef = useRef(false);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     if (conversations.length === 0) {
-      dispatch(getConversations({ limit: 10, cursor: null }));
+      void dispatch(
+        getConversations({ limit: 10, cursor: null }),
+      ).finally(() => setInitialLoading(false));
+    } else {
+      setInitialLoading(false);
     }
-  }, [dispatch, conversations?.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatch]);
+
+  // Reset the in-flight guard whenever new conversations arrive so the next
+  // page can be requested; when nothing new arrives we stop loading more.
+  useEffect(() => {
+    isFetchingMoreRef.current = false;
+  }, [conversations.length]);
 
   const loadMoreConversations = () => {
-    console.log(conversations[conversations.length - 1]);
-    dispatch(
-      getConversations({
-        limit: 10,
-        cursor: conversations[conversations.length - 1]?.lastMessageAt || null,
-      }),
-    );
+    if (isFetchingMoreRef.current) return;
+    const cursor =
+      conversations[conversations.length - 1]?.lastMessageAt || null;
+    if (!cursor) return;
+    isFetchingMoreRef.current = true;
+    dispatch(getConversations({ limit: 10, cursor }));
   };
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadMoreConversations();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations.length]);
 
   const renderConversationItem = (conversation: Conversation) => {
     const memberCount =
       conversation.memberCount ?? conversation.members?.length ?? 0;
+    const isActive = selectedChatId === conversation.id;
+    const unread =
+      Number(conversation.unreadCount) > 0 || conversation.unreadCount === "5+";
 
     return (
       <button
@@ -54,35 +92,35 @@ export function ChatSidebar() {
           navigate(`/chat/${conversation.id}`);
         }}
         className={cn(
-          "w-full p-4 flex items-start gap-3 hover:bg-bg-box-message-incoming/50 transition-colors border-b border-bg-box-message-incoming/30",
-          selectedChatId === conversation.id && "bg-bg-box-message-incoming",
+          "flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-accent",
+          isActive && "bg-accent",
         )}
       >
-        <div className="relative">
+        <div className="relative shrink-0">
           {conversation.type === "DIRECT" ? (
-            <Avatar className="w-12 h-12">
+            <Avatar className="size-12">
               <AvatarImage
                 src={conversation.groupAvatar || ""}
-                alt={conversation.groupName || ""}
+                alt={conversation.groupName || "Ảnh đại diện"}
               />
               <AvatarFallback>
                 {(conversation.groupName || "C")[0]}
               </AvatarFallback>
             </Avatar>
           ) : (
-            <div className="*:data-[slot=avatar]:ring-background flex -space-x-2 *:data-[slot=avatar]:ring-2 *:data-[slot=avatar]:grayscale">
-              <Avatar>
+            <div className="flex -space-x-2 *:data-[slot=avatar]:ring-2 *:data-[slot=avatar]:ring-background">
+              <Avatar className="size-12">
                 <AvatarImage
                   src={conversation.groupAvatar || ""}
-                  alt={conversation.groupName || ""}
+                  alt={conversation.groupName || "Ảnh đại diện nhóm"}
                 />
                 <AvatarFallback>
                   {(conversation.groupName || "C")[0]}
                 </AvatarFallback>
               </Avatar>
               {memberCount >= 2 && (
-                <Avatar>
-                  <AvatarFallback>
+                <Avatar className="size-12">
+                  <AvatarFallback className="text-xs">
                     {memberCount - 1 <= 99 ? memberCount - 1 : "99+"}
                   </AvatarFallback>
                 </Avatar>
@@ -91,60 +129,97 @@ export function ChatSidebar() {
           )}
         </div>
 
-        <div className="flex-1 min-w-0 text-left">
-          <div className="flex items-center justify-between mb-1">
-            <span className="font-medium text-text truncate">
+        <div className="min-w-0 flex-1">
+          <div className="mb-0.5 flex items-center justify-between gap-2">
+            <span
+              className={cn(
+                "truncate text-sm text-foreground",
+                unread ? "font-semibold" : "font-medium",
+              )}
+            >
               {conversation.groupName}
             </span>
-            <span className="text-xs text-gray-400 ml-2">
+            <span className="shrink-0 text-xs text-muted-foreground">
               {formatDateTime(conversation.updatedAt)}
             </span>
           </div>
-          <p className="text-sm text-gray-400 truncate">
-            {conversation?.lastMessageText
-              ? conversation.lastMessageSenderName &&
-                conversation.lastMessageSenderId !== user?.id
-                ? `${conversation.lastMessageSenderName}: ${conversation.lastMessageText}`
-                : conversation.lastMessageText
-              : "Chưa có tin nhắn nào."}
-          </p>
-        </div>
-
-        {(Number(conversation.unreadCount) > 0 ||
-          conversation.unreadCount === "5+") && (
-          <div className="w-6 h-6 bg-bg-box-message-out rounded-full flex items-center justify-center">
-            <span className="text-xs text-text font-medium">
-              {Number(conversation.unreadCount) > 5
-                ? "5+"
-                : conversation.unreadCount}
-            </span>
+          <div className="flex items-center justify-between gap-2">
+            <p
+              className={cn(
+                "truncate text-sm",
+                unread
+                  ? "font-medium text-foreground"
+                  : "text-muted-foreground",
+              )}
+            >
+              {conversation?.lastMessageText
+                ? conversation.lastMessageSenderName &&
+                  conversation.lastMessageSenderId !== user?.id
+                  ? `${conversation.lastMessageSenderName}: ${conversation.lastMessageText}`
+                  : conversation.lastMessageText
+                : "Chưa có tin nhắn nào."}
+            </p>
+            {unread && (
+              <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground">
+                {Number(conversation.unreadCount) > 5
+                  ? "5+"
+                  : conversation.unreadCount}
+              </span>
+            )}
           </div>
-        )}
+        </div>
       </button>
     );
   };
 
   return (
-    <div className="w-1/3 bg-black-bland border-r border-bg-box-message-incoming flex flex-col custom-scrollbar">
-      <div className="flex items-center justify-end p-4 border-b border-bg-box-message-incoming">
-        <div className="flex gap-2 items-center">
+    <aside
+      className={cn(
+        "w-full flex-col border-r border-border bg-sidebar md:flex md:w-80 lg:w-96",
+        className,
+      )}
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <h1 className="text-base font-semibold text-foreground">Trò chuyện</h1>
+        <div className="flex items-center gap-1">
           <ModeToggle />
           <NotificationsDropdown />
           <MenuCustome />
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {conversations?.map(renderConversationItem)}
-        <div className="w-full flex items-center justify-center my-4">
-          <Button
-            className="interceptor-loading"
-            onClick={() => loadMoreConversations()}
-          >
-            Tải thêm
-          </Button>
-        </div>
+      <div className="custom-scrollbar flex-1 space-y-1 overflow-y-auto p-2">
+        {initialLoading ? (
+          Array.from({ length: 7 }).map((_, index) => (
+            <div key={index} className="flex items-center gap-3 p-3">
+              <Skeleton className="size-12 shrink-0 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-3.5 w-2/3" />
+                <Skeleton className="h-3 w-4/5" />
+              </div>
+            </div>
+          ))
+        ) : conversations.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+            <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <MessagesSquare className="size-7" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-foreground">
+                Chưa có cuộc trò chuyện
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Bắt đầu nhắn tin với bạn bè hoặc tạo nhóm mới.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {conversations.map(renderConversationItem)}
+            <div ref={loadMoreSentinelRef} className="h-px w-full" />
+          </>
+        )}
       </div>
-    </div>
+    </aside>
   );
 }

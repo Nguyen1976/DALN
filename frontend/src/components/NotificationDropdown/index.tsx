@@ -107,11 +107,12 @@ export function NotificationsDropdown() {
           <Button
             variant="ghost"
             size="icon"
+            aria-label="Thông báo"
             className="relative text-muted-foreground hover:text-foreground"
           >
-            <Bell className="w-5 h-5 text-text" />
+            <Bell className="size-5" />
             {notifications.filter((n) => !n.isRead).length > 0 && (
-              <span className="absolute top-2 right-2 w-2 h-2 bg-destructive rounded-full border-2 border-background" />
+              <span className="absolute right-2 top-2 size-2 rounded-full border-2 border-background bg-destructive" />
             )}
           </Button>
         </PopoverTrigger>
