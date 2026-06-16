@@ -9,6 +9,8 @@
     "proto:gen": "protoc -I ./proto   --ts_proto_out=interfaces   --ts_proto_opt=nestJs=true,addGrpcMetadata=true   ./proto/*.proto",
     "db:normalize-chat-legacy": "ts-node scripts/normalize-chat-legacy.ts",
     "db:backfill-conversation-member-profile": "ts-node scripts/backfill-conversation-member-profile.ts",
+    "db:seed": "npm run db:seed:recommendation",
+    "db:seed:recommendation": "npx prisma db seed --schema=apps/recommendation/prisma/schema.prisma",
     "rcm:train-bootstrap": "ts-node --compiler-options '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' scripts/train-rcm-from-dataset.ts",
     "build": "nest build",
     "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
@@ -98,6 +100,9 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
+  },
+  "prisma": {
+    "seed": "ts-node apps/recommendation/prisma/seed.ts"
   },
   "jest": {
     "moduleFileExtensions": [
