@@ -47,8 +47,6 @@ const Profile = () => {
   );
 
   const onSubmit = async (data: z.infer<typeof formProfileScheme>) => {
-    console.log("FORM DATA:", data);
-
     const formData = new FormData();
     if (data.avatar) formData.append("avatar", data.avatar);
     formData.append("fullName", data.fullName);

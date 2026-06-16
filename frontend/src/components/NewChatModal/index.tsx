@@ -87,26 +87,28 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
   }, [preview]);
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in">
       <form
-        className="bg-bg-voice-call rounded-2xl w-full max-w-md mx-4 overflow-hidden"
+        className="flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
         onSubmit={handleSubmit(onSubmit)}
       >
-        <div className="flex items-center justify-between p-6 border-b border-button">
-          <h2 className="text-xl font-semibold text-text">
+        <div className="flex items-center justify-between border-b border-border p-5">
+          <h2 className="text-lg font-semibold text-foreground">
             Tạo cuộc trò chuyện mới
           </h2>
           <Button
+            type="button"
             variant="ghost"
             size="icon"
             onClick={onClose}
-            className="hover:bg-button text-gray-400 hover:text-text"
+            aria-label="Đóng"
+            className="text-muted-foreground hover:text-foreground"
           >
-            <X className="w-5 h-5" />
+            <X className="size-5" />
           </Button>
         </div>
 
-        <div className="p-6 pb-0">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
           <Input
             type="file"
             accept="image/*"
@@ -116,48 +118,48 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
               const file = e.target.files?.[0];
               if (file) setPreview(URL.createObjectURL(file));
 
-              // set vào react-hook-form
               setValue("groupAvatar", file);
             }}
           />
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <Avatar
-              className="w-12 h-12 mb-4 flex items-center justify-center bg-muted border border-button cursor-pointer hover:bg-button transition-colors"
+              className="flex size-12 shrink-0 cursor-pointer items-center justify-center border border-border bg-muted transition-colors hover:bg-accent"
               onClick={() => inputRef.current?.click()}
             >
               {!preview ? (
-                <Camera className="w-6 h-6 text-muted-foreground" />
+                <Camera className="size-5 text-muted-foreground" />
               ) : (
                 <AvatarImage src={preview} alt="Xem trước" />
               )}
             </Avatar>
             <Input
-              className="mb-4 bg-background! border border-button text-text outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 focus-visible:border-violet-500"
               type="text"
               placeholder="Tên nhóm"
               {...register("groupName", { required: "Vui lòng nhập tên nhóm" })}
             />
           </div>
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <input
+
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
               type="text"
               placeholder="Tìm người dùng..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-background border border-button text-text placeholder:text-muted-foreground rounded-lg pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              className="pl-10"
             />
           </div>
 
-          <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar">
+          <div className="custom-scrollbar max-h-[300px] space-y-1 overflow-y-auto">
             {friends?.map((user) => (
-              <div
+              <label
                 key={user.id}
-                className="w-full flex items-center gap-3 p-3 hover:bg-button rounded-lg transition-colors"
+                htmlFor={`${user.id}`}
+                className="flex w-full cursor-pointer items-center gap-3 rounded-lg p-3 transition-colors hover:bg-accent"
               >
                 <Checkbox
                   id={`${user.id}`}
-                  className="size-5 border-2 border-muted-foreground bg-background data-[state=checked]:bg-violet-600 data-[state=checked]:border-violet-600 data-[state=checked]:text-white"
+                  className="size-5"
                   checked={slectedFriends.includes(user.id)}
                   onCheckedChange={(checked) => {
                     if (checked) {
@@ -169,34 +171,33 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
                     }
                   }}
                 />
-                <div className="relative">
-                  <Avatar className="w-10 h-10">
-                    <AvatarImage src={"/placeholder.svg"} alt={user.username} />
-                    <AvatarFallback>{user.username[0]}</AvatarFallback>
-                  </Avatar>
-                  {/* {user.isOnline && (
-                    <div className='absolute bottom-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-bg-voice-call' />
-                  )} */}
-                </div>
-                <span className="text-text font-medium">{user.username}</span>
-              </div>
+                <Avatar className="size-10 shrink-0">
+                  <AvatarImage src={user.avatar || "/placeholder.svg"} alt={user.username} />
+                  <AvatarFallback>{user.username[0]}</AvatarFallback>
+                </Avatar>
+                <span className="font-medium text-foreground">
+                  {user.username}
+                </span>
+              </label>
             ))}
-          </div>
-          <div className="w-full flex items-center justify-center my-4">
-            <Button
-              type="button"
-              variant="ghost"
-              className="interceptor-loading text-text hover:bg-button"
-              onClick={() => {
-                loadMoreFriends();
-              }}
-            >
-              Tải thêm
-            </Button>
+            <div className="my-2 flex items-center justify-center">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="interceptor-loading text-muted-foreground"
+                onClick={() => {
+                  loadMoreFriends();
+                }}
+              >
+                Tải thêm
+              </Button>
+            </div>
           </div>
         </div>
-        <div className="w-full flex justify-end">
-          <Button type="submit" className="m-4 interceptor-loading">
+
+        <div className="flex justify-end border-t border-border p-4">
+          <Button type="submit" className="interceptor-loading">
             Bắt đầu chat
           </Button>
         </div>

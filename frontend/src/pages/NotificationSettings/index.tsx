@@ -22,6 +22,24 @@ function normalizeChannels(data?: Partial<ChannelToggles>): ChannelToggles {
   };
 }
 
+const channelLabels: Record<keyof ChannelToggles, string> = {
+  IN_APP: "Trong ứng dụng",
+  EMAIL: "Email",
+  REALTIME: "Thời gian thực",
+};
+
+const typeLabels: Record<string, string> = {
+  MESSAGE_RECEIVED: "Tin nhắn mới",
+  FRIEND_REQUEST_SENT: "Lời mời kết bạn đã gửi",
+  FRIEND_REQUEST_ACCEPTED: "Lời mời kết bạn được chấp nhận",
+  FRIEND_REQUEST_REJECTED: "Lời mời kết bạn bị từ chối",
+  SYSTEM_NOTIFICATION: "Thông báo hệ thống",
+  USER_JOINED_GROUP: "Có người tham gia nhóm",
+  USER_LEFT_GROUP: "Có người rời nhóm",
+  USER_KICKED_FROM_GROUP: "Có người bị mời khỏi nhóm",
+  USER_ADDED_TO_GROUP: "Có người được thêm vào nhóm",
+};
+
 export default function NotificationSettingsPage() {
   const dispatch = useDispatch<AppDispatch>();
   const { data, notificationTypes, isLoading, isSaving } = useSelector(
@@ -117,27 +135,30 @@ export default function NotificationSettingsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Notification Settings</h1>
-          <p className="text-sm text-muted-foreground">
-            Quản lý kênh nhận thông báo theo nhu cầu của bạn.
-          </p>
+    <div className="min-h-[100dvh] bg-background">
+      <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:py-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">
+              Cài đặt thông báo
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Quản lý kênh nhận thông báo theo nhu cầu của bạn.
+            </p>
+          </div>
+          <Button asChild variant="outline">
+            <Link to="/">Quay lại chat</Link>
+          </Button>
         </div>
-        <Button asChild variant="outline">
-          <Link to="/">Quay lại chat</Link>
-        </Button>
-      </div>
 
-      {isLoading && (
-        <p className="text-sm text-muted-foreground">Đang tải cấu hình...</p>
-      )}
+        {isLoading && (
+          <p className="text-sm text-muted-foreground">Đang tải cấu hình...</p>
+        )}
 
-      {data && (
-        <>
-          <section className="rounded-lg border p-4 space-y-4">
-            <h2 className="font-medium">Global Preferences</h2>
+        {data && (
+          <>
+            <section className="space-y-4 rounded-xl border border-border bg-card p-5">
+              <h2 className="font-semibold text-foreground">Tùy chọn chung</h2>
 
             <div className="flex items-center gap-3">
               <Checkbox
@@ -168,14 +189,16 @@ export default function NotificationSettingsPage() {
                       void handleGlobalChannelChange(channel, Boolean(value))
                     }
                   />
-                  <Label htmlFor={`global-${channel}`}>{channel}</Label>
+                  <Label htmlFor={`global-${channel}`}>
+                    {channelLabels[channel]}
+                  </Label>
                 </div>
               ))}
             </div>
           </section>
 
-          <section className="rounded-lg border p-4 space-y-4">
-            <h2 className="font-medium">Digest Settings</h2>
+          <section className="space-y-4 rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold text-foreground">Tổng hợp email</h2>
             <div className="flex items-center gap-3">
               <Checkbox
                 id="digest-enabled"
@@ -185,26 +208,30 @@ export default function NotificationSettingsPage() {
                   void handleDigestEnabled(Boolean(value))
                 }
               />
-              <Label htmlFor="digest-enabled">Bật email digest</Label>
+              <Label htmlFor="digest-enabled">Bật email tổng hợp</Label>
             </div>
             <p className="text-xs text-muted-foreground">
-              minUnread: {data.digest.minUnread} | cooldown:{" "}
+              Số tin chưa đọc tối thiểu: {data.digest.minUnread} | thời gian chờ:{" "}
               {data.digest.cooldownMinutes} phút
             </p>
           </section>
 
-          <section className="rounded-lg border p-4 space-y-4">
-            <h2 className="font-medium">Per Notification Type</h2>
+          <section className="space-y-4 rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold text-foreground">
+              Theo từng loại thông báo
+            </h2>
             <div className="space-y-3">
               {typeList.map((type) => {
                 const channels = normalizeChannels(data.overrides?.[type]);
                 return (
                   <div
                     key={type}
-                    className="rounded-md border p-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+                    className="flex flex-col gap-3 rounded-lg border border-border p-3 md:flex-row md:items-center md:justify-between"
                   >
                     <div>
-                      <p className="text-sm font-medium">{type}</p>
+                      <p className="text-sm font-medium text-foreground">
+                        {typeLabels[type] || type}
+                      </p>
                     </div>
                     <div className="flex items-center gap-4">
                       {(
@@ -232,7 +259,7 @@ export default function NotificationSettingsPage() {
                             htmlFor={`${type}-${channel}`}
                             className="text-xs"
                           >
-                            {channel}
+                            {channelLabels[channel]}
                           </Label>
                         </div>
                       ))}
@@ -242,8 +269,9 @@ export default function NotificationSettingsPage() {
               })}
             </div>
           </section>
-        </>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

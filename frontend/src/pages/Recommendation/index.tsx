@@ -144,9 +144,14 @@ export default function RecommendationPage() {
             )}
 
             {emptyState && (
-              <div className="rounded-2xl border border-dashed p-10 text-center bg-card/30">
-                <p className="text-lg font-medium">Chưa có danh sách bạn bè</p>
-                <p className="mt-2 text-sm text-muted-foreground">
+              <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card/30 p-10 text-center">
+                <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <UserPlus className="size-7" />
+                </div>
+                <p className="text-lg font-medium text-foreground">
+                  Chưa có danh sách bạn bè
+                </p>
+                <p className="text-sm text-muted-foreground">
                   Hệ thống sẽ hiển thị người dùng phù hợp khi đã có dữ liệu.
                 </p>
               </div>
@@ -176,7 +181,7 @@ export default function RecommendationPage() {
                                 </AvatarFallback>
                               </Avatar>
                               {profile.isActive ? (
-                                <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-background bg-green-500" />
+                                <span className="absolute bottom-0 right-0 size-3 rounded-full border-2 border-background bg-success" />
                               ) : null}
                             </div>
 

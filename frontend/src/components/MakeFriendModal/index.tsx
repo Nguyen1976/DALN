@@ -20,34 +20,42 @@ export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in">
       <form
-        className="bg-bg-voice-call rounded-2xl w-full max-w-md mx-4 overflow-hidden"
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
         onSubmit={handleSubmit(onSubmit)}
       >
-        <div className="flex items-center justify-between p-6 border-button">
-          <h2 className="text-xl font-semibold text-text">Thêm bạn bè</h2>
+        <div className="flex items-center justify-between border-b border-border p-5">
+          <h2 className="text-lg font-semibold text-foreground">Thêm bạn bè</h2>
           <Button
+            type="button"
             variant="ghost"
             size="icon"
             onClick={onClose}
-            className="hover:bg-button text-gray-400 hover:text-text"
+            aria-label="Đóng"
+            className="text-muted-foreground hover:text-foreground"
           >
-            <X className="w-5 h-5" />
+            <X className="size-5" />
           </Button>
         </div>
 
-        <div className="p-6 pb-0">
+        <div className="space-y-2 p-5">
+          <label
+            htmlFor="make-friend-email"
+            className="text-sm font-medium text-foreground"
+          >
+            Email người dùng
+          </label>
           <Input
-            className="border-none mb-4 focus:ring-bg-box-message-out! bg-button! text-text outline-none"
-            type="text"
+            id="make-friend-email"
+            type="email"
             placeholder="Nhập email"
             {...register("email", { required: "Vui lòng nhập email" })}
           />
         </div>
 
-        <div className="w-full flex justify-end">
-          <Button type="submit" className="m-4 interceptor-loading">
+        <div className="flex justify-end border-t border-border p-4">
+          <Button type="submit" className="interceptor-loading">
             Gửi lời mời
           </Button>
         </div>
