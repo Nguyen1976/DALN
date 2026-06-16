@@ -26,103 +26,119 @@
 }
 
 :root {
+  /* Radius scale */
+  --radius: 0.75rem;
+
+  /* Light theme — neutral surfaces with a violet brand accent */
   --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: oklch(0.21 0.01 285);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.01 285);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.21 0.01 285);
+  --primary: oklch(0.55 0.22 285);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.97 0.005 285);
+  --secondary-foreground: oklch(0.28 0.02 285);
+  --muted: oklch(0.968 0.004 285);
+  --muted-foreground: oklch(0.55 0.015 285);
+  --accent: oklch(0.95 0.02 285);
+  --accent-foreground: oklch(0.4 0.12 285);
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.7 0.16 155);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.75 0.15 75);
+  --warning-foreground: oklch(0.27 0.05 75);
+  --border: oklch(0.92 0.004 285);
+  --input: oklch(0.92 0.004 285);
+  --ring: oklch(0.55 0.22 285);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.75rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
 
-  /* màu của app */
-  --bg-box-chat: #fafafa; /* nền chat tổng */
-  --bg-box-message-incoming: #f4f4f5; /* bubble tin đến */
-  --bg-box-message-out: #ede9fe; /* bubble tin gửi (tím nhạt) */
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.21 0.01 285);
+  --sidebar-primary: oklch(0.55 0.22 285);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.95 0.02 285);
+  --sidebar-accent-foreground: oklch(0.4 0.12 285);
+  --sidebar-border: oklch(0.92 0.004 285);
+  --sidebar-ring: oklch(0.55 0.22 285);
 
-  --text: #000000;
+  /* App-specific surfaces (theme-aware) */
+  --bg-box-chat: oklch(0.99 0 0); /* chat canvas background */
+  --bg-box-message-incoming: oklch(0.955 0.003 285); /* incoming bubble */
+  --bg-box-message-out: oklch(0.92 0.05 285); /* outgoing bubble (soft violet) */
+  --text: oklch(0.21 0.01 285);
 
-  --black-bland: #fafafa;
-  --bg-voice-call: #f1f2f7;
-  --button: #d5d7dd;
+  --black-bland: oklch(1 0 0); /* navigation / panel surface */
+  --bg-voice-call: oklch(0.97 0.005 285);
+  --button: oklch(0.93 0.005 285);
 
-  --bg-scroll-thumb: oklch(0.75 0 0);
+  --bg-scroll-thumb: oklch(0.8 0.005 285);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 .dark {
-  --background: oklch(0.08 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.12 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: #0f0f13;
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.55 0.25 280);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.18 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.18 0 0);
-  --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.55 0.25 280);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.55 0.25 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.18 0 0);
-  --input: oklch(0.18 0 0);
-  --ring: oklch(0.55 0.25 280);
-  --chart-1: oklch(0.55 0.25 280);
+  --background: oklch(0.16 0.006 285);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.2 0.007 285);
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.2 0.007 285);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.62 0.21 285);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.26 0.01 285);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.26 0.01 285);
+  --muted-foreground: oklch(0.7 0.015 285);
+  --accent: oklch(0.3 0.04 285);
+  --accent-foreground: oklch(0.96 0 0);
+  --destructive: oklch(0.62 0.21 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.72 0.16 155);
+  --success-foreground: oklch(0.16 0.006 285);
+  --warning: oklch(0.8 0.14 80);
+  --warning-foreground: oklch(0.2 0.03 80);
+  --border: oklch(0.29 0.01 285);
+  --input: oklch(0.29 0.01 285);
+  --ring: oklch(0.62 0.21 285);
+  --chart-1: oklch(0.62 0.21 285);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.12 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.55 0.25 280);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.18 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.18 0 0);
-  --sidebar-ring: oklch(0.55 0.25 280);
 
-  /* màu của app */
-  --bg-box-chat: #0f0f13;
-  --bg-box-message-incoming: #27272a;
-  --bg-box-message-out: #9810fa;
-  --text: #ffffff;
+  --sidebar: oklch(0.2 0.007 285);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: oklch(0.62 0.21 285);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.3 0.04 285);
+  --sidebar-accent-foreground: oklch(0.96 0 0);
+  --sidebar-border: oklch(0.29 0.01 285);
+  --sidebar-ring: oklch(0.62 0.21 285);
 
-  --black-bland: #18181b;
-  --bg-voice-call: #2d2d3d;
+  /* App-specific surfaces (theme-aware) */
+  --bg-box-chat: oklch(0.16 0.006 285);
+  --bg-box-message-incoming: oklch(0.26 0.01 285);
+  --bg-box-message-out: oklch(0.48 0.16 285); /* readable violet with white text */
+  --text: oklch(0.97 0 0);
 
-  --button: #3d3d4d;
-  --bg-scroll-thumb: oklch(0.35 0 0);
+  --black-bland: oklch(0.2 0.007 285);
+  --bg-voice-call: oklch(0.23 0.012 285);
+  --button: oklch(0.32 0.012 285);
+
+  --bg-scroll-thumb: oklch(0.4 0.01 285);
 }
 
 @theme inline {
-  /* optional: --font-sans, --font-serif, --font-mono if they are applied in the layout.tsx */
+  --font-sans: var(--font-sans);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -139,6 +155,10 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -160,12 +180,11 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  /* màu của app */
+  /* App-specific surfaces */
   --color-bg-box-chat: var(--bg-box-chat);
   --color-bg-box-message-incoming: var(--bg-box-message-incoming);
   --color-bg-box-message-out: var(--bg-box-message-out);
   --color-text: var(--text);
-
   --color-black-bland: var(--black-bland);
   --color-bg-voice-call: var(--bg-voice-call);
   --color-button: var(--button);
@@ -177,8 +196,15 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 }
 
@@ -192,12 +218,17 @@
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: oklch(0.35 0 0);
-  border-radius: 3px;
+  background: var(--bg-scroll-thumb);
+  border-radius: 9999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.45 0 0);
+  background: var(--muted-foreground);
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-scroll-thumb) transparent;
 }
 
 @layer utilities {
