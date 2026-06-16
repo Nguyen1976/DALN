@@ -173,7 +173,6 @@ function App() {
       userId: string;
       lastSeen: string;
     }) => {
-      console.log("handleOfflineStatusChanged", data.userId, data.lastSeen);
       dispatch(
         updateStatusOffline({ friendId: data.userId, lastSeen: data.lastSeen }),
       );
