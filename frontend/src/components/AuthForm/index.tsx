@@ -19,11 +19,11 @@ interface AuthFormProps {
 export function AuthForm({ mode, onModeChange }: AuthFormProps) {
   return (
     <Card className="w-full max-w-md backdrop-blur-xl bg-card/80 border-border/50 shadow-2xl relative">
-      <div className="absolute top-4 right-4">
+      <div className="absolute right-3 top-3 z-10">
         <ModeToggle />
       </div>
-      <CardHeader className="space-y-1">
-        <CardTitle className="text-3xl font-bold text-center">
+      <CardHeader className="space-y-1 pt-2">
+        <CardTitle className="mx-auto max-w-[16rem] text-center text-2xl font-bold leading-snug">
           {mode === "login" ? "Chào mừng bạn quay lại" : "Tạo tài khoản"}
         </CardTitle>
         <CardDescription className="text-center">
@@ -57,7 +57,7 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
               {"Chưa có tài khoản? "}
               <button
                 onClick={() => onModeChange("register")}
-                className="text-accent hover:underline font-medium"
+                className="font-medium text-primary hover:underline"
               >
                 Đăng ký ngay
               </button>
@@ -67,7 +67,7 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
               {"Đã có tài khoản? "}
               <button
                 onClick={() => onModeChange("login")}
-                className="text-accent hover:underline font-medium"
+                className="font-medium text-primary hover:underline"
               >
                 Đăng nhập
               </button>

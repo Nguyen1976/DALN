@@ -11,6 +11,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Loader2 } from "lucide-react";
 import { getInterestTagsAPI, type InterestTagItem } from "@/apis";
 import {
   completeInterestOnboardingAPI,
@@ -100,9 +102,16 @@ export default function InterestOnboardingPage() {
   };
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden">
-      <div className="relative z-20 flex min-h-screen items-center justify-center p-4">
-        <Card className="w-full max-w-lg backdrop-blur-xl bg-card/80 border-border/50 shadow-2xl relative max-h-[90vh] flex flex-col">
+    <div className="relative flex min-h-[100dvh] w-full items-center justify-center overflow-hidden bg-background p-4">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 overflow-hidden"
+      >
+        <div className="absolute -left-24 -top-24 size-72 rounded-full bg-primary/20 blur-3xl" />
+        <div className="absolute -bottom-24 -right-24 size-80 rounded-full bg-primary/15 blur-3xl" />
+      </div>
+      <div className="relative z-20 flex w-full max-w-lg justify-center">
+        <Card className="relative flex max-h-[90dvh] w-full flex-col border-border/60 bg-card/80 shadow-2xl backdrop-blur-xl">
           <div className="absolute top-4 right-4">
             <ModeToggle />
           </div>
@@ -123,9 +132,21 @@ export default function InterestOnboardingPage() {
             </p>
 
             {loadingTags ? (
-              <p className="text-center text-sm text-muted-foreground py-8">
-                Đang tải danh mục…
-              </p>
+              <div className="space-y-6 py-2">
+                {Array.from({ length: 3 }).map((_, groupIndex) => (
+                  <div key={groupIndex} className="space-y-2">
+                    <Skeleton className="h-4 w-32" />
+                    <div className="flex flex-wrap gap-2">
+                      {Array.from({ length: 6 }).map((_, chipIndex) => (
+                        <Skeleton
+                          key={chipIndex}
+                          className="h-8 w-24 rounded-full"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
               <ScrollArea className="h-[min(420px,50vh)] pr-3">
                 <div className="space-y-6 pb-2">
@@ -167,6 +188,7 @@ export default function InterestOnboardingPage() {
               disabled={submitting || loadingTags || selected.size === 0}
               onClick={() => void onSubmit()}
             >
+              {submitting && <Loader2 className="size-4 animate-spin" />}
               {submitting ? "Đang lưu…" : "Tiếp tục"}
             </Button>
           </CardContent>

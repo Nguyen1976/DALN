@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { useForm } from "react-hook-form";
@@ -17,8 +18,10 @@ import { useDispatch } from "react-redux";
 import type { AppDispatch } from "@/redux/store";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 const Login = () => {
+  const [showPassword, setShowPassword] = useState(false);
   const form = useForm<z.infer<typeof formLoginScheme>>({
     resolver: zodResolver(formLoginScheme),
     defaultValues: {
@@ -76,15 +79,41 @@ const Login = () => {
               <FormItem>
                 <FormLabel>Mật khẩu</FormLabel>
                 <FormControl>
-                  <Input placeholder="******" {...field} type="password" />
+                  <div className="relative">
+                    <Input
+                      placeholder="••••••••"
+                      {...field}
+                      type={showPassword ? "text" : "password"}
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </button>
+                  </div>
                 </FormControl>
                 <FormMessage />
               </FormItem>
             )}
           />
         </div>
-        <Button type="submit" className="w-full">
-          Đăng nhập
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={form.formState.isSubmitting}
+        >
+          {form.formState.isSubmitting && (
+            <Loader2 className="size-4 animate-spin" />
+          )}
+          {form.formState.isSubmitting ? "Đang đăng nhập..." : "Đăng nhập"}
         </Button>
       </form>
     </Form>

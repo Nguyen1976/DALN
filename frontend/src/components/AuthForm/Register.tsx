@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { useForm } from "react-hook-form";
@@ -15,9 +16,12 @@ import {
 import { registerAPI } from "@/apis";
 import { toast } from "sonner";
 import { useNavigate } from "react-router";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 const Register = () => {
   const navigate = useNavigate();
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const form = useForm<z.infer<typeof formRegisterScheme>>({
     resolver: zodResolver(formRegisterScheme),
     defaultValues: {
@@ -58,19 +62,11 @@ const Register = () => {
   const onSubmit = async (data: z.infer<typeof formRegisterScheme>) => {
     const { username, email, password } = data;
 
-    console.log("[register] submit form payload", {
-      username,
-      email,
-      hasPassword: Boolean(password),
-    });
-
     try {
       let location: { lat: number; lon: number } | undefined;
 
       try {
-        console.log("[register] requesting current browser location");
         location = await getCurrentPosition();
-        console.log("[register] browser location resolved", location);
       } catch (locationError) {
         console.warn(
           "Không lấy được vị trí hiện tại khi đăng ký",
@@ -86,12 +82,6 @@ const Register = () => {
         email,
         password,
         location,
-      });
-
-      console.log("[register] registerAPI response", {
-        email: result?.email,
-        requiresOtpVerification: result?.requiresOtpVerification,
-        sentLocation: location ?? null,
       });
 
       if (result?.requiresOtpVerification) {
@@ -149,7 +139,26 @@ const Register = () => {
               <FormItem>
                 <FormLabel>Mật khẩu</FormLabel>
                 <FormControl>
-                  <Input placeholder="••••••••" type="password" {...field} />
+                  <div className="relative">
+                    <Input
+                      placeholder="••••••••"
+                      type={showPassword ? "text" : "password"}
+                      className="pr-10"
+                      {...field}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </button>
+                  </div>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -164,7 +173,30 @@ const Register = () => {
               <FormItem>
                 <FormLabel>Xác nhận mật khẩu</FormLabel>
                 <FormControl>
-                  <Input placeholder="••••••••" type="password" {...field} />
+                  <div className="relative">
+                    <Input
+                      placeholder="••••••••"
+                      type={showConfirmPassword ? "text" : "password"}
+                      className="pr-10"
+                      {...field}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowConfirmPassword((prev) => !prev)
+                      }
+                      aria-label={
+                        showConfirmPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"
+                      }
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </button>
+                  </div>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -176,7 +208,10 @@ const Register = () => {
           className="w-full"
           disabled={form.formState.isSubmitting}
         >
-          Đăng ký
+          {form.formState.isSubmitting && (
+            <Loader2 className="size-4 animate-spin" />
+          )}
+          {form.formState.isSubmitting ? "Đang đăng ký..." : "Đăng ký"}
         </Button>
       </form>
     </Form>
