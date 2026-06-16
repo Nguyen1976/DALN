@@ -1,5 +1,6 @@
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   getConversationAssetsAPI,
   type ConversationAssetMessage,
@@ -127,67 +128,61 @@ export default function ProfilePanel({
   };
 
   return (
-    <div className="bg-black-bland border-l border-bg-box-message-incoming flex flex-col custom-scrollbar">
-      <div className="flex items-center justify-between p-4 border-b border-bg-box-message-incoming">
-        <h2 className="text-lg font-semibold text-text">
+    <div className="fixed inset-0 z-40 flex flex-col bg-sidebar md:static md:z-auto md:w-80 md:shrink-0 md:border-l md:border-border lg:w-96">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <h2 className="text-base font-semibold text-foreground">
           Thông tin cuộc trò chuyện
         </h2>
         <Button
           variant="ghost"
           size="icon"
           onClick={onClose}
-          className="hover:bg-bg-box-message-incoming text-gray-400 hover:text-text"
+          aria-label="Đóng bảng thông tin"
+          className="text-muted-foreground hover:text-foreground"
         >
-          <X className="w-5 h-5" />
+          <X className="size-5" />
         </Button>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="p-6 space-y-6">
+      <div className="custom-scrollbar flex-1 overflow-y-auto">
+        <div className="space-y-6 p-6">
           {/* Avatar */}
-          <div className="flex flex-col items-center">
-            <Avatar className="w-32 h-32 mb-4">
+          <div className="flex flex-col items-center text-center">
+            <Avatar className="mb-4 size-28">
               <AvatarImage
                 src={conversation.groupAvatar || "/placeholder.svg"}
                 alt={title}
               />
               <AvatarFallback className="text-3xl">{title?.[0]}</AvatarFallback>
             </Avatar>
-            <h3 className="text-xl font-semibold text-text">{title}</h3>
-            {/* <p className='text-sm text-gray-400'>{conversation.groupStatus}</p> */}
+            <h3 className="text-xl font-semibold text-foreground">{title}</h3>
           </div>
 
-          {/* Bio */}
-          {/* {conversation.bio && (
-            <div>
-              <h4 className='text-sm font-medium text-gray-400 mb-2'>Bio</h4>
-              <p className='text-sm text-text'>{conversation.bio}</p>
-            </div>
-          )} */}
-
-          {/* Phone */}
-          {/* {conversation.phone && (
-            <div>
-              <h4 className='text-sm font-medium text-gray-400 mb-2'>Mobile</h4>
-              <p className='text-sm text-text'>{conversation.phone}</p>
-            </div>
-          )} */}
-
           {/* Settings */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-text">
+          <div className="space-y-3 rounded-xl border border-border bg-card/50 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-foreground">
                 Tắt thông báo cuộc trò chuyện
               </span>
-              <button className="relative inline-flex h-6 w-11 items-center rounded-full bg-bg-box-message-incoming transition-colors">
-                <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1" />
+              <button
+                type="button"
+                aria-label="Tắt thông báo cuộc trò chuyện"
+                className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
+              >
+                <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
               </button>
             </div>
 
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-text">Tin nhắn tự biến mất</span>
-              <button className="relative inline-flex h-6 w-11 items-center rounded-full bg-bg-box-message-incoming transition-colors">
-                <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1" />
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-foreground">
+                Tin nhắn tự biến mất
+              </span>
+              <button
+                type="button"
+                aria-label="Tin nhắn tự biến mất"
+                className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
+              >
+                <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
               </button>
             </div>
           </div>
@@ -196,7 +191,7 @@ export default function ProfilePanel({
 
           {/* Media */}
           <div>
-            <h4 className="text-sm font-medium text-gray-400 mb-3">
+            <h4 className="mb-3 text-sm font-medium text-muted-foreground">
               Ảnh, liên kết & tài liệu
             </h4>
 
@@ -230,16 +225,16 @@ export default function ProfilePanel({
                     <button
                       key={message.id}
                       onClick={() => onJumpToMessage(message.id)}
-                      className="w-full text-left rounded-lg border border-bg-box-message-incoming p-2 hover:bg-bg-box-message-incoming/40"
+                      className="w-full rounded-lg border border-border p-2 text-left transition-colors hover:bg-accent"
                     >
                       <div className="flex items-center gap-2">
-                        <ImageIcon className="h-4 w-4 text-gray-400" />
+                        <ImageIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
                         <img
                           src={url}
                           alt="tệp phương tiện"
-                          className="h-12 w-12 rounded-md object-cover"
+                          className="size-12 rounded-md object-cover"
                         />
-                        <p className="truncate text-xs text-gray-300">
+                        <p className="truncate text-xs text-muted-foreground">
                           {message.text || "Tệp phương tiện"}
                         </p>
                       </div>
@@ -254,11 +249,11 @@ export default function ProfilePanel({
                     <button
                       key={message.id}
                       onClick={() => onJumpToMessage(message.id)}
-                      className="w-full text-left rounded-lg border border-bg-box-message-incoming p-2 hover:bg-bg-box-message-incoming/40"
+                      className="w-full rounded-lg border border-border p-2 text-left transition-colors hover:bg-accent"
                     >
                       <div className="flex items-start gap-2">
-                        <Link2 className="mt-0.5 h-4 w-4 text-gray-400" />
-                        <p className="truncate text-xs text-blue-300">{link}</p>
+                        <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                        <p className="truncate text-xs text-primary">{link}</p>
                       </div>
                     </button>
                   );
@@ -268,11 +263,11 @@ export default function ProfilePanel({
                   <button
                     key={message.id}
                     onClick={() => onJumpToMessage(message.id)}
-                    className="w-full text-left rounded-lg border border-bg-box-message-incoming p-2 hover:bg-bg-box-message-incoming/40"
+                    className="w-full rounded-lg border border-border p-2 text-left transition-colors hover:bg-accent"
                   >
                     <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-gray-400" />
-                      <p className="truncate text-xs text-gray-200">
+                      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <p className="truncate text-xs text-foreground">
                         {resolveFileName(message)}
                       </p>
                     </div>
@@ -281,11 +276,15 @@ export default function ProfilePanel({
               })}
 
               {isLoading && (
-                <p className="text-xs text-gray-400">Đang tải...</p>
+                <div className="space-y-2">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <Skeleton key={index} className="h-14 w-full rounded-lg" />
+                  ))}
+                </div>
               )}
 
               {!isLoading && assets.length === 0 && (
-                <p className="text-xs text-gray-500">
+                <p className="py-6 text-center text-xs text-muted-foreground">
                   {canAccessConversationData
                     ? "Không có dữ liệu"
                     : "Bạn không còn trong nhóm này"}
@@ -296,6 +295,7 @@ export default function ProfilePanel({
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="w-full"
                   onClick={() => {
                     if (!isLoading && nextCursor) {
                       setCursor(nextCursor);

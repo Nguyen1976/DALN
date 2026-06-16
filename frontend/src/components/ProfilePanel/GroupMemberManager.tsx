@@ -305,7 +305,7 @@ export function GroupMemberManager() {
       </PopoverTrigger>
       <PopoverContent className="w-80 p-0 bg-background border-accent/20">
         <div className="p-4 border-b border-accent/10">
-          <h3 className="text-sm font-semibold text-white">
+          <h3 className="text-sm font-semibold text-foreground">
             {conversation?.groupName}
           </h3>
           <div className="mt-3">
@@ -397,7 +397,7 @@ export function GroupMemberManager() {
                             </Avatar>
                             <div>
                               <p
-                                className={`text-sm text-white ${
+                                className={`text-sm text-foreground ${
                                   member.userId === user.id
                                     ? "font-bold"
                                     : "font-medium"
@@ -408,12 +408,12 @@ export function GroupMemberManager() {
                               </p>
                               <div className="flex items-center gap-2 mt-0.5">
                                 {member.role === "ADMIN" && (
-                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                                  <span className="rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-warning-foreground">
                                     QUẢN TRỊ VIÊN
                                   </span>
                                 )}
                                 {member.userId === user.id && (
-                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                                  <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
                                     BẠN
                                   </span>
                                 )}
@@ -465,7 +465,7 @@ export function GroupMemberManager() {
                           </AvatarFallback>
                         </Avatar>
                         <div>
-                          <p className="text-sm font-medium text-white">
+                          <p className="text-sm font-medium text-foreground">
                             {friend.username}
                           </p>
                           {/* <p className='text-xs text-muted-foreground'>

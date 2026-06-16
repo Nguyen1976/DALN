@@ -23,19 +23,25 @@ export default function VoiceCallModal({
   ) as Conversation;
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-      <div className="bg-bg-voice-call rounded-2xl w-full max-w-sm mx-4 p-8 relative">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Cuộc gọi thoại"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in"
+    >
+      <div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-2xl">
         <Button
           variant="ghost"
           size="icon"
           onClick={onClose}
-          className="absolute top-4 right-4 hover:bg-button text-gray-400 hover:text-text"
+          aria-label="Đóng"
+          className="absolute right-4 top-4 text-muted-foreground hover:text-foreground"
         >
-          <X className="w-5 h-5" />
+          <X className="size-5" />
         </Button>
 
-        <div className="flex flex-col items-center">
-          <Avatar className="w-32 h-32 mb-6">
+        <div className="flex flex-col items-center text-center">
+          <Avatar className="mb-6 size-32 ring-4 ring-primary/20">
             <AvatarImage
               src={conversation.groupAvatar || "/placeholder.svg"}
               alt={conversation.groupName}
@@ -45,35 +51,38 @@ export default function VoiceCallModal({
             </AvatarFallback>
           </Avatar>
 
-          <h3 className="text-2xl font-semibold text-text mb-2">
+          <h3 className="mb-1 text-2xl font-semibold text-foreground">
             {conversation.groupName}
           </h3>
-          <p className="text-gray-400 mb-8">Đang gọi thoại...</p>
+          <p className="mb-8 text-sm text-muted-foreground">Đang gọi thoại...</p>
 
           <div className="flex gap-6">
             <Button
-              variant="ghost"
+              variant="secondary"
               size="icon"
-              className="w-14 h-14 rounded-full bg-button hover:bg-[#a9a9bd] text-text"
+              aria-label="Tắt/bật micro"
+              className="size-14 rounded-full"
             >
-              <Mic className="w-6 h-6" />
+              <Mic className="size-6" />
             </Button>
 
             <Button
-              variant="ghost"
+              variant="destructive"
               size="icon"
               onClick={onClose}
-              className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-text"
+              aria-label="Kết thúc cuộc gọi"
+              className="size-14 rounded-full"
             >
-              <X className="w-6 h-6" />
+              <X className="size-6" />
             </Button>
 
             <Button
-              variant="ghost"
+              variant="secondary"
               size="icon"
-              className="w-14 h-14 rounded-full bg-button hover:bg-[#a9a9bd] text-text"
+              aria-label="Tắt/bật loa"
+              className="size-14 rounded-full"
             >
-              <Volume2 className="w-6 h-6" />
+              <Volume2 className="size-6" />
             </Button>
           </div>
         </div>
