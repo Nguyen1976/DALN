@@ -128,4 +128,11 @@ export const selectSeenUsersForMessage = (
   return seenState.seenByUser[conversationId][messageId];
 };
 
+export const selectConversationSeenStatus = (
+  state: RootState,
+  conversationId: string,
+): ConversationSeenStatus => {
+  return state.seenStatus.seenByUser[conversationId] ?? {};
+};
+
 export default seenStatusSlice.reducer;
