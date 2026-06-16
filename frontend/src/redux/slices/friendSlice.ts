@@ -1,5 +1,4 @@
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
-import { API_ROOT } from "@/utils/constant";
 import {
   createAsyncThunk,
   createSelector,
@@ -41,7 +40,7 @@ export const getFriends = createAsyncThunk(
   `/user/list-friends`,
   async ({ limit, page }: { limit: number; page: number }) => {
     const response = await authorizeAxiosInstance.get(
-      `${API_ROOT}/user/list-friends?limit=${limit}&page=${page}`,
+      `/user/list-friends?limit=${limit}&page=${page}`,
     );
     return { ...response.data.data, page: page };
   },
@@ -60,7 +59,7 @@ export const upsertOnlineFriend = createAsyncThunk(
     }
 
     const response = await authorizeAxiosInstance.get(
-      `${API_ROOT}/user?userId=${friendId}`,
+      `/user?userId=${friendId}`,
     );
 
     return {
@@ -83,10 +82,9 @@ export const friendSlice = createSlice({
         (friend) => friend.id === friendId,
       );
       if (friendIndex !== -1) {
-          state.friends[friendIndex].status = false;
-          state.friends[friendIndex].lastSeen = lastSeen;
+        state.friends[friendIndex].status = false;
+        state.friends[friendIndex].lastSeen = lastSeen;
       }
-      console.log("updateStatusOffline", friendId, lastSeen);
       return state;
     },
   },
@@ -130,10 +128,6 @@ export const friendSlice = createSlice({
     builder.addCase(logoutAPI.fulfilled, () => initialState);
   },
 });
-
-// export const selectFriend = (state: { friend: FriendState }) => {
-//   return state.friend.friends
-// }
 
 export const selectFriend = createSelector(
   (state: RootState) => state.friend,

@@ -1,5 +1,4 @@
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
-import { API_ROOT } from "@/utils/constant";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
 import { logoutAPI } from "./userSlice";
@@ -22,7 +21,7 @@ export const getNotifications = createAsyncThunk(
   `/notification`,
   async ({ limit, page }: { limit: number; page: number }) => {
     const response = await authorizeAxiosInstance.get(
-      `${API_ROOT}/notification?limit=${limit}&page=${page}`,
+      `/notification?limit=${limit}&page=${page}`,
     );
     return {
       ...response.data.data,
@@ -36,7 +35,7 @@ export const markNotificationAsRead = createAsyncThunk(
   `/notification/mark-read`,
   async ({ notificationId }: { notificationId: string }) => {
     await authorizeAxiosInstance.patch(
-      `${API_ROOT}/notification/${notificationId}/read`,
+      `/notification/${notificationId}/read`,
     );
     return { notificationId };
   },
@@ -45,7 +44,7 @@ export const markNotificationAsRead = createAsyncThunk(
 export const markAllNotificationsAsRead = createAsyncThunk(
   `/notification/mark-all-read`,
   async () => {
-    await authorizeAxiosInstance.patch(`${API_ROOT}/notification/read-all`);
+    await authorizeAxiosInstance.patch("/notification/read-all");
     return true;
   },
 );

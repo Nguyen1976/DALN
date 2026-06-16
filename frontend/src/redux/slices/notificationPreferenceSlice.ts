@@ -1,5 +1,4 @@
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
-import { API_ROOT } from "@/utils/constant";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
 import { logoutAPI } from "./userSlice";
@@ -43,9 +42,7 @@ const initialState: NotificationPreferenceState = {
 export const getNotificationTypes = createAsyncThunk(
   "/notification/types",
   async () => {
-    const response = await authorizeAxiosInstance.get(
-      `${API_ROOT}/notification/types`,
-    );
+    const response = await authorizeAxiosInstance.get("/notification/types");
     return response.data.data.types as string[];
   },
 );
@@ -54,7 +51,7 @@ export const getNotificationPreferences = createAsyncThunk(
   "/notification/preferences/get",
   async () => {
     const response = await authorizeAxiosInstance.get(
-      `${API_ROOT}/notification/preferences`,
+      "/notification/preferences",
     );
     return response.data.data as NotificationPreferences;
   },
@@ -64,7 +61,7 @@ export const updateNotificationPreferences = createAsyncThunk(
   "/notification/preferences/update",
   async (payload: Partial<NotificationPreferences>) => {
     const response = await authorizeAxiosInstance.put(
-      `${API_ROOT}/notification/preferences`,
+      "/notification/preferences",
       payload,
     );
     return response.data.data as NotificationPreferences;

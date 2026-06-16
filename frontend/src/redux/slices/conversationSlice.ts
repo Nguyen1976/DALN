@@ -1,5 +1,4 @@
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
-import { API_ROOT } from "@/utils/constant";
 import {
   createAsyncThunk,
   createSelector,
@@ -117,7 +116,7 @@ export const getConversations = createAsyncThunk(
     const userId = state.user.id;
     cursor = cursor?.replaceAll("+", "%2B") || null;
     const response = await authorizeAxiosInstance.get(
-      `${API_ROOT}/chat/conversations?limit=${limit}&cursor=${cursor ?? ""}`,
+      `/chat/conversations?limit=${limit}&cursor=${cursor ?? ""}`,
     );
     return { userId, conversations: response.data.data };
   },
@@ -127,7 +126,7 @@ export const createConversation = createAsyncThunk(
   `/chat/create`,
   async (formData: FormData) => {
     const response = await authorizeAxiosInstance.post(
-      `${API_ROOT}/chat/create`,
+      "/chat/create",
       formData,
       {
         headers: {

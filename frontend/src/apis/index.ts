@@ -55,7 +55,7 @@ export const makeFriendRequest = async (
   email: string,
 ): Promise<{ status: string }> => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/user/make-friend`,
+    `/user/make-friend`,
     { email },
   );
   return response.data;
@@ -107,14 +107,14 @@ export interface RecommendationResponse {
 export const getMyRecommendationsAPI =
   async (): Promise<RecommendationResponse> => {
     const response = await authorizeAxiosInstance.get(
-      `${API_ROOT}/recommendation/me`,
+      `/recommendation/me`,
     );
     return response.data.data ?? response.data;
   };
 
 export const getFriendRequestDetail = async (friendRequestId: string) => {
   const response = await authorizeAxiosInstance.get(
-    `${API_ROOT}/user/detail-friend-request?friendRequestId=${friendRequestId}`,
+    `/user/detail-friend-request?friendRequestId=${friendRequestId}`,
   );
   return response.data.data;
 };
@@ -129,7 +129,7 @@ export const registerAPI = async (data: {
   };
 }): Promise<{ email: string; requiresOtpVerification: boolean }> => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/user/register`,
+    `/user/register`,
     data,
   );
   return response.data.data;
@@ -137,7 +137,7 @@ export const registerAPI = async (data: {
 
 export const verifyOtpAPI = async (data: { email: string; otp: string }) => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/user/verify-otp`,
+    `/user/verify-otp`,
     data,
   );
   return response.data.data;
@@ -145,7 +145,7 @@ export const verifyOtpAPI = async (data: { email: string; otp: string }) => {
 
 export const resendOtpAPI = async (data: { email: string }) => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/user/resend-otp`,
+    `/user/resend-otp`,
     data,
   );
   return response.data.data;
@@ -183,7 +183,7 @@ export const getFriendRequestsAPI = async ({
   page: number;
 }): Promise<FriendRequestListItem[]> => {
   const response = await authorizeAxiosInstance.get(
-    `${API_ROOT}/user/list-friend-requests?limit=${limit}&page=${page}`,
+    `/user/list-friend-requests?limit=${limit}&page=${page}`,
   );
   return response.data.data.friendRequests || [];
 };
@@ -198,7 +198,7 @@ export const updateFriendRequestStatus = async ({
   status: "ACCEPTED" | "REJECTED";
 }): Promise<{ status: string }> => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/user/update-status-make-friend`,
+    `/user/update-status-make-friend`,
     { inviterId, inviteeName, status },
   );
   return response.data;
@@ -225,7 +225,7 @@ export const getUserProfileByIdAPI = async (
   userId: string,
 ): Promise<UserProfileByIdResponse> => {
   const response = await authorizeAxiosInstance.get(
-    `${API_ROOT}/user?userId=${userId}`,
+    `/user?userId=${userId}`,
   );
   return response.data.data;
 };
@@ -234,7 +234,7 @@ export const searchUsersAPI = async (
   keyword: string,
 ): Promise<SearchFriendItem[]> => {
   const response = await authorizeAxiosInstance.get(
-    `${API_ROOT}/user/search?keyword=${encodeURIComponent(keyword)}`,
+    `/user/search?keyword=${encodeURIComponent(keyword)}`,
   );
   return response.data.data.friends || [];
 };
@@ -278,7 +278,7 @@ export const getConversationByFriendIdAPI = async (
   friendId: string,
 ): Promise<ConversationByFriendResponse> => {
   const response = await authorizeAxiosInstance.get(
-    `${API_ROOT}/chat/conversation-by-friend/?friendId=${friendId}`,
+    `/chat/conversation-by-friend/?friendId=${friendId}`,
   );
   return response.data.data;
 };
@@ -329,7 +329,7 @@ export const getConversationByIdAPI = async (
   conversationId: string,
 ): Promise<ConversationByIdResponse> => {
   const response = await authorizeAxiosInstance.get(
-    `${API_ROOT}/chat/conversations/${conversationId}`,
+    `/chat/conversations/${conversationId}`,
   );
   return response.data.data;
 };
@@ -338,7 +338,7 @@ export const searchConversationsAPI = async (
   keyword: string,
 ): Promise<SearchConversationItem[]> => {
   const response = await authorizeAxiosInstance.get(
-    `${API_ROOT}/chat/search?keyword=${encodeURIComponent(keyword)}`,
+    `/chat/search?keyword=${encodeURIComponent(keyword)}`,
   );
   return response.data.data || [];
 };
@@ -348,7 +348,7 @@ export const revokeMessageAPI = async (data: {
   messageId: string;
 }) => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/messages/revoke`,
+    `/chat/messages/revoke`,
     data,
   );
   return response.data.data;
@@ -359,7 +359,7 @@ export const deleteMessageForMeAPI = async (data: {
   messageId: string;
 }) => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/messages/delete-for-me`,
+    `/chat/messages/delete-for-me`,
     data,
   );
   return response.data.data;
@@ -369,7 +369,7 @@ export const clearConversationHistoryAPI = async (data: {
   conversationId: string;
 }) => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/conversations/clear-history`,
+    `/chat/conversations/clear-history`,
     data,
   );
   return response.data.data;
@@ -397,7 +397,7 @@ export const createPollAPI = async (data: {
   isMultipleChoice: boolean;
 }) => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/polls`,
+    `/chat/polls`,
     data,
   );
   return response.data.data as {
@@ -426,7 +426,7 @@ export const submitPollVoteAPI = async (data: {
   optionIds: string[];
 }) => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/polls/vote`,
+    `/chat/polls/vote`,
     data,
   );
   return response.data.data as {
@@ -443,7 +443,7 @@ export const submitPollVoteAPI = async (data: {
 
 export const closePollAPI = async (data: { pollId: string }) => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/polls/close`,
+    `/chat/polls/close`,
     data,
   );
   return response.data.data as {
@@ -485,7 +485,7 @@ export const createMessageUploadUrlAPI = async (payload: {
   size: string;
 }): Promise<UploadMediaUrlResponse> => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/media/presign`,
+    `/chat/media/presign`,
     payload,
   );
   return response.data.data;
@@ -535,7 +535,7 @@ export const getConversationAssetsAPI = async ({
   cursor?: string | null;
 }): Promise<{ messages: ConversationAssetMessage[]; nextCursor?: string }> => {
   const response = await authorizeAxiosInstance.get(
-    `${API_ROOT}/chat/assets?conversationId=${encodeURIComponent(
+    `/chat/assets?conversationId=${encodeURIComponent(
       conversationId,
     )}&kind=${kind}&limit=${limit}${
       cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
@@ -556,7 +556,7 @@ export const addMembersToConversationAPI = async (payload: {
   }>;
 }): Promise<{ status: string }> => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/add-member`,
+    `/chat/add-member`,
     payload,
   );
   return response.data.data;
@@ -567,7 +567,7 @@ export const removeMemberFromConversationAPI = async (payload: {
   targetUserId: string;
 }): Promise<{ status: string }> => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/remove-member`,
+    `/chat/remove-member`,
     payload,
   );
   return response.data.data;
@@ -577,7 +577,7 @@ export const leaveConversationAPI = async (payload: {
   conversationId: string;
 }): Promise<{ status: string; promotedUserId?: string }> => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/leave-group`,
+    `/chat/leave-group`,
     payload,
   );
   return response.data.data;
@@ -587,7 +587,7 @@ export const deleteConversationAPI = async (payload: {
   conversationId: string;
 }): Promise<{ status: string }> => {
   const response = await authorizeAxiosInstance.post(
-    `${API_ROOT}/chat/delete-conversation`,
+    `/chat/delete-conversation`,
     payload,
   );
   return response.data.data;

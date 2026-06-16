@@ -1,5 +1,5 @@
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
-import { API_ROOT } from "@/utils/constant";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
 
@@ -14,6 +14,16 @@ export interface UserState {
   interests: string[];
   hasCompletedInterestOnboarding: boolean;
 }
+
+type AuthUserPayload = Partial<UserState> & {
+  token?: string;
+  accessToken?: string;
+};
+
+type InterestOnboardingResult = {
+  interests?: string[];
+  hasCompletedInterestOnboarding?: boolean;
+};
 
 const initialState: UserState = {
   id: "",
@@ -30,25 +40,16 @@ export const loginAPI = createAsyncThunk(
   `/user/login`,
   async (data: { email: string; password: string }, { rejectWithValue }) => {
     try {
-      const response = await authorizeAxiosInstance.post(
-        `${API_ROOT}/user/login`,
-        data,
-      );
+      const response = await authorizeAxiosInstance.post("/user/login", data);
       return response.data.data;
-    } catch (error: any) {
-      const backendMessage =
-        error?.response?.data?.message ||
-        error?.response?.data?.error?.message ||
-        error?.message ||
-        "Đã xảy ra lỗi";
-
-      return rejectWithValue(backendMessage);
+    } catch (error) {
+      return rejectWithValue(getErrorMessage(error));
     }
   },
 );
 
 export const logoutAPI = createAsyncThunk(`/user/logout`, async () => {
-  await authorizeAxiosInstance.post(`${API_ROOT}/user/logout`);
+  await authorizeAxiosInstance.post("/user/logout");
   return {};
 });
 
@@ -56,18 +57,10 @@ export const fetchCurrentUserAPI = createAsyncThunk(
   `user/me`,
   async (_, { rejectWithValue }) => {
     try {
-      const response = await authorizeAxiosInstance.get(
-        `${API_ROOT}/user/me`,
-      );
+      const response = await authorizeAxiosInstance.get("/user/me");
       return response.data.data;
-    } catch (error: any) {
-      const backendMessage =
-        error?.response?.data?.message ||
-        error?.response?.data?.error?.message ||
-        error?.message ||
-        "Đã xảy ra lỗi";
-
-      return rejectWithValue(backendMessage);
+    } catch (error) {
+      return rejectWithValue(getErrorMessage(error));
     }
   },
 );
@@ -77,18 +70,12 @@ export const completeInterestOnboardingAPI = createAsyncThunk(
   async (slugs: string[], { rejectWithValue }) => {
     try {
       const response = await authorizeAxiosInstance.post(
-        `${API_ROOT}/user/interest-onboarding`,
+        "/user/interest-onboarding",
         { slugs },
       );
       return response.data.data;
-    } catch (error: any) {
-      const backendMessage =
-        error?.response?.data?.message ||
-        error?.response?.data?.error?.message ||
-        error?.message ||
-        "Đã xảy ra lỗi";
-
-      return rejectWithValue(backendMessage);
+    } catch (error) {
+      return rejectWithValue(getErrorMessage(error));
     }
   },
 );
@@ -97,7 +84,7 @@ export const updateProfileAPI = createAsyncThunk(
   `/user/update-profile`,
   async (formData: FormData) => {
     const response = await authorizeAxiosInstance.post(
-      `${API_ROOT}/user/update-profile`,
+      "/user/update-profile",
       formData,
       {
         headers: {
@@ -113,7 +100,7 @@ export const fetchUserByIdAPI = createAsyncThunk(
   `/user/get-by-id`,
   async (userId: string) => {
     const response = await authorizeAxiosInstance.get(
-      `${API_ROOT}/user?userId=${userId}`,
+      `/user?userId=${userId}`,
     );
     return response.data.data;
   },
@@ -128,8 +115,10 @@ export const userSlice = createSlice({
       Object.assign(state, initialState);
     });
 
-    builder.addCase(loginAPI.fulfilled, (state, action: PayloadAction<any>) => {
-      const { token, accessToken, refreshToken, ...user } = action.payload;
+    builder.addCase(
+      loginAPI.fulfilled,
+      (state, action: PayloadAction<AuthUserPayload>) => {
+        const { token, accessToken, ...user } = action.payload;
       Object.assign(state, initialState, user);
       const bearer = accessToken || token;
       if (bearer) {
@@ -174,12 +163,12 @@ export const userSlice = createSlice({
     );
     builder.addCase(
       fetchCurrentUserAPI.fulfilled,
-      (state, action: PayloadAction<any>) => {
+      (state, action: PayloadAction<AuthUserPayload>) => {
         const d = action.payload;
         if (!d?.id) return;
         state.id = d.id;
-        state.email = d.email;
-        state.username = d.username;
+        state.email = d.email ?? "";
+        state.username = d.username ?? "";
         state.fullName = d.fullName ?? "";
         state.avatar = d.avatar ?? "";
         state.bio = d.bio ?? "";
@@ -190,7 +179,7 @@ export const userSlice = createSlice({
     );
     builder.addCase(
       completeInterestOnboardingAPI.fulfilled,
-      (state, action: PayloadAction<any>) => {
+      (state, action: PayloadAction<InterestOnboardingResult>) => {
         if (Array.isArray(action.payload?.interests)) {
           state.interests = action.payload.interests;
         }

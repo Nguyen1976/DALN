@@ -1,5 +1,4 @@
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
-import { API_ROOT } from "@/utils/constant";
 import {
   createAsyncThunk,
   createSelector,
@@ -91,7 +90,7 @@ export const getMessages = createAsyncThunk(
     cursor?: string | null;
   }) => {
     const response = await authorizeAxiosInstance.get(
-      `${API_ROOT}/chat/messages/${conversationId}?limit=${limit}${
+      `/chat/messages/${conversationId}?limit=${limit}${
         cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
       }`,
     );
