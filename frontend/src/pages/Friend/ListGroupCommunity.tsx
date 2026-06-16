@@ -2,6 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { searchConversationsAPI, type SearchConversationItem } from "@/apis";
 import {
   applyConversationUpdate,
@@ -10,7 +11,7 @@ import {
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import type { AppDispatch } from "@/redux/store";
-import { Search } from "lucide-react";
+import { Search, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
@@ -116,43 +117,33 @@ const ListGroupCommunity = () => {
       <button
         key={group.id}
         onClick={() => openConversation(group)}
-        className="w-full p-3 rounded-lg flex items-center gap-3 hover:bg-accent transition-colors group"
+        className="flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-accent"
       >
-        <div className="relative w-12 h-12 shrink-0">
-          <Avatar className="w-12 h-12">
-            <AvatarImage
-              src={(group.groupAvatar as string) || "/placeholder.svg"}
-              alt={group.groupName || "Nhóm"}
-            />
-            <AvatarFallback>{(group.groupName || "G")[0]}</AvatarFallback>
-          </Avatar>
-        </div>
+        <Avatar className="size-12 shrink-0">
+          <AvatarImage
+            src={(group.groupAvatar as string) || "/placeholder.svg"}
+            alt={group.groupName || "Nhóm"}
+          />
+          <AvatarFallback>{(group.groupName || "G")[0]}</AvatarFallback>
+        </Avatar>
 
-        <div className="flex-1 min-w-0 text-left">
-          <p className="font-medium text-foreground truncate">
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium text-foreground">
             {group.groupName || "Nhóm chưa đặt tên"}
           </p>
           <p className="text-xs text-muted-foreground">
             {memberCount} thành viên
           </p>
         </div>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <span className="text-xl">⋮</span>
-        </Button>
       </button>
     );
   };
 
   return (
     <div className="h-full min-h-0 flex-1">
-      <div className="p-4 border-b">
+      <div className="border-b border-border p-4">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
@@ -163,20 +154,29 @@ const ListGroupCommunity = () => {
       </div>
 
       <ScrollArea className="h-full">
-        <div className="p-6">
-          <div className="space-y-2">
-            {displayedGroups.map(renderGroupItem)}
-          </div>
+        <div className="space-y-1 p-3">
+          {displayedGroups.map(renderGroupItem)}
 
           {isSearching && (
-            <div className="text-center py-6">
-              <p className="text-muted-foreground">Đang tìm kiếm...</p>
+            <div className="space-y-1">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="flex items-center gap-3 p-3">
+                  <Skeleton className="size-12 shrink-0 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-3.5 w-1/2" />
+                    <Skeleton className="h-3 w-1/4" />
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
           {displayedGroups.length === 0 && !isSearching && (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">
+            <div className="flex flex-col items-center gap-3 py-12 text-center">
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <UsersRound className="size-7" />
+              </div>
+              <p className="text-sm text-muted-foreground">
                 {debouncedKeyword
                   ? "Không tìm thấy cuộc trò chuyện phù hợp"
                   : "Chưa có nhóm hoặc cộng đồng"}
@@ -184,9 +184,14 @@ const ListGroupCommunity = () => {
             </div>
           )}
 
-          {!debouncedKeyword && (
-            <div className="w-full flex items-center justify-center my-4">
-              <Button className="interceptor-loading" onClick={loadMoreGroups}>
+          {!debouncedKeyword && displayedGroups.length > 0 && (
+            <div className="my-3 flex items-center justify-center">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="interceptor-loading text-muted-foreground"
+                onClick={loadMoreGroups}
+              >
                 Tải thêm
               </Button>
             </div>

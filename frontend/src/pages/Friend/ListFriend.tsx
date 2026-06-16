@@ -2,6 +2,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import { MessageCircle, X } from "lucide-react";
 import {
   getConversationByFriendIdAPI,
   searchUsersAPI,
@@ -44,6 +47,7 @@ const ListFriend = () => {
   const [debouncedKeyword, setDebouncedKeyword] = useState("");
   const [searchResults, setSearchResults] = useState<SearchFriendItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   useEffect(() => {
     //fetch friends từ redux store hoặc API
@@ -167,12 +171,91 @@ const ListFriend = () => {
     (friend) => friend.id === selectedFriendId,
   );
 
+  const renderProfileDetail = () => {
+    if (!selectedFriendId) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+          <p className="text-sm text-muted-foreground">
+            Hãy chọn một người bạn để xem thông tin
+          </p>
+        </div>
+      );
+    }
+
+    if (isLoadingProfile) {
+      return (
+        <div className="flex flex-col items-center gap-3">
+          <Skeleton className="size-24 rounded-full" />
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="mt-2 h-12 w-full rounded-md" />
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col items-center gap-3">
+          <Avatar className="size-24">
+            <AvatarImage
+              src={selectedProfile?.avatar || "/placeholder.svg"}
+              alt={selectedProfile?.username || "Ảnh đại diện người dùng"}
+            />
+            <AvatarFallback className="text-2xl">
+              {(selectedProfile?.username || "U")[0]}
+            </AvatarFallback>
+          </Avatar>
+
+          <div className="text-center">
+            <p className="text-lg font-semibold text-foreground">
+              {selectedProfile?.fullName || selectedProfile?.username}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              @{selectedProfile?.username}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {selectedProfile?.email}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {selectedProfile?.bio || "Chưa có tiểu sử"}
+            </p>
+            <span
+              className={cn(
+                "mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+                selectedFriend?.status
+                  ? "bg-success/15 text-success"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  selectedFriend?.status ? "bg-success" : "bg-muted-foreground",
+                )}
+              />
+              {selectedFriend?.status ? "Đang online" : "Đang offline"}
+            </span>
+          </div>
+        </div>
+
+        <Button
+          className="h-12 w-full gap-2 text-base font-semibold"
+          onClick={() => void handleChatWithFriend()}
+          disabled={isStartingChat}
+        >
+          <MessageCircle className="size-5" />
+          {isStartingChat ? "Đang mở cuộc trò chuyện..." : "Nhắn tin"}
+        </Button>
+      </div>
+    );
+  };
+
   return (
-    <div className="h-full min-h-0 flex-1 flex">
-      <div className="h-full min-h-0 flex-1 border-r">
-        <div className="p-4 border-b">
+    <div className="flex h-full min-h-0 flex-1 lg:flex-row">
+      <div className="flex h-full min-h-0 flex-1 flex-col border-border lg:border-r">
+        <div className="border-b border-border p-4">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
@@ -182,137 +265,114 @@ const ListFriend = () => {
           </div>
         </div>
 
-        <ScrollArea className="h-full">
-          <div className="p-6">
-            <div className="mb-6">
-              <div className="space-y-2">
-                {displayedFriends.map((friend: Friend) => (
-                  <button
-                    key={friend.id}
-                    onClick={() => void handleSelectFriend(friend)}
-                    className={`w-full p-3 rounded-lg flex items-center gap-3 hover:bg-accent transition-colors group ${
-                      selectedFriendId === friend.id ? "bg-accent" : ""
-                    }`}
-                  >
-                    <div className="relative w-12 h-12 shrink-0">
-                      <Avatar className="w-12 h-12">
-                        <AvatarImage
-                          src={friend.avatar || "/placeholder.svg"}
-                          alt={friend.username}
-                        />
-                        <AvatarFallback>{friend.username[0]}</AvatarFallback>
-                      </Avatar>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="space-y-1 p-3">
+            {displayedFriends.map((friend: Friend) => (
+              <button
+                key={friend.id}
+                onClick={() => {
+                  void handleSelectFriend(friend);
+                  setMobileDetailOpen(true);
+                }}
+                className={cn(
+                  "group flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-accent",
+                  selectedFriendId === friend.id && "bg-accent",
+                )}
+              >
+                <div className="relative size-12 shrink-0">
+                  <Avatar className="size-12">
+                    <AvatarImage
+                      src={friend.avatar || "/placeholder.svg"}
+                      alt={friend.username}
+                    />
+                    <AvatarFallback>{friend.username[0]}</AvatarFallback>
+                  </Avatar>
 
-                      {friend.status && (
-                        <span className="absolute bottom-0 right-0 block w-3 h-3 rounded-full bg-green-500 border-2 border-white" />
-                      )}
-                    </div>
-
-                    <div className="flex-1 min-w-0 text-left">
-                      <p className="font-medium text-foreground truncate">
-                        {friend.username}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {friend.status
-                          ? "Đang online"
-                          : formatLastSeen(friend.lastSeen)}
-                      </p>
-                    </div>
-
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <span className="text-xl">⋮</span>
-                    </Button>
-                  </button>
-                ))}
-              </div>
-
-              {isSearching && (
-                <div className="text-center py-4">
-                  <p className="text-muted-foreground">Đang tìm kiếm...</p>
+                  {friend.status && (
+                    <span className="absolute bottom-0 right-0 block size-3 rounded-full border-2 border-background bg-success" />
+                  )}
                 </div>
-              )}
 
-              {displayedFriends.length === 0 && !isSearching && (
-                <div className="text-center py-6">
-                  <p className="text-muted-foreground">
-                    {debouncedKeyword
-                      ? "Không tìm thấy bạn bè phù hợp"
-                      : "Chưa có bạn bè"}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium text-foreground">
+                    {friend.username}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {friend.status
+                      ? "Đang online"
+                      : formatLastSeen(friend.lastSeen)}
                   </p>
                 </div>
-              )}
+              </button>
+            ))}
 
-              {!debouncedKeyword && (
-                <div className="w-full flex items-center justify-center my-4">
-                  <Button
-                    className="interceptor-loading"
-                    onClick={loadMoreFriends}
-                  >
-                    Tải thêm
-                  </Button>
-                </div>
-              )}
-            </div>
+            {isSearching && (
+              <div className="space-y-1">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="flex items-center gap-3 p-3">
+                    <Skeleton className="size-12 shrink-0 rounded-full" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-3.5 w-2/3" />
+                      <Skeleton className="h-3 w-1/3" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {displayedFriends.length === 0 && !isSearching && (
+              <div className="py-10 text-center">
+                <p className="text-sm text-muted-foreground">
+                  {debouncedKeyword
+                    ? "Không tìm thấy bạn bè phù hợp"
+                    : "Chưa có bạn bè"}
+                </p>
+              </div>
+            )}
+
+            {!debouncedKeyword && displayedFriends.length > 0 && (
+              <div className="my-3 flex items-center justify-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="interceptor-loading text-muted-foreground"
+                  onClick={loadMoreFriends}
+                >
+                  Tải thêm
+                </Button>
+              </div>
+            )}
           </div>
         </ScrollArea>
       </div>
 
-      <div className="w-90 p-6 flex flex-col justify-center">
-        {!selectedFriendId ? (
-          <p className="text-muted-foreground text-center">
-            Hãy chọn một người bạn để xem thông tin
-          </p>
-        ) : isLoadingProfile ? (
-          <p className="text-muted-foreground text-center">
-            Đang tải thông tin...
-          </p>
-        ) : (
-          <div className="space-y-6">
-            <div className="flex flex-col items-center gap-3">
-              <Avatar className="w-24 h-24">
-                <AvatarImage
-                  src={selectedProfile?.avatar || "/placeholder.svg"}
-                  alt={selectedProfile?.username || "Ảnh đại diện người dùng"}
-                />
-                <AvatarFallback>
-                  {(selectedProfile?.username || "U")[0]}
-                </AvatarFallback>
-              </Avatar>
+      {/* Backdrop for mobile detail sheet */}
+      {mobileDetailOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          onClick={() => setMobileDetailOpen(false)}
+        />
+      )}
 
-              <div className="text-center">
-                <p className="text-lg font-semibold text-foreground">
-                  {selectedProfile?.fullName || selectedProfile?.username}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  @{selectedProfile?.username}
-                </p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {selectedProfile?.email}
-                </p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {selectedProfile?.bio || "Chưa có tiểu sử"}
-                </p>
-                <p className="text-xs mt-2 text-muted-foreground">
-                  {selectedFriend?.status ? "Đang online" : "Đang offline"}
-                </p>
-              </div>
-            </div>
-
-            <Button
-              className="w-full h-12 text-base font-semibold"
-              onClick={() => void handleChatWithFriend()}
-              disabled={isStartingChat}
-            >
-              {isStartingChat
-                ? "Đang mở cuộc trò chuyện..."
-                : "Bạn có muốn chat với họ không?"}
-            </Button>
-          </div>
+      <div
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-40 flex max-h-[85dvh] flex-col overflow-y-auto rounded-t-2xl border-t border-border bg-background p-6 shadow-2xl transition-transform duration-300",
+          mobileDetailOpen ? "translate-y-0" : "translate-y-full",
+          "lg:static lg:z-auto lg:max-h-none lg:w-80 lg:translate-y-0 lg:justify-center lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none",
         )}
+      >
+        <div className="mb-4 flex items-center justify-end lg:hidden">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Đóng"
+            onClick={() => setMobileDetailOpen(false)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-5" />
+          </Button>
+        </div>
+        {renderProfileDetail()}
       </div>
     </div>
   );

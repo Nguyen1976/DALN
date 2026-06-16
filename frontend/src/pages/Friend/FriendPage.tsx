@@ -1,7 +1,13 @@
-import { Search, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import MainLayout from "@/layouts/MainLayout";
 import { useLocation, useNavigate } from "react-router";
+
+const tabs = [
+  { path: "/friends", label: "Bạn bè" },
+  { path: "/groups", label: "Nhóm & cộng đồng" },
+  { path: "/friend_requests", label: "Lời mời kết bạn" },
+];
 
 export function FriendsPage({ children }: { children?: React.ReactNode }) {
   const location = useLocation();
@@ -14,69 +20,38 @@ export function FriendsPage({ children }: { children?: React.ReactNode }) {
   };
 
   const navigate = useNavigate();
+
   return (
     <MainLayout>
-      <div className="flex-1 flex flex-col bg-black-bland min-h-0">
-        {/* Header */}
-        <div className="border-b p-4">
-          <h2 className="text-xl font-semibold mb-4">
+      <div className="flex min-h-0 flex-1 flex-col bg-background">
+        <div className="border-b border-border px-4 py-3 sm:px-6">
+          <h2 className="text-lg font-semibold text-foreground sm:text-xl">
             {titleMap[params] || "Danh sách bạn bè"}
           </h2>
 
-          {/* Search and Filter */}
-          <div className="flex gap-3 items-center">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              {/* <Input
-                placeholder='Tìm bạn'
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className='pl-10'
-              /> */}
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="whitespace-nowrap bg-transparent"
-            >
-              Tên (A-Z)
-            </Button>
-            <Button variant="outline" size="icon">
-              <Settings className="w-4 h-4" />
-            </Button>
+          <div className="custom-scrollbar mt-3 flex gap-1 overflow-x-auto rounded-xl bg-muted/60 p-1">
+            {tabs.map((tab) => {
+              const active = params === tab.path;
+              return (
+                <Button
+                  key={tab.path}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => navigate(tab.path)}
+                  className={cn(
+                    "shrink-0 rounded-lg text-muted-foreground hover:bg-transparent hover:text-foreground",
+                    active &&
+                      "bg-background text-foreground shadow-sm hover:bg-background hover:text-foreground",
+                  )}
+                >
+                  {tab.label}
+                </Button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Left Sidebar Tabs */}
-        <div className="flex flex-1 min-h-0">
-          <div className="w-64 border-r flex flex-col bg-black-bland">
-            {/* Tab Buttons */}
-            <div className="p-4 flex flex-col gap-2">
-              <Button
-                variant={params === "/friends" ? "default" : "ghost"}
-                className="justify-start"
-                onClick={() => navigate("/friends")}
-              >
-                Danh sách bạn bè
-              </Button>
-              <Button
-                variant={params === "/groups" ? "default" : "ghost"}
-                className="justify-start"
-                onClick={() => navigate("/groups")}
-              >
-                Danh sách nhóm và cộng đồng
-              </Button>
-              <Button
-                variant={params === "/friend_requests" ? "default" : "ghost"}
-                className="justify-start"
-                onClick={() => navigate("/friend_requests")}
-              >
-                Lời mời kết bạn
-              </Button>
-            </div>
-          </div>
-          <div className="flex-1 min-h-0 flex flex-col">{children}</div>
-        </div>
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       </div>
     </MainLayout>
   );
