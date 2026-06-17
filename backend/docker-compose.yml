@@ -1,14 +1,15 @@
 # ============================================================================
-# Docker Compose - môi trường DEV cho NestJS monorepo microservices.
+# Docker Compose — DEV: app services + LOCAL infra containers.
 #
-#   docker compose up -d        -> build (lần đầu) + chạy toàn bộ hệ thống
-#   docker compose logs -f chat -> xem log 1 service
-#   docker compose down         -> dừng & xoá container (DỮ LIỆU VẪN CÒN)
-#   docker compose down -v      -> dừng & XOÁ luôn dữ liệu (named volumes)
+#   docker compose up -d              -> dev full stack (hot-reload + mongo/redis/...)
+#   docker compose --profile training up -d neo4j   -> chỉ bật Neo4j khi train offline
 #
-# - Code được mount (./ -> /app): sửa code dev là container tự reload (watch).
-# - node_modules dùng anonymous volume để không bị host ghi đè (đúng linux deps).
-# - Dữ liệu infra nằm trong named volumes => bật/tắt không mất, chỉ mất khi -v.
+# PRODUCTION (managed cloud — không chạy container stateful):
+#   cp .env.production.example .env.production
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+#   docker compose down         -> dừng container (volume dev vẫn còn)
+#   docker compose down -v      -> xoá luôn dữ liệu local
 # ============================================================================
 
 name: daln-backend
@@ -34,8 +35,6 @@ x-app-common: &app-common
     redis:
       condition: service_healthy
     rabbitmq:
-      condition: service_healthy
-    neo4j:
       condition: service_healthy
     qdrant:
       condition: service_started
@@ -123,6 +122,7 @@ services:
       retries: 10
 
   neo4j:
+    profiles: [training]
     image: neo4j:5-community
     container_name: daln-neo4j
     restart: unless-stopped
