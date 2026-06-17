@@ -8,5 +8,4 @@ on:
     paths:
       - 'backend/**'
       - '.github/workflows/deploy-backend.yml'
-    workflow_dispatch:
-
+  workflow_dispatch:
