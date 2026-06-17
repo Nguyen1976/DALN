@@ -10,10 +10,5 @@ if [ -f "${SCHEMA}" ]; then
   npx prisma generate --schema="${SCHEMA}"
 fi
 
-if [ "${SERVICE}" = "recommendation" ] && [ -f "apps/recommendation/prisma/seed.ts" ]; then
-  echo "[entrypoint] Seeding interest tags (idempotent)..."
-  npx ts-node apps/recommendation/prisma/seed.ts
-fi
-
 echo "[entrypoint] Khởi động ${SERVICE} ở chế độ watch (hot-reload)..."
 exec npx nest start "${SERVICE}" --watch --preserveWatchOutput
