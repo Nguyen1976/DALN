@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common'
 import { UserService } from './user.service'
-import { RedisModule } from '@app/redis'
+import { getRedisOptions, RedisModule } from '@app/redis'
 import { AuthGuard, CommonModule } from '@app/common'
 import { UtilModule } from '@app/util'
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
@@ -62,16 +62,7 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
       publicUrl: process.env.R2_PUBLIC_URL!,
     }),
     LoggerModule.forService('User-Service'),
-    RedisModule.forRoot(
-      {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: Number(process.env.REDIS_PORT || 6379),
-        username: process.env.REDIS_USERNAME,
-        password: process.env.REDIS_PASSWORD,
-        db: 0,
-      },
-      'REDIS_CLIENT',
-    ),
+    RedisModule.forRoot(getRedisOptions({ db: 0 }), 'REDIS_CLIENT'),
   ],
   controllers: [UserHttpController],
   providers: [

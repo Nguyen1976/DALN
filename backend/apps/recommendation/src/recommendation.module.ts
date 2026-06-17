@@ -7,7 +7,7 @@ import { ConfigModule } from '@nestjs/config/dist/config.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { QdrantModule } from '@app/qdrant/qdrant.module'
 import { UtilModule } from '@app/util'
-import { RedisModule } from '@app/redis'
+import { getRedisOptions, RedisModule } from '@app/redis'
 import { EmbeddingService } from './services/embedding.service'
 import { FeatureService } from './services/feature.service'
 import { GbRankerService } from './services/gb-ranker.service'
@@ -39,14 +39,7 @@ import { FriendGraphService } from './services/friend-graph.service'
     }),
     QdrantModule,
     UtilModule,
-    RedisModule.forRoot(
-      {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: Number(process.env.REDIS_PORT || 6379),
-        db: 0,
-      },
-      'REDIS_CLIENT',
-    ),
+    RedisModule.forRoot(getRedisOptions({ db: 0 }), 'REDIS_CLIENT'),
     RabbitMQModule.forRoot({
       exchanges: [
         {

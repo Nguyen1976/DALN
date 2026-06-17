@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common'
 import { QdrantClient } from '@qdrant/js-client-rest'
+import { getQdrantClientParams } from './qdrant.config'
 
 @Injectable()
 export class QdrantService implements OnModuleInit {
@@ -7,12 +8,7 @@ export class QdrantService implements OnModuleInit {
   private readonly COLLECTION_NAME = 'user_bios'
 
   async onModuleInit() {
-    const host = process.env.QDRANT_HOST?.trim() || '127.0.0.1'
-    const port = Number(process.env.QDRANT_PORT || 6333)
-    const url = process.env.QDRANT_URL?.trim()
-    this.client = url
-      ? new QdrantClient({ url })
-      : new QdrantClient({ host, port })
+    this.client = new QdrantClient(getQdrantClientParams())
     try {
       await this.createCollection()
     } catch (error) {
