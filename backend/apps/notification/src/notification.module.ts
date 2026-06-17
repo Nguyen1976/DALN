@@ -5,7 +5,7 @@ import { MailerModule } from '@app/mailer'
 import { ConfigModule } from '@nestjs/config'
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
 import { UtilModule } from '@app/util'
-import { getRedisOptions, RedisModule } from '@app/redis'
+import { RedisModule } from '@app/redis'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { LoggerModule } from '@app/logger'
 import { AuthGuard, CommonModule } from '@app/common'
@@ -30,7 +30,7 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
       },
     }),
     CommonModule,
-    RedisModule.forRoot(getRedisOptions({ db: 0 }), 'REDIS_CLIENT'),
+    RedisModule.forRoot(() => ({}), 'REDIS_CLIENT'),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: process.cwd() + '/apps/notification/.env',

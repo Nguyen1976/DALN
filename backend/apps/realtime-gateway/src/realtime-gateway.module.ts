@@ -2,14 +2,14 @@ import { Module } from '@nestjs/common'
 import { RealtimeGatewayController } from './realtime-gateway.controller'
 import { RealtimeGatewayService } from './realtime-gateway.service'
 import { RealtimeGateway } from './realtime/realtime.gateway'
-import { getRedisOptions, RedisModule } from '@app/redis'
+import { RedisModule } from '@app/redis'
 import { CommonModule } from '@app/common'
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 
 @Module({
   imports: [
-    RedisModule.forRoot(getRedisOptions({ db: 0 }), 'REDIS_CLIENT'),
+    RedisModule.forRoot(() => ({}), 'REDIS_CLIENT'),
     RabbitMQModule.forRoot({
       exchanges: [
         {

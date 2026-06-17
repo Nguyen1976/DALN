@@ -23,8 +23,7 @@ import { AuthGuard, CommonModule } from '@app/common'
 import { APP_GUARD } from '@nestjs/core'
 import { PrismaModule } from '../prisma/prisma.module'
 import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
-import { getRedisOptions } from '@app/redis/redis.config'
-import { RedisModule } from '@app/redis/redis.module'
+import { getRedisConnectionConfig, RedisModule } from '@app/redis'
 import { BackgroundJobModule } from './background-jobs/background-jobs.module'
 
 @Module({
@@ -54,14 +53,16 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
       publicUrl: process.env.R2_PUBLIC_URL!,
     }),
     ScheduleModule.forRoot(),
-    BullModule.forRoot({
-      connection: getRedisOptions(),
+    BullModule.forRootAsync({
+      useFactory: () => ({
+        connection: getRedisConnectionConfig() as object,
+      }),
     }),
     BullModule.registerQueue({
       name: 'unreadQueue', // Tên cái xe buýt chở event
     }),
     BackgroundJobModule,
-    RedisModule.forRoot(getRedisOptions({ db: 0 }), 'REDIS_CLIENT'),
+    RedisModule.forRoot(() => ({}), 'REDIS_CLIENT'),
   ],
   controllers: [ChatController],
   providers: [
