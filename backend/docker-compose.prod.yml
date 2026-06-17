@@ -7,8 +7,9 @@
 #   cp .env.production.example .env.production   # điền link cloud thật
 #   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 #
-# Dev local (container infra + hot-reload):
-#   docker compose up -d
+# Trên máy local: tắt stack dev trước (trùng port 3001–3005, 8000):
+#   docker compose down
+# Nếu còn container cũ: docker rm -f $(docker ps -aq --filter "name=daln-")
 # ============================================================================
 
 name: daln-backend-prod
@@ -23,7 +24,7 @@ x-app-prod: &app-prod
 services:
   kong:
     image: kong:3.7
-    container_name: daln-kong
+    container_name: daln-prod-kong
     restart: unless-stopped
     environment:
       KONG_DATABASE: "off"
@@ -49,7 +50,7 @@ services:
 
   user:
     <<: *app-prod
-    container_name: daln-user
+    container_name: daln-prod-user
     build:
       context: .
       dockerfile: Dockerfile
@@ -67,7 +68,7 @@ services:
 
   chat:
     <<: *app-prod
-    container_name: daln-chat
+    container_name: daln-prod-chat
     build:
       context: .
       dockerfile: Dockerfile
@@ -85,7 +86,7 @@ services:
 
   notification:
     <<: *app-prod
-    container_name: daln-notification
+    container_name: daln-prod-notification
     build:
       context: .
       dockerfile: Dockerfile
@@ -103,7 +104,7 @@ services:
 
   realtime-gateway:
     <<: *app-prod
-    container_name: daln-realtime
+    container_name: daln-prod-realtime
     build:
       context: .
       dockerfile: Dockerfile
@@ -121,7 +122,7 @@ services:
 
   recommendation:
     <<: *app-prod
-    container_name: daln-recommendation
+    container_name: daln-prod-recommendation
     build:
       context: .
       dockerfile: Dockerfile
@@ -140,7 +141,7 @@ services:
 
   saga-orchestrator:
     <<: *app-prod
-    container_name: daln-saga-orchestrator
+    container_name: daln-prod-saga-orchestrator
     build:
       context: .
       dockerfile: Dockerfile
