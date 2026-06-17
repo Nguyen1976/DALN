@@ -102,6 +102,12 @@
       "entryFile": "main",
       "sourceRoot": "apps/recommendation/src",
       "compilerOptions": {
+        "assets": [
+          {
+            "include": "generated/**/*",
+            "outDir": "dist/apps/recommendation/apps/recommendation/src"
+          }
+        ],
         "tsConfigPath": "apps/recommendation/tsconfig.app.json"
       }
     },
