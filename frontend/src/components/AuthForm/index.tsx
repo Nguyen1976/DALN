@@ -24,7 +24,7 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
       </div>
       <CardHeader className="space-y-1 pt-2">
         <CardTitle className="mx-auto max-w-[16rem] text-center text-2xl font-bold leading-snug">
-          {mode === "login" ? "Chào mừng bạn quay lại" : "Tạo tài khoản"}
+          {mode === "login" ? "Chào mừng bạn quay lại khà khà" : "Tạo tài khoản"}
         </CardTitle>
         <CardDescription className="text-center">
           {mode === "login"
