@@ -11,14 +11,13 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Tag deploy on EC2 (empty = git sha)'
+        description: 'Tag deploy lên EC2 (để trống = sha git)'
         required: false
         default: ''
 
 env:
   AWS_REGION: ap-southeast-1
-  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
-  ECR_REPO_PREFIX: chat-app
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-1.amazonaws.com
 
 permissions:
   id-token: write
@@ -36,15 +35,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
+      # - run: npm test   # bật khi đã có test
 
   build-and-push:
-    name: Build and Push — ${{ matrix.service }}
+    name: Build & Push — ${{ matrix.service }}
     needs: test
     runs-on: ubuntu-latest
     strategy:
@@ -63,7 +62,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-daln-deploy
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-chat-app-deploy
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/amazon-ecr-login@v2
@@ -80,16 +79,16 @@ jobs:
       - name: Build and push
         working-directory: backend
         env:
-          IMAGE: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.service }}:${{ steps.meta.outputs.tag }}
+          IMAGE: ${{ env.ECR_REGISTRY }}/chat-app/${{ matrix.service }}:${{ steps.meta.outputs.tag }}
         run: |
           docker build \
             --target production \
             --build-arg SERVICE=${{ matrix.service }} \
             -t "$IMAGE" \
-            -t "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.service }}:latest" \
+            -t "${{ env.ECR_REGISTRY }}/chat-app/${{ matrix.service }}:latest" \
             .
           docker push "$IMAGE"
-          docker push "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.service }}:latest"
+          docker push "${{ env.ECR_REGISTRY }}/chat-app/${{ matrix.service }}:latest"
 
     outputs:
       image_tag: ${{ steps.meta.outputs.tag }}
@@ -99,10 +98,9 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-daln-deploy
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-chat-app-deploy
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy via SSM
@@ -110,19 +108,17 @@ jobs:
           INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           ECR_REGISTRY: ${{ env.ECR_REGISTRY }}
-          ECR_REPO_PREFIX: ${{ env.ECR_REPO_PREFIX }}
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --comment "Deploy backend $IMAGE_TAG" \
+            --comment "Deploy Chat App backend $IMAGE_TAG" \
             --parameters commands="[
               \"set -euo pipefail\",
-              \"cd /opt/daln/backend\",
-              \"aws ssm get-parameter --name /daln/prod/env --with-decryption --region $AWS_REGION --query Parameter.Value --output text > .env.production\",
+              \"cd /opt/chat-app/backend\",
+              \"aws ssm get-parameter --name /chat-app/prod/env --with-decryption --region $AWS_REGION --query Parameter.Value --output text > .env.production\",
               \"export ECR_REGISTRY=$ECR_REGISTRY\",
-              \"export ECR_REPO_PREFIX=$ECR_REPO_PREFIX\",
               \"export IMAGE_TAG=$IMAGE_TAG\",
               \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
               \"docker compose -f docker-compose.prod.yml --env-file .env.production pull\",
