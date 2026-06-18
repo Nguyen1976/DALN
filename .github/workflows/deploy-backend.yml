@@ -121,9 +121,10 @@ jobs:
               \"export ECR_REGISTRY=$ECR_REGISTRY\",
               \"export IMAGE_TAG=$IMAGE_TAG\",
               \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
+              \"docker compose -f docker-compose.prod.yml down\",
+              \"docker image prune -a -f\",
               \"docker compose -f docker-compose.prod.yml --env-file .env.production pull\",
               \"docker compose -f docker-compose.prod.yml --env-file .env.production up -d --remove-orphans\",
-              \"docker image prune -f\"
             ]" \
             --query "Command.CommandId" \
             --output text)
