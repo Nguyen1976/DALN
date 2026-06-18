@@ -6,14 +6,14 @@ on:
       - main
       - deploy-on-aws
     paths:
-      - 'backend/**'
-      - '.github/workflows/deploy-backend.yml'
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Tag deploy lên EC2 (để trống = sha git)'
+        description: "Tag deploy lên EC2 (để trống = sha git)"
         required: false
-        default: ''
+        default: ""
 
 env:
   AWS_REGION: ap-southeast-1
@@ -122,9 +122,10 @@ jobs:
               \"export IMAGE_TAG=$IMAGE_TAG\",
               \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
               \"docker compose -f docker-compose.prod.yml down\",
-              \"docker image prune -a -f\",
               \"docker compose -f docker-compose.prod.yml --env-file .env.production pull\",
               \"docker compose -f docker-compose.prod.yml --env-file .env.production up -d --remove-orphans\",
+              \"docker image prune -a -f\",
+
             ]" \
             --query "Command.CommandId" \
             --output text)
