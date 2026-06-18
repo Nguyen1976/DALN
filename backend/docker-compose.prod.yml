@@ -57,7 +57,7 @@ services:
       target: production
       args:
         SERVICE: user
-    image: daln-user:prod
+    image: ${ECR_REGISTRY}/chat-app/user:${IMAGE_TAG:-latest}
     environment:
       SERVICE: user
       PORT: 3002
@@ -75,7 +75,7 @@ services:
       target: production
       args:
         SERVICE: chat
-    image: daln-chat:prod
+    image: ${ECR_REGISTRY}/chat-app/chat:${IMAGE_TAG:-latest}
     environment:
       SERVICE: chat
       PORT: 3003
@@ -93,7 +93,7 @@ services:
       target: production
       args:
         SERVICE: notification
-    image: daln-notification:prod
+    image: ${ECR_REGISTRY}/chat-app/notification:${IMAGE_TAG:-latest}
     environment:
       SERVICE: notification
       PORT: 3004
@@ -111,7 +111,7 @@ services:
       target: production
       args:
         SERVICE: realtime-gateway
-    image: daln-realtime-gateway:prod
+    image: ${ECR_REGISTRY}/chat-app/realtime-gateway:${IMAGE_TAG:-latest}
     environment:
       SERVICE: realtime-gateway
       port: 3001
@@ -129,7 +129,7 @@ services:
       target: production
       args:
         SERVICE: recommendation
-    image: daln-recommendation:prod
+    image: ${ECR_REGISTRY}/chat-app/recommendation:${IMAGE_TAG:-latest}
     environment:
       SERVICE: recommendation
       PORT: 3005
@@ -148,7 +148,7 @@ services:
       target: production
       args:
         SERVICE: saga-orchestrator
-    image: daln-saga-orchestrator:prod
+    image: ${ECR_REGISTRY}/chat-app/saga-orchestrator:${IMAGE_TAG:-latest}
     environment:
       SERVICE: saga-orchestrator
       NODE_ENV: production
