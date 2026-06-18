@@ -46,35 +46,53 @@ ENTRYPOINT ["entrypoint.sh"]
 # ----------------------------------------------------------------------------
 FROM base AS build
 ARG SERVICE
+ARG TARGETARCH
 ENV SERVICE=${SERVICE}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Sinh Prisma client nếu service có schema
+# Prisma: chỉ sinh query engine cho OS/arch của image (không ship native/darwin).
 RUN if [ -f "apps/${SERVICE}/prisma/schema.prisma" ]; then \
+      rm -rf "apps/${SERVICE}/src/generated" && \
+      case "${TARGETARCH}" in \
+        arm64) PRISMA_BT="linux-musl-arm64-openssl-3.0.x" ;; \
+        amd64) PRISMA_BT="linux-musl-openssl-3.0.x" ;; \
+        *) PRISMA_BT="linux-musl-openssl-3.0.x" ;; \
+      esac && \
+      sed -i.bak "s/binaryTargets = \[.*\]/binaryTargets = [\"${PRISMA_BT}\"]/" \
+        "apps/${SERVICE}/prisma/schema.prisma" && \
       npx prisma generate --schema="apps/${SERVICE}/prisma/schema.prisma"; \
     fi
-RUN npm run build -- "${SERVICE}"
-# Export Prisma engines to fixed path (realtime-gateway has no prisma)
-RUN if [ -d "apps/${SERVICE}/src/generated" ]; then \
-      mkdir -p /prisma-export && cp -r "apps/${SERVICE}/src/generated" /prisma-export/generated; \
-    else \
-      mkdir -p /prisma-export/generated; \
-    fi
+RUN npm run build -- "${SERVICE}" \
+    && find dist -name '*.dylib.node' -delete
 
 # ----------------------------------------------------------------------------
-# Production: image gọn, chỉ deps production + dist
+# Prod deps: prune trong stage riêng để layer COPY sang production không mang dev deps
+# ----------------------------------------------------------------------------
+FROM base AS prod-deps
+ARG SERVICE
+COPY package.json package-lock.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY docker/prune-prod-deps.sh /tmp/prune-prod-deps.sh
+RUN chmod +x /tmp/prune-prod-deps.sh \
+    && npm prune --omit=dev \
+    && npm cache clean --force \
+    && /tmp/prune-prod-deps.sh "${SERVICE}"
+
+# ----------------------------------------------------------------------------
+# Production: image gọn — node_modules đã prune theo SERVICE + dist webpack
 # ----------------------------------------------------------------------------
 FROM base AS production
 ARG SERVICE
 ENV SERVICE=${SERVICE}
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 # Email HTML templates (notification service reads at runtime)
 COPY --from=build /app/libs/mailer/src/templates ./libs/mailer/src/templates
-# Prisma native query engine (skip empty dir for services without prisma)
-COPY --from=build /prisma-export/generated ./apps/${SERVICE}/src/generated
+COPY docker/link-prisma-generated.sh /tmp/link-prisma-generated.sh
+RUN chmod +x /tmp/link-prisma-generated.sh \
+    && /tmp/link-prisma-generated.sh "${SERVICE}"
 COPY docker/entrypoint.prod.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 EXPOSE 3001 3002 3003 3004 3005
