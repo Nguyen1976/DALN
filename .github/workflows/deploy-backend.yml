@@ -1,0 +1,11 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+      - deploy-on-aws
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:

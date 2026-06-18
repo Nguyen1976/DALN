@@ -10,6 +10,7 @@ export interface InterestTagItem {
   order: number;
 }
 
+
 function parseInterestTagsPayload(body: unknown): InterestTagItem[] {
   if (Array.isArray(body)) {
     return body as InterestTagItem[];

@@ -1,0 +1,159 @@
+# ============================================================================
+# Docker Compose — PRODUCTION app tier (stateless only).
+#
+# Stateful infra (Mongo, RabbitMQ, Redis, Qdrant) dùng managed cloud — khai báo
+# URL trong .env.production (xem .env.production.example).
+#
+#   cp .env.production.example .env.production   # điền link cloud thật
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# Trên máy local: tắt stack dev trước (trùng port 3001–3005, 8000):
+#   docker compose down
+# Nếu còn container cũ: docker rm -f $(docker ps -aq --filter "name=daln-")
+# ============================================================================
+
+name: daln-backend-prod
+
+x-app-prod: &app-prod
+  restart: unless-stopped
+  env_file:
+    - .env.production
+  networks:
+    - backend
+
+services:
+  kong:
+    image: kong:3.7
+    container_name: daln-prod-kong
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    networks:
+      - backend
+    depends_on:
+      - user
+      - chat
+      - notification
+      - realtime-gateway
+      - recommendation
+
+  user:
+    <<: *app-prod
+    container_name: daln-prod-user
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: user
+    image: daln-user:prod
+    environment:
+      SERVICE: user
+      PORT: 3002
+      NODE_ENV: production
+      DATABASE_URL: ${USER_DATABASE_URL}
+    ports:
+      - "3002:3002"
+
+  chat:
+    <<: *app-prod
+    container_name: daln-prod-chat
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: chat
+    image: daln-chat:prod
+    environment:
+      SERVICE: chat
+      PORT: 3003
+      NODE_ENV: production
+      DATABASE_URL: ${CHAT_DATABASE_URL}
+    ports:
+      - "3003:3003"
+
+  notification:
+    <<: *app-prod
+    container_name: daln-prod-notification
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: notification
+    image: daln-notification:prod
+    environment:
+      SERVICE: notification
+      PORT: 3004
+      NODE_ENV: production
+      DATABASE_URL: ${NOTIFICATION_DATABASE_URL}
+    ports:
+      - "3004:3004"
+
+  realtime-gateway:
+    <<: *app-prod
+    container_name: daln-prod-realtime
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: realtime-gateway
+    image: daln-realtime-gateway:prod
+    environment:
+      SERVICE: realtime-gateway
+      port: 3001
+      PORT: 3001
+      NODE_ENV: production
+    ports:
+      - "3001:3001"
+
+  recommendation:
+    <<: *app-prod
+    container_name: daln-prod-recommendation
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: recommendation
+    image: daln-recommendation:prod
+    environment:
+      SERVICE: recommendation
+      PORT: 3005
+      NODE_ENV: production
+      DATABASE_URL: ${RECOMMENDATION_DATABASE_URL}
+      USER_MONGO_URI: ${USER_MONGO_URI}
+    ports:
+      - "3005:3005"
+
+  saga-orchestrator:
+    <<: *app-prod
+    container_name: daln-prod-saga-orchestrator
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: saga-orchestrator
+    image: daln-saga-orchestrator:prod
+    environment:
+      SERVICE: saga-orchestrator
+      NODE_ENV: production
+      DATABASE_URL: ${SAGA_DATABASE_URL}
+
+networks:
+  backend:
+    driver: bridge

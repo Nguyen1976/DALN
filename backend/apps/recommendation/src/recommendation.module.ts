@@ -20,6 +20,7 @@ import { UserSnapshotSyncSubscriber } from './rmq/subscribers/user-snapshot-sync
 import { CommonModule, AuthGuard } from '@app/common'
 import { RecommendationCron } from './background-jobs/recommendation/recommendation.cron'
 import { InterestTagService } from './services/interest-tag.service'
+import { InterestTagSeedService } from './services/interest-tag-seed.service'
 import { EmbeddingNotifyService } from './services/embedding-notify.service'
 import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
 import { RecommendationFriendshipService } from './services/recommendation-friendship.service'
@@ -39,14 +40,7 @@ import { FriendGraphService } from './services/friend-graph.service'
     }),
     QdrantModule,
     UtilModule,
-    RedisModule.forRoot(
-      {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: Number(process.env.REDIS_PORT || 6379),
-        db: 0,
-      },
-      'REDIS_CLIENT',
-    ),
+    RedisModule.forRoot(() => ({}), 'REDIS_CLIENT'),
     RabbitMQModule.forRoot({
       exchanges: [
         {
@@ -81,6 +75,7 @@ import { FriendGraphService } from './services/friend-graph.service'
     GroupMembershipSubscriber,
     RecommendationCron,
     InterestTagService,
+    InterestTagSeedService,
   ],
 })
 export class RecommendationModule {}

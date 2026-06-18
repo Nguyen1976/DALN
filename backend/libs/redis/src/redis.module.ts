@@ -1,16 +1,15 @@
 // libs/redis/redis.module.ts
 import { DynamicModule, Module, Global } from '@nestjs/common'
-import { RedisOptions } from 'ioredis'
-import Redis from 'ioredis'
+import { createRedisClient, type RedisConnectionOptions } from './redis.config'
 import { RedisService } from './redis.service'
 
-export interface RedisModuleOptions extends RedisOptions {}
+type RedisModuleOptions = RedisConnectionOptions
 
 @Global()
 @Module({})
 export class RedisModule {
   static forRoot(
-    options: RedisModuleOptions,
+    optionsFactory: () => RedisModuleOptions,
     token: string = 'REDIS_CLIENT',
   ): DynamicModule {
     return {
@@ -18,7 +17,7 @@ export class RedisModule {
       providers: [
         {
           provide: token,
-          useFactory: () => new Redis(options),
+          useFactory: () => createRedisClient(optionsFactory()),
         },
         RedisService,
       ],

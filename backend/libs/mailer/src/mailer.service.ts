@@ -1,13 +1,26 @@
 import { Injectable } from '@nestjs/common'
 import { MailerService as NestMailerService } from '@nestjs-modules/mailer'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
+import { join } from 'path'
 
 @Injectable()
 export class MailerService {
   constructor(private mailer: NestMailerService) {}
 
+  private readTemplate(filename: string): string {
+    const candidates = [
+      join(process.cwd(), 'libs/mailer/src/templates', filename),
+      join(__dirname, 'templates', filename),
+    ]
+    const path = candidates.find((candidate) => existsSync(candidate))
+    if (!path) {
+      throw new Error(`Mail template not found: ${filename}`)
+    }
+    return readFileSync(path, 'utf8')
+  }
+
   async sendUserConfirmation(data) {
-    let html = readFileSync('./libs/mailer/src/templates/welcome.html', 'utf8')
+    let html = this.readTemplate('welcome.html')
 
     html = html
       .replace(/{{\s*name\s*}}/g, data.username)
@@ -22,10 +35,7 @@ export class MailerService {
   }
 
   async sendMakeFriendNotification({ senderName, friendEmail, receiverName }) {
-    let html = readFileSync(
-      './libs/mailer/src/templates/make-friend.html',
-      'utf8',
-    )
+    let html = this.readTemplate('make-friend.html')
 
     html = html
       .replace(/{{\s*senderName\s*}}/g, senderName)
@@ -46,10 +56,7 @@ export class MailerService {
     username: string
     otp: string
   }) {
-    let html = readFileSync(
-      './libs/mailer/src/templates/register-otp.html',
-      'utf8',
-    )
+    let html = this.readTemplate('register-otp.html')
 
     html = html
       .replace(/{{\s*name\s*}}/g, data.username)

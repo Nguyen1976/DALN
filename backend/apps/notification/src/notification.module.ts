@@ -30,16 +30,7 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
       },
     }),
     CommonModule,
-    RedisModule.forRoot(
-      {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: Number(process.env.REDIS_PORT || 6379),
-        username: process.env.REDIS_USERNAME,
-        password: process.env.REDIS_PASSWORD,
-        db: 0,
-      },
-      'REDIS_CLIENT',
-    ),
+    RedisModule.forRoot(() => ({}), 'REDIS_CLIENT'),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: process.cwd() + '/apps/notification/.env',

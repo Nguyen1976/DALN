@@ -8,7 +8,7 @@
 #   - target "production": build theo từng service qua build-arg SERVICE,
 #     chạy `node dist/apps/<SERVICE>/main.js`.
 #
-# SERVICE hợp lệ: user | chat | notification | realtime-gateway | recommendation
+# SERVICE hợp lệ: user | chat | notification | realtime-gateway | recommendation | saga-orchestrator
 # ============================================================================
 
 ARG NODE_IMAGE=node:20-alpine
@@ -54,6 +54,12 @@ RUN if [ -f "apps/${SERVICE}/prisma/schema.prisma" ]; then \
       npx prisma generate --schema="apps/${SERVICE}/prisma/schema.prisma"; \
     fi
 RUN npm run build -- "${SERVICE}"
+# Export Prisma engines to fixed path (realtime-gateway has no prisma)
+RUN if [ -d "apps/${SERVICE}/src/generated" ]; then \
+      mkdir -p /prisma-export && cp -r "apps/${SERVICE}/src/generated" /prisma-export/generated; \
+    else \
+      mkdir -p /prisma-export/generated; \
+    fi
 
 # ----------------------------------------------------------------------------
 # Production: image gọn, chỉ deps production + dist
@@ -65,6 +71,10 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
+# Email HTML templates (notification service reads at runtime)
+COPY --from=build /app/libs/mailer/src/templates ./libs/mailer/src/templates
+# Prisma native query engine (skip empty dir for services without prisma)
+COPY --from=build /prisma-export/generated ./apps/${SERVICE}/src/generated
 COPY docker/entrypoint.prod.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 EXPOSE 3001 3002 3003 3004 3005
