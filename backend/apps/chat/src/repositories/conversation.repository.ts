@@ -268,7 +268,22 @@ export class ConversationRepository {
         unreadCount: true,
         lastReadAt: true,
         lastMessageAt: true,
-        conversation: true,
+        conversation: {
+          include: {
+            members: {
+              where: this.activeMemberWhere,
+              select: {
+                userId: true,
+                role: true,
+                username: true,
+                avatar: true,
+                fullName: true,
+                lastReadAt: true,
+                lastMessageAt: true,
+              },
+            },
+          },
+        },
       },
     } as any)) as any[]
     const result = memberships.map((membership) => ({
