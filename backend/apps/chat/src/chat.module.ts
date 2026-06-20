@@ -23,7 +23,7 @@ import { AuthGuard, CommonModule } from '@app/common'
 import { APP_GUARD } from '@nestjs/core'
 import { PrismaModule } from '../prisma/prisma.module'
 import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
-import { getRedisConnectionConfig, RedisModule } from '@app/redis'
+import { getBullMqConnectionConfig, RedisModule } from '@app/redis'
 import { BackgroundJobModule } from './background-jobs/background-jobs.module'
 
 @Module({
@@ -55,7 +55,7 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       useFactory: () => ({
-        connection: getRedisConnectionConfig() as object,
+        connection: getBullMqConnectionConfig(),
       }),
     }),
     BullModule.registerQueue({
