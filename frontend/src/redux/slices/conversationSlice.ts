@@ -89,21 +89,146 @@ const normalizeUnreadCount = (
   return parsed > 5 ? "5+" : String(parsed);
 };
 
+const deriveLastMessagePreview = (
+  conversation: Conversation,
+): Pick<
+  Conversation,
+  | "lastMessage"
+  | "lastMessageAt"
+  | "lastMessageText"
+  | "lastMessageSenderId"
+  | "lastMessageSenderName"
+  | "lastMessageSenderAvatar"
+> => {
+  const lastMessage =
+    conversation.lastMessage !== undefined ? conversation.lastMessage : null;
+
+  if (lastMessage) {
+    return {
+      lastMessage,
+      lastMessageAt: conversation.lastMessageAt || lastMessage.createdAt,
+      lastMessageText:
+        conversation.lastMessageText ||
+        (lastMessage.isRevoked
+          ? "Tin nhắn đã bị thu hồi"
+          : lastMessage.text || lastMessage.content || ""),
+      lastMessageSenderId:
+        conversation.lastMessageSenderId ?? lastMessage.senderId ?? null,
+      lastMessageSenderName:
+        conversation.lastMessageSenderName ||
+        lastMessage.senderMember?.fullName ||
+        lastMessage.senderMember?.username ||
+        null,
+      lastMessageSenderAvatar:
+        conversation.lastMessageSenderAvatar ??
+        lastMessage.senderMember?.avatar ??
+        null,
+    };
+  }
+
+  return {
+    lastMessage: null,
+    lastMessageAt: conversation.lastMessageAt,
+    lastMessageText: conversation.lastMessageText,
+    lastMessageSenderId: conversation.lastMessageSenderId ?? null,
+    lastMessageSenderName: conversation.lastMessageSenderName ?? null,
+    lastMessageSenderAvatar: conversation.lastMessageSenderAvatar ?? null,
+  };
+};
+
+const resolveConversationDisplay = (
+  conversation: Conversation,
+  userId?: string,
+  previous?: Conversation,
+) => {
+  const hasMembers = (conversation.members?.length ?? 0) > 0;
+
+  if (conversation.type !== "DIRECT") {
+    return {
+      groupName: conversation.groupName || "Nhóm chat",
+      groupAvatar: conversation.groupAvatar || "",
+    };
+  }
+
+  if (hasMembers && userId) {
+    return {
+      groupName: getConversationTitle(conversation, userId),
+      groupAvatar: getConversationAvatar(conversation, userId),
+    };
+  }
+
+  return {
+    groupName:
+      previous?.groupName ||
+      conversation.groupName ||
+      "Trò chuyện trực tiếp",
+    groupAvatar: previous?.groupAvatar || conversation.groupAvatar || "",
+  };
+};
+
 const normalizeConversationForStore = (
   conversation: Conversation,
   userId?: string,
+  previous?: Conversation,
 ): Conversation => {
+  const display = resolveConversationDisplay(conversation, userId, previous);
+
   return {
     ...conversation,
-    groupName: getConversationTitle(conversation, userId),
-    groupAvatar: getConversationAvatar(conversation, userId),
+    ...deriveLastMessagePreview(conversation),
+    groupName: display.groupName,
+    groupAvatar: display.groupAvatar,
     memberCount: getConversationMemberCount(conversation),
-    lastMessage:
-      conversation.lastMessage !== undefined ? conversation.lastMessage : null,
     unreadCount: normalizeUnreadCount(conversation.unreadCount),
     membershipStatus: conversation.membershipStatus || "ACTIVE",
     canSendMessage: conversation.canSendMessage ?? true,
   };
+};
+
+const mergeConversationRecords = (
+  existing: Conversation,
+  incoming: Conversation,
+  userId?: string,
+): Conversation => {
+  const mergedSource: Conversation = {
+    ...existing,
+    ...incoming,
+    members: incoming.members?.length ? incoming.members : existing.members,
+    canSendMessage: incoming.canSendMessage ?? existing.canSendMessage,
+    membershipStatus:
+      incoming.membershipStatus || existing.membershipStatus || "ACTIVE",
+    unreadCount: incoming.unreadCount ?? existing.unreadCount,
+    lastMessage: incoming.lastMessage || existing.lastMessage,
+    lastMessageAt: incoming.lastMessageAt || existing.lastMessageAt,
+    lastMessageText: incoming.lastMessageText || existing.lastMessageText,
+    lastMessageSenderId:
+      incoming.lastMessageSenderId ?? existing.lastMessageSenderId,
+    lastMessageSenderName:
+      incoming.lastMessageSenderName || existing.lastMessageSenderName,
+    lastMessageSenderAvatar:
+      incoming.lastMessageSenderAvatar ?? existing.lastMessageSenderAvatar,
+  };
+
+  return normalizeConversationForStore(mergedSource, userId, existing);
+};
+
+const upsertConversationInList = (
+  state: ConversationState,
+  conversation: Conversation,
+  userId?: string,
+) => {
+  const existingIndex = state.findIndex((item) => item.id === conversation.id);
+
+  if (existingIndex === -1) {
+    state.unshift(normalizeConversationForStore(conversation, userId));
+    return;
+  }
+
+  state[existingIndex] = mergeConversationRecords(
+    state[existingIndex],
+    conversation,
+    userId,
+  );
 };
 
 export const getConversations = createAsyncThunk(
@@ -201,39 +326,31 @@ export const conversationSlice = createSlice({
       state,
       action: PayloadAction<{
         conversation: Conversation;
+        userId?: string;
         membershipStatus?: "ACTIVE" | "REMOVED" | "LEFT";
         canSendMessage?: boolean;
       }>,
     ) => {
-      const { conversation, membershipStatus, canSendMessage } = action.payload;
+      const { conversation, userId, membershipStatus, canSendMessage } =
+        action.payload;
 
-      const existingIndex = state.findIndex(
-        (item) => item.id === conversation.id,
-      );
+      const existing = state.find((item) => item.id === conversation.id);
 
       const nextConversation: Conversation = {
-        ...normalizeConversationForStore(conversation),
+        ...conversation,
         membershipStatus:
           membershipStatus ||
           conversation.membershipStatus ||
-          state[existingIndex]?.membershipStatus ||
+          existing?.membershipStatus ||
           "ACTIVE",
         canSendMessage:
           canSendMessage ??
           conversation.canSendMessage ??
-          state[existingIndex]?.canSendMessage ??
+          existing?.canSendMessage ??
           membershipStatus !== "REMOVED",
       };
 
-      if (existingIndex === -1) {
-        state.unshift(nextConversation);
-        return;
-      }
-
-      state[existingIndex] = {
-        ...state[existingIndex],
-        ...nextConversation,
-      };
+      upsertConversationInList(state, nextConversation, userId);
     },
     addConversationMembers: (
       state,
@@ -371,14 +488,28 @@ export const conversationSlice = createSlice({
           }>,
         ) => {
           const { conversations, userId } = action.payload;
-          const oldState = state || [];
-          state = [
-            ...oldState,
-            ...(conversations?.map((c) =>
-              normalizeConversationForStore(c, userId),
-            ) as Conversation[]),
-          ];
-          return state;
+          const merged = [...(state || [])];
+
+          for (const conversation of conversations || []) {
+            const existingIndex = merged.findIndex(
+              (item) => item.id === conversation.id,
+            );
+
+            if (existingIndex === -1) {
+              merged.push(
+                normalizeConversationForStore(conversation, userId),
+              );
+              continue;
+            }
+
+            merged[existingIndex] = mergeConversationRecords(
+              merged[existingIndex],
+              conversation,
+              userId,
+            );
+          }
+
+          return merged;
         },
       )
       .addCase(

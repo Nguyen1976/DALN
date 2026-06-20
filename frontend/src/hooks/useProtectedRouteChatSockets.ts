@@ -111,6 +111,7 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
         dispatch(
           applyConversationUpdate({
             conversation: response.conversation as Conversation,
+            userId: user.id,
           }),
         );
         knownConversationIdsRef.current.add(targetConversationId);
@@ -314,6 +315,7 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       dispatch(
         applyConversationUpdate({
           conversation: payload.conversation,
+          userId: user.id,
           membershipStatus: payload.membershipStatus,
           canSendMessage: payload.canSendMessage,
         }),

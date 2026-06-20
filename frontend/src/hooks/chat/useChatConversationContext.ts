@@ -101,6 +101,7 @@ export function useChatConversationContext(conversationId?: string) {
         dispatch(
           applyConversationUpdate({
             conversation: response.conversation as Conversation,
+            userId: user.id,
           }),
         );
       } catch {
