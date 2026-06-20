@@ -284,47 +284,12 @@ export const getConversationByFriendIdAPI = async (
   return response.data.data;
 };
 
-export interface SearchConversationItem {
-  id: string;
-  type: string;
-  unreadCount?: string;
-  groupName?: string;
-  groupAvatar?: string;
-  memberCount?: number;
-  createdAt: string;
-  updatedAt?: string;
-  lastMessageAt?: string | null;
-  lastMessageText?: string;
-  lastMessageSenderId?: string | null;
-  lastMessageSenderName?: string | null;
-  lastMessageSenderAvatar?: string | null;
-  members?: Array<{
-    userId: string;
-    lastReadAt?: string;
-    username?: string;
-    avatar?: string;
-    fullName?: string;
-    lastMessageAt?: string;
-  }>;
-  lastMessage?: {
-    id: string;
-    conversationId: string;
-    senderId: string;
-    text: string;
-    isDeleted?: boolean;
-    createdAt: string;
-    senderMember?: {
-      userId: string;
-      username?: string;
-      avatar?: string;
-      fullName?: string;
-    };
-  } | null;
-}
+import type { Conversation } from "@/redux/slices/conversationSlice";
 
-export interface ConversationByIdResponse {
-  conversation: SearchConversationItem;
-}
+export type SearchConversationItem = Conversation;
+export type ConversationByIdResponse = {
+  conversation: Conversation;
+};
 
 export const getConversationByIdAPI = async (
   conversationId: string,

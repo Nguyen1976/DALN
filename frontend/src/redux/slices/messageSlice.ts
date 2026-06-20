@@ -36,14 +36,12 @@ export interface Message {
   senderId: string;
   text: string;
   type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL";
-  content?: string;
   clientMessageId?: string;
-  replyToMessageId?: string | undefined;
+  replyToMessageId?: string;
   isDeleted?: boolean;
   isRevoked?: boolean;
-  deleteType?: string;
   createdAt?: string;
-  senderMember?: SenderMember | undefined;
+  senderMember?: SenderMember;
   medias?: {
     id?: string;
     mediaType: "IMAGE" | "VIDEO" | "FILE";
@@ -203,7 +201,6 @@ export const messageSlice = createSlice({
         currentMessages[index] = {
           ...currentMessages[index],
           isRevoked: true,
-          content: "",
           text: "",
           medias: [],
         };
@@ -250,7 +247,6 @@ export const messageSlice = createSlice({
       target.poll = poll;
       target.type = "POLL";
       target.text = poll.question;
-      target.content = poll.question;
     },
   },
   extraReducers: (builder) => {

@@ -7,35 +7,37 @@ import {
 import type { PayloadAction } from "@reduxjs/toolkit";
 import type { RootState } from "../store";
 import type { Message } from "./messageSlice";
+import { MessageMapper } from "@/utils/messageMapper";
 import { toast } from "sonner";
 import { logoutAPI } from "./userSlice";
 
 export interface ConversationMember {
   userId: string;
   role?: "ADMIN" | "MEMBER" | "OWNER";
-  /** timestamp (ms) */
-  lastReadMessageId?: string;
-  lastReadAt?: string;
+  lastReadAt?: string | null;
   username?: string;
   avatar?: string;
   fullName?: string;
-  lastMessageAt?: string;
+  lastMessageAt?: string | null;
 }
 
 export interface Conversation {
   id: string;
   type: string;
-  unreadCount?: string;
+  groupName?: string | null;
+  groupAvatar?: string | null;
+  displayName: string;
+  displayAvatar: string;
+  unreadCount: string;
   membershipStatus?: "ACTIVE" | "REMOVED" | "LEFT";
   canSendMessage?: boolean;
-  groupName?: string | undefined;
-  groupAvatar?: string | undefined;
-  memberCount?: number;
+  memberCount: number;
   createdAt: string;
-  updatedAt?: string | undefined;
+  updatedAt: string;
   members?: ConversationMember[];
   lastMessage?: Message | null;
-  lastMessageAt?: string;
+  lastMessageId?: string | null;
+  lastMessageAt?: string | null;
   lastMessageText?: string;
   lastMessageSenderId?: string | null;
   lastMessageSenderName?: string | null;
@@ -46,204 +48,38 @@ export type ConversationState = Conversation[];
 
 const initialState: ConversationState = [];
 
-const getConversationTitle = (conversation: Conversation, userId?: string) => {
-  if (conversation.type !== "DIRECT") {
-    return conversation.groupName || "Nhóm chat";
-  }
-
-  const otherMember = conversation.members?.find(
-    (member) => member.userId !== userId,
-  );
-
-  return (
-    otherMember?.username ||
-    otherMember?.fullName ||
-    conversation.groupName ||
-    "Trò chuyện trực tiếp"
-  );
-};
-
-const getConversationAvatar = (conversation: Conversation, userId?: string) => {
-  if (conversation.type !== "DIRECT") {
-    return conversation.groupAvatar || "";
-  }
-
-  const otherMember = conversation.members?.find(
-    (member) => member.userId !== userId,
-  );
-
-  return otherMember?.avatar || conversation.groupAvatar || "";
-};
-
-const getConversationMemberCount = (conversation: Conversation) => {
-  return conversation.memberCount ?? conversation.members?.length ?? 0;
-};
-
-const normalizeUnreadCount = (
-  unreadCount: Conversation["unreadCount"] | number | null | undefined,
-): string => {
-  if (unreadCount === "5+") return "5+";
-
-  const parsed = Number(unreadCount ?? 0);
-  if (!Number.isFinite(parsed) || parsed <= 0) return "0";
-  return parsed > 5 ? "5+" : String(parsed);
-};
-
-const deriveLastMessagePreview = (
-  conversation: Conversation,
-): Pick<
-  Conversation,
-  | "lastMessage"
-  | "lastMessageAt"
-  | "lastMessageText"
-  | "lastMessageSenderId"
-  | "lastMessageSenderName"
-  | "lastMessageSenderAvatar"
-> => {
-  const lastMessage =
-    conversation.lastMessage !== undefined ? conversation.lastMessage : null;
-
-  if (lastMessage) {
-    return {
-      lastMessage,
-      lastMessageAt: conversation.lastMessageAt || lastMessage.createdAt,
-      lastMessageText:
-        conversation.lastMessageText ||
-        (lastMessage.isRevoked
-          ? "Tin nhắn đã bị thu hồi"
-          : lastMessage.text || lastMessage.content || ""),
-      lastMessageSenderId:
-        conversation.lastMessageSenderId ?? lastMessage.senderId ?? null,
-      lastMessageSenderName:
-        conversation.lastMessageSenderName ||
-        lastMessage.senderMember?.fullName ||
-        lastMessage.senderMember?.username ||
-        null,
-      lastMessageSenderAvatar:
-        conversation.lastMessageSenderAvatar ??
-        lastMessage.senderMember?.avatar ??
-        null,
-    };
-  }
-
-  return {
-    lastMessage: null,
-    lastMessageAt: conversation.lastMessageAt,
-    lastMessageText: conversation.lastMessageText,
-    lastMessageSenderId: conversation.lastMessageSenderId ?? null,
-    lastMessageSenderName: conversation.lastMessageSenderName ?? null,
-    lastMessageSenderAvatar: conversation.lastMessageSenderAvatar ?? null,
-  };
-};
-
-const resolveConversationDisplay = (
-  conversation: Conversation,
-  userId?: string,
-  previous?: Conversation,
-) => {
-  const hasMembers = (conversation.members?.length ?? 0) > 0;
-
-  if (conversation.type !== "DIRECT") {
-    return {
-      groupName: conversation.groupName || "Nhóm chat",
-      groupAvatar: conversation.groupAvatar || "",
-    };
-  }
-
-  if (hasMembers && userId) {
-    return {
-      groupName: getConversationTitle(conversation, userId),
-      groupAvatar: getConversationAvatar(conversation, userId),
-    };
-  }
-
-  return {
-    groupName:
-      previous?.groupName ||
-      conversation.groupName ||
-      "Trò chuyện trực tiếp",
-    groupAvatar: previous?.groupAvatar || conversation.groupAvatar || "",
-  };
-};
-
-const normalizeConversationForStore = (
-  conversation: Conversation,
-  userId?: string,
-  previous?: Conversation,
-): Conversation => {
-  const display = resolveConversationDisplay(conversation, userId, previous);
-
-  return {
-    ...conversation,
-    ...deriveLastMessagePreview(conversation),
-    groupName: display.groupName,
-    groupAvatar: display.groupAvatar,
-    memberCount: getConversationMemberCount(conversation),
-    unreadCount: normalizeUnreadCount(conversation.unreadCount),
-    membershipStatus: conversation.membershipStatus || "ACTIVE",
-    canSendMessage: conversation.canSendMessage ?? true,
-  };
-};
-
-const mergeConversationRecords = (
+const mergeConversation = (
   existing: Conversation,
   incoming: Conversation,
-  userId?: string,
-): Conversation => {
-  const mergedSource: Conversation = {
-    ...existing,
-    ...incoming,
-    members: incoming.members?.length ? incoming.members : existing.members,
-    canSendMessage: incoming.canSendMessage ?? existing.canSendMessage,
-    membershipStatus:
-      incoming.membershipStatus || existing.membershipStatus || "ACTIVE",
-    unreadCount: incoming.unreadCount ?? existing.unreadCount,
-    lastMessage: incoming.lastMessage || existing.lastMessage,
-    lastMessageAt: incoming.lastMessageAt || existing.lastMessageAt,
-    lastMessageText: incoming.lastMessageText || existing.lastMessageText,
-    lastMessageSenderId:
-      incoming.lastMessageSenderId ?? existing.lastMessageSenderId,
-    lastMessageSenderName:
-      incoming.lastMessageSenderName || existing.lastMessageSenderName,
-    lastMessageSenderAvatar:
-      incoming.lastMessageSenderAvatar ?? existing.lastMessageSenderAvatar,
-  };
+): Conversation => ({
+  ...existing,
+  ...incoming,
+  members: incoming.members?.length ? incoming.members : existing.members,
+  canSendMessage: incoming.canSendMessage ?? existing.canSendMessage,
+  membershipStatus:
+    incoming.membershipStatus || existing.membershipStatus || "ACTIVE",
+});
 
-  return normalizeConversationForStore(mergedSource, userId, existing);
-};
-
-const upsertConversationInList = (
+const upsertConversation = (
   state: ConversationState,
   conversation: Conversation,
-  userId?: string,
 ) => {
-  const existingIndex = state.findIndex((item) => item.id === conversation.id);
-
-  if (existingIndex === -1) {
-    state.unshift(normalizeConversationForStore(conversation, userId));
+  const index = state.findIndex((item) => item.id === conversation.id);
+  if (index === -1) {
+    state.unshift(conversation);
     return;
   }
-
-  state[existingIndex] = mergeConversationRecords(
-    state[existingIndex],
-    conversation,
-    userId,
-  );
+  state[index] = mergeConversation(state[index], conversation);
 };
 
 export const getConversations = createAsyncThunk(
   `/chat/conversations`,
-  async (
-    { limit = 10, cursor }: { limit: number; cursor: string | null },
-    { getState },
-  ) => {
-    const state = getState() as RootState;
-    const userId = state.user.id;
+  async ({ limit = 10, cursor }: { limit: number; cursor: string | null }) => {
     cursor = cursor?.replaceAll("+", "%2B") || null;
     const response = await authorizeAxiosInstance.get(
       `/chat/conversations?limit=${limit}&cursor=${cursor ?? ""}`,
     );
-    return { userId, conversations: response.data.data };
+    return response.data.data as Conversation[];
   },
 );
 
@@ -259,7 +95,7 @@ export const createConversation = createAsyncThunk(
         },
       },
     );
-    return response.data.data;
+    return response.data.data as { conversation: Conversation };
   },
 );
 
@@ -269,13 +105,11 @@ export const conversationSlice = createSlice({
   reducers: {
     addConversation: (
       state,
-      action: PayloadAction<{ conversation: Conversation; userId: string }>,
+      action: PayloadAction<{ conversation: Conversation }>,
     ) => {
-      const { conversation, userId } = action.payload;
-
-      state.unshift({
-        ...normalizeConversationForStore(conversation, userId),
-        unreadCount: "0",
+      upsertConversation(state, {
+        ...action.payload.conversation,
+        unreadCount: action.payload.conversation.unreadCount || "0",
       });
     },
     updateNewMessage: (
@@ -283,27 +117,27 @@ export const conversationSlice = createSlice({
       action: PayloadAction<{ conversationId: string; lastMessage: Message }>,
     ) => {
       const { conversationId, lastMessage } = action.payload;
+      const target = state.find((conversation) => conversation.id === conversationId);
+      if (!target) return;
 
-      const updatedConversation = state.find((c) => c.id === conversationId);
-      if (!updatedConversation) return state;
-
-      const newConversation = {
-        ...updatedConversation,
+      const preview = MessageMapper.previewText(lastMessage);
+      const updated: Conversation = {
+        ...target,
         lastMessage,
-        lastMessageAt: lastMessage.createdAt,
-        lastMessageText: lastMessage.isRevoked
-          ? "Tin nhắn đã bị thu hồi"
-          : lastMessage.text || lastMessage.content || "",
+        lastMessageId: lastMessage.id,
+        lastMessageAt: lastMessage.createdAt || target.lastMessageAt,
+        lastMessageText: preview,
         lastMessageSenderId: lastMessage.senderId,
         lastMessageSenderName:
           lastMessage.senderMember?.fullName ||
           lastMessage.senderMember?.username ||
-          "",
+          null,
         lastMessageSenderAvatar: lastMessage.senderMember?.avatar || null,
-        updatedAt: lastMessage.createdAt,
+        updatedAt: lastMessage.createdAt || target.updatedAt,
       };
 
-      return [newConversation, ...state.filter((c) => c.id !== conversationId)];
+      const rest = state.filter((conversation) => conversation.id !== conversationId);
+      state.splice(0, state.length, updated, ...rest);
     },
     setConversationAccessState: (
       state,
@@ -313,10 +147,9 @@ export const conversationSlice = createSlice({
         canSendMessage: boolean;
       }>,
     ) => {
-      const target = state.find((conversation) => {
-        return conversation.id === action.payload.conversationId;
-      });
-
+      const target = state.find(
+        (conversation) => conversation.id === action.payload.conversationId,
+      );
       if (!target) return;
 
       target.membershipStatus = action.payload.membershipStatus;
@@ -326,31 +159,18 @@ export const conversationSlice = createSlice({
       state,
       action: PayloadAction<{
         conversation: Conversation;
-        userId?: string;
         membershipStatus?: "ACTIVE" | "REMOVED" | "LEFT";
         canSendMessage?: boolean;
       }>,
     ) => {
-      const { conversation, userId, membershipStatus, canSendMessage } =
-        action.payload;
-
-      const existing = state.find((item) => item.id === conversation.id);
-
-      const nextConversation: Conversation = {
+      const { conversation, membershipStatus, canSendMessage } = action.payload;
+      upsertConversation(state, {
         ...conversation,
         membershipStatus:
-          membershipStatus ||
-          conversation.membershipStatus ||
-          existing?.membershipStatus ||
-          "ACTIVE",
+          membershipStatus || conversation.membershipStatus || "ACTIVE",
         canSendMessage:
-          canSendMessage ??
-          conversation.canSendMessage ??
-          existing?.canSendMessage ??
-          membershipStatus !== "REMOVED",
-      };
-
-      upsertConversationInList(state, nextConversation, userId);
+          canSendMessage ?? conversation.canSendMessage ?? true,
+      });
     },
     addConversationMembers: (
       state,
@@ -366,40 +186,28 @@ export const conversationSlice = createSlice({
         }>;
       }>,
     ) => {
-      const target = state.find((conversation) => {
-        return conversation.id === action.payload.conversationId;
-      });
+      const target = state.find(
+        (conversation) => conversation.id === action.payload.conversationId,
+      );
       if (!target) return;
 
       target.members ||= [];
-
       const incomingById = new Map(
         (action.payload.members || []).map((member) => [member.userId, member]),
       );
-
-      const existingIds = new Set(
-        target.members.map((member) => member.userId),
-      );
+      const existingIds = new Set(target.members.map((member) => member.userId));
       let addedCount = 0;
 
       for (let index = 0; index < target.members.length; index += 1) {
         const existing = target.members[index];
         const incoming = incomingById.get(existing.userId);
         if (!incoming) continue;
-
-        target.members[index] = {
-          ...existing,
-          ...incoming,
-        };
+        target.members[index] = { ...existing, ...incoming };
       }
 
       for (const memberId of action.payload.memberIds) {
+        if (existingIds.has(memberId)) continue;
         const incoming = incomingById.get(memberId);
-
-        if (existingIds.has(memberId)) {
-          continue;
-        }
-
         addedCount += 1;
         target.members.push({
           userId: memberId,
@@ -411,8 +219,7 @@ export const conversationSlice = createSlice({
       }
 
       if (addedCount > 0) {
-        target.memberCount =
-          (target.memberCount ?? target.members.length ?? 0) + addedCount;
+        target.memberCount += addedCount;
       }
     },
     removeConversationMember: (
@@ -422,25 +229,18 @@ export const conversationSlice = createSlice({
         userId: string;
       }>,
     ) => {
-      const target = state.find((conversation) => {
-        return conversation.id === action.payload.conversationId;
-      });
-      if (!target) return;
-
-      target.members ||= [];
+      const target = state.find(
+        (conversation) => conversation.id === action.payload.conversationId,
+      );
+      if (!target?.members) return;
 
       const beforeCount = target.members.length;
-
       target.members = target.members.filter(
         (member) => member.userId !== action.payload.userId,
       );
-
       const removedCount = beforeCount - target.members.length;
       if (removedCount > 0) {
-        target.memberCount = Math.max(
-          (target.memberCount ?? beforeCount) - removedCount,
-          0,
-        );
+        target.memberCount = Math.max(target.memberCount - removedCount, 0);
       }
     },
     removeConversationById: (
@@ -455,14 +255,13 @@ export const conversationSlice = createSlice({
       state,
       action: PayloadAction<{ conversationId: string }>,
     ) => {
-      const { conversationId } = action.payload;
-      const conversation = state.find((c) => c.id === conversationId);
-      if (!conversation) return state;
-      if (conversation.unreadCount === "5+") return state;
-      const newUnreadCount = Number(conversation.unreadCount) + 1;
-      conversation.unreadCount = String(
-        newUnreadCount > 5 ? "5+" : newUnreadCount,
+      const conversation = state.find(
+        (item) => item.id === action.payload.conversationId,
       );
+      if (!conversation || conversation.unreadCount === "5+") return;
+
+      const next = Number(conversation.unreadCount) + 1;
+      conversation.unreadCount = next > 5 ? "5+" : String(next);
     },
     markConversationRead: (
       state,
@@ -472,54 +271,25 @@ export const conversationSlice = createSlice({
         (conversation) => conversation.id === action.payload.conversationId,
       );
       if (!target) return;
-
       target.unreadCount = "0";
     },
   },
   extraReducers: (builder) => {
     builder
-      .addCase(
-        getConversations.fulfilled,
-        (
-          state: ConversationState,
-          action: PayloadAction<{
-            conversations: Conversation[];
-            userId: string;
-          }>,
-        ) => {
-          const { conversations, userId } = action.payload;
-          const merged = [...(state || [])];
-
-          for (const conversation of conversations || []) {
-            const existingIndex = merged.findIndex(
-              (item) => item.id === conversation.id,
-            );
-
-            if (existingIndex === -1) {
-              merged.push(
-                normalizeConversationForStore(conversation, userId),
-              );
-              continue;
-            }
-
-            merged[existingIndex] = mergeConversationRecords(
-              merged[existingIndex],
-              conversation,
-              userId,
-            );
+      .addCase(getConversations.fulfilled, (state, action) => {
+        for (const conversation of action.payload || []) {
+          const index = state.findIndex((item) => item.id === conversation.id);
+          if (index === -1) {
+            state.push(conversation);
+            continue;
           }
-
-          return merged;
-        },
-      )
-      .addCase(
-        createConversation.fulfilled,
-        (state, action: PayloadAction<{ conversation: Conversation }>) => {
-          const c = action.payload.conversation;
-          state.unshift(normalizeConversationForStore(c));
-          toast.success("Conversation created successfully");
-        },
-      )
+          state[index] = mergeConversation(state[index], conversation);
+        }
+      })
+      .addCase(createConversation.fulfilled, (state, action) => {
+        upsertConversation(state, action.payload.conversation);
+        toast.success("Conversation created successfully");
+      })
       .addCase(logoutAPI.fulfilled, () => initialState);
   },
 });
@@ -530,25 +300,9 @@ export const selectConversation = createSelector(
 );
 
 export const selectConversationById = (
-  state: {
-    conversations: ConversationState;
-  },
+  state: { conversations: ConversationState },
   conversationId: string,
-) => {
-  return state.conversations?.find((c) => c.id === conversationId);
-};
-
-export const selectMessagesByConversationId = (
-  state: {
-    conversations: ConversationState;
-  },
-  conversationId: string,
-) => {
-  const conversation = state.conversations?.find(
-    (c) => c.id === conversationId,
-  );
-  return conversation ? conversation.lastMessage : null;
-};
+) => state.conversations.find((conversation) => conversation.id === conversationId);
 
 export const {
   addConversation,
@@ -561,4 +315,5 @@ export const {
   removeConversationMember,
   removeConversationById,
 } = conversationSlice.actions;
+
 export default conversationSlice.reducer;
