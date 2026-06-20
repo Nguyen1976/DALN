@@ -35,6 +35,36 @@ export function getRedisConnectionConfig():
   }
 }
 
+/**
+ * BullMQ cần object `{ host, port, ... }`. Truyền URL string trực tiếp sẽ bị bỏ qua
+ * và worker fallback về 127.0.0.1:6379.
+ */
+export function getBullMqConnectionConfig(): RedisConnectionOptions {
+  const url = process.env.REDIS_URL?.trim()
+  if (url) {
+    try {
+      const parsed = new URL(url)
+      return {
+        ...commonOptions(),
+        host: parsed.hostname,
+        port: parsed.port ? Number(parsed.port) : 6379,
+        username: parsed.username || undefined,
+        password: parsed.password || undefined,
+        tls: parsed.protocol === 'rediss:' ? {} : undefined,
+      }
+    } catch {
+      // fall through to host/port env vars
+    }
+  }
+
+  const base = getRedisConnectionConfig()
+  if (typeof base === 'string') {
+    return { ...commonOptions() }
+  }
+
+  return base
+}
+
 /** @deprecated use getRedisConnectionConfig — kept for callers passing overrides */
 export function getRedisOptions(
   overrides: RedisConnectionOptions = {},
