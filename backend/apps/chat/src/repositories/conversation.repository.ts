@@ -299,6 +299,7 @@ export class ConversationRepository {
   async updateUpdatedAt(
     conversationId: string,
     data?: {
+      lastMessageId?: string | null
       lastMessageAt?: Date
       lastMessageText?: string | null
       lastMessageSenderId?: string | null
@@ -310,6 +311,9 @@ export class ConversationRepository {
       where: { id: conversationId },
       data: {
         updatedAt: new Date(),
+        ...(data?.lastMessageId !== undefined
+          ? { lastMessageId: data.lastMessageId }
+          : {}),
         ...(data?.lastMessageAt ? { lastMessageAt: data.lastMessageAt } : {}),
         ...(data?.lastMessageText !== undefined
           ? { lastMessageText: data.lastMessageText }

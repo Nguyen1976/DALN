@@ -5,6 +5,7 @@ import { Job } from 'bullmq'
 export interface UnreadSyncJobPayload {
   conversationId: string
   senderId: string
+  lastMessageId?: string
   lastMessageAt?: string | Date
   lastMessageText?: string
   lastMessageSenderId?: string

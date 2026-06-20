@@ -46,6 +46,7 @@ export class UnreadCron {
           const lastMsg = JSON.parse(lastMsgString)
 
           await this.conversationRepo.updateUpdatedAt(conversationId, {
+            lastMessageId: lastMsg.lastMessageId || undefined,
             lastMessageAt: lastMsg.lastMessageAt
               ? new Date(lastMsg.lastMessageAt)
               : undefined,
