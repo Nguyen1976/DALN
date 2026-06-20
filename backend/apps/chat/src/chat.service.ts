@@ -238,20 +238,12 @@ export class ChatService {
     )
     message.senderMember = senderMember
 
-    this.unreadQueue.add(
-      'increase-unread',
-      {
-        conversationId: data.conversationId,
-        senderId: data.senderId,
-        lastMessageAt: message.createdAt,
-        lastMessageText: message.content || '',
-        lastMessageSenderId: data.senderId,
-        lastMessageSenderName:
-          senderMember?.fullName || senderMember?.username || data.senderId,
-        lastMessageSenderAvatar: senderMember?.avatar || null,
-      },
-      { removeOnComplete: true, removeOnFail: true },
-    )
+    this.enqueueConversationSyncJob({
+      conversationId: data.conversationId,
+      senderId: data.senderId,
+      message,
+      senderMember: senderMember || { userId: data.senderId },
+    })
 
     const normalizedMessage = this.normalizeMessage(message)
 
@@ -628,7 +620,7 @@ export class ChatService {
       cursor,
       take,
     )
-    return conversations
+    return this.enrichConversationsLastMessage(conversations)
   }
 
   async getMessagesByConversationId(
@@ -726,20 +718,12 @@ export class ChatService {
 
     createdMessage.senderMember = senderMember
 
-    this.unreadQueue.add(
-      'increase-unread',
-      {
-        conversationId: data.conversationId,
-        senderId: data.userId,
-        lastMessageAt: createdMessage.createdAt,
-        lastMessageText: `Bình chọn: ${question}`,
-        lastMessageSenderId: data.userId,
-        lastMessageSenderName:
-          senderMember?.fullName || senderMember?.username || data.userId,
-        lastMessageSenderAvatar: senderMember?.avatar || null,
-      },
-      { removeOnComplete: true, removeOnFail: true },
-    )
+    this.enqueueConversationSyncJob({
+      conversationId: data.conversationId,
+      senderId: data.userId,
+      message: createdMessage,
+      senderMember: senderMember || { userId: data.userId },
+    })
 
     const normalizedMessage = this.normalizeMessage(createdMessage)
 
@@ -1350,16 +1334,17 @@ export class ChatService {
     const message = result
     if (!message) return
 
-    await this.conversationRepo.updateUpdatedAt(conversationId, {
-      lastMessageAt: message.createdAt,
-      lastMessageText: text,
-      lastMessageSenderId: actorUserId,
-      lastMessageSenderName: 'System',
-      lastMessageSenderAvatar: null,
+    this.enqueueConversationSyncJob({
+      conversationId,
+      senderId: actorUserId,
+      message,
+      senderMember: {
+        userId: actorUserId,
+        fullName: 'System',
+        username: 'System',
+        avatar: null,
+      },
     })
-
-    await this.memberRepo.updateLastMessageAt(conversationId, message.createdAt)
-    await this.memberRepo.increaseUnreadForOthers(conversationId, actorUserId)
 
     const normalized = this.normalizeMessage(message)
     const members = await this.memberRepo.findByConversationId(conversationId)
@@ -1379,5 +1364,105 @@ export class ChatService {
     } catch (error) {
       console.error('[chat-service] publish event failed', error)
     }
+  }
+
+  private resolveLastMessagePreview(message: {
+    content?: string | null
+    type?: string
+    poll?: { question?: string } | null
+  }) {
+    const content = String(message.content || '').trim()
+    if (content) return content
+
+    switch (message.type) {
+      case 'IMAGE':
+        return 'Hình ảnh'
+      case 'VIDEO':
+        return 'Video'
+      case 'FILE':
+        return 'Tệp đính kèm'
+      case 'POLL':
+        return `Bình chọn: ${message.poll?.question || 'Khảo sát'}`
+      default:
+        return ''
+    }
+  }
+
+  private enqueueConversationSyncJob(params: {
+    conversationId: string
+    senderId: string
+    message: {
+      createdAt: Date
+      content?: string | null
+      type?: string
+      poll?: { question?: string } | null
+    }
+    senderMember: {
+      userId: string
+      fullName?: string | null
+      username?: string | null
+      avatar?: string | null
+    }
+  }) {
+    const { conversationId, senderId, message, senderMember } = params
+
+    void this.unreadQueue
+      .add(
+        'increase-unread',
+        {
+          conversationId,
+          senderId,
+          lastMessageAt: message.createdAt,
+          lastMessageText: this.resolveLastMessagePreview(message),
+          lastMessageSenderId: senderId,
+          lastMessageSenderName:
+            senderMember.fullName || senderMember.username || senderId,
+          lastMessageSenderAvatar: senderMember.avatar || null,
+        },
+        { removeOnComplete: true, removeOnFail: true },
+      )
+      .catch((error) => {
+        console.error('[chat-service] unreadQueue.add failed', error)
+      })
+  }
+
+  private async enrichConversationsLastMessage(conversations: any[]) {
+    const missing = conversations.filter(
+      (conversation) => !conversation?.lastMessageText,
+    )
+
+    if (!missing.length) return conversations
+
+    const latestMessages = await this.messageRepo.findLatestByConversationIds(
+      missing.map((conversation) => conversation.id),
+    )
+
+    const latestByConversationId = new Map(
+      latestMessages
+        .filter((message): message is NonNullable<typeof message> =>
+          Boolean(message),
+        )
+        .map((message) => [message.conversationId, message]),
+    )
+
+    return conversations.map((conversation) => {
+      if (conversation.lastMessageText) return conversation
+
+      const latestMessage = latestByConversationId.get(conversation.id)
+      if (!latestMessage) return conversation
+
+      const sender = latestMessage.senderMember
+
+      return {
+        ...conversation,
+        lastMessageAt: latestMessage.createdAt,
+        lastMessageText: this.resolveLastMessagePreview(latestMessage),
+        lastMessageSenderId: latestMessage.senderId,
+        lastMessageSenderName:
+          sender?.fullName || sender?.username || latestMessage.senderId,
+        lastMessageSenderAvatar: sender?.avatar || null,
+        messages: [latestMessage],
+      }
+    })
   }
 }
