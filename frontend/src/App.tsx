@@ -133,7 +133,7 @@ function App() {
 
   useEffect(() => {
     const handler = ({ conversation }: { conversation: Conversation }) => {
-      dispatch(addConversation({ conversation, userId: user.id }));
+      dispatch(addConversation({ conversation }));
     };
 
     socket.on("chat.new_conversation", handler);

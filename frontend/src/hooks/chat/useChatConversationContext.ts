@@ -11,10 +11,6 @@ import { selectConversationSeenStatus } from "@/redux/slices/seenStatusSlice";
 import { selectUser } from "@/redux/slices/userSlice";
 import { getConversationByIdAPI } from "@/apis";
 import type { AppDispatch, RootState } from "@/redux/store";
-import {
-  getConversationDisplayAvatar,
-  getConversationDisplayName,
-} from "@/utils/conversationDisplay";
 
 export function useChatConversationContext(conversationId?: string) {
   const dispatch = useDispatch<AppDispatch>();
@@ -39,14 +35,8 @@ export function useChatConversationContext(conversationId?: string) {
   const membershipStatus = effectiveConversation?.membershipStatus || "ACTIVE";
   const canLoadMessages = membershipStatus === "ACTIVE";
 
-  const conversationName = getConversationDisplayName(
-    effectiveConversation,
-    user.id,
-  );
-  const conversationAvatar = getConversationDisplayAvatar(
-    effectiveConversation,
-    user.id,
-  );
+  const conversationName = effectiveConversation?.displayName || "Trò chuyện";
+  const conversationAvatar = effectiveConversation?.displayAvatar || "";
 
   const typingUsers = useSelector((state: RootState) =>
     selectTypingUsersInConversation(state, conversationId || ""),
@@ -101,14 +91,13 @@ export function useChatConversationContext(conversationId?: string) {
         dispatch(
           applyConversationUpdate({
             conversation: response.conversation as Conversation,
-            userId: user.id,
           }),
         );
       } catch {
         hydratedConversationRef.current = null;
       }
     })();
-  }, [conversationId, effectiveConversation?.members?.length, dispatch]);
+  }, [conversationId, dispatch, effectiveConversation?.members?.length]);
 
   return {
     user,

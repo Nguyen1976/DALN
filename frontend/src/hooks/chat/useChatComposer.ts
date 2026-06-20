@@ -52,9 +52,8 @@ export function useChatComposer({
           conversation: {
             ...effectiveConversation,
             lastMessage,
-            updatedAt: lastMessage.createdAt,
+            updatedAt: lastMessage.createdAt || effectiveConversation.updatedAt,
           },
-          userId: user.id,
         }),
       );
     },
@@ -67,7 +66,6 @@ export function useChatComposer({
       conversationId: conversationId || "",
       senderId: user.id,
       text: partial.text ?? "",
-      content: partial.content ?? partial.text ?? "",
       type: partial.type,
       medias: partial.medias,
       clientMessageId: partial.clientMessageId,
@@ -91,7 +89,6 @@ export function useChatComposer({
       id: clientMessageId,
       type: "TEXT",
       text: msg,
-      content: msg,
       clientMessageId,
     });
 
@@ -145,7 +142,6 @@ export function useChatComposer({
         id: clientMessageId,
         type: mediaType,
         text: msg,
-        content: msg,
         medias: [tempMedia],
         clientMessageId,
       });

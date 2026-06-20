@@ -145,7 +145,7 @@ const ListFriend = () => {
       const response = await getConversationByFriendIdAPI(selectedFriendId);
       const conversation = response.conversation as Conversation;
 
-      dispatch(addConversation({ conversation, userId: user.id }));
+      dispatch(addConversation({ conversation }));
 
       navigate(`/chat/${conversation.id}`, {
         state: { conversation },

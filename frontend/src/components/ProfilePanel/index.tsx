@@ -10,7 +10,7 @@ import type {
   ConversationState,
 } from "@/redux/slices/conversationSlice";
 import { FileText, ImageIcon, Link2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { GroupMemberManager } from "./GroupMemberManager";
 
@@ -39,10 +39,7 @@ export default function ProfilePanel({
     },
   ) as Conversation;
 
-  const title = useMemo(() => {
-    if (!conversation) return "Cuộc trò chuyện";
-    return conversation.groupName || "Cuộc trò chuyện";
-  }, [conversation]);
+  const title = conversation?.displayName || "Cuộc trò chuyện";
 
   const canAccessConversationData =
     conversation?.membershipStatus !== "REMOVED" &&

@@ -43,16 +43,16 @@ export default function VoiceCallModal({
         <div className="flex flex-col items-center text-center">
           <Avatar className="mb-6 size-32 ring-4 ring-primary/20">
             <AvatarImage
-              src={conversation.groupAvatar || "/placeholder.svg"}
-              alt={conversation.groupName}
+              src={conversation.displayAvatar || "/placeholder.svg"}
+              alt={conversation.displayName}
             />
             <AvatarFallback className="text-3xl">
-              {conversation.groupName?.[0]}
+              {conversation.displayName?.[0]}
             </AvatarFallback>
           </Avatar>
 
           <h3 className="mb-1 text-2xl font-semibold text-foreground">
-            {conversation.groupName}
+            {conversation.displayName}
           </h3>
           <p className="mb-8 text-sm text-muted-foreground">Đang gọi thoại...</p>
 
