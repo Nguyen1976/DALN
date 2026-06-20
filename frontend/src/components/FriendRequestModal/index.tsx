@@ -14,8 +14,11 @@ import {
   updateFriendRequestStatus,
   type DetailMakeFriendResponse,
 } from "@/apis";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
+import { getFriends } from "@/redux/slices/friendSlice";
 import { selectUser } from "@/redux/slices/userSlice";
+import type { AppDispatch } from "@/redux/store";
+import { showErrorToast } from "@/utils/toastError";
 import { toast } from "sonner";
 
 interface FriendRequestModalProps {
@@ -29,6 +32,7 @@ const FriendRequestModal = ({
   friendRequestId,
   onClose,
 }: FriendRequestModalProps) => {
+  const dispatch = useDispatch<AppDispatch>();
   const [friendRequestData, setFriendRequestData] =
     useState<DetailMakeFriendResponse | null>(null);
 
@@ -49,13 +53,27 @@ const FriendRequestModal = ({
       onClose();
       return;
     }
-    await updateFriendRequestStatus({
-      inviterId: friendRequestData?.fromUser?.id || "",
-      inviteeName: user?.username || "",
-      status: "ACCEPTED",
-    }).then(() => {
+
+    const fromUser = friendRequestData.fromUser;
+    if (!fromUser?.id) {
+      toast.error("Không tìm thấy thông tin người gửi lời mời.");
+      return;
+    }
+
+    try {
+      await updateFriendRequestStatus({
+        inviterId: fromUser.id,
+        inviteeName: user?.username || "",
+        status: "ACCEPTED",
+      });
+
+      await dispatch(getFriends({ limit: 100, page: 1 })).unwrap();
+
+      toast.success(`Đã kết bạn với ${fromUser.username}`);
       onClose();
-    });
+    } catch (error) {
+      showErrorToast(error, "Không thể chấp nhận lời mời kết bạn");
+    }
   };
 
   const onReject = async () => {
@@ -65,13 +83,17 @@ const FriendRequestModal = ({
       onClose();
       return;
     }
-    await updateFriendRequestStatus({
-      inviterId: friendRequestData?.fromUser?.id || "",
-      inviteeName: user?.username || "",
-      status: "REJECTED",
-    }).then(() => {
+
+    try {
+      await updateFriendRequestStatus({
+        inviterId: friendRequestData.fromUser?.id || "",
+        inviteeName: user?.username || "",
+        status: "REJECTED",
+      });
       onClose();
-    });
+    } catch (error) {
+      showErrorToast(error, "Không thể từ chối lời mời kết bạn");
+    }
   };
 
   return (
