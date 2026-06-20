@@ -27,145 +27,13 @@ import {
   SubmitPollVoteDTO,
   ClosePollDTO,
 } from './http/chat-http.dto'
-
-// Reusable response formatters
-const formatMessage = (message: any) => {
-  if (!message) return null
-
-  return {
-    ...message,
-    text: message.content || '',
-    type: message.type || 'TEXT',
-    clientMessageId: message.clientMessageId || undefined,
-    createdAt: message.createdAt.toString(),
-    medias: (message.medias || []).map((media: any) => ({
-      ...media,
-      size: String(media.size),
-    })),
-    poll: message.poll
-      ? {
-          id: message.poll.id,
-          question: message.poll.question,
-          isMultipleChoice: Boolean(message.poll.isMultipleChoice),
-          isClosed: Boolean(message.poll.isClosed),
-          closedAt: message.poll.closedAt
-            ? message.poll.closedAt.toString()
-            : null,
-          options: (message.poll.options || []).map((option: any) => ({
-            id: option.id,
-            text: option.text,
-            count: Number(option.count || 0),
-          })),
-        }
-      : undefined,
-  }
-}
-
-const formatConversationLastMessage = (c: any) => {
-  if (c?.messages?.length) {
-    return formatMessage(c.messages[0])
-  }
-
-  if (
-    c?.lastMessageText === undefined &&
-    c?.lastMessageSenderName === undefined
-  ) {
-    return null
-  }
-
-  return {
-    id: c?.lastMessageId || c?.id,
-    conversationId: c?.id,
-    senderId: c?.lastMessageSenderId || '',
-    text: c?.lastMessageText || '',
-    content: c?.lastMessageText || '',
-    type: 'TEXT',
-    createdAt: c?.lastMessageAt
-      ? c.lastMessageAt.toString()
-      : c?.updatedAt?.toString?.() || new Date().toISOString(),
-    senderMember:
-      c?.lastMessageSenderName || c?.lastMessageSenderAvatar
-        ? {
-            userId: c?.lastMessageSenderId || '',
-            username: c?.lastMessageSenderName || '',
-            avatar: c?.lastMessageSenderAvatar || '',
-            fullName: c?.lastMessageSenderName || '',
-          }
-        : undefined,
-  }
-}
-
-const formatConversationSummary = (c: any, userId?: string) => ({
-  id: c.id,
-  type: c.type,
-  groupName: c.groupName,
-  groupAvatar: c.groupAvatar,
-  memberCount: c.memberCount ?? c.members?.length ?? 0,
-  unreadCount: resolveUnreadCount(c, userId),
-  createdAt: c.createdAt.toString(),
-  updatedAt: c.updatedAt.toString(),
-  members: (c.members || []).map((m: any) => ({
-    userId: m.userId,
-    role: m.role,
-    username: m.username,
-    avatar: m.avatar,
-    fullName: m.fullName,
-    lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : null,
-    lastMessageAt: m.lastMessageAt ? m.lastMessageAt.toString() : null,
-  })),
-  lastMessage: formatConversationLastMessage(c),
-  lastMessageAt: c.lastMessageAt ? c.lastMessageAt.toString() : null,
-  lastMessageText: c.lastMessageText || '',
-  lastMessageSenderId: c.lastMessageSenderId || null,
-  lastMessageSenderName: c.lastMessageSenderName || null,
-  lastMessageSenderAvatar: c.lastMessageSenderAvatar || null,
-})
-
-const resolveUnreadCount = (conversation: any, userId?: string) => {
-  if (
-    conversation?.unreadCount !== undefined &&
-    conversation?.unreadCount !== null
-  ) {
-    const unread = Number(conversation.unreadCount)
-    if (!Number.isFinite(unread) || unread <= 0) return '0'
-    return unread > 5 ? '5+' : String(unread)
-  }
-
-  if (userId && Array.isArray(conversation?.members)) {
-    const me = conversation.members.find((m: any) => m.userId === userId)
-    const unread = Number(me?.unreadCount || 0)
-    if (!Number.isFinite(unread) || unread <= 0) return '0'
-    return unread > 5 ? '5+' : String(unread)
-  }
-
-  return '0'
-}
-
-const formatConversationDetail = (c: any, userId?: string) => ({
-  id: c.id,
-  type: c.type,
-  groupName: c.groupName,
-  groupAvatar: c.groupAvatar,
-  memberCount: c.memberCount ?? c.members?.length ?? 0,
-  unreadCount: resolveUnreadCount(c, userId),
-  createdAt: c.createdAt.toString(),
-  updatedAt: c.updatedAt.toString(),
-  members: c.members.map((m: any) => ({
-    ...m,
-    userId: m.userId,
-    role: m.role,
-    username: m.username,
-    avatar: m.avatar,
-    fullName: m.fullName,
-    lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : null,
-    lastMessageAt: m.lastMessageAt ? m.lastMessageAt.toString() : null,
-  })),
-  lastMessage: formatConversationLastMessage(c),
-})
+import { ConversationMapper } from './domain/conversation.mapper'
+import { MessageMapper } from './domain/message.mapper'
 
 @Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
+
   @Post('create')
   @UseInterceptors(
     FileInterceptor('groupAvatar', {
@@ -201,24 +69,7 @@ export class ChatController {
       groupAvatarFilename: groupAvatar?.originalname,
     })
 
-    return {
-      conversation: {
-        id: res?.id,
-        unreadCount: '0',
-        type: res?.type,
-        groupName: res?.groupName,
-        groupAvatar: res?.groupAvatar,
-        memberCount: res?.memberCount ?? res?.members?.length ?? 0,
-        createdAt: res?.createdAt.toString(),
-        updatedAt: res?.updatedAt.toString(),
-        members: res?.members.map((m: any) => ({
-          ...m,
-          role: m.role,
-          lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : '',
-        })),
-        messages: res?.messages?.map((msg: any) => formatMessage(msg)) || [],
-      },
-    }
+    return ConversationMapper.toCreateResponse(res, userInfo.userId)
   }
 
   @Post('add-member')
@@ -302,8 +153,9 @@ export class ChatController {
       limit: limit ? parseInt(limit, 10) : 20,
       cursor: cursor || null,
     })
+
     return result.map((conversation) =>
-      formatConversationSummary(conversation, userInfo.userId),
+      ConversationMapper.toSummary(conversation, userInfo.userId),
     )
   }
 
@@ -319,7 +171,7 @@ export class ChatController {
     )
 
     return {
-      conversation: formatConversationDetail(
+      conversation: ConversationMapper.toDetail(
         result.conversation,
         userInfo.userId,
       ),
@@ -352,11 +204,15 @@ export class ChatController {
     @Body() body: RevokeMessageDTO,
     @UserInfo() userInfo: any,
   ) {
-    return await this.chatService.revokeMessage({
+    const result = await this.chatService.revokeMessage({
       conversationId: body.conversationId,
       messageId: body.messageId,
       userId: userInfo.userId,
     })
+
+    return {
+      message: MessageMapper.toResponse(result.message),
+    }
   }
 
   @Post('messages/delete-for-me')
@@ -396,7 +252,7 @@ export class ChatController {
     })
 
     return {
-      message: formatMessage(result.message),
+      message: MessageMapper.toResponse(result.message),
       poll: result.poll,
     }
   }
@@ -478,12 +334,14 @@ export class ChatController {
     @Query('keyword') keyword: string,
     @UserInfo() userInfo: any,
   ) {
-    const res = (await this.chatService.searchConversations(
+    const res = await this.chatService.searchConversations(
       userInfo.userId,
       keyword,
-    )) as Array<any>
+    )
 
-    return res.map((c) => formatConversationSummary(c, userInfo.userId))
+    return res.map((conversation) =>
+      ConversationMapper.toSummary(conversation, userInfo.userId),
+    )
   }
 
   @Get('conversation-by-friend')
@@ -497,6 +355,8 @@ export class ChatController {
       userInfo.userId,
     )
 
-    return formatConversationDetail(res, userInfo.userId)
+    return {
+      conversation: ConversationMapper.toDetail(res, userInfo.userId),
+    }
   }
 }
