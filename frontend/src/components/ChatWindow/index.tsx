@@ -403,6 +403,9 @@ export default function ChatWindow({
             <DialogTitle className="text-2xl font-semibold">
               Tạo bình chọn
             </DialogTitle>
+            <DialogDescription>
+              Nhập câu hỏi và các lựa chọn để tạo bình chọn trong cuộc trò chuyện.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5">

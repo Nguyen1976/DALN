@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core'
 import { ChatModule } from './chat.module'
 import { ValidationPipe } from '@nestjs/common'
-import { GrpcToHttpExceptionFilter, ResponseInterceptor } from '@app/common'
+import { GrpcToHttpExceptionFilter, ResponseInterceptor, validationExceptionFactory } from '@app/common'
 import cookieParser from 'cookie-parser'
 async function bootstrap() {
   const app = await NestFactory.create(ChatModule)
@@ -11,6 +11,7 @@ async function bootstrap() {
     new ValidationPipe({
       whitelist: true,
       transform: true,
+      exceptionFactory: validationExceptionFactory,
     }),
   )
   app.useGlobalFilters(new GrpcToHttpExceptionFilter())

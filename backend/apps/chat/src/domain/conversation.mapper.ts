@@ -57,6 +57,9 @@ export class ConversationMapper {
       avatar: member.avatar,
       fullName: member.fullName,
       lastReadAt: this.toIso(member.lastReadAt),
+      lastReadMessageId: member.lastReadMessageId
+        ? String(member.lastReadMessageId)
+        : null,
       lastMessageAt: this.toIso(member.lastMessageAt),
     }
   }

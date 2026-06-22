@@ -15,6 +15,7 @@ export interface ConversationMember {
   userId: string;
   role?: "ADMIN" | "MEMBER" | "OWNER";
   lastReadAt?: string | null;
+  lastReadMessageId?: string | null;
   username?: string;
   avatar?: string;
   fullName?: string;
@@ -288,21 +289,19 @@ export const conversationSlice = createSlice({
       })
       .addCase(createConversation.fulfilled, (state, action) => {
         upsertConversation(state, action.payload.conversation);
-        toast.success("Conversation created successfully");
+        toast.success("Đã tạo cuộc trò chuyện thành công");
       })
       .addCase(logoutAPI.fulfilled, () => initialState);
   },
 });
 
-export const selectConversation = createSelector(
-  (state: RootState) => state.conversations,
-  (conversations) => conversations,
-);
+export const selectConversation = (state: RootState) => state.conversations;
 
-export const selectConversationById = (
-  state: { conversations: ConversationState },
-  conversationId: string,
-) => state.conversations.find((conversation) => conversation.id === conversationId);
+export const selectConversationById = createSelector(
+  [selectConversation, (_state: RootState, conversationId: string) => conversationId],
+  (conversations, conversationId) =>
+    conversations.find((conversation) => conversation.id === conversationId),
+);
 
 export const {
   addConversation,

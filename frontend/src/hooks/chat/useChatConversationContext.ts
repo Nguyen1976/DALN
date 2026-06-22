@@ -1,13 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useLocation } from "react-router";
 import {
   applyConversationUpdate,
+  selectConversationById,
   type Conversation,
-  type ConversationState,
 } from "@/redux/slices/conversationSlice";
 import { selectTypingUsersInConversation } from "@/redux/slices/typingIndicatorSlice";
-import { selectConversationSeenStatus } from "@/redux/slices/seenStatusSlice";
+import {
+  hydrateSeenStatusFromMembers,
+  selectConversationSeenStatus,
+} from "@/redux/slices/seenStatusSlice";
 import { selectUser } from "@/redux/slices/userSlice";
 import { getConversationByIdAPI } from "@/apis";
 import type { AppDispatch, RootState } from "@/redux/store";
@@ -18,9 +21,8 @@ export function useChatConversationContext(conversationId?: string) {
   const user = useSelector(selectUser);
   const hydratedConversationRef = useRef<string | null>(null);
 
-  const conversation = useSelector(
-    (state: { conversations: ConversationState }) =>
-      state.conversations?.find((c) => c.id === conversationId),
+  const conversation = useSelector((state: RootState) =>
+    conversationId ? selectConversationById(state, conversationId) : undefined,
   );
 
   const pendingConversation = (
@@ -45,36 +47,82 @@ export function useChatConversationContext(conversationId?: string) {
   const allSeenStatus = useSelector((state: RootState) =>
     conversationId
       ? selectConversationSeenStatus(state, conversationId)
-      : {},
+      : selectConversationSeenStatus(state, ""),
   );
 
   const conversationMembers = effectiveConversation?.members || [];
-  const memberNamesMap = new Map(
-    conversationMembers.map((member) => [
-      member.userId,
-      member.username || member.fullName || "Unknown",
-    ]),
+
+  const memberNamesMap = useMemo(
+    () =>
+      new Map(
+        conversationMembers.map((member) => [
+          member.userId,
+          member.username || member.fullName || "Unknown",
+        ]),
+      ),
+    [conversationMembers],
   );
-  const memberAvatarMap = new Map(
-    conversationMembers.map((member) => [member.userId, member.avatar || ""]),
+
+  const memberAvatarMap = useMemo(
+    () =>
+      new Map(
+        conversationMembers.map((member) => [
+          member.userId,
+          member.avatar || "",
+        ]),
+      ),
+    [conversationMembers],
   );
 
-  const typingUserNames = typingUsers
-    .filter((uid) => uid !== user.id)
-    .map((uid) => memberNamesMap.get(uid) || "Unknown user");
+  const typingUserNames = useMemo(
+    () =>
+      typingUsers
+        .filter((uid) => uid !== user.id)
+        .map((uid) => memberNamesMap.get(uid) || "Unknown user"),
+    [memberNamesMap, typingUsers, user.id],
+  );
 
-  const seenMessages: Record<
-    string,
-    { userId: string; username?: string; avatar?: string }[]
-  > = {};
+  const seenMessages = useMemo(() => {
+    const result: Record<
+      string,
+      { userId: string; username?: string; avatar?: string }[]
+    > = {};
 
-  Object.entries(allSeenStatus).forEach(([messageId, seenUsers]) => {
-    seenMessages[messageId] = seenUsers.map((seen) => ({
-      userId: seen.userId,
-      username: memberNamesMap.get(seen.userId),
-      avatar: memberAvatarMap.get(seen.userId),
-    }));
-  });
+    Object.entries(allSeenStatus).forEach(([messageId, seenUsers]) => {
+      result[messageId] = seenUsers.map((seen) => ({
+        userId: seen.userId,
+        username: memberNamesMap.get(seen.userId),
+        avatar: memberAvatarMap.get(seen.userId),
+      }));
+    });
+
+    return result;
+  }, [allSeenStatus, memberAvatarMap, memberNamesMap]);
+
+  const hydratedSeenRef = useRef<string>("");
+
+  useEffect(() => {
+    hydratedSeenRef.current = "";
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId || !conversationMembers.length) return;
+
+    const signature = conversationMembers
+      .map((member) => `${member.userId}:${member.lastReadMessageId ?? ""}`)
+      .join("|");
+
+    if (signature === hydratedSeenRef.current) return;
+    hydratedSeenRef.current = signature;
+
+    dispatch(
+      hydrateSeenStatusFromMembers({
+        conversationId,
+        currentUserId: user.id,
+        members: conversationMembers,
+      }),
+    );
+  }, [conversationId, conversationMembers, dispatch, user.id]);
 
   useEffect(() => {
     if (!conversationId) return;
