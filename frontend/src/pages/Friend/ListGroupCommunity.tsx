@@ -114,14 +114,14 @@ const ListGroupCommunity = () => {
         <Avatar className="size-12 shrink-0">
           <AvatarImage
             src={(group.groupAvatar as string) || "/placeholder.svg"}
-            alt={group.groupName || "Nhóm"}
+            alt={group.displayAvatar || "Nhóm"}
           />
-          <AvatarFallback>{(group.groupName || "G")[0]}</AvatarFallback>
+          <AvatarFallback>{(group.displayName || "G")[0]}</AvatarFallback>
         </Avatar>
 
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-foreground">
-            {group.groupName || "Nhóm chưa đặt tên"}
+            {group.displayName || "Nhóm chưa đặt tên"}
           </p>
           <p className="text-xs text-muted-foreground">
             {memberCount} thành viên

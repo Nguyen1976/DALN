@@ -92,6 +92,36 @@ export class MessageRepository {
     })
   }
 
+  async findLatestByConversationIds(conversationIds: string[]) {
+    if (!conversationIds.length) return []
+
+    const latestMessages = await Promise.all(
+      conversationIds.map((conversationId) =>
+        this.prisma.message.findFirst({
+          where: {
+            conversationId,
+            isDeleted: false,
+            isRevoked: false,
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          include: {
+            senderMember: {
+              select: {
+                userId: true,
+                username: true,
+                fullName: true,
+                avatar: true,
+              },
+            },
+            poll: true,
+          },
+        }),
+      ),
+    )
+
+    return latestMessages.filter(Boolean)
+  }
+
   async findByConversationIdPaginated(
     conversationId: string,
     take: number,

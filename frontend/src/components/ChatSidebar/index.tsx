@@ -100,22 +100,22 @@ export function ChatSidebar({ className }: { className?: string }) {
           {conversation.type === "DIRECT" ? (
             <Avatar className="size-12">
               <AvatarImage
-                src={conversation.groupAvatar || ""}
-                alt={conversation.groupName || "Ảnh đại diện"}
+                src={conversation.displayAvatar || ""}
+                alt={conversation.displayName || "Ảnh đại diện"}
               />
               <AvatarFallback>
-                {(conversation.groupName || "C")[0]}
+                {(conversation.displayName || "C")[0]}
               </AvatarFallback>
             </Avatar>
           ) : (
             <div className="flex -space-x-2 *:data-[slot=avatar]:ring-2 *:data-[slot=avatar]:ring-background">
               <Avatar className="size-12">
                 <AvatarImage
-                  src={conversation.groupAvatar || ""}
-                  alt={conversation.groupName || "Ảnh đại diện nhóm"}
+                  src={conversation.displayAvatar || ""}
+                  alt={conversation.displayName || "Ảnh đại diện nhóm"}
                 />
                 <AvatarFallback>
-                  {(conversation.groupName || "C")[0]}
+                  {(conversation.displayName || "C")[0]}
                 </AvatarFallback>
               </Avatar>
               {memberCount >= 2 && (
@@ -137,7 +137,7 @@ export function ChatSidebar({ className }: { className?: string }) {
                 unread ? "font-semibold" : "font-medium",
               )}
             >
-              {conversation.groupName}
+              {conversation.displayName}
             </span>
             <span className="shrink-0 text-xs text-muted-foreground">
               {formatDateTime(conversation.updatedAt)}

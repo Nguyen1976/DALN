@@ -92,10 +92,12 @@ export const friendSlice = createSlice({
     builder.addCase(
       getFriends.fulfilled,
       (state, action: PayloadAction<FriendState>) => {
-        //push thêm vào state
-        state.friends = [...state.friends, ...action.payload.friends];
+        if (action.payload.page === 1) {
+          state.friends = action.payload.friends;
+        } else {
+          state.friends = [...state.friends, ...action.payload.friends];
+        }
         state.page = action.payload.page;
-        return state;
       },
     );
 

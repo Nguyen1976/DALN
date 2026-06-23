@@ -10,3 +10,4 @@ training/.venv/
 *.pyc
 .codegraph
 /backend/apps/**/generated/
+SEQUENCE_DIAGRAMS.md

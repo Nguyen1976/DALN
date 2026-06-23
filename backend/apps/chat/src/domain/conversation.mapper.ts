@@ -1,7 +1,7 @@
-export class ConversationMapper {
-  // Add mapping methods here as needed
+import { MessageMapper } from './message.mapper'
 
-  private static resolveUnreadCount(conversation: any, userId?: string) {
+export class ConversationMapper {
+  static resolveUnreadCount(conversation: any, userId?: string): string {
     if (
       conversation?.unreadCount !== undefined &&
       conversation?.unreadCount !== null
@@ -21,130 +21,140 @@ export class ConversationMapper {
     return '0'
   }
 
-  private static mapMessage(message: any) {
-    if (!message) return null
+  static resolveDisplay(conversation: any, userId?: string) {
+    if (conversation?.type !== 'DIRECT') {
+      return {
+        displayName: conversation?.groupName || 'Nhóm chat',
+        displayAvatar: conversation?.groupAvatar || '',
+      }
+    }
+
+    const peer = (conversation?.members || []).find(
+      (member: any) => member.userId !== userId,
+    )
 
     return {
-      ...message,
-      text: message.content || '',
-      type: message.type || 'TEXT',
-      clientMessageId: message.clientMessageId || undefined,
-      createdAt: message.createdAt.toString(),
-      medias: (message.medias || []).map((media: any) => ({
-        ...media,
-        size: String(media.size),
-      })),
+      displayName:
+        peer?.username ||
+        peer?.fullName ||
+        conversation?.groupName ||
+        'Trò chuyện trực tiếp',
+      displayAvatar: peer?.avatar || conversation?.groupAvatar || '',
     }
   }
 
-  private static mapConversationLastMessage(conversation: any) {
-    if (conversation?.messages?.length) {
-      return this.mapMessage(conversation.messages[0])
-    }
+  private static toIso(value: any): string | null {
+    if (!value) return null
+    if (value instanceof Date) return value.toISOString()
+    return String(value)
+  }
 
-    if (
-      conversation?.lastMessageText === undefined &&
-      conversation?.lastMessageSenderName === undefined
-    ) {
-      return null
+  private static mapMember(member: any) {
+    return {
+      userId: member.userId,
+      role: member.role,
+      username: member.username,
+      avatar: member.avatar,
+      fullName: member.fullName,
+      lastReadAt: this.toIso(member.lastReadAt),
+      lastReadMessageId: member.lastReadMessageId
+        ? String(member.lastReadMessageId)
+        : null,
+      lastMessageAt: this.toIso(member.lastMessageAt),
     }
+  }
+
+  private static resolveLastMessageFields(conversation: any) {
+    const latestMessage = conversation?.messages?.[0]
+    const lastMessageId =
+      conversation?.lastMessageId ||
+      latestMessage?.id ||
+      null
+
+    const lastMessageAt = this.toIso(
+      conversation?.lastMessageAt || latestMessage?.createdAt,
+    )
+
+    const lastMessageText =
+      conversation?.lastMessageText !== undefined &&
+      conversation?.lastMessageText !== null
+        ? String(conversation.lastMessageText)
+        : latestMessage
+          ? MessageMapper.previewText(latestMessage)
+          : ''
+
+    const sender = latestMessage?.senderMember
+    const lastMessageSenderId =
+      conversation?.lastMessageSenderId ||
+      latestMessage?.senderId ||
+      null
+    const lastMessageSenderName =
+      conversation?.lastMessageSenderName ||
+      sender?.fullName ||
+      sender?.username ||
+      null
+    const lastMessageSenderAvatar =
+      conversation?.lastMessageSenderAvatar ?? sender?.avatar ?? null
 
     return {
-      id: conversation?.lastMessageId || conversation?.id,
-      conversationId: conversation?.id,
-      senderId: conversation?.lastMessageSenderId || '',
-      text: conversation?.lastMessageText || '',
-      content: conversation?.lastMessageText || '',
-      type: 'TEXT',
-      createdAt: conversation?.lastMessageAt
-        ? conversation.lastMessageAt.toString()
-        : conversation?.updatedAt?.toString?.() || new Date().toISOString(),
-      senderMember: conversation?.lastMessageSenderName
-        ? {
-            userId: conversation?.lastMessageSenderId || '',
-            username: conversation?.lastMessageSenderName || '',
-            avatar: conversation?.lastMessageSenderAvatar || '',
-            fullName: conversation?.lastMessageSenderName || '',
-          }
-        : undefined,
+      lastMessageId,
+      lastMessageAt,
+      lastMessageText,
+      lastMessageSenderId,
+      lastMessageSenderName,
+      lastMessageSenderAvatar,
     }
   }
 
-  static toGetConversationByIdResponse(res: any): any {
-    return this.formatConversationResponse(res)
-  }
+  static toSummary(conversation: any, userId?: string) {
+    const display = this.resolveDisplay(conversation, userId)
+    const lastMessage = this.resolveLastMessageFields(conversation)
 
-  static toGetConversationsResponse(conversations, userId?: string) {
     return {
-      conversations: conversations.map((c) => ({
-        id: c.id,
-        type: c.type,
-        groupName: c.groupName,
-        groupAvatar: c.groupAvatar,
-        unreadCount: this.resolveUnreadCount(c, userId),
-        createdAt: c.createdAt.toString(),
-        updatedAt: c.updatedAt.toString(),
-        members: c.members.map((m) => ({
-          ...m,
-          userId: m.userId,
-          role: m.role,
-          username: m.username,
-          avatar: m.avatar,
-          fullName: m.fullName,
-          lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : null,
-          lastMessageAt: m.lastMessageAt.toString(),
-        })),
-        lastMessage: this.mapConversationLastMessage(c),
-      })),
-    }
-  }
-  static toGetConversationByFriendIdResponse(conversation, userId?: string) {
-    return {
-      conversation: {
-        id: conversation.id,
-        type: conversation.type,
-        groupName: conversation.groupName,
-        groupAvatar: conversation.groupAvatar,
-        unreadCount: this.resolveUnreadCount(conversation, userId),
-        createdAt: conversation.createdAt.toString(),
-        updatedAt: conversation.updatedAt.toString(),
-        members: conversation.members.map((m) => ({
-          userId: m.userId,
-          role: m.role,
-          username: m.username,
-          avatar: m.avatar,
-          fullName: m.fullName,
-          lastReadAt: m.lastReadAt?.toString() ?? null,
-          lastMessageAt: m.lastMessageAt.toString(),
-        })),
-        lastMessage: this.mapConversationLastMessage(conversation),
-      },
+      id: conversation.id,
+      type: conversation.type,
+      groupName: conversation.groupName ?? null,
+      groupAvatar: conversation.groupAvatar ?? null,
+      displayName: display.displayName,
+      displayAvatar: display.displayAvatar,
+      memberCount: conversation.memberCount ?? conversation.members?.length ?? 0,
+      unreadCount: this.resolveUnreadCount(conversation, userId),
+      createdAt: this.toIso(conversation.createdAt)!,
+      updatedAt: this.toIso(conversation.updatedAt)!,
+      members: (conversation.members || []).map((member: any) =>
+        this.mapMember(member),
+      ),
+      ...lastMessage,
     }
   }
 
-  static toCreateConversationResponse(res: any) {
-    return this.formatConversationResponse(res)
+  static toDetail(
+    conversation: any,
+    userId?: string,
+    options?: {
+      membershipStatus?: 'ACTIVE' | 'REMOVED' | 'LEFT'
+      canSendMessage?: boolean
+    },
+  ) {
+    const summary = this.toSummary(conversation, userId)
+    const latestMessage = conversation?.messages?.[0]
+
+    return {
+      ...summary,
+      lastMessage: latestMessage
+        ? MessageMapper.toResponse(latestMessage)
+        : null,
+      membershipStatus: options?.membershipStatus ?? 'ACTIVE',
+      canSendMessage: options?.canSendMessage ?? true,
+    }
   }
 
-  // Private helper methods
-  static formatConversationResponse(res: any) {
+  static toCreateResponse(conversation: any, userId: string) {
     return {
-      conversation: {
-        id: res?.id,
-        unreadCount: '0',
-        type: res?.type,
-        groupName: res?.groupName,
-        groupAvatar: res?.groupAvatar,
-        createdAt: res?.createdAt.toString(),
-        updatedAt: res?.updatedAt.toString(),
-        members: res?.members.map((m: any) => ({
-          ...m,
-          role: m.role,
-          lastReadAt: m.lastReadAt ? m.lastReadAt.toString() : '',
-        })),
-        lastMessage: this.mapConversationLastMessage(res),
-        messages: res?.messages?.map((msg: any) => this.mapMessage(msg)) || [],
-      },
+      conversation: this.toDetail(conversation, userId, {
+        membershipStatus: 'ACTIVE',
+        canSendMessage: true,
+      }),
     }
   }
 }

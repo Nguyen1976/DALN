@@ -41,6 +41,7 @@ model conversation {
   groupAvatar         String?
   memberCount         Int                @default(0)
   lastMessageText     String?
+  lastMessageId       String?            @db.ObjectId
   lastMessageSenderId String?
   lastMessageSenderName String?
   lastMessageSenderAvatar String?

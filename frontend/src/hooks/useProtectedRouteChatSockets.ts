@@ -24,7 +24,7 @@ import {
 import { selectUser } from "@/redux/slices/userSlice";
 import type { AppDispatch } from "@/redux/store";
 
-function normalizeIncomingMessage(raw: unknown): Message | null {
+function parseSocketMessage(raw: unknown): Message | null {
   const source =
     raw && typeof raw === "object" && "message" in raw
       ? (raw as { message?: unknown }).message
@@ -32,21 +32,9 @@ function normalizeIncomingMessage(raw: unknown): Message | null {
 
   if (!source || typeof source !== "object") return null;
 
-  const record = source as Record<string, unknown>;
-  const conversation = record.conversation as { id?: string } | undefined;
-
-  const normalized: Message = {
-    ...(source as Message),
-    id: String(record.id || record._id || ""),
-    conversationId: String(
-      record.conversationId || conversation?.id || record.chatId || "",
-    ),
-    text: String(record.text ?? record.content ?? ""),
-    content: String(record.content ?? record.text ?? ""),
-  };
-
-  if (!normalized.id || !normalized.conversationId) return null;
-  return normalized;
+  const message = source as Message;
+  if (!message.id || !message.conversationId) return null;
+  return message;
 }
 
 interface PollSocketPayload {
@@ -129,7 +117,7 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       dispatch(
         updateNewMessage({
           conversationId: message.conversationId,
-          lastMessage: { ...message },
+          lastMessage: message,
         }),
       );
 
@@ -142,9 +130,9 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
     };
 
     const newMessageHandler = (payload: { message: Message }) => {
-      const normalized = normalizeIncomingMessage(payload);
-      if (!normalized) return;
-      void processIncomingMessage(normalized);
+      const message = parseSocketMessage(payload);
+      if (!message) return;
+      void processIncomingMessage(message);
     };
 
     const ackHandler = (payload: {
@@ -186,14 +174,14 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
     };
 
     const systemMessageHandler = (payload: { message: Message }) => {
-      const message = normalizeIncomingMessage(payload);
+      const message = parseSocketMessage(payload);
       if (!message) return;
 
       dispatch(addMessage(message));
       dispatch(
         updateNewMessage({
           conversationId: message.conversationId,
-          lastMessage: { ...message },
+          lastMessage: message,
         }),
       );
     };
@@ -216,18 +204,17 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
         }),
       );
 
-      if (
-        payload.message &&
-        currentConversation?.lastMessage?.id === payload.messageId
-      ) {
-        const normalized = normalizeIncomingMessage({
-          message: payload.message,
-        });
-        if (normalized) {
+      const isLastMessage =
+        currentConversation?.lastMessageId === payload.messageId ||
+        currentConversation?.lastMessage?.id === payload.messageId;
+
+      if (payload.message && isLastMessage) {
+        const message = parseSocketMessage({ message: payload.message });
+        if (message) {
           dispatch(
             updateNewMessage({
               conversationId: payload.conversationId,
-              lastMessage: normalized,
+              lastMessage: message,
             }),
           );
         }

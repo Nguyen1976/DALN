@@ -1,4 +1,4 @@
-import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
+import { createSlice, createSelector, type PayloadAction } from "@reduxjs/toolkit";
 import type { RootState } from "../store";
 
 /**
@@ -88,6 +88,75 @@ export const seenStatusSlice = createSlice({
     },
 
     /**
+     * Khôi phục seen status từ lastReadMessageId của members (sau reload trang).
+     */
+    hydrateSeenStatusFromMembers: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        currentUserId: string;
+        members: Array<{
+          userId: string;
+          lastReadMessageId?: string | null;
+          username?: string;
+          avatar?: string;
+        }>;
+      }>,
+    ) => {
+      const { conversationId, currentUserId, members } = action.payload;
+      if (!conversationId || !members?.length) return;
+
+      for (const member of members) {
+        if (!member.userId || member.userId === currentUserId) continue;
+        if (!member.lastReadMessageId) continue;
+
+        const { userId, lastReadMessageId, username, avatar } = {
+          userId: member.userId,
+          lastReadMessageId: member.lastReadMessageId,
+          username: member.username,
+          avatar: member.avatar,
+        };
+
+        if (!state.seenByUser[conversationId]) {
+          state.seenByUser[conversationId] = {};
+        }
+
+        Object.keys(state.seenByUser[conversationId]).forEach((messageId) => {
+          state.seenByUser[conversationId][messageId] = state.seenByUser[
+            conversationId
+          ][messageId].filter((s) => s.userId !== userId);
+
+          if (state.seenByUser[conversationId][messageId].length === 0) {
+            delete state.seenByUser[conversationId][messageId];
+          }
+        });
+
+        if (!state.seenByUser[conversationId][lastReadMessageId]) {
+          state.seenByUser[conversationId][lastReadMessageId] = [];
+        }
+
+        const existingIndex = state.seenByUser[conversationId][
+          lastReadMessageId
+        ].findIndex((s) => s.userId === userId);
+
+        if (existingIndex >= 0) {
+          state.seenByUser[conversationId][lastReadMessageId][existingIndex] = {
+            ...state.seenByUser[conversationId][lastReadMessageId][existingIndex],
+            username,
+            avatar,
+          };
+        } else {
+          state.seenByUser[conversationId][lastReadMessageId].push({
+            messageId: lastReadMessageId,
+            userId,
+            username,
+            avatar,
+          });
+        }
+      }
+    },
+
+    /**
      * Xóa hết seen status của 1 conversation khi reload
      */
     clearConversationSeenStatus: (
@@ -108,6 +177,7 @@ export const seenStatusSlice = createSlice({
 
 export const {
   updateSeenStatus,
+  hydrateSeenStatusFromMembers,
   clearConversationSeenStatus,
   clearAllSeenStatus,
 } = seenStatusSlice.actions;
@@ -128,11 +198,15 @@ export const selectSeenUsersForMessage = (
   return seenState.seenByUser[conversationId][messageId];
 };
 
-export const selectConversationSeenStatus = (
-  state: RootState,
-  conversationId: string,
-): ConversationSeenStatus => {
-  return state.seenStatus.seenByUser[conversationId] ?? {};
-};
+const EMPTY_CONVERSATION_SEEN: ConversationSeenStatus = {};
+
+export const selectConversationSeenStatus = createSelector(
+  [
+    (state: RootState) => state.seenStatus.seenByUser,
+    (_state: RootState, conversationId: string) => conversationId,
+  ],
+  (seenByUser, conversationId) =>
+    conversationId ? (seenByUser[conversationId] ?? EMPTY_CONVERSATION_SEEN) : EMPTY_CONVERSATION_SEEN,
+);
 
 export default seenStatusSlice.reducer;

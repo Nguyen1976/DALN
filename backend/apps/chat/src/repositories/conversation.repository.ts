@@ -212,6 +212,7 @@ export class ConversationRepository {
             username: true,
             avatar: true,
             lastReadAt: true,
+            lastReadMessageId: true,
             fullName: true,
             lastMessageAt: true,
             unreadCount: true,
@@ -268,7 +269,23 @@ export class ConversationRepository {
         unreadCount: true,
         lastReadAt: true,
         lastMessageAt: true,
-        conversation: true,
+        conversation: {
+          include: {
+            members: {
+              where: this.activeMemberWhere,
+              select: {
+                userId: true,
+                role: true,
+                username: true,
+                avatar: true,
+                fullName: true,
+                lastReadAt: true,
+                lastReadMessageId: true,
+                lastMessageAt: true,
+              },
+            },
+          },
+        },
       },
     } as any)) as any[]
     const result = memberships.map((membership) => ({
@@ -284,6 +301,7 @@ export class ConversationRepository {
   async updateUpdatedAt(
     conversationId: string,
     data?: {
+      lastMessageId?: string | null
       lastMessageAt?: Date
       lastMessageText?: string | null
       lastMessageSenderId?: string | null
@@ -295,6 +313,9 @@ export class ConversationRepository {
       where: { id: conversationId },
       data: {
         updatedAt: new Date(),
+        ...(data?.lastMessageId !== undefined
+          ? { lastMessageId: data.lastMessageId }
+          : {}),
         ...(data?.lastMessageAt ? { lastMessageAt: data.lastMessageAt } : {}),
         ...(data?.lastMessageText !== undefined
           ? { lastMessageText: data.lastMessageText }
