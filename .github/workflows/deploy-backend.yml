@@ -4,10 +4,9 @@ on:
   push:
     branches:
       - main
-      - deploy-on-aws
-    paths:
-      - "backend/**"
-      - ".github/workflows/deploy-backend.yml"
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       image_tag:
@@ -45,6 +44,7 @@ jobs:
   build-and-push:
     name: Build & Push — ${{ matrix.service }}
     needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -96,6 +96,7 @@ jobs:
   deploy:
     name: Deploy to EC2
     needs: build-and-push
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
@@ -124,8 +125,7 @@ jobs:
               \"docker compose -f docker-compose.prod.yml down\",
               \"docker compose -f docker-compose.prod.yml --env-file .env.production pull\",
               \"docker compose -f docker-compose.prod.yml --env-file .env.production up -d --remove-orphans\",
-              \"docker image prune -a -f\",
-
+              \"docker image prune -a -f\"
             ]" \
             --query "Command.CommandId" \
             --output text)
