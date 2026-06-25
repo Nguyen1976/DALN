@@ -41,6 +41,7 @@ env:
 permissions:
   id-token: write
   contents: read
+  actions: write # cache Docker layers (type=gha)
 
 jobs:
   detect-changes:
@@ -163,29 +164,9 @@ jobs:
             echo "has_deploy=false" >> "$GITHUB_OUTPUT"
           fi
 
-  test:
-    name: Test
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has_deploy == 'true' || github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-
-      - run: npm ci
-      # - run: npm test   # bật khi đã có test
-
   build-and-push:
     name: Build & Push — ${{ matrix.service }}
-    needs: [detect-changes, test]
+    needs: detect-changes
     if: >-
       github.event_name != 'pull_request'
       && needs.detect-changes.outputs.services != '[]'
@@ -205,6 +186,8 @@ jobs:
 
       - uses: aws-actions/amazon-ecr-login@v2
 
+      - uses: docker/setup-buildx-action@v3
+
       - name: Set image tag
         id: meta
         run: |
@@ -215,18 +198,23 @@ jobs:
           fi
 
       - name: Build and push
-        working-directory: backend
-        env:
-          IMAGE: ${{ env.ECR_REGISTRY }}/chat-app/${{ matrix.service }}:${{ steps.meta.outputs.tag }}
-        run: |
-          docker build \
-            --target production \
-            --build-arg SERVICE=${{ matrix.service }} \
-            -t "$IMAGE" \
-            -t "${{ env.ECR_REGISTRY }}/chat-app/${{ matrix.service }}:latest" \
-            .
-          docker push "$IMAGE"
-          docker push "${{ env.ECR_REGISTRY }}/chat-app/${{ matrix.service }}:latest"
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          target: production
+          build-args: SERVICE=${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/chat-app/${{ matrix.service }}:${{ steps.meta.outputs.tag }}
+            ${{ env.ECR_REGISTRY }}/chat-app/${{ matrix.service }}:latest
+          cache-from: |
+            type=gha,scope=backend-${{ matrix.service }}
+            type=gha,scope=backend-shared
+          cache-to: |
+            type=gha,mode=max,scope=backend-${{ matrix.service }}
+            type=gha,mode=max,scope=backend-shared
+          provenance: false
 
   deploy:
     name: Deploy to EC2
