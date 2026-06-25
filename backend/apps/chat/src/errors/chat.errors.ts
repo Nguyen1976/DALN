@@ -65,6 +65,12 @@ export class ChatErrors {
     throw new BadRequestException(message)
   }
 
+  static pollNotAllowedInDirectChat(): never {
+    throw new BadRequestException(
+      'Polls are only allowed in group conversations',
+    )
+  }
+
   static pollNotFound(): never {
     throw new NotFoundException('Poll not found')
   }

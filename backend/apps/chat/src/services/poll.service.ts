@@ -2,10 +2,12 @@ import { Injectable } from '@nestjs/common'
 import { v4 as uuidv4 } from 'uuid'
 import {
   ConversationMemberRepository,
+  ConversationRepository,
   MessageRepository,
   PollRepository,
 } from '../repositories'
 import { ChatErrors } from '../errors/chat.errors'
+import { conversationType } from '../generated'
 import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
 import { MessageService } from './message.service'
 
@@ -31,6 +33,7 @@ export interface ClosePollRequest {
 @Injectable()
 export class PollService {
   constructor(
+    private readonly conversationRepo: ConversationRepository,
     private readonly memberRepo: ConversationMemberRepository,
     private readonly messageRepo: MessageRepository,
     private readonly pollRepo: PollRepository,
@@ -39,6 +42,18 @@ export class PollService {
   ) {}
 
   async createPoll(data: CreatePollRequest) {
+    const conversation = await this.conversationRepo.findById(
+      data.conversationId,
+    )
+
+    if (!conversation) {
+      ChatErrors.conversationNotFound()
+    }
+
+    if (conversation.type !== conversationType.GROUP) {
+      ChatErrors.pollNotAllowedInDirectChat()
+    }
+
     const member = await this.memberRepo.findByConversationIdAndUserId(
       data.conversationId,
       data.userId,
