@@ -5,9 +5,9 @@ import { AuthGuard, CommonModule } from '@app/common'
 import { UtilModule } from '@app/util'
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
-import { StorageR2Module } from '@app/storage-r2'
+import { S3StorageModule, getS3StorageConfigFromEnv } from '@app/storage-s3'
 import { ConfigModule } from '@nestjs/config'
-import { r2Config } from './storage-r2.config'
+import { storageConfig } from './storage.config'
 import {
   UserRepository,
   FriendRequestRepository,
@@ -48,19 +48,13 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
       uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: true },
     }),
-    StorageR2Module,
+    S3StorageModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: process.cwd() + '/apps/user/.env',
-      load: [r2Config],
+      load: [storageConfig],
     }),
-    StorageR2Module.forRoot({
-      accessKey: process.env.R2_ACCESS_KEY!,
-      secretKey: process.env.R2_SECRET_KEY!,
-      endpoint: process.env.R2_ENDPOINT!,
-      bucket: process.env.R2_BUCKET!,
-      publicUrl: process.env.R2_PUBLIC_URL!,
-    }),
+    S3StorageModule.forRoot(getS3StorageConfigFromEnv()),
     LoggerModule.forService('User-Service'),
     RedisModule.forRoot(() => ({}), 'REDIS_CLIENT'),
   ],

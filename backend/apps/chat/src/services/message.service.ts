@@ -87,12 +87,27 @@ export class MessageService {
     }
 
     if (type !== 'TEXT') {
+      const normalizedMedias = medias.map((media) => {
+        const fileName = String(media.objectKey || '').split('/').pop() || ''
+        const resolvedMimeType = this.messageMediaService.resolveMimeType(
+          fileName,
+          media.mimeType,
+        )
+
+        return {
+          ...media,
+          mimeType: resolvedMimeType,
+        }
+      })
+
       await Promise.all(
-        medias.map(async (media) => {
+        normalizedMedias.map(async (media) => {
+          const fileName = String(media.objectKey || '').split('/').pop() || ''
           this.messageMediaService.validateMimeAndSize(
             type,
             media.mimeType,
             Number(media.size),
+            fileName,
           )
           const exists =
             await this.messageMediaService.checkObjectExistsWithRetry(
@@ -103,6 +118,8 @@ export class MessageService {
           }
         }),
       )
+
+      medias.splice(0, medias.length, ...normalizedMedias)
     }
 
     console.time('save-message')
@@ -153,9 +170,10 @@ export class MessageService {
     }
 
     const size = Number(data.size)
-    const resolvedMimeType =
-      (typeof data.mimeType === 'string' && data.mimeType.trim()) ||
-      this.messageMediaService.getMimeType(data.fileName)
+    const resolvedMimeType = this.messageMediaService.resolveMimeType(
+      data.fileName,
+      data.mimeType,
+    )
 
     const normalizedType = this.messageMediaService.normalizeMessageType(
       data.type,
@@ -165,6 +183,7 @@ export class MessageService {
       normalizedType,
       resolvedMimeType,
       size,
+      data.fileName,
     )
 
     const upload = await this.messageMediaService.createPresignedUploadUrl({

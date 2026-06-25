@@ -3,7 +3,7 @@ import type {
   UserUpdatedPayload,
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'
-import { StorageR2Service } from '@app/storage-r2/storage-r2.service'
+import { S3StorageService } from '@app/storage-s3/s3-storage.service'
 import {
   ConversationRepository,
   ConversationMemberRepository,
@@ -38,8 +38,8 @@ export class ConversationService {
     private readonly messageRepo: MessageRepository,
     private readonly eventsPublisher: ChatEventsPublisher,
     private readonly messageMediaService: MessageMediaService,
-    @Inject(StorageR2Service)
-    private readonly storageR2Service: StorageR2Service,
+    @Inject(S3StorageService)
+    private readonly s3StorageService: S3StorageService,
   ) {}
 
   async createConversationWhenAcceptFriend(
@@ -67,7 +67,7 @@ export class ConversationService {
         this.messageMediaService.getMimeType(data.groupAvatarFilename) ||
         'application/octet-stream'
 
-      avatarUrl = await this.storageR2Service.upload({
+      avatarUrl = await this.s3StorageService.upload({
         buffer: data.groupAvatar as Buffer,
         mime,
         folder: 'avatars',
