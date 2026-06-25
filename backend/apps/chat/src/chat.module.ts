@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule'
 import { BullModule } from '@nestjs/bullmq'
 import { ChatController } from './chat.controller'
 import { ChatService } from './chat.service'
+import { MessageService, MessageMediaService, PollService, ConversationMemberService, ConversationService } from './services'
 import { UtilModule } from '@app/util'
 import {
   ConversationRepository,
@@ -16,8 +17,9 @@ import { ChatSagaSubscriber } from './rmq/subcribers/chat-saga.subscriber'
 import { ChatOutboxRelay } from './rmq/chat-outbox.relay'
 import { RmqModule } from './rmq.module'
 import { LoggerModule } from '@app/logger'
-import { StorageR2Module } from '@app/storage-r2/storage-r2.module'
-import { r2Config } from './storage-r2.config'
+import { S3StorageModule } from '@app/storage-s3/s3-storage.module'
+import { getS3StorageConfigFromEnv } from '@app/storage-s3/s3-storage-env'
+import { storageConfig } from './storage.config'
 import { ConfigModule } from '@nestjs/config/dist/config.module'
 import { AuthGuard, CommonModule } from '@app/common'
 import { APP_GUARD } from '@nestjs/core'
@@ -39,19 +41,13 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
     RmqModule,
     UtilModule,
     LoggerModule.forService('Chat-Service'),
-    StorageR2Module,
+    S3StorageModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: process.cwd() + '/apps/chat/.env',
-      load: [r2Config],
+      load: [storageConfig],
     }),
-    StorageR2Module.forRoot({
-      accessKey: process.env.R2_ACCESS_KEY!,
-      secretKey: process.env.R2_SECRET_KEY!,
-      endpoint: process.env.R2_ENDPOINT!,
-      bucket: process.env.R2_BUCKET!,
-      publicUrl: process.env.R2_PUBLIC_URL!,
-    }),
+    S3StorageModule.forRoot(getS3StorageConfigFromEnv()),
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       useFactory: () => ({
@@ -71,6 +67,11 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
       useClass: AuthGuard,
     },
     ChatService,
+    MessageService,
+    MessageMediaService,
+    PollService,
+    ConversationMemberService,
+    ConversationService,
     ConversationRepository,
     MessageRepository,
     ConversationMemberRepository,

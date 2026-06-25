@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,6 +11,8 @@ import { showErrorToast } from "@/utils/toastError";
 import { UserPlus } from "lucide-react";
 
 const ListFriendRequests = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestIdFromUrl = searchParams.get("requestId") || "";
   const [requests, setRequests] = useState<FriendRequestListItem[]>([]);
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -46,8 +49,19 @@ const ListFriendRequests = () => {
     void fetchRequests({ nextPage: 1, replace: true });
   }, []);
 
+  useEffect(() => {
+    if (requestIdFromUrl) {
+      setSelectedRequestId(requestIdFromUrl);
+    }
+  }, [requestIdFromUrl]);
+
   const handleCloseModal = () => {
     setSelectedRequestId("");
+    if (requestIdFromUrl) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("requestId");
+      setSearchParams(nextParams, { replace: true });
+    }
     void fetchRequests({ nextPage: 1, replace: true });
   };
 

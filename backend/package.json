@@ -129,7 +129,7 @@
       "^@app/qdrant(|/.*)$": "<rootDir>/libs/qdrant/src/$1",
       "^@app/redis(|/.*)$": "<rootDir>/libs/redis/src/$1",
       "^@app/saga(|/.*)$": "<rootDir>/libs/saga/src/$1",
-      "^@app/storage-r2(|/.*)$": "<rootDir>/libs/storage-r2/src/$1",
+      "^@app/storage-s3(|/.*)$": "<rootDir>/libs/storage-s3/src/$1",
       "^@app/util(|/.*)$": "<rootDir>/libs/util/src/$1"
     }
   }

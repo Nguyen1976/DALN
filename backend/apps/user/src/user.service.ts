@@ -1,4 +1,4 @@
-import { StorageR2Service } from '@app/storage-r2'
+import { S3StorageService } from '@app/storage-s3'
 import { UtilService } from '@app/util/util.service'
 import { Inject, Injectable } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
@@ -95,8 +95,8 @@ export class UserService {
     @Inject(JwtService) private readonly jwtService: JwtService,
     @Inject(UtilService) private readonly utilService: UtilService,
     private readonly eventsPublisher: UserEventsPublisher,
-    @Inject(StorageR2Service)
-    private readonly storageR2Service: StorageR2Service,
+    @Inject(S3StorageService)
+    private readonly s3StorageService: S3StorageService,
     private readonly redisService: RedisService,
     private readonly logger: LoggerService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -757,7 +757,7 @@ export class UserService {
       const mime =
         lookup(data.avatarFilename || '') || 'application/octet-stream'
 
-      avatarUrl = await this.storageR2Service.upload({
+      avatarUrl = await this.s3StorageService.upload({
         buffer: data.avatar as Buffer,
         mime: mime,
         folder: 'avatars',

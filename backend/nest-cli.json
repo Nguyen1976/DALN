@@ -135,13 +135,13 @@
         "tsConfigPath": "apps/saga-orchestrator/tsconfig.app.json"
       }
     },
-    "storage-r2": {
+    "storage-s3": {
       "type": "library",
-      "root": "libs/storage-r2",
+      "root": "libs/storage-s3",
       "entryFile": "index",
-      "sourceRoot": "libs/storage-r2/src",
+      "sourceRoot": "libs/storage-s3/src",
       "compilerOptions": {
-        "tsConfigPath": "libs/storage-r2/tsconfig.lib.json"
+        "tsConfigPath": "libs/storage-s3/tsconfig.lib.json"
       }
     },
     "user": {

@@ -38,6 +38,7 @@ export class MessageMapper {
         height: media.height ?? undefined,
         duration: media.duration ?? undefined,
         thumbnailUrl: media.thumbnailUrl ?? undefined,
+        fileName: media.fileName ?? undefined,
         sortOrder: media.sortOrder ?? undefined,
       })),
       poll: message.poll

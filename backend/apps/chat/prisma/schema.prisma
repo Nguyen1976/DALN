@@ -160,6 +160,7 @@ model messageMedia {
   height       Int?
   duration     Float?
   thumbnailUrl String?
+  fileName     String?
   sortOrder    Int       @default(0)
   createdAt    DateTime  @default(now())
   message      message   @relation(fields: [messageId], references: [id], onDelete: NoAction, onUpdate: NoAction)

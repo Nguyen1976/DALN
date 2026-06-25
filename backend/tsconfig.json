@@ -64,11 +64,11 @@
       "@app/saga/*": [
         "libs/saga/src/*"
       ],
-      "@app/storage-r2": [
-        "libs/storage-r2/src"
+      "@app/storage-s3": [
+        "libs/storage-s3/src"
       ],
-      "@app/storage-r2/*": [
-        "libs/storage-r2/src/*"
+      "@app/storage-s3/*": [
+        "libs/storage-s3/src/*"
       ],
       "@app/util": [
         "libs/util/src"

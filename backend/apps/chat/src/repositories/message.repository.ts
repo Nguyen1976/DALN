@@ -12,6 +12,7 @@ type MediaInput = {
   height?: number
   duration?: number
   thumbnailUrl?: string
+  fileName?: string
   sortOrder?: number
 }
 
@@ -68,6 +69,7 @@ export class MessageRepository {
                 height: media.height ?? null,
                 duration: media.duration ?? null,
                 thumbnailUrl: media.thumbnailUrl ?? null,
+                fileName: media.fileName ?? null,
                 sortOrder: media.sortOrder ?? index,
               })),
             }

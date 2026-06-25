@@ -134,6 +134,7 @@ export default function ChatWindow({
     useChatMessageActions({ conversationId, messages });
 
   const poll = useChatPoll({ conversationId, messages });
+  const isGroupConversation = effectiveConversation?.type === "GROUP";
 
   useConversationRoom(conversationId);
 
@@ -291,16 +292,18 @@ export default function ChatWindow({
             <Paperclip className="size-5" />
           </Button>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={!canSendMessage}
-            onClick={poll.handleOpenCreatePollDialog}
-            aria-label="Tạo bình chọn"
-            className="shrink-0 text-muted-foreground hover:text-foreground"
-          >
-            <ListChecks className="size-5" />
-          </Button>
+          {isGroupConversation && (
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={!canSendMessage}
+              onClick={poll.handleOpenCreatePollDialog}
+              aria-label="Tạo bình chọn"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <ListChecks className="size-5" />
+            </Button>
+          )}
 
           <input
             type="text"
