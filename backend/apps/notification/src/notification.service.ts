@@ -114,6 +114,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
         senderName: data.inviterName,
         friendEmail: data.inviteeEmail,
         receiverName: data.inviteeName,
+        friendRequestId: data.friendRequestId,
       })
     } else {
       this.notificationEventsPublisher.emitToUsers(

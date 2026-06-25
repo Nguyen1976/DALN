@@ -16,7 +16,7 @@ import {
 import { loginAPI } from "@/redux/slices/userSlice";
 import { useDispatch } from "react-redux";
 import type { AppDispatch } from "@/redux/store";
-import { useNavigate } from "react-router";
+import { useNavigate, useLocation } from "react-router";
 import { toast } from "sonner";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 
@@ -32,11 +32,16 @@ const Login = () => {
 
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const onSubmit = async (data: z.infer<typeof formLoginScheme>) => {
     try {
       await dispatch(loginAPI(data)).unwrap();
-      navigate("/");
+      const from = (location.state as { from?: Location } | null)?.from;
+      const redirectTo = from
+        ? `${from.pathname}${from.search}${from.hash}`
+        : "/";
+      navigate(redirectTo);
     } catch (error) {
       const message =
         typeof error === "string"

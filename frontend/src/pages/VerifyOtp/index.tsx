@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -37,10 +37,12 @@ const verifyOtpSchema = z.object({
 export default function VerifyOtpPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const queryEmail = searchParams.get("email") || "";
   const initialEmail = useMemo(() => {
     const state = location.state as { email?: string } | null;
-    return state?.email || "";
-  }, [location.state]);
+    return queryEmail || state?.email || "";
+  }, [location.state, queryEmail]);
 
   const [resendCountdown, setResendCountdown] = useState(0);
 
@@ -51,6 +53,12 @@ export default function VerifyOtpPage() {
       otp: "",
     },
   });
+
+  useEffect(() => {
+    if (initialEmail) {
+      form.setValue("email", initialEmail);
+    }
+  }, [form, initialEmail]);
 
   const startResendCountdown = () => {
     setResendCountdown(30);
