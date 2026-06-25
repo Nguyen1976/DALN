@@ -28,7 +28,7 @@ if [ "${SERVICE}" != "recommendation" ]; then
   rm_rf @qdrant/js-client-rest
 fi
 
-# Neo4j — không có service prod nào import @app/neo4j
+# Neo4j driver — chỉ dùng cho script train offline (devDependency)
 rm_rf neo4j-driver
 
 # R2 / S3 — user + chat

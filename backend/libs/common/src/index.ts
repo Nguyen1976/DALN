@@ -1,6 +1,6 @@
 export * from './common.module'
 export * from './common.service'
 export * from './auth/auth.guard'
-export * from './http/grpc-http.filter'
+export * from './http/http-exception.filter'
 export * from './http/response.interceptor'
 export * from './http/validation-exception.factory'

@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core'
 import { NotificationModule } from './notification.module'
 import { ValidationPipe } from '@nestjs/common'
-import { GrpcToHttpExceptionFilter, ResponseInterceptor } from '@app/common'
+import { AppHttpExceptionFilter, ResponseInterceptor } from '@app/common'
 import cookieParser from 'cookie-parser'
 
 async function bootstrap() {
@@ -14,7 +14,7 @@ async function bootstrap() {
       transform: true,
     }),
   )
-  app.useGlobalFilters(new GrpcToHttpExceptionFilter())
+  app.useGlobalFilters(new AppHttpExceptionFilter())
   app.useGlobalInterceptors(new ResponseInterceptor())
   app.enableCors({
     origin: true,

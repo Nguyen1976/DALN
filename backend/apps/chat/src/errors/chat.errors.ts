@@ -1,130 +1,79 @@
-import { status } from '@grpc/grpc-js'
-import { RpcException } from '@nestjs/microservices'
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common'
 
 export class ChatErrors {
   static conversationNotEnoughMembers(): never {
-    throw new RpcException({
-      code: status.FAILED_PRECONDITION,
-      message: 'A group conversation must have at least 3 members',
-    })
+    throw new BadRequestException('A group conversation must have at least 3 members')
   }
 
   static userNoPermission(): never {
-    throw new RpcException({
-      code: status.PERMISSION_DENIED,
-      message: 'User has no permission to perform this action',
-    })
+    throw new ForbiddenException('User has no permission to perform this action')
   }
 
   static senderNotMember(): never {
-    throw new RpcException({
-      code: status.FAILED_PRECONDITION,
-      message: 'Sender is not a member of the conversation',
-    })
+    throw new BadRequestException('Sender is not a member of the conversation')
   }
 
   static conversationNotFound(): never {
-    throw new RpcException({
-      code: status.NOT_FOUND,
-      message: 'Conversation not found',
-    })
+    throw new NotFoundException('Conversation not found')
   }
 
   static userNotMember(): never {
-    throw new RpcException({
-      code: status.FAILED_PRECONDITION,
-      message: 'User is not a member of the conversation',
-    })
+    throw new BadRequestException('User is not a member of the conversation')
   }
 
   static invalidMessagePayload(): never {
-    throw new RpcException({
-      code: status.INVALID_ARGUMENT,
-      message: 'Invalid message payload',
-    })
+    throw new BadRequestException('Invalid message payload')
   }
 
   static invalidMediaType(): never {
-    throw new RpcException({
-      code: status.INVALID_ARGUMENT,
-      message: 'Invalid media type or mime type',
-    })
+    throw new BadRequestException('Invalid media type or mime type')
   }
 
   static fileSizeExceeded(): never {
-    throw new RpcException({
-      code: status.INVALID_ARGUMENT,
-      message: 'File size exceeded max limit',
-    })
+    throw new BadRequestException('File size exceeded max limit')
   }
 
   static mediaNotUploaded(): never {
-    throw new RpcException({
-      code: status.FAILED_PRECONDITION,
-      message: 'Media file not found in storage',
-    })
+    throw new BadRequestException('Media file not found in storage')
   }
 
   static memberNotFoundInConversation(): never {
-    throw new RpcException({
-      code: status.NOT_FOUND,
-      message: 'Target user is not a member of this conversation',
-    })
+    throw new NotFoundException('Target user is not a member of this conversation')
   }
 
   static invalidMemberAction(message = 'Invalid member action'): never {
-    throw new RpcException({
-      code: status.INVALID_ARGUMENT,
-      message,
-    })
+    throw new BadRequestException(message)
   }
 
   static adminCannotLeaveGroup(): never {
-    throw new RpcException({
-      code: status.FAILED_PRECONDITION,
-      message: 'Admin không thể rời nhóm. Hãy chuyển quyền admin trước.',
-    })
+    throw new BadRequestException('Admin không thể rời nhóm. Hãy chuyển quyền admin trước.')
   }
 
   static messageNotFound(): never {
-    throw new RpcException({
-      code: status.NOT_FOUND,
-      message: 'Message not found',
-    })
+    throw new NotFoundException('Message not found')
   }
 
   static notMessageOwner(): never {
-    throw new RpcException({
-      code: status.PERMISSION_DENIED,
-      message: 'You can only perform this action on your own message',
-    })
+    throw new ForbiddenException('You can only perform this action on your own message')
   }
 
   static invalidPollPayload(message = 'Invalid poll payload'): never {
-    throw new RpcException({
-      code: status.INVALID_ARGUMENT,
-      message,
-    })
+    throw new BadRequestException(message)
   }
 
   static pollNotFound(): never {
-    throw new RpcException({
-      code: status.NOT_FOUND,
-      message: 'Poll not found',
-    })
+    throw new NotFoundException('Poll not found')
   }
 
   static pollAlreadyClosed(): never {
-    throw new RpcException({
-      code: status.FAILED_PRECONDITION,
-      message: 'Poll is already closed',
-    })
+    throw new BadRequestException('Poll is already closed')
   }
 
   static pollCreatorOnly(): never {
-    throw new RpcException({
-      code: status.PERMISSION_DENIED,
-      message: 'Only the poll creator can close this poll',
-    })
+    throw new ForbiddenException('Only the poll creator can close this poll')
   }
 }

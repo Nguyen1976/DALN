@@ -9,8 +9,5 @@
   "testRegex": ".e2e-spec.ts$",
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
-  },
-  "moduleNameMapper": {
-    "^@app/neo4j(|/.*)$": "<rootDir>/../libs/neo4j/src/$1"
   }
 }

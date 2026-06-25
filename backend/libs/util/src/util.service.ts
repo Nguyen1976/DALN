@@ -1,5 +1,8 @@
-import { HttpException, Injectable } from '@nestjs/common'
-import { RpcException } from '@nestjs/microservices/exceptions/rpc-exception'
+import {
+  HttpException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common'
 import * as bcrypt from 'bcryptjs'
 import { v5 as uuidv5 } from 'uuid'
 
@@ -24,26 +27,13 @@ export class UtilService {
     try {
       return await fn()
     } catch (err) {
-      // 1. Nếu là lỗi business đã chuẩn hóa
-      if (err instanceof RpcException) {
+      if (err instanceof HttpException) {
         throw err
       }
 
-      // 2. Nếu lỡ dùng HttpException trong service
-      if (err instanceof HttpException) {
-        throw new RpcException({
-          code: err.getStatus(),
-          message: err.message,
-        })
-      }
+      console.error('🔥 Service error:', err)
 
-      // 3. Prisma, Mongo, bug, crash, undefined...
-      console.error('🔥 Microservice crashed:', err)
-
-      throw new RpcException({
-        code: 'INTERNAL_SERVICE_ERROR',
-        message: 'Service temporarily unavailable',
-      })
+      throw new InternalServerErrorException('Service temporarily unavailable')
     }
   }
 

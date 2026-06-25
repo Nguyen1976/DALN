@@ -46,12 +46,6 @@
       "@app/mailer/*": [
         "libs/mailer/src/*"
       ],
-      "@app/neo4j": [
-        "libs/neo4j/src"
-      ],
-      "@app/neo4j/*": [
-        "libs/neo4j/src/*"
-      ],
       "@app/qdrant": [
         "libs/qdrant/src"
       ],
