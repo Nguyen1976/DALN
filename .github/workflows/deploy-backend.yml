@@ -4,11 +4,30 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
   pull_request:
     branches:
       - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
     inputs:
+      service:
+        description: "Service deploy (all = mọi service)"
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - user
+          - chat
+          - notification
+          - realtime-gateway
+          - recommendation
+          - saga-orchestrator
       image_tag:
         description: "Tag deploy lên EC2 (để trống = sha git)"
         required: false
@@ -17,14 +36,137 @@ on:
 env:
   AWS_REGION: ap-southeast-1
   ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-1.amazonaws.com
+  ALL_SERVICES: '["user","chat","notification","realtime-gateway","recommendation","saga-orchestrator"]'
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
+  detect-changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.services.outputs.services }}
+      kong: ${{ steps.services.outputs.kong }}
+      infra: ${{ steps.services.outputs.infra }}
+      has_deploy: ${{ steps.services.outputs.has_deploy }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          filters: |
+            user:
+              - 'backend/apps/user/**'
+            chat:
+              - 'backend/apps/chat/**'
+            notification:
+              - 'backend/apps/notification/**'
+            realtime-gateway:
+              - 'backend/apps/realtime-gateway/**'
+            recommendation:
+              - 'backend/apps/recommendation/**'
+            saga-orchestrator:
+              - 'backend/apps/saga-orchestrator/**'
+            shared:
+              - 'backend/libs/**'
+              - 'backend/Dockerfile'
+              - 'backend/docker/**'
+              - 'backend/package.json'
+              - 'backend/package-lock.json'
+              - 'backend/nest-cli.json'
+              - 'backend/tsconfig*.json'
+              - 'backend/proto/**'
+            infra:
+              - 'backend/docker-compose.prod.yml'
+              - 'backend/kong/**'
+            kong:
+              - 'backend/kong/**'
+
+      - name: Compute services to build & deploy
+        id: services
+        env:
+          ALL_SERVICES: ${{ env.ALL_SERVICES }}
+          FILTER_USER: ${{ steps.filter.outputs.user }}
+          FILTER_CHAT: ${{ steps.filter.outputs.chat }}
+          FILTER_NOTIFICATION: ${{ steps.filter.outputs.notification }}
+          FILTER_REALTIME: ${{ steps.filter.outputs.realtime-gateway }}
+          FILTER_RECOMMENDATION: ${{ steps.filter.outputs.recommendation }}
+          FILTER_SAGA: ${{ steps.filter.outputs.saga-orchestrator }}
+          FILTER_SHARED: ${{ steps.filter.outputs.shared }}
+          FILTER_INFRA: ${{ steps.filter.outputs.infra }}
+          FILTER_KONG: ${{ steps.filter.outputs.kong }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            INPUT="${{ github.event.inputs.service }}"
+            if [ -z "$INPUT" ] || [ "$INPUT" = "all" ]; then
+              echo "services=$ALL_SERVICES" >> "$GITHUB_OUTPUT"
+              echo "kong=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "services=[\"$INPUT\"]" >> "$GITHUB_OUTPUT"
+              echo "kong=false" >> "$GITHUB_OUTPUT"
+            fi
+            echo "has_deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$FILTER_SHARED" = "true" ]; then
+            echo "services=$ALL_SERVICES" >> "$GITHUB_OUTPUT"
+          else
+            SERVICES=()
+            [ "$FILTER_USER" = "true" ] && SERVICES+=("user")
+            [ "$FILTER_CHAT" = "true" ] && SERVICES+=("chat")
+            [ "$FILTER_NOTIFICATION" = "true" ] && SERVICES+=("notification")
+            [ "$FILTER_REALTIME" = "true" ] && SERVICES+=("realtime-gateway")
+            [ "$FILTER_RECOMMENDATION" = "true" ] && SERVICES+=("recommendation")
+            [ "$FILTER_SAGA" = "true" ] && SERVICES+=("saga-orchestrator")
+
+            if [ ${#SERVICES[@]} -eq 0 ]; then
+              echo 'services=[]' >> "$GITHUB_OUTPUT"
+            else
+              JSON=$(printf '%s\n' "${SERVICES[@]}" | jq -R . | jq -s -c .)
+              echo "services=$JSON" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          echo "kong=$FILTER_KONG" >> "$GITHUB_OUTPUT"
+          echo "infra=$FILTER_INFRA" >> "$GITHUB_OUTPUT"
+
+          SERVICES_OUT=$(jq -n \
+            --arg shared "$FILTER_SHARED" \
+            --arg infra "$FILTER_INFRA" \
+            --arg user "$FILTER_USER" \
+            --arg chat "$FILTER_CHAT" \
+            --arg notification "$FILTER_NOTIFICATION" \
+            --arg realtime "$FILTER_REALTIME" \
+            --arg recommendation "$FILTER_RECOMMENDATION" \
+            --arg saga "$FILTER_SAGA" \
+            --arg kong "$FILTER_KONG" \
+            '
+              ($shared == "true")
+              or ($infra == "true")
+              or ($user == "true")
+              or ($chat == "true")
+              or ($notification == "true")
+              or ($realtime == "true")
+              or ($recommendation == "true")
+              or ($saga == "true")
+              or ($kong == "true")
+            ')
+
+          if [ "$SERVICES_OUT" = "true" ]; then
+            echo "has_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Test
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_deploy == 'true' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -43,19 +185,15 @@ jobs:
 
   build-and-push:
     name: Build & Push — ${{ matrix.service }}
-    needs: test
-    if: github.event_name != 'pull_request'
+    needs: [detect-changes, test]
+    if: >-
+      github.event_name != 'pull_request'
+      && needs.detect-changes.outputs.services != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - user
-          - chat
-          - notification
-          - realtime-gateway
-          - recommendation
-          - saga-orchestrator
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -90,47 +228,86 @@ jobs:
           docker push "$IMAGE"
           docker push "${{ env.ECR_REGISTRY }}/chat-app/${{ matrix.service }}:latest"
 
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tag }}
-
   deploy:
     name: Deploy to EC2
-    needs: build-and-push
-    if: github.event_name != 'pull_request'
+    needs: [detect-changes, build-and-push]
+    if: >-
+      always()
+      && github.event_name != 'pull_request'
+      && needs.detect-changes.outputs.has_deploy == 'true'
+      && (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-chat-app-deploy
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set image tag
+        id: meta
+        run: |
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy via SSM
+        working-directory: backend
         env:
           INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
-          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
           ECR_REGISTRY: ${{ env.ECR_REGISTRY }}
           AWS_REGION: ${{ env.AWS_REGION }}
+          SERVICES: ${{ needs.detect-changes.outputs.services }}
+          INFRA: ${{ needs.detect-changes.outputs.infra }}
         run: |
+          set -euo pipefail
+
+          COMPOSE_B64=$(base64 -w0 docker-compose.prod.yml)
+          KONG_B64=$(base64 -w0 kong/kong.yml)
+
+          commands=()
+          commands+=("set -euo pipefail")
+          commands+=("mkdir -p /opt/chat-app/backend/kong")
+          commands+=("printf '%s' '${COMPOSE_B64}' | base64 -d > /opt/chat-app/backend/docker-compose.prod.yml")
+          commands+=("printf '%s' '${KONG_B64}' | base64 -d > /opt/chat-app/backend/kong/kong.yml")
+          commands+=("cd /opt/chat-app/backend")
+          commands+=("aws ssm get-parameter --name /chat-app/prod/env --with-decryption --region ${AWS_REGION} --query Parameter.Value --output text > .env.production")
+          commands+=("export ECR_REGISTRY=${ECR_REGISTRY}")
+          commands+=("export IMAGE_TAG=${IMAGE_TAG}")
+          commands+=("aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}")
+
+          while IFS= read -r svc; do
+            [ -z "$svc" ] && continue
+            commands+=("docker compose -f docker-compose.prod.yml --env-file .env.production pull ${svc}")
+            commands+=("docker compose -f docker-compose.prod.yml --env-file .env.production up -d --no-deps ${svc}")
+          done < <(echo "${SERVICES}" | jq -r '.[]')
+
+          if [ "${INFRA}" = "true" ] && [ "$(echo "${SERVICES}" | jq 'length')" -eq 0 ]; then
+            commands+=("docker compose -f docker-compose.prod.yml --env-file .env.production up -d --remove-orphans")
+          fi
+
+          # Luôn restart kong sau khi sync kong.yml
+          commands+=("docker compose -f docker-compose.prod.yml --env-file .env.production up -d --no-deps kong")
+
+          commands+=("docker image prune -f")
+
+          PARAMS=$(printf '%s\n' "${commands[@]}" | jq -R . | jq -s '{commands: .}')
+
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --comment "Deploy Chat App backend $IMAGE_TAG" \
-            --parameters commands="[
-              \"set -euo pipefail\",
-              \"cd /opt/chat-app/backend\",
-              \"aws ssm get-parameter --name /chat-app/prod/env --with-decryption --region $AWS_REGION --query Parameter.Value --output text > .env.production\",
-              \"export ECR_REGISTRY=$ECR_REGISTRY\",
-              \"export IMAGE_TAG=$IMAGE_TAG\",
-              \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
-              \"docker compose -f docker-compose.prod.yml down\",
-              \"docker compose -f docker-compose.prod.yml --env-file .env.production pull\",
-              \"docker compose -f docker-compose.prod.yml --env-file .env.production up -d --remove-orphans\",
-              \"docker image prune -a -f\"
-            ]" \
+            --comment "Deploy backend services=${SERVICES} infra=${INFRA} tag=${IMAGE_TAG}" \
+            --parameters "$PARAMS" \
             --query "Command.CommandId" \
             --output text)
 
           echo "SSM CommandId: $COMMAND_ID"
+          echo "Deploying services: ${SERVICES}"
+          echo "Infra config changed: ${INFRA}"
 
           aws ssm wait command-executed \
             --command-id "$COMMAND_ID" \
