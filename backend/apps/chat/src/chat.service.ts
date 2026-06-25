@@ -1309,6 +1309,7 @@ export class ChatService {
     const message = result
     if (!message) return
 
+    
     this.enqueueConversationSyncJob({
       conversationId,
       senderId: actorUserId,
