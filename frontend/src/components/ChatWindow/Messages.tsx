@@ -4,7 +4,7 @@ import { selectUser } from "@/redux/slices/userSlice";
 import { formatDateTime } from "@/utils/formatDateTime";
 import { useSelector } from "react-redux";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
-import { FileText, MoreVertical, RotateCcw, Trash2, User } from "lucide-react";
+import { Check, ChevronRight, MoreVertical, RotateCcw, Trash2, User } from "lucide-react";
 import { SeenStatus } from "@/components/SeenStatus";
 import {
   DropdownMenu,
@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { Check, ChevronRight } from "lucide-react";
+import FileAttachmentPreview from "./FileAttachmentPreview";
 
 const MessageComponent = ({
   messages,
@@ -54,31 +54,6 @@ const MessageComponent = ({
     }
 
     return "FILE";
-  };
-
-  const getFileNameFromUrl = (url?: string) => {
-    if (!url) return "tệp đính kèm";
-    try {
-      const parsed = new URL(url);
-      const rawName = parsed.pathname.split("/").pop() || "tệp đính kèm";
-      return decodeURIComponent(rawName);
-    } catch {
-      const rawName = url.split("/").pop() || "tệp đính kèm";
-      return decodeURIComponent(rawName);
-    }
-  };
-
-  const formatBytes = (size?: string) => {
-    const value = Number(size || 0);
-    if (!Number.isFinite(value) || value <= 0) return "";
-    const units = ["B", "KB", "MB", "GB"];
-    let index = 0;
-    let current = value;
-    while (current >= 1024 && index < units.length - 1) {
-      current /= 1024;
-      index += 1;
-    }
-    return `${current.toFixed(current >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
   };
 
   return (
@@ -293,25 +268,13 @@ const MessageComponent = ({
                     }
 
                     return (
-                      <a
+                      <FileAttachmentPreview
                         key={`${message.id}-${mediaIndex}`}
-                        href={media.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mb-2 block rounded-lg border border-border/60 bg-background/40 px-3 py-2 transition-colors hover:bg-background/70"
-                      >
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 shrink-0 text-primary" />
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">
-                              {getFileNameFromUrl(media.url)}
-                            </p>
-                            <p className="text-xs opacity-70">
-                              {formatBytes(media.size) || "Mở tệp"}
-                            </p>
-                          </div>
-                        </div>
-                      </a>
+                        url={media.url}
+                        mimeType={media.mimeType}
+                        size={media.size}
+                        fileName={media.fileName}
+                      />
                     );
                   })}
 

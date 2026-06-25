@@ -104,6 +104,7 @@ export interface MessageMediaInput {
   height?: number
   duration?: number
   thumbnailUrl?: string
+  fileName?: string
   sortOrder?: number
 }
 

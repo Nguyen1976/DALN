@@ -135,6 +135,7 @@ export function useChatComposer({
         url: URL.createObjectURL(file),
         mimeType,
         size: String(file.size),
+        fileName: file.name,
         sortOrder: 0,
       };
 
@@ -173,6 +174,7 @@ export function useChatComposer({
               url: upload.publicUrl,
               mimeType,
               size: String(file.size),
+              fileName: file.name,
               sortOrder: 0,
             },
           ],

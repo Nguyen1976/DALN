@@ -13,20 +13,51 @@ export class MessageMediaService {
   }
 
   private readonly mimeAllowListByType: Record<string, string[]> = {
-    IMAGE: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-    VIDEO: ['video/mp4', 'video/webm', 'video/quicktime'],
+    IMAGE: [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'image/bmp',
+      'image/svg+xml',
+      'image/heic',
+      'image/heif',
+      'image/x-icon',
+    ],
+    VIDEO: ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'],
     FILE: [
       'application/pdf',
       'text/plain',
       'text/markdown',
       'text/csv',
+      'text/html',
+      'text/calendar',
       'application/json',
       'application/xml',
       'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/epub+zip',
       'application/zip',
+      'application/x-zip-compressed',
+      'application/vnd.rar',
+      'application/x-rar-compressed',
+      'application/x-7z-compressed',
+      'application/x-tar',
+      'application/gzip',
+      'application/x-pem-file',
+      'application/x-x509-ca-cert',
+      'application/x-x509-user-cert',
+      'application/pkix-cert',
+      'application/pkcs8',
+      'application/x-pkcs12',
+      'application/pkcs12',
+      'audio/mpeg',
+      'audio/wav',
+      'audio/ogg',
       'application/octet-stream',
     ],
   }
@@ -38,6 +69,14 @@ export class MessageMediaService {
     'application/javascript': 'text/plain',
     'text/javascript': 'text/plain',
     'text/x-markdown': 'text/markdown',
+    'application/x-pem-file': 'text/plain',
+    'application/x-x509-ca-cert': 'text/plain',
+    'application/x-x509-user-cert': 'text/plain',
+    'application/pkix-cert': 'text/plain',
+    'application/pkcs8': 'text/plain',
+    'application/x-pkcs12': 'application/pkcs12',
+    'application/x-zip-compressed': 'application/zip',
+    'application/x-rar-compressed': 'application/vnd.rar',
   }
 
   private readonly genericBrowserMimeTypes = new Set([
@@ -46,6 +85,12 @@ export class MessageMediaService {
     'application/binary',
     'binary/octet-stream',
   ])
+
+  private get allowedMimeTypes(): Set<string> {
+    return new Set(
+      Object.values(this.mimeAllowListByType).flatMap((items) => items),
+    )
+  }
 
   constructor(
     @Inject(S3StorageService)
@@ -75,10 +120,43 @@ export class MessageMediaService {
       gif: 'image/gif',
       webp: 'image/webp',
       bmp: 'image/bmp',
+      svg: 'image/svg+xml',
+      heic: 'image/heic',
+      heif: 'image/heif',
+      ico: 'image/x-icon',
+      mp4: 'video/mp4',
+      webm: 'video/webm',
+      mov: 'video/quicktime',
+      avi: 'video/x-msvideo',
+      pdf: 'application/pdf',
+      epub: 'application/epub+zip',
+      zip: 'application/zip',
+      rar: 'application/vnd.rar',
+      '7z': 'application/x-7z-compressed',
+      tar: 'application/x-tar',
+      gz: 'application/gzip',
+      doc: 'application/msword',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xls: 'application/vnd.ms-excel',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ppt: 'application/vnd.ms-powerpoint',
+      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      pem: 'text/plain',
+      key: 'text/plain',
+      crt: 'text/plain',
+      cer: 'text/plain',
+      p12: 'application/pkcs12',
+      pfx: 'application/pkcs12',
+      mp3: 'audio/mpeg',
+      wav: 'audio/wav',
+      ogg: 'audio/ogg',
       txt: 'text/plain',
       csv: 'text/csv',
       json: 'application/json',
       xml: 'application/xml',
+      html: 'text/html',
+      htm: 'text/html',
+      ics: 'text/calendar',
       yaml: 'text/plain',
       yml: 'text/plain',
       js: 'text/plain',
@@ -102,6 +180,7 @@ export class MessageMediaService {
       log: 'text/plain',
       md: 'text/markdown',
       markdown: 'text/markdown',
+      env: 'text/plain',
     }
     return mimeTypes[ext || ''] || 'application/octet-stream'
   }
@@ -125,7 +204,20 @@ export class MessageMediaService {
       return extensionMime
     }
 
-    return aliasedReported
+    if (this.allowedMimeTypes.has(aliasedReported)) {
+      return aliasedReported
+    }
+
+    if (
+      extensionMime !== 'application/octet-stream' &&
+      this.allowedMimeTypes.has(extensionMime)
+    ) {
+      return extensionMime
+    }
+
+    return extensionMime !== 'application/octet-stream'
+      ? extensionMime
+      : aliasedReported
   }
 
   private inferMessageTypeFromMime(mimeType: string, fileName: string): string {
@@ -146,7 +238,7 @@ export class MessageMediaService {
     fileName = '',
   ): void {
     const normalizedType = this.normalizeMessageType(type)
-    const resolvedMime = this.resolveMimeType(fileName, mimeType)
+    let resolvedMime = this.resolveMimeType(fileName, mimeType)
     const effectiveType =
       normalizedType === 'TEXT'
         ? this.inferMessageTypeFromMime(resolvedMime, fileName)
@@ -162,6 +254,14 @@ export class MessageMediaService {
       size > this.uploadLimitByType[effectiveType]
     ) {
       ChatErrors.fileSizeExceeded()
+    }
+
+    const extensionMime = this.getMimeType(fileName)
+    if (
+      !this.mimeAllowListByType[effectiveType].includes(resolvedMime) &&
+      this.mimeAllowListByType[effectiveType].includes(extensionMime)
+    ) {
+      resolvedMime = extensionMime
     }
 
     if (!this.mimeAllowListByType[effectiveType].includes(resolvedMime)) {

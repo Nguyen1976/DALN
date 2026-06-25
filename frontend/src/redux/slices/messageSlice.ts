@@ -53,6 +53,7 @@ export interface Message {
     height?: number;
     duration?: number;
     thumbnailUrl?: string;
+    fileName?: string;
     sortOrder?: number;
   }[];
   poll?: PollData;

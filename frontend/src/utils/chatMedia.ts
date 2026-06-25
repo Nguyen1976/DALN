@@ -5,17 +5,45 @@ const EXTENSION_MIME_MAP: Record<string, string> = {
   gif: "image/gif",
   webp: "image/webp",
   bmp: "image/bmp",
+  svg: "image/svg+xml",
+  heic: "image/heic",
+  heif: "image/heif",
+  ico: "image/x-icon",
   mp4: "video/mp4",
   webm: "video/webm",
   mov: "video/quicktime",
+  avi: "video/x-msvideo",
   pdf: "application/pdf",
+  epub: "application/epub+zip",
   zip: "application/zip",
+  rar: "application/vnd.rar",
+  "7z": "application/x-7z-compressed",
+  tar: "application/x-tar",
+  gz: "application/gzip",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  pem: "text/plain",
+  key: "text/plain",
+  crt: "text/plain",
+  cer: "text/plain",
+  p12: "application/pkcs12",
+  pfx: "application/pkcs12",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
   txt: "text/plain",
   md: "text/markdown",
   markdown: "text/markdown",
   csv: "text/csv",
   json: "application/json",
   xml: "application/xml",
+  html: "text/html",
+  htm: "text/html",
+  ics: "text/calendar",
   yaml: "text/plain",
   yml: "text/plain",
   js: "text/plain",
@@ -37,6 +65,7 @@ const EXTENSION_MIME_MAP: Record<string, string> = {
   zsh: "text/plain",
   sql: "text/plain",
   log: "text/plain",
+  env: "text/plain",
 };
 
 const BROWSER_MIME_ALIASES: Record<string, string> = {
@@ -45,7 +74,22 @@ const BROWSER_MIME_ALIASES: Record<string, string> = {
   "text/x-shellscript": "text/plain",
   "application/javascript": "text/plain",
   "text/javascript": "text/plain",
+  "application/x-pem-file": "text/plain",
+  "application/x-x509-ca-cert": "text/plain",
+  "application/x-x509-user-cert": "text/plain",
+  "application/pkix-cert": "text/plain",
+  "application/pkcs8": "text/plain",
+  "application/x-pkcs12": "application/pkcs12",
+  "application/x-zip-compressed": "application/zip",
+  "application/x-rar-compressed": "application/vnd.rar",
 };
+
+const GENERIC_BROWSER_MIME_TYPES = new Set([
+  "",
+  "application/octet-stream",
+  "application/binary",
+  "binary/octet-stream",
+]);
 
 function getMimeTypeFromFileName(fileName: string): string {
   const ext = fileName.split(".").pop()?.toLowerCase() || "";
@@ -72,13 +116,13 @@ export function getMimeTypeFromFile(file: File): string {
     return aliased;
   }
 
-  if (
-    !aliased ||
-    aliased === "application/octet-stream" ||
-    aliased === "application/binary"
-  ) {
+  if (GENERIC_BROWSER_MIME_TYPES.has(aliased)) {
     return extensionMime;
   }
 
-  return aliased;
+  if (extensionMime !== "application/octet-stream") {
+    return extensionMime;
+  }
+
+  return aliased || extensionMime;
 }
