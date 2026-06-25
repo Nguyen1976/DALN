@@ -285,10 +285,13 @@ jobs:
 
           PARAMS=$(printf '%s\n' "${commands[@]}" | jq -R . | jq -s '{commands: .}')
 
+          SSM_COMMENT="Deploy backend tag=${IMAGE_TAG}"
+          SSM_COMMENT=${SSM_COMMENT:0:100}
+
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --comment "Deploy backend services=${SERVICES} infra=${INFRA} tag=${IMAGE_TAG}" \
+            --comment "$SSM_COMMENT" \
             --parameters "$PARAMS" \
             --query "Command.CommandId" \
             --output text)
