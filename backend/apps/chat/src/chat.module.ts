@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule'
 import { BullModule } from '@nestjs/bullmq'
 import { ChatController } from './chat.controller'
 import { ChatService } from './chat.service'
+import { MessageService, MessageMediaService, PollService, ConversationMemberService, ConversationService } from './services'
 import { UtilModule } from '@app/util'
 import {
   ConversationRepository,
@@ -71,6 +72,11 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
       useClass: AuthGuard,
     },
     ChatService,
+    MessageService,
+    MessageMediaService,
+    PollService,
+    ConversationMemberService,
+    ConversationService,
     ConversationRepository,
     MessageRepository,
     ConversationMemberRepository,
