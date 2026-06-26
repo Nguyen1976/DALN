@@ -29,6 +29,7 @@ import {
 } from "./redux/slices/friendSlice";
 import NotificationSettingsPage from "./pages/NotificationSettings";
 import { useChatSocketEvents } from "./hooks/useChatSocketEvents";
+import IncomingCallManager from "./components/IncomingCallManager";
 import VerifyOtpPage from "./pages/VerifyOtp";
 import InterestOnboardingPage from "./pages/InterestOnboarding";
 
@@ -185,7 +186,12 @@ function App() {
     };
   }, [dispatch]);
 
-  return <RouterProvider router={router} />;
+  return (
+    <>
+      <RouterProvider router={router} />
+      {user?.id ? <IncomingCallManager /> : null}
+    </>
+  );
 }
 
 export default App;
