@@ -3,13 +3,21 @@ import { MessageSquareText } from "lucide-react";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import ProfilePanel from "@/components/ProfilePanel";
-import VoiceCallModal from "@/components/VoiceCallModal";
+import VoiceCallModal, {
+  type VoiceCallMode,
+} from "@/components/VoiceCallModal";
 import MainLayout from "@/layouts/MainLayout";
 import { useNavigate, useParams } from "react-router";
 
+type ActiveVoiceCall = {
+  conversationId: string;
+  mode: VoiceCallMode;
+};
+
 export default function ChatPage() {
   const [showProfile, setShowProfile] = useState(false);
-  const [showVoiceCall, setShowVoiceCall] = useState(false);
+  const [activeVoiceCall, setActiveVoiceCall] =
+    useState<ActiveVoiceCall | null>(null);
   const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
 
   const navigate = useNavigate();
@@ -23,7 +31,13 @@ export default function ChatPage() {
         <ChatWindow
           conversationId={selectedChatId || undefined}
           onToggleProfile={() => setShowProfile(!showProfile)}
-          onVoiceCall={() => setShowVoiceCall(true)}
+          onVoiceCall={() => {
+            if (!selectedChatId) return;
+            setActiveVoiceCall({
+              conversationId: selectedChatId,
+              mode: "outgoing",
+            });
+          }}
           onBack={() => navigate("/")}
           focusMessageId={focusMessageId}
           onFocusHandled={() => setFocusMessageId(null)}
@@ -55,10 +69,11 @@ export default function ChatPage() {
         />
       )}
 
-      {showVoiceCall && selectedChatId && (
+      {activeVoiceCall && (
         <VoiceCallModal
-          conversationId={selectedChatId}
-          onClose={() => setShowVoiceCall(false)}
+          conversationId={activeVoiceCall.conversationId}
+          mode={activeVoiceCall.mode}
+          onClose={() => setActiveVoiceCall(null)}
         />
       )}
     </MainLayout>

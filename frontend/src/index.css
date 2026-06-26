@@ -231,6 +231,15 @@
   scrollbar-color: var(--bg-scroll-thumb) transparent;
 }
 
+@keyframes callRingProgress {
+  from {
+    stroke-dashoffset: var(--ring-circumference);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 @layer utilities {
   .animate-fade-in {
     animation: fadeIn 0.3s ease-in-out;
@@ -238,5 +247,10 @@
 
   .animate-slide-in-up {
     animation: slideInUp 0.3s ease-in-out;
+  }
+
+  .animate-call-ring-progress {
+    stroke-dashoffset: var(--ring-circumference);
+    animation: callRingProgress var(--ring-duration, 30s) linear forwards;
   }
 }

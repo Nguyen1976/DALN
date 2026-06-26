@@ -39,4 +39,12 @@ export const SOCKET_EVENTS = {
   NOTIFICATION: {
     NEW_NOTIFICATION: "notification.new_notification",
   },
+
+  CALL: {
+    INCOMING_CALL: "call.incoming_call",
+    CALL_ACCEPTED: "call.accepted",
+    CALL_REJECTED: "call.rejected",
+    CALL_ENDED: "call.ended",
+    ICE_CANDIDATE: "call.ice_candidate",
+  },
 };

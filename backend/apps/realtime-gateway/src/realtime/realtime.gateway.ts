@@ -453,4 +453,130 @@ export class RealtimeGateway
       },
     )
   }
+
+  private emitToUserSockets(
+    userIds: string[],
+    event: string,
+    data: Record<string, unknown>,
+  ) {
+    for (const userId of userIds) {
+      this.server.to(`user:${userId}`).emit(event, data)
+    }
+  }
+
+  @SubscribeMessage(SOCKET_EVENTS.CALL.INCOMING_CALL)
+  async handleIncomingCall(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const callerId = client.data.userId
+    const offer = data?.offer
+    const targetUserId = data?.targetUserId
+    const conversationId = data?.conversationId
+
+    if (!callerId || !offer || !targetUserId) {
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        code: 'INVALID_PAYLOAD',
+        message: 'callerId, offer, and targetUserId are required',
+        retryable: false,
+      })
+      return
+    }
+
+    this.emitToUserSockets([targetUserId], SOCKET_EVENTS.CALL.INCOMING_CALL, {
+      callerId,
+      offer,
+      conversationId,
+    })
+  }
+
+  @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_ACCEPTED)
+  async handleCallAccepted(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const targetUserId = client.data.userId
+    const answer = data?.answer
+    const callerId = data?.callerId
+
+    if (!targetUserId || !answer || !callerId) {
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        code: 'INVALID_PAYLOAD',
+        message: 'targetUserId, answer, and callerId are required',
+        retryable: false,
+      })
+      return
+    }
+
+    // Gửi answer tới callerId
+    this.emitToUserSockets([callerId], SOCKET_EVENTS.CALL.CALL_ACCEPTED, {
+      answer: data.answer,
+      answererId: client.data.userId,
+    })
+  }
+
+  @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_REJECTED)
+  async handleCallRejected(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const targetUserId = client.data.userId
+    const callerId = data?.callerId
+
+    if (!targetUserId || !callerId) {
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        code: 'INVALID_PAYLOAD',
+        message: 'targetUserId and callerId are required',
+        retryable: false,
+      })
+      return
+    }
+
+    // Gửi thông báo từ chối tới callerId
+    this.emitToUserSockets([callerId], SOCKET_EVENTS.CALL.CALL_REJECTED, {
+      rejecterId: client.data.userId,
+    })
+  }
+
+  @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_ENDED)
+  async handleCallEnded(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const enderId = client.data.userId
+    const peerUserId = data?.targetUserId ?? data?.callerId
+
+    if (!enderId || !peerUserId) {
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        code: 'INVALID_PAYLOAD',
+        message: 'targetUserId is required',
+        retryable: false,
+      })
+      return
+    }
+
+    this.emitToUserSockets([peerUserId], SOCKET_EVENTS.CALL.CALL_ENDED, {
+      enderId,
+      reason: data?.reason,
+    })
+  }
+  @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CANDIDATE)
+  async handleIceCandidate(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const senderId = client.data.userId
+    const targetUserId = data?.targetUserId
+    const candidate = data?.candidate
+
+    if (!senderId || !targetUserId || !candidate) {
+      return // Có thể emit lỗi tương tự như trên
+    }
+
+    // Chuyển tiếp ICE candidate cho đối phương
+    this.emitToUserSockets([targetUserId], SOCKET_EVENTS.CALL.ICE_CANDIDATE, {
+      senderId,
+      candidate,
+    })
+  }
 }
