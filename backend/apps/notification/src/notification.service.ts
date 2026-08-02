@@ -173,55 +173,72 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     this.isDigestSweepRunning = true
 
     try {
-      const preferences = await this.preferenceRepo.findAllForDigestSweep()
+      // 1 query duy nhất: chỉ những user THỰC SỰ có thông báo chưa đọc.
+      // Hệ thống rảnh -> mảng rỗng -> thoát ngay, không đụng tới bảng
+      // preference lẫn Redis.
+      const candidates = await this.notificationRepo.findDigestCandidates()
+      if (!candidates.length) return
 
-      for (const pref of preferences) {
-        const normalized = this.normalizePreference(pref)
-        if (!normalized.digest.enabled) continue
+      const preferences = await this.preferenceRepo.findManyByUserIds(
+        candidates.map((c) => c.userId),
+      )
+      const prefByUser = new Map<string, NotificationPreferenceDocument>(
+        preferences.map((pref) => [
+          pref.userId,
+          this.normalizePreference(pref),
+        ]),
+      )
 
-        const unreadCount =
-          await this.notificationRepo.countUnreadDigestEligible(pref.userId)
+      const now = new Date()
+      const due = candidates.filter(({ userId, unreadCount }) => {
+        const pref = prefByUser.get(userId)
+        if (!pref) return false
 
-        if (unreadCount < normalized.digest.minUnread) continue
+        const { digest } = pref
+        if (!digest.enabled) return false
+        if (unreadCount < digest.minUnread) return false
+        if (!digest.lastDigestAt) return true
 
-        const now = new Date()
-        const lastDigestAt = normalized.digest.lastDigestAt
-          ? new Date(normalized.digest.lastDigestAt)
-          : null
+        const elapsed = now.getTime() - new Date(digest.lastDigestAt).getTime()
+        return elapsed >= digest.cooldownMinutes * 60 * 1000
+      })
+      if (!due.length) return
 
-        if (lastDigestAt) {
-          const cooldownMillis = normalized.digest.cooldownMinutes * 60 * 1000
-          const elapsed = now.getTime() - lastDigestAt.getTime()
-          if (elapsed < cooldownMillis) continue
-        }
+      // 2 round-trip cho toàn bộ danh sách, thay vì 1+K cho mỗi user.
+      const onlineByUser = await this.redisService.isOnlineBatch(
+        due.map((d) => d.userId),
+      )
+
+      for (const { userId, unreadCount } of due) {
+        const pref = prefByUser.get(userId)!
+        const message = `Bạn có ${unreadCount} thông báo chưa đọc.`
 
         await this.createNotification({
-          userId: pref.userId,
-          message: `Bạn có ${unreadCount} thông báo chưa đọc.`,
+          userId,
+          message,
           type: NotificationType.SYSTEM_NOTIFICATION,
           digestEligible: false,
         })
 
-        const online = await this.redisService.isOnline(pref.userId)
-        if (online) {
+        if (onlineByUser.get(userId)) {
           this.notificationEventsPublisher.emitToUsers(
-            [pref.userId],
+            [userId],
             SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
             {
               type: NotificationType.SYSTEM_NOTIFICATION,
-              message: `Bạn có ${unreadCount} thông báo chưa đọc.`,
+              message,
               createdAt: now.toISOString(),
             },
           )
         }
 
         await this.preferenceRepo.updateDigest(
-          pref.userId,
+          userId,
           {
-            ...normalized.digest,
+            ...pref.digest,
             lastDigestAt: now.toISOString(),
           },
-          normalized.version + 1,
+          pref.version + 1,
         )
       }
     } finally {

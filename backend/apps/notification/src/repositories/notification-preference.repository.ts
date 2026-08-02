@@ -51,8 +51,28 @@ export class NotificationPreferenceRepository {
     })
   }
 
+  /**
+   * @deprecated Tải TOÀN BỘ preference — chi phí O(số user) mỗi lượt quét.
+   * Dùng {@link findManyByUserIds} với tập ứng viên đã lọc từ notification.
+   */
   findAllForDigestSweep() {
     return this.prisma.userNotificationPreference.findMany({
+      select: {
+        userId: true,
+        globalSettings: true,
+        overrides: true,
+        digestSettings: true,
+        version: true,
+        updatedAt: true,
+      },
+    })
+  }
+
+  // Không early-return [] khi rỗng: bên gọi đã chặn trước, và trả về union với
+  // never[] làm hỏng suy luận kiểu ở phía dùng.
+  findManyByUserIds(userIds: string[]) {
+    return this.prisma.userNotificationPreference.findMany({
+      where: { userId: { in: userIds } },
       select: {
         userId: true,
         globalSettings: true,

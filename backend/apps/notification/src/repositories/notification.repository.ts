@@ -51,6 +51,26 @@ export class NotificationRepository {
     })
   }
 
+  /**
+   * Đảo chiều câu hỏi của digest sweep: thay vì "với MỖI user, đếm số thông báo
+   * chưa đọc" (N query, O(tổng số user)), hỏi một lần "những user nào đang có
+   * thông báo chưa đọc" — chi phí gắn với lưu lượng thật, không với quy mô DB.
+   */
+  async findDigestCandidates(): Promise<
+    { userId: string; unreadCount: number }[]
+  > {
+    const rows = await this.prisma.notification.groupBy({
+      by: ['userId'],
+      where: { isRead: false, digestEligible: true },
+      _count: { _all: true },
+    })
+
+    return rows.map((row) => ({
+      userId: row.userId,
+      unreadCount: row._count._all,
+    }))
+  }
+
   markOneRead(userId: string, notificationId: string) {
     return this.prisma.notification.updateMany({
       where: {
