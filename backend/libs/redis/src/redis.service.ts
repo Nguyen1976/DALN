@@ -1,5 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common'
 // import Redis, { Redis as RedisClient, RedisOptions } from 'ioredis'
+
+/** Set chỉ mục các user đang online — phải khớp với UserStatusStore. */
+const ONLINE_USERS_KEY = 'online:users'
+
 @Injectable()
 export class RedisService {
   //   static create(options?: RedisOptions): RedisClient {
@@ -18,26 +22,90 @@ export class RedisService {
 
     if (!sockets.length) return false
 
-    let alive = 0
+    // Gộp N lệnh EXISTS vào 1 pipeline: 1 round-trip thay vì N.
+    const res: [Error | null, unknown][] = await this.redisClient
+      .pipeline(sockets.map((id) => ['exists', `socket:${id}`]))
+      .exec()
 
-    for (const socketId of sockets) {
-      const exists = await this.redisClient.exists(`socket:${socketId}`)
-      if (exists) alive++
-      else await this.redisClient.srem(userKey, socketId) // cleanup zombie
-    }
+    const dead = sockets.filter((_, i) => !res?.[i]?.[1])
+    if (dead.length) await this.redisClient.srem(userKey, ...dead)
 
-    if (alive === 0) {
-      await this.redisClient.del(userKey)
+    if (dead.length === sockets.length) {
+      await this.redisClient
+        .multi()
+        .del(userKey)
+        .srem(ONLINE_USERS_KEY, userId)
+        .exec()
       return false
     }
 
     return true
   }
 
+  /**
+   * Bản theo lô của isOnline: 2 round-trip cho N user, bất kể N lớn đến đâu.
+   * Dùng cho các luồng quét nhiều user (digest sweep) thay vì gọi isOnline()
+   * trong vòng lặp — vốn tốn 1 + K round-trip cho MỖI user.
+   */
+  async isOnlineBatch(userIds: string[]): Promise<Map<string, boolean>> {
+    const result = new Map<string, boolean>(userIds.map((id) => [id, false]))
+    if (!userIds.length) return result
+
+    const sets: [Error | null, string[]][] = await this.redisClient
+      .pipeline(userIds.map((id) => ['smembers', this.getKey(id)]))
+      .exec()
+
+    const probes: { userId: string; socketId: string }[] = []
+    userIds.forEach((userId, i) => {
+      for (const socketId of sets?.[i]?.[1] ?? []) {
+        probes.push({ userId, socketId })
+      }
+    })
+    if (!probes.length) return result
+
+    const alive: [Error | null, unknown][] = await this.redisClient
+      .pipeline(probes.map((p) => ['exists', `socket:${p.socketId}`]))
+      .exec()
+
+    probes.forEach((p, i) => {
+      if (alive?.[i]?.[1]) result.set(p.userId, true)
+    })
+
+    return result
+  }
+
   async hincrby(redisKey: string, field: string, increment: number) {
     await this.redisClient.hincrby(redisKey, field, increment)
   }
 
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    if (!members.length) return 0
+    return await this.redisClient.sadd(key, ...members)
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    if (!members.length) return 0
+    return await this.redisClient.srem(key, ...members)
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    return await this.redisClient.smembers(key)
+  }
+
+  /**
+   * Lấy tối đa `count` phần tử ra khỏi set, nguyên tử.
+   * Dùng làm hàng đợi việc: nhiều bản sao service cùng pop sẽ không xử lý trùng.
+   */
+  async spop(key: string, count: number): Promise<string[]> {
+    const res = await this.redisClient.spop(key, count)
+    if (!res) return []
+    return Array.isArray(res) ? res : [res]
+  }
+
+  /**
+   * @deprecated KEYS duyệt toàn bộ keyspace và CHẶN Redis (đơn luồng) —
+   * đo được 45,7ms ở 1 triệu key. Dùng Set chỉ mục + {@link spop} thay thế.
+   */
   async keys(pattern: string): Promise<string[]> {
     return await this.redisClient.keys(pattern)
   }
