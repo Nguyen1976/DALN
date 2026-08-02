@@ -6,6 +6,7 @@ import {
   UserInterestsUpdatedPayload,
   UserUpdatedPayload,
 } from 'libs/constant/rmq/payload'
+import { RecommendationDirtyService } from './recommendation-dirty.service'
 
 @Injectable()
 export class UserSnapshotSyncService {
@@ -14,10 +15,12 @@ export class UserSnapshotSyncService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly embeddingNotify: EmbeddingNotifyService,
+    private readonly dirty: RecommendationDirtyService,
   ) {}
 
   async syncUserCreated(payload: UserCreatedPayload): Promise<void> {
     const now = new Date()
+    await this.dirty.markDirty(payload.id)
 
     await this.prisma.userSnapshot.upsert({
       where: { userId: payload.id },
@@ -59,6 +62,7 @@ export class UserSnapshotSyncService {
 
   async syncUserUpdated(payload: UserUpdatedPayload): Promise<void> {
     const now = new Date()
+    await this.dirty.markDirty(payload.userId)
 
     const updates: Record<string, any> = {
       syncedAt: now,
@@ -124,6 +128,8 @@ export class UserSnapshotSyncService {
     if (!slugs.length) {
       return
     }
+
+    await this.dirty.markDirty(payload.userId)
 
     await this.prisma.userSnapshot.updateMany({
       where: { userId: payload.userId },

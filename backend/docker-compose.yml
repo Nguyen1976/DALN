@@ -241,8 +241,22 @@ services:
       PORT: 3005
       DATABASE_URL: mongodb://mongo:27017/recommendation-service?replicaSet=rs0
       USER_MONGO_URI: mongodb://mongo:27017/user-service?replicaSet=rs0
+      RECOMMENDATION_ROLE: api
     ports:
       - "3005:3005"
+
+  # Cùng image, cùng app — chỉ khác RECOMMENDATION_ROLE.
+  # Gánh toàn bộ việc nặng CPU (huấn luyện mô hình, cron gợi ý hằng ngày) để
+  # tiến trình `recommendation` ở trên luôn rảnh tay phục vụ HTTP.
+  recommendation-worker:
+    <<: *app-common
+    container_name: daln-recommendation-worker
+    environment:
+      SERVICE: recommendation
+      PORT: 3105
+      DATABASE_URL: mongodb://mongo:27017/recommendation-service?replicaSet=rs0
+      USER_MONGO_URI: mongodb://mongo:27017/user-service?replicaSet=rs0
+      RECOMMENDATION_ROLE: worker
 
   # Saga orchestrator: RMQ-only (không expose HTTP), điều phối luồng accept friend.
   saga-orchestrator:

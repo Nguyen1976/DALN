@@ -1,5 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
+import { RecommendationDirtyService } from './services/recommendation-dirty.service'
 import { QdrantService } from '@app/qdrant/qdrant.service'
 import { UtilService } from '@app/util/util.service'
 import { RedisService } from '@app/redis/redis.service'
@@ -47,6 +48,8 @@ type RecommendationFeatureRow = {
 
 @Injectable()
 export class RecommendationService {
+  private readonly logger = new Logger(RecommendationService.name)
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly qdrantService: QdrantService,
@@ -58,6 +61,7 @@ export class RecommendationService {
     private readonly userSnapshotHydrate: UserSnapshotHydrateService,
     private readonly recommendationFriendship: RecommendationFriendshipService,
     private readonly friendGraph: FriendGraphService,
+    private readonly dirty: RecommendationDirtyService,
   ) {}
 
   private tokenizeBio(text: string): Set<string> {
@@ -222,7 +226,7 @@ export class RecommendationService {
         .map((r) => r.userId)
         .filter((id): id is string => typeof id === 'string')
     } catch (e) {
-      console.warn('[recommendation] cold-start interest match failed', e)
+      this.logger.warn('[recommendation] cold-start interest match failed', e)
       return []
     }
   }
@@ -253,7 +257,7 @@ export class RecommendationService {
         .map((r) => r.userId)
         .filter((id): id is string => typeof id === 'string')
     } catch (e) {
-      console.warn('[recommendation] cold-start geo ring failed', e)
+      this.logger.warn('[recommendation] cold-start geo ring failed', e)
       return []
     }
   }
@@ -347,7 +351,7 @@ export class RecommendationService {
         .map((r) => r.userId)
         .filter((id): id is string => typeof id === 'string')
     } catch (e) {
-      console.warn('[recommendation] top interest overlap failed', e)
+      this.logger.warn('[recommendation] top interest overlap failed', e)
       return []
     }
   }
@@ -702,40 +706,87 @@ export class RecommendationService {
     }
   }
 
+  /**
+   * Tính lại gợi ý cho những user CÓ THAY ĐỔI kể từ lượt trước.
+   *
+   * Trước đây hàm này `findMany` toàn bộ userSnapshot không giới hạn, rồi chạy
+   * cho từng người — mỗi người tốn 2 truy vấn Neo4j + 1 vector search Qdrant +
+   * 1 truy vấn Mongo. Đa số là vô ích vì người dùng không đổi gì so với hôm
+   * trước, và job chết giữa chừng thì lần sau phải làm lại từ đầu.
+   *
+   * Nay đọc từ hàng đợi `rcm:dirty:users` (SPOP nguyên tử): chi phí gắn với số
+   * thay đổi thật, và những user chưa pop vẫn nằm nguyên trong set nên job có
+   * thể tiếp tục đúng chỗ dở sau sự cố.
+   */
   async recommendation() {
-    console.time('Tổng thời gian cho 1000 User')
-    // 1. Lấy 1000 user (có thể thay đổi số lượng)
-    console.time('Bắt đầu lấy danh sách user từ MongoDB')
-    const users = await this.prisma.userSnapshot.findMany({
-      select: { userId: true },
-    })
-    console.timeEnd('Bắt đầu lấy danh sách user từ MongoDB')
-
-    // 2. Chia thành các lô nhỏ để giữ mức concurrency ổn định
+    const startedAt = Date.now()
     const CHUNK_SIZE = 50
-    const userChunks = _.chunk(users, CHUNK_SIZE)
+    const TAKE_PER_ROUND = 500
 
     let processed = 0
-    for (const chunk of userChunks) {
-      // Chạy song song trong mỗi lô (khoảng CHUNK_SIZE promises)
-      await Promise.all(chunk.map((u) => this.recommendationHelper(u.userId)))
-      processed += chunk.length
-      console.log(`✅ Đã xử lý xong ${processed}/${users.length} users...`)
+    let failed = 0
+
+    for (;;) {
+      const userIds = await this.dirty.take(TAKE_PER_ROUND)
+      if (!userIds.length) break
+
+      for (const chunk of _.chunk(userIds, CHUNK_SIZE)) {
+        // allSettled: một user lỗi không được làm hỏng cả lô 50 như Promise.all
+        const results = await Promise.allSettled(
+          chunk.map((userId) => this.recommendationHelper(userId)),
+        )
+
+        const retry = chunk.filter((_u, i) => results[i].status === 'rejected')
+        if (retry.length) {
+          failed += retry.length
+          await this.dirty.requeue(retry)
+        }
+        processed += chunk.length - retry.length
+      }
     }
 
-    console.timeEnd('Tổng thời gian cho 1000 User')
+    this.logger.log(
+      `Daily refresh: ${processed} user thành công, ${failed} trả lại hàng đợi, ${Date.now() - startedAt}ms`,
+    )
+  }
+
+  /**
+   * Lưới an toàn: quét toàn bộ user và đẩy vào hàng đợi dirty.
+   * Cơ chế đánh dấu theo sự kiện luôn có nguy cơ sót (mất message, service
+   * ngừng đúng lúc), nên cần một lần đối soát định kỳ. Chạy hằng tuần.
+   */
+  async enqueueFullRefresh(): Promise<number> {
+    const BATCH = 1000
+    let cursor: string | undefined
+    let total = 0
+
+    for (;;) {
+      const users = await this.prisma.userSnapshot.findMany({
+        select: { userId: true },
+        take: BATCH,
+        ...(cursor ? { skip: 1, cursor: { userId: cursor } } : {}),
+        orderBy: { userId: 'asc' },
+      })
+      if (!users.length) break
+
+      await this.dirty.markDirty(...users.map((u) => u.userId))
+      total += users.length
+      cursor = users[users.length - 1].userId
+      if (users.length < BATCH) break
+    }
+
+    this.logger.log(`Full refresh: đã đưa ${total} user vào hàng đợi`)
+    return total
   }
 
   async recommendationHelper(userId: string) {
-    console.log(`--- Bắt đầu xử lý Suggest cho User: ${userId} ---`)
-    console.time('Tổng thời gian recommendationHelper')
 
     // 1. Bạn bè từ MongoDB (cold start: có thể không có dữ liệu)
     let friendIds: string[] = []
     try {
       friendIds = await this.friendGraph.getFriendIds(userId)
     } catch (e) {
-      console.warn('[recommendation] friend list failed', e)
+      this.logger.warn('[recommendation] friend list failed', e)
     }
     friendIds = friendIds.filter((id) => id && typeof id === 'string')
 
@@ -744,7 +795,6 @@ export class RecommendationService {
 
     const qdrantUuid = await this.utilService.mongoIdToUuid(userId)
 
-    console.time('Giai đoạn xử lý song song')
     const settled = await Promise.allSettled([
       this.friendGraph.getCommonFriends(userId, 300),
       this.friendGraph.getCommonGroups(userId, 300),
@@ -754,23 +804,22 @@ export class RecommendationService {
         select: { location: true, bio: true, interests: true },
       }),
     ])
-    console.timeEnd('Giai đoạn xử lý song song')
 
     const commonFriends =
       settled[0].status === 'fulfilled' ? settled[0].value : []
     if (settled[0].status === 'rejected') {
-      console.warn('[recommendation] commonFriends failed', settled[0].reason)
+      this.logger.warn('[recommendation] commonFriends failed', settled[0].reason)
     }
 
     const commonGroups =
       settled[1].status === 'fulfilled' ? settled[1].value : []
     if (settled[1].status === 'rejected') {
-      console.warn('[recommendation] commonGroups failed', settled[1].reason)
+      this.logger.warn('[recommendation] commonGroups failed', settled[1].reason)
     }
 
     const qdrantRes = settled[2].status === 'fulfilled' ? settled[2].value : []
     if (settled[2].status === 'rejected') {
-      console.warn(
+      this.logger.warn(
         '[recommendation] qdrant recommendSimilar failed',
         settled[2].reason,
       )
@@ -779,13 +828,12 @@ export class RecommendationService {
     const currentUser =
       settled[3].status === 'fulfilled' ? settled[3].value : null
     if (settled[3].status === 'rejected') {
-      console.warn(
+      this.logger.warn(
         '[recommendation] prisma currentUser failed',
         settled[3].reason,
       )
     }
 
-    console.time('Giai đoạn 5: MongoDB GeoNear')
     const nearPoint = this.toGeoNearNearField(currentUser?.location)
     let suggestBasedOnNearby: Array<NearbyUser> = []
 
@@ -808,12 +856,10 @@ export class RecommendationService {
           ],
         })) as any
       } catch (e) {
-        console.warn('[recommendation] MongoDB GeoNear failed', e)
+        this.logger.warn('[recommendation] MongoDB GeoNear failed', e)
       }
     }
-    console.timeEnd('Giai đoạn 5: MongoDB GeoNear')
 
-    console.time('Giai đoạn 6: Build candidate union')
     const candidateIdsFromGraph = [
       ...commonFriends.map((u) => u.id),
       ...commonGroups.map((u) => u.id),
@@ -864,10 +910,8 @@ export class RecommendationService {
     )
 
     const allCandidateIds = orderedCandidateIds
-    console.timeEnd('Giai đoạn 6: Build candidate union')
 
     // Giai đoạn 6.5: Lấy bio embedding vectors từ Qdrant
-    console.time('Giai đoạn 6.5: Fetch bio vectors from Qdrant')
     const userIdsForBioVectors = [userId, ...allCandidateIds]
     const qdrantUserUuids: string[] = []
     for (const id of userIdsForBioVectors) {
@@ -889,7 +933,7 @@ export class RecommendationService {
     try {
       vectorPoints = await this.qdrantService.getVectorsBatch(qdrantUserUuids)
     } catch (e) {
-      console.warn('[recommendation] getVectorsBatch failed', e)
+      this.logger.warn('[recommendation] getVectorsBatch failed', e)
     }
     const bioVectorsByUserId = new Map<string, number[]>()
     for (const point of vectorPoints) {
@@ -898,9 +942,7 @@ export class RecommendationService {
         bioVectorsByUserId.set(mongoId, point.vector as number[])
       }
     }
-    console.timeEnd('Giai đoạn 6.5: Fetch bio vectors from Qdrant')
 
-    console.time('Giai đoạn 7: Enrich Features')
 
     // Giai đoạn 7a: Fetch từ Redis cache (batch)
     const cachedFeatures =
@@ -955,14 +997,13 @@ export class RecommendationService {
     }
 
     // Giai đoạn 7d: Fetch neighbors (friends) của current user + candidates từ MongoDB
-    console.time('Giai đoạn 7d: Fetch neighbors from MongoDB')
     const userIdsForNeighbors = [userId, ...allCandidateIds]
     let neighborsByUserId = new Map<string, Set<string>>()
     try {
       neighborsByUserId =
         await this.friendGraph.getNeighborsBatch(userIdsForNeighbors)
     } catch (e) {
-      console.warn('[recommendation] neighbors batch failed', e)
+      this.logger.warn('[recommendation] neighbors batch failed', e)
     }
 
     const degreesByUserId = new Map<string, number>()
@@ -974,15 +1015,13 @@ export class RecommendationService {
       degreesByUserId.set(userId, 0)
     }
 
-    console.timeEnd('Giai đoạn 7d: Fetch neighbors from MongoDB')
 
     // Giai đoạn 7d.5: Fetch groups của current user + candidates từ MongoDB
-    console.time('Giai đoạn 7d.5: Fetch groups from MongoDB')
     let groupsByUserId = new Map<string, Set<string>>()
     try {
       groupsByUserId = await this.friendGraph.getGroupsBatch(userIdsForNeighbors)
     } catch (e) {
-      console.warn('[recommendation] groups batch failed', e)
+      this.logger.warn('[recommendation] groups batch failed', e)
     }
     for (const id of userIdsForNeighbors) {
       if (!groupsByUserId.has(id)) {
@@ -990,9 +1029,7 @@ export class RecommendationService {
       }
     }
 
-    console.timeEnd('Giai đoạn 7d.5: Fetch groups from MongoDB')
 
-    console.timeEnd('Giai đoạn 7: Enrich Features')
 
     const profileByCandidateId = new Map(
       (candidateProfiles as UserProfileRow[]).map((u) => [u.userId, u]),
@@ -1012,14 +1049,16 @@ export class RecommendationService {
     )
     const currentUserInterests = currentUser?.interests ?? []
 
-    console.log({
-      commonFriends: commonFriends[0],
-      commonGroups: commonGroups[0],
-      suggestBasedOnInterest: qdrantRes[0],
-      suggestBasedOnNearby: suggestBasedOnNearby[0],
-      coldStart,
-      candidatePool: allCandidateIds.length,
-    })
+    this.logger.debug(
+      JSON.stringify({
+        commonFriends: commonFriends[0],
+        commonGroups: commonGroups[0],
+        suggestBasedOnInterest: qdrantRes[0],
+        suggestBasedOnNearby: suggestBasedOnNearby[0],
+        coldStart,
+        candidatePool: allCandidateIds.length,
+      }),
+    )
 
     const currentUserNeighbors = neighborsByUserId.get(userId) ?? new Set()
     const currentUserBioVector = bioVectorsByUserId.get(userId) ?? null
@@ -1253,7 +1292,6 @@ export class RecommendationService {
       },
     })
 
-    console.timeEnd('Tổng thời gian recommendationHelper')
     return topKCandidates
   }
 }

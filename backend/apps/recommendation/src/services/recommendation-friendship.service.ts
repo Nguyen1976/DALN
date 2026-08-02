@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Prisma } from '../../src/generated'
 import { PrismaService } from '../../prisma/prisma.service'
+import { RecommendationDirtyService } from './recommendation-dirty.service'
 
 type CandidateJson = { candidateId?: string; [key: string]: unknown }
 
@@ -12,7 +13,10 @@ function asPrismaJson(value: CandidateJson[]): Prisma.InputJsonValue {
 export class RecommendationFriendshipService {
   private readonly logger = new Logger(RecommendationFriendshipService.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly dirty: RecommendationDirtyService,
+  ) {}
 
   /**
    * Remove `friendUserId` from stored recommendation list for `userId`.
@@ -64,6 +68,9 @@ export class RecommendationFriendshipService {
     userAId: string,
     userBId: string,
   ): Promise<void> {
+    // Đồ thị bạn bè của cả hai vừa đổi -> gợi ý cần tính lại ở lượt cron sau.
+    await this.dirty.markDirty(userAId, userBId)
+
     await Promise.all([
       this.removeCandidateFromStoredRecommendations(userAId, userBId),
       this.removeCandidateFromStoredRecommendations(userBId, userAId),

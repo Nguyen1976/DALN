@@ -1,11 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { FriendGraphService } from './friend-graph.service'
+import { RecommendationDirtyService } from './recommendation-dirty.service'
 
 @Injectable()
 export class RecommendationGroupMembershipService {
   private readonly logger = new Logger(RecommendationGroupMembershipService.name)
 
-  constructor(private readonly friendGraph: FriendGraphService) {}
+  constructor(
+    private readonly friendGraph: FriendGraphService,
+    private readonly dirty: RecommendationDirtyService,
+  ) {}
 
   async onUserJoinedGroup(payload: {
     userId: string
@@ -15,6 +19,7 @@ export class RecommendationGroupMembershipService {
     createdAt?: string
   }): Promise<void> {
     const conversationId = payload.conversationId ?? payload.groupId
+    await this.dirty.markDirty(payload.userId)
     try {
       await this.friendGraph.upsertGroupMembership(
         payload.userId,
@@ -33,6 +38,7 @@ export class RecommendationGroupMembershipService {
     leftAt?: string
   }): Promise<void> {
     const conversationId = payload.conversationId ?? payload.groupId
+    await this.dirty.markDirty(payload.userId)
     try {
       await this.friendGraph.removeGroupMembership(payload.userId, conversationId)
     } catch (e) {
