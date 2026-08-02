@@ -5,6 +5,10 @@ import {
   ConversationMemberRepository,
   ConversationRepository,
 } from '../../repositories'
+import {
+  DIRTY_BATCH_SIZE,
+  DIRTY_CONVERSATIONS_KEY,
+} from './unread.constants'
 
 @Injectable()
 export class UnreadCron {
@@ -18,13 +22,18 @@ export class UnreadCron {
 
   @Cron(CronExpression.EVERY_5_SECONDS)
   async handleCron() {
-    const keys = await this.redisService.keys('unread_count:*')
-    if (keys.length === 0) return
+    // SPOP nguyên tử: nhiều bản sao service chạy song song sẽ không xử lý trùng
+    // cùng một conversation (điều mà SMEMBERS + DEL sau đó không đảm bảo được).
+    const conversationIds = await this.redisService.spop(
+      DIRTY_CONVERSATIONS_KEY,
+      DIRTY_BATCH_SIZE,
+    )
+    if (conversationIds.length === 0) return
 
-    for (const key of keys) {
-      const conversationId = key.split(':')[1]
+    for (const conversationId of conversationIds) {
       if (!conversationId) continue
 
+      const key = `unread_count:${conversationId}`
       const lastMsgKey = `last_message:${conversationId}`
 
       try {
@@ -67,14 +76,18 @@ export class UnreadCron {
         this.logger.debug(
           `[Batch Update] Synced conversation ${conversationId}`,
         )
+
+        // CHỈ xoá khi đã đồng bộ thành công. Trước đây hai lệnh này nằm trong
+        // `finally`, nên Mongo lỗi một nhịp là số tin chưa đọc bốc hơi luôn.
+        await this.redisService.del(key)
+        await this.redisService.del(lastMsgKey)
       } catch (error) {
         this.logger.error(
           `[Batch Update] Failed to sync conversation ${conversationId}`,
           error instanceof Error ? error.stack : String(error),
         )
-      } finally {
-        await this.redisService.del(key)
-        await this.redisService.del(lastMsgKey)
+        // Trả lại hàng đợi để lượt sau thử lại; dữ liệu Redis giữ nguyên.
+        await this.redisService.sadd(DIRTY_CONVERSATIONS_KEY, conversationId)
       }
     }
   }

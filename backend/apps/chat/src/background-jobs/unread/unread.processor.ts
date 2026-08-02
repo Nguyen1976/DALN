@@ -1,6 +1,7 @@
 import { RedisService } from '@app/redis'
 import { Processor, WorkerHost } from '@nestjs/bullmq'
 import { Job } from 'bullmq'
+import { DIRTY_CONVERSATIONS_KEY } from './unread.constants'
 
 export interface UnreadSyncJobPayload {
   conversationId: string
@@ -36,5 +37,9 @@ export class UnreadProcessor extends WorkerHost {
     })
 
     await this.redisService.set(lastMessageKey, payloadToSave)
+
+    // Đánh dấu "bẩn" SAU khi dữ liệu đã ghi xong, để cron pop ra là chắc chắn
+    // đọc được đầy đủ.
+    await this.redisService.sadd(DIRTY_CONVERSATIONS_KEY, conversationId)
   }
 }
