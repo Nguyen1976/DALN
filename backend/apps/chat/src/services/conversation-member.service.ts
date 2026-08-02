@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import {
   ConversationRepository,
   ConversationMemberRepository,
@@ -28,6 +28,8 @@ export interface LeaveConversationRequest {
 
 @Injectable()
 export class ConversationMemberService {
+  private readonly logger = new Logger(ConversationMemberService.name)
+
   constructor(
     private readonly conversationRepo: ConversationRepository,
     private readonly memberRepo: ConversationMemberRepository,
@@ -122,7 +124,7 @@ export class ConversationMemberService {
         })
       }
     } catch (e) {
-      console.warn('[chat-service] publishUserJoinedGroup failed', e)
+      this.logger.warn('[chat-service] publishUserJoinedGroup failed', e)
     }
 
     return {
@@ -214,7 +216,7 @@ export class ConversationMemberService {
         leftAt: new Date().toISOString(),
       })
     } catch (e) {
-      console.warn('[chat-service] publishUserLeftGroup failed', e)
+      this.logger.warn('[chat-service] publishUserLeftGroup failed', e)
     }
 
     return {
@@ -293,7 +295,7 @@ export class ConversationMemberService {
         leftAt: new Date().toISOString(),
       })
     } catch (e) {
-      console.warn('[chat-service] publishUserLeftGroup failed', e)
+      this.logger.warn('[chat-service] publishUserLeftGroup failed', e)
     }
 
     return {
@@ -305,7 +307,7 @@ export class ConversationMemberService {
     try {
       fn()
     } catch (error) {
-      console.error('[chat-service] publish event failed', error)
+      this.logger.error('[chat-service] publish event failed', error)
     }
   }
 }

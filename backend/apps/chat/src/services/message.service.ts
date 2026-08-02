@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { InjectQueue } from '@nestjs/bullmq'
 import { Queue } from 'bullmq'
 import type {
@@ -52,6 +52,8 @@ type OutboundMessage = {
 
 @Injectable()
 export class MessageService {
+  private readonly logger = new Logger(MessageService.name)
+
   constructor(
     private readonly memberRepo: ConversationMemberRepository,
     private readonly messageRepo: MessageRepository,
@@ -61,7 +63,6 @@ export class MessageService {
   ) {}
 
   async sendMessage(data: MessageSendPayload) {
-    console.time('fetch-members')
     const conversationMembers = await this.memberRepo.findByConversationId(
       data.conversationId,
     )
@@ -70,7 +71,6 @@ export class MessageService {
     if (!memberIds.includes(data.senderId)) {
       ChatErrors.senderNotMember()
     }
-    console.timeEnd('fetch-members')
 
     const type = this.messageMediaService.normalizeMessageType(
       data.type || 'TEXT',
@@ -122,7 +122,6 @@ export class MessageService {
       medias.splice(0, medias.length, ...normalizedMedias)
     }
 
-    console.time('save-message')
     const message: OutboundMessage = await this.messageRepo.create({
       conversationId: data.conversationId,
       senderId: data.senderId,
@@ -131,7 +130,6 @@ export class MessageService {
       replyToMessageId: data.replyToMessageId,
       medias,
     })
-    console.timeEnd('save-message')
 
     if (!message) {
       ChatErrors.invalidMessagePayload()
@@ -489,7 +487,7 @@ export class MessageService {
     try {
       fn()
     } catch (error) {
-      console.error('[chat-service] publish event failed', error)
+      this.logger.error('[chat-service] publish event failed', error)
     }
   }
 
@@ -518,7 +516,7 @@ export class MessageService {
         { removeOnComplete: true, removeOnFail: true },
       )
       .catch((error) => {
-        console.error('[chat-service] unreadQueue.add failed', error)
+        this.logger.error('[chat-service] unreadQueue.add failed', error)
       })
   }
 }
