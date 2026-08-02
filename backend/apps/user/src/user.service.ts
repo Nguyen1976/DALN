@@ -124,7 +124,11 @@ export class UserService {
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // Endpoint này là liên dịch vụ (@InternalOnly), không có phiên JWT.
+          'x-internal-token': process.env.INTERNAL_API_TOKEN ?? '',
+        },
         body: JSON.stringify({
           users: [{ id: userId, bio: bio || '', age: 0 }],
         }),

@@ -1,16 +1,29 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { Reflector } from '@nestjs/core'
 import { Request, Response } from 'express'
 import { TokenExpiredError, JsonWebTokenError } from 'jsonwebtoken'
+import { timingSafeEqual } from 'crypto'
+
+/** So sánh chuỗi theo thời gian hằng định để không rò rỉ độ dài/nội dung token. */
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const bufA = Buffer.from(a)
+  const bufB = Buffer.from(b)
+  if (bufA.length !== bufB.length) return false
+  return timingSafeEqual(bufA, bufB)
+}
 
 @Injectable()
 export class AuthGuard implements CanActivate {
+  private readonly logger = new Logger(AuthGuard.name)
+
   constructor(
     private jwtService: JwtService,
     private reflector: Reflector,
@@ -32,6 +45,15 @@ export class AuthGuard implements CanActivate {
         code: 'REQUEST_CONTEXT_INVALID',
       })
     }
+
+    // Kiểm tra TRƯỚC `without-login` để @InternalOnly() luôn thắng, kể cả khi
+    // controller cha có @WithoutLogin().
+    const internalOnly = this.reflector.getAllAndOverride<boolean>(
+      'internal-only',
+      [context.getHandler(), context.getClass()],
+    )
+
+    if (internalOnly) return this.assertInternalCaller(request)
 
     const withoutLogin = this.reflector.getAllAndOverride<boolean>(
       'without-login',
@@ -109,6 +131,36 @@ export class AuthGuard implements CanActivate {
         code: 'AUTH_FAILED',
       })
     }
+  }
+
+  /**
+   * Xác thực lời gọi nội bộ bằng shared secret. Fail-closed: thiếu biến môi
+   * trường thì chặn hết, tránh trường hợp cấu hình sót lại mở toang endpoint.
+   */
+  private assertInternalCaller(request: Request): boolean {
+    const expected = process.env.INTERNAL_API_TOKEN?.trim()
+
+    if (!expected) {
+      this.logger.error(
+        'INTERNAL_API_TOKEN chưa được cấu hình — từ chối mọi lời gọi nội bộ',
+      )
+      throw new ForbiddenException({
+        message: 'FORBIDDEN',
+        code: 'INTERNAL_API_NOT_CONFIGURED',
+      })
+    }
+
+    const provided = request.headers['x-internal-token']
+    const token = Array.isArray(provided) ? provided[0] : provided
+
+    if (!token || !timingSafeEqualStr(token, expected)) {
+      throw new ForbiddenException({
+        message: 'FORBIDDEN',
+        code: 'INTERNAL_TOKEN_INVALID',
+      })
+    }
+
+    return true
   }
 
   private getCookieValue(
