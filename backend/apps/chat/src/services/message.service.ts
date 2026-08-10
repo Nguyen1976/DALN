@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { InjectQueue } from '@nestjs/bullmq'
-import { Queue } from 'bullmq'
+import { RedisService } from '@app/redis'
+import { DIRTY_CONVERSATIONS_KEY } from '../background-jobs/unread/unread.constants'
 import type {
   MessageSendPayload,
   UpdateMessageReadPayload,
@@ -59,7 +59,7 @@ export class MessageService {
     private readonly messageRepo: MessageRepository,
     private readonly eventsPublisher: ChatEventsPublisher,
     private readonly messageMediaService: MessageMediaService,
-    @InjectQueue('unreadQueue') private readonly unreadQueue: Queue,
+    private readonly redisService: RedisService,
   ) {}
 
   async sendMessage(data: MessageSendPayload) {
@@ -491,6 +491,19 @@ export class MessageService {
     }
   }
 
+  /**
+   * Tích luỹ số tin chưa đọc + tin nhắn cuối vào Redis; cron sẽ gom xuống Mongo.
+   *
+   * Trước đây bước này đi qua một job BullMQ, nhưng worker của nó cũng chỉ ghi
+   * đúng ba lệnh Redis dưới đây — mà vòng đời một job BullMQ tốn khoảng 8–10
+   * lệnh Redis cho việc sổ sách (wait list, hash job data, event stream,
+   * BRPOPLPUSH, cập nhật trạng thái, removeOnComplete). Ở peak 1000 msg/s đó là
+   * chi phí lớn hơn nhiều lần công việc thật.
+   *
+   * Hàng đợi cũng không mang lại độ bền ở đây: nó nằm trên CHÍNH Redis này, nên
+   * Redis chết thì cả hai cùng chết. Ghi thẳng còn bền hơn — dữ liệu vào ngay
+   * thay vì nằm chờ worker nhặt.
+   */
   private enqueueConversationSyncJob(params: {
     conversationId: string
     senderId: string
@@ -499,24 +512,29 @@ export class MessageService {
   }) {
     const { conversationId, senderId, message, senderMember } = params
 
-    void this.unreadQueue
-      .add(
-        'increase-unread',
-        {
-          conversationId,
-          senderId,
-          lastMessageId: message.id,
-          lastMessageAt: message.createdAt,
-          lastMessageText: MessageMapper.previewText(message),
-          lastMessageSenderId: senderId,
-          lastMessageSenderName:
-            senderMember.fullName || senderMember.username || senderId,
-          lastMessageSenderAvatar: senderMember.avatar || null,
-        },
-        { removeOnComplete: true, removeOnFail: true },
-      )
+    const lastMessage = JSON.stringify({
+      senderId,
+      lastMessageId: message.id,
+      lastMessageAt: message.createdAt
+        ? new Date(message.createdAt).toISOString()
+        : undefined,
+      lastMessageText: MessageMapper.previewText(message),
+      lastMessageSenderId: senderId,
+      lastMessageSenderName:
+        senderMember.fullName || senderMember.username || senderId,
+      lastMessageSenderAvatar: senderMember.avatar || null,
+    })
+
+    // Một round-trip cho cả ba lệnh. SADD đặt CUỐI để khi cron pop được id ra
+    // thì dữ liệu đã nằm sẵn trong Redis.
+    void this.redisService
+      .pipeline([
+        ['hincrby', `unread_count:${conversationId}`, senderId, 1],
+        ['set', `last_message:${conversationId}`, lastMessage],
+        ['sadd', DIRTY_CONVERSATIONS_KEY, conversationId],
+      ])
       .catch((error) => {
-        this.logger.error('[chat-service] unreadQueue.add failed', error)
+        this.logger.error('[chat-service] unread pipeline failed', error)
       })
   }
 }

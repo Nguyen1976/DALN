@@ -118,8 +118,30 @@ export class RedisService {
     await this.redisClient.del(key)
   }
 
+  /** Xoá nhiều key trong một lệnh thay vì N lần round-trip. */
+  async delMany(keys: string[]): Promise<void> {
+    if (!keys.length) return
+    await this.redisClient.del(...keys)
+  }
+
   async set(key: string, value: string): Promise<void> {
     await this.redisClient.set(key, value)
+  }
+
+  /** SET kèm TTL (giây). */
+  async setEx(key: string, value: string, ttlSeconds: number): Promise<void> {
+    await this.redisClient.set(key, value, 'EX', ttlSeconds)
+  }
+
+  /**
+   * Gom nhiều lệnh vào một round-trip. Trả về mảng [error, result] theo thứ tự
+   * lệnh, giống ioredis.
+   */
+  async pipeline(
+    commands: (string | number)[][],
+  ): Promise<[Error | null, unknown][]> {
+    if (!commands.length) return []
+    return await this.redisClient.pipeline(commands).exec()
   }
 
   private getRegistrationOtpKey(email: string): string {

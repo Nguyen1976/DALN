@@ -10,3 +10,10 @@ export const DIRTY_CONVERSATIONS_KEY = 'dirty:conversations'
 
 /** Số conversation xử lý tối đa mỗi lượt cron, tránh một lượt chạy quá dài. */
 export const DIRTY_BATCH_SIZE = 500
+
+/**
+ * Số conversation flush đồng thời trong một lô.
+ * Đủ lớn để 500 conversation xong trong cửa sổ 5 giây, đủ nhỏ để không dội
+ * quá tải connection pool của Mongo.
+ */
+export const FLUSH_CONCURRENCY = 25

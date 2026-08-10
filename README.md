@@ -106,7 +106,7 @@ cd backend
 docker compose up -d
 ```
 
-Services will be available through Kong at `http://localhost:8000`.
+Services will be available through Kong at `http://localhost:8080`.
 
 ### Frontend (local)
 

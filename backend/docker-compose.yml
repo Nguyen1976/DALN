@@ -110,7 +110,9 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      # 6380 trên host để không đụng Redis của dự án khác đang giữ 6379.
+      # Trong Docker network các service vẫn nối qua `redis:6379` như cũ.
+      - "6380:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -171,7 +173,9 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
     ports:
-      - "8000:8000" # proxy (client gọi qua đây)
+      # 8080 trên host để không đụng dự án khác đang giữ 8000.
+      # Bên trong container Kong vẫn nghe 8000 như cấu hình mặc định.
+      - "8080:8000" # proxy (client gọi qua đây -> VITE_API_ROOT)
       - "8001:8001" # admin API
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
@@ -201,6 +205,26 @@ services:
       DATABASE_URL: mongodb://mongo:27017/user-service?replicaSet=rs0
     ports:
       - "3002:3002"
+
+  # Consumer thứ hai của chat_queue_send_message.
+  # RabbitMQ chia đều message giữa các consumer (competing consumers) nên đây
+  # là cách mở rộng thông lượng ghi tin nhắn theo chiều ngang. Không publish
+  # cổng HTTP: Kong chỉ định tuyến tới `chat`, container này chuyên tiêu thụ RMQ.
+  chat-2:
+    <<: *app-common
+    container_name: daln-chat-2
+    environment:
+      SERVICE: chat
+      PORT: 3013
+      DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
+
+  chat-3:
+    <<: *app-common
+    container_name: daln-chat-3
+    environment:
+      SERVICE: chat
+      PORT: 3023
+      DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
 
   chat:
     <<: *app-common

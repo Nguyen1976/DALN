@@ -1,16 +1,69 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { Member } from '../http/chat-http.dto'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { conversationType } from 'apps/chat/src/generated'
+import { RedisService } from '@app/redis'
+
+type CachedMember = {
+  userId: string
+  role: string | null
+  username: string | null
+  fullName: string | null
+  avatar: string | null
+  joinedAt: string | null
+}
+
+/** Danh sách thành viên của một cuộc trò chuyện. */
+const membersKey = (conversationId: string) => `conv:members:${conversationId}`
+
+/**
+ * TTL an toàn. Mọi thay đổi thành viên đều invalidate tường minh, TTL chỉ là
+ * lưới đỡ cho trường hợp có đường ghi nào đó bị bỏ sót.
+ */
+const MEMBERS_TTL_SECONDS = 300
 
 @Injectable()
 export class ConversationMemberRepository {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ConversationMemberRepository.name)
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    private readonly redisService: RedisService,
+  ) {}
 
   private participantRoleBackfilled = false
   private unreadCountBackfilled = false
   private readonly activeMemberFilter = {
     isActive: true,
+  }
+
+  /** Xoá cache thành viên của một hoặc nhiều cuộc trò chuyện. */
+  async invalidateMembersCache(...conversationIds: string[]): Promise<void> {
+    const ids = conversationIds.filter(Boolean)
+    if (!ids.length) return
+    try {
+      await this.redisService.delMany(ids.map(membersKey))
+    } catch (error) {
+      // Cache hỏng không được làm hỏng nghiệp vụ; TTL sẽ tự dọn.
+      this.logger.warn(
+        `invalidateMembersCache thất bại: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+  }
+
+  /**
+   * Xoá cache mọi cuộc trò chuyện mà user tham gia.
+   * Chỉ dùng khi hồ sơ user đổi (avatar/fullName được phi chuẩn hoá vào
+   * conversationMember) — thao tác hiếm nên một query tra cứu là chấp nhận được.
+   */
+  private async invalidateMembersCacheByUserId(userId: string): Promise<void> {
+    const rows = await this.prisma.conversationMember.findMany({
+      where: { userId },
+      select: { conversationId: true },
+    })
+    await this.invalidateMembersCache(...rows.map((r) => r.conversationId))
   }
 
   private async forceBackfillUnreadCount() {
@@ -109,7 +162,7 @@ export class ConversationMemberRepository {
     createrId: string,
     type: conversationType,
   ) {
-    return await this.prisma.conversationMember.createMany({
+    const result = await this.prisma.conversationMember.createMany({
       data: members.map((member: Member) => ({
         ...member,
         conversationId,
@@ -124,13 +177,41 @@ export class ConversationMemberRepository {
         lastMessageAt: new Date(),
       })),
     })
+
+    await this.invalidateMembersCache(conversationId)
+    return result
   }
 
+  /**
+   * Danh sách thành viên — có cache Redis.
+   *
+   * Đây là điểm nóng nhất của hệ thống: sendMessage() gọi nó cho MỌI tin nhắn
+   * để kiểm tra người gửi có trong nhóm và lấy thông tin hiển thị. Ở peak
+   * 1000 msg/s là 1000 read Mongo/giây, trong khi thành phần nhóm gần như
+   * không đổi. Cache cắt gần trọn lượng đọc đó.
+   */
   async findByConversationId(conversationId: string) {
-    // await this.ensureParticipantRoleNormalized()
-    // await this.ensureUnreadCountInitialized()
+    const key = membersKey(conversationId)
 
-    return await this.withRoleRetry(() =>
+    try {
+      const cached = await this.redisService.get(key)
+      if (cached) {
+        const rows = JSON.parse(cached) as CachedMember[]
+        return rows.map((row) => ({
+          ...row,
+          joinedAt: row.joinedAt ? new Date(row.joinedAt) : null,
+        }))
+      }
+    } catch (error) {
+      // Redis lỗi hoặc JSON hỏng -> rơi xuống đọc Mongo, không ném ra ngoài.
+      this.logger.warn(
+        `Đọc cache thành viên thất bại (${conversationId}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+
+    const members = await this.withRoleRetry(() =>
       this.prisma.conversationMember.findMany({
         where: {
           conversationId,
@@ -146,6 +227,18 @@ export class ConversationMemberRepository {
         },
       }),
     )
+
+    try {
+      await this.redisService.setEx(
+        key,
+        JSON.stringify(members),
+        MEMBERS_TTL_SECONDS,
+      )
+    } catch {
+      /* ghi cache thất bại thì bỏ qua, lần sau thử lại */
+    }
+
+    return members
   }
 
   async updateLastMessageAt(conversationId: string, lastMessageAt: Date) {
@@ -155,23 +248,6 @@ export class ConversationMemberRepository {
       },
       data: {
         lastMessageAt: lastMessageAt,
-      },
-    })
-  }
-
-  async increaseUnreadForOthers(conversationId: string, senderId: string) {
-    return await this.prisma.conversationMember.updateMany({
-      where: {
-        conversationId,
-        userId: {
-          not: senderId,
-        },
-        ...this.activeMemberFilter,
-      },
-      data: {
-        unreadCount: {
-          increment: 1,
-        },
       },
     })
   }
@@ -292,6 +368,7 @@ export class ConversationMemberRepository {
       changedCount += 1
     }
 
+    await this.invalidateMembersCache(conversationId)
     return changedCount
   }
 
@@ -347,7 +424,7 @@ export class ConversationMemberRepository {
       fullName?: string
     },
   ) {
-    return await this.prisma.conversationMember.updateMany({
+    const result = await this.prisma.conversationMember.updateMany({
       where: {
         userId,
       },
@@ -356,6 +433,11 @@ export class ConversationMemberRepository {
         ...(data.fullName !== undefined ? { fullName: data.fullName } : {}),
       },
     })
+
+    // avatar/fullName nằm trong bản cache -> phải dọn mọi cuộc trò chuyện của
+    // user này. Đổi hồ sơ là thao tác hiếm nên một query tra cứu là xứng đáng.
+    await this.invalidateMembersCacheByUserId(userId)
+    return result
   }
 
   async removeMember(conversationId: string, userId: string) {
@@ -383,6 +465,7 @@ export class ConversationMemberRepository {
       },
     })
 
+    await this.invalidateMembersCache(conversationId)
     return true
   }
 
@@ -400,7 +483,7 @@ export class ConversationMemberRepository {
   // }
 
   async promoteToAdmin(conversationId: string, userId: string) {
-    return await this.prisma.conversationMember.updateMany({
+    const result = await this.prisma.conversationMember.updateMany({
       where: {
         conversationId,
         userId,
@@ -410,5 +493,8 @@ export class ConversationMemberRepository {
         role: 'ADMIN',
       },
     })
+
+    await this.invalidateMembersCache(conversationId)
+    return result
   }
 }

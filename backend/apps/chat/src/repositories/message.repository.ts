@@ -75,14 +75,24 @@ export class MessageRepository {
             }
           : undefined,
       },
-      // Trả về luôn relations, không cần gọi findUnique thêm lần nữa!
+      // Chỉ include quan hệ khi tin nhắn THỰC SỰ có quan hệ đó. Prisma bắn
+      // một truy vấn riêng cho mỗi relation trong `include` — profile Mongo
+      // cho thấy 341 lệnh `messageMedia` cho 340 tin nhắn TEXT thuần, tức mỗi
+      // tin nhắn văn bản đang trả tiền cho một truy vấn luôn rỗng.
       include: {
-        medias: { orderBy: { sortOrder: 'asc' } },
-        poll: true,
+        ...(data.medias?.length
+          ? { medias: { orderBy: { sortOrder: 'asc' as const } } }
+          : {}),
+        ...(data.pollId ? { poll: true as const } : {}),
       },
     })
 
-    return created
+    return {
+      ...created,
+      // Giữ nguyên hình dạng trả về để bên gọi không phải đổi.
+      medias: (created as { medias?: unknown[] }).medias ?? [],
+      poll: (created as { poll?: unknown }).poll ?? null,
+    }
   }
 
   async findById(id: string, conversationId: string) {

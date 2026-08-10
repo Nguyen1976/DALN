@@ -1,10 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { conversationType, Prisma } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
+import { RedisService } from '@app/redis'
 
 @Injectable()
 export class ConversationRepository {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    private readonly redisService: RedisService,
+  ) {}
 
   private updatedAtBackfilled = false
   private participantRoleBackfilled = false
@@ -406,6 +410,9 @@ export class ConversationRepository {
         where: { id: conversationId },
       })
     })
+
+    // Cuộc trò chuyện đã biến mất -> dọn cache thành viên kèm theo.
+    await this.redisService.delMany([`conv:members:${conversationId}`])
   }
 
   // async searchByKeyword(userId: string, keyword: string) {
