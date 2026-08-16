@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { messageType } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
+import { MessageBatchWriter } from '../services/message-batch-writer.service'
 
 type MediaInput = {
   mediaType: 'IMAGE' | 'VIDEO' | 'FILE'
@@ -18,7 +19,10 @@ type MediaInput = {
 
 @Injectable()
 export class MessageRepository {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    private readonly batchWriter: MessageBatchWriter,
+  ) {}
 
   private readonly defaultMessageInclude = {
     senderMember: {
@@ -46,6 +50,20 @@ export class MessageRepository {
     pollId?: string | null
     medias?: MediaInput[]
   }) {
+    // Đường nóng: tin nhắn thuần văn bản, không media, không poll — chiếm đại
+    // đa số lưu lượng. Gom lô qua createMany thay vì mỗi tin một create().
+    // Tin có media/poll cần nested write + quan hệ nên giữ nguyên đường cũ;
+    // chúng hiếm nên không ảnh hưởng thông lượng.
+    if (!data.medias?.length && !data.pollId) {
+      return await this.batchWriter.enqueue({
+        conversationId: data.conversationId,
+        senderId: data.senderId,
+        type: data.type,
+        content: data.content,
+        replyToMessageId: data.replyToMessageId,
+      })
+    }
+
     // Ghi dữ liệu & trả về trong 1 nhịp duy nhất (nested writes)
     const created = await this.prisma.message.create({
       data: {

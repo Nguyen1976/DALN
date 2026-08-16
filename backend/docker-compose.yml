@@ -206,26 +206,6 @@ services:
     ports:
       - "3002:3002"
 
-  # Consumer thứ hai của chat_queue_send_message.
-  # RabbitMQ chia đều message giữa các consumer (competing consumers) nên đây
-  # là cách mở rộng thông lượng ghi tin nhắn theo chiều ngang. Không publish
-  # cổng HTTP: Kong chỉ định tuyến tới `chat`, container này chuyên tiêu thụ RMQ.
-  chat-2:
-    <<: *app-common
-    container_name: daln-chat-2
-    environment:
-      SERVICE: chat
-      PORT: 3013
-      DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
-
-  chat-3:
-    <<: *app-common
-    container_name: daln-chat-3
-    environment:
-      SERVICE: chat
-      PORT: 3023
-      DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
-
   chat:
     <<: *app-common
     container_name: daln-chat

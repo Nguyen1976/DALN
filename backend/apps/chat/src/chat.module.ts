@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common'
 import { ScheduleModule } from '@nestjs/schedule'
 import { ChatController } from './chat.controller'
 import { ChatService } from './chat.service'
-import { MessageService, MessageMediaService, PollService, ConversationMemberService, ConversationService } from './services'
+import { MessageService, MessageMediaService, PollService, ConversationMemberService, ConversationService, MessageBatchWriter } from './services'
 import { UtilModule } from '@app/util'
 import {
   ConversationRepository,
@@ -68,6 +68,7 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
     ConversationService,
     ConversationRepository,
     MessageRepository,
+    MessageBatchWriter,
     ConversationMemberRepository,
     PollRepository,
     ChatEventsPublisher,
