@@ -43,7 +43,7 @@ const Profile = () => {
   });
 
   const [preview, setPreview] = useState<string>(
-    user.avatar || "/placeholder.svg",
+    user.avatar || "",
   );
 
   const onSubmit = async (data: z.infer<typeof formProfileScheme>) => {

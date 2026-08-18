@@ -1,5 +1,7 @@
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   getConversationAssetsAPI,
@@ -127,15 +129,14 @@ export default function ProfilePanel({
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-sidebar md:static md:z-auto md:w-80 md:shrink-0 md:border-l md:border-border lg:w-96">
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h2 className="text-base font-semibold text-foreground">
+        <h2 className="text-base font-semibold tracking-[-0.01em] text-foreground">
           Thông tin cuộc trò chuyện
         </h2>
         <Button
-          variant="ghost"
+          variant="ghost-muted"
           size="icon"
           onClick={onClose}
           aria-label="Đóng bảng thông tin"
-          className="text-muted-foreground hover:text-foreground"
         >
           <X className="size-5" />
         </Button>
@@ -145,50 +146,51 @@ export default function ProfilePanel({
         <div className="space-y-6 p-6">
           {/* Avatar */}
           <div className="flex flex-col items-center text-center">
-            <Avatar className="mb-4 size-28">
+            <Avatar className="mb-3 size-24 border border-border">
               <AvatarImage
-                src={conversation.groupAvatar || "/placeholder.svg"}
-                alt={title}
+                src={conversation.groupAvatar || conversation.displayAvatar || ""}
+                alt={`Ảnh đại diện ${title}`}
               />
-              <AvatarFallback className="text-3xl">{title?.[0]}</AvatarFallback>
+              <AvatarFallback className="text-2xl">{title?.[0]}</AvatarFallback>
             </Avatar>
-            <h3 className="text-xl font-semibold text-foreground">{title}</h3>
+            <h3 className="text-lg font-semibold tracking-[-0.01em] text-foreground">
+              {title}
+            </h3>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {conversation.type === "GROUP"
+                ? `${conversation.memberCount ?? conversation.members?.length ?? 0} thành viên`
+                : "Trò chuyện trực tiếp"}
+            </p>
           </div>
 
           {/* Settings */}
-          <div className="space-y-3 rounded-xl border border-border bg-card/50 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-foreground">
-                Tắt thông báo cuộc trò chuyện
-              </span>
-              <button
-                type="button"
-                aria-label="Tắt thông báo cuộc trò chuyện"
-                className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
-              >
-                <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-foreground">
-                Tin nhắn tự biến mất
-              </span>
-              <button
-                type="button"
-                aria-label="Tin nhắn tự biến mất"
-                className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
-              >
-                <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
-              </button>
-            </div>
+          <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+            {[
+              ["Tắt thông báo cuộc trò chuyện", "chat-mute"],
+              ["Tin nhắn tự biến mất", "chat-ephemeral"],
+            ].map(([label, key]) => (
+              <div key={key} className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                  {label}
+                  <Badge variant="secondary" size="sm">
+                    Sắp có
+                  </Badge>
+                </span>
+                <Switch
+                  checked={false}
+                  disabled
+                  aria-label={label}
+                  onCheckedChange={() => {}}
+                />
+              </div>
+            ))}
           </div>
 
           {conversation.type === "GROUP" && <GroupMemberManager />}
 
           {/* Media */}
           <div>
-            <h4 className="mb-3 text-sm font-medium text-muted-foreground">
+            <h4 className="mb-3 text-sm font-semibold text-foreground">
               Ảnh, liên kết & tài liệu
             </h4>
 
@@ -205,6 +207,7 @@ export default function ProfilePanel({
                   size="sm"
                   variant={assetKind === kind ? "default" : "outline"}
                   onClick={() => setAssetKind(kind)}
+                  aria-pressed={assetKind === kind}
                   className="h-8"
                 >
                   {label}
@@ -228,7 +231,8 @@ export default function ProfilePanel({
                         <ImageIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
                         <img
                           src={url}
-                          alt="tệp phương tiện"
+                          alt={message.text || "Tệp phương tiện đã gửi"}
+                          loading="lazy"
                           className="size-12 rounded-md object-cover"
                         />
                         <p className="truncate text-xs text-muted-foreground">

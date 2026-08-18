@@ -1,7 +1,10 @@
 import { useEffect, useMemo } from "react";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
+import { Bell, BellOff, Mail, MessageSquare, Zap } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader } from "@/components/ui/feedback";
+import MainLayout from "@/layouts/MainLayout";
+import { cn } from "@/lib/utils";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch } from "@/redux/store";
 import {
@@ -12,7 +15,6 @@ import {
   type ChannelToggles,
   type NotificationPreferences,
 } from "@/redux/slices/notificationPreferenceSlice";
-import { Link } from "react-router";
 
 function normalizeChannels(data?: Partial<ChannelToggles>): ChannelToggles {
   return {
@@ -22,11 +24,26 @@ function normalizeChannels(data?: Partial<ChannelToggles>): ChannelToggles {
   };
 }
 
-const channelLabels: Record<keyof ChannelToggles, string> = {
-  IN_APP: "Trong ứng dụng",
-  EMAIL: "Email",
-  REALTIME: "Thời gian thực",
-};
+const CHANNELS: Array<{
+  key: keyof ChannelToggles;
+  label: string;
+  hint: string;
+  icon: typeof Bell;
+}> = [
+  {
+    key: "IN_APP",
+    label: "Trong ứng dụng",
+    hint: "Hiện ở chuông thông báo",
+    icon: MessageSquare,
+  },
+  { key: "EMAIL", label: "Email", hint: "Gửi tới hộp thư của bạn", icon: Mail },
+  {
+    key: "REALTIME",
+    label: "Thời gian thực",
+    hint: "Báo ngay khi đang mở app",
+    icon: Zap,
+  },
+];
 
 const typeLabels: Record<string, string> = {
   MESSAGE_RECEIVED: "Tin nhắn mới",
@@ -134,144 +151,191 @@ export default function NotificationSettingsPage() {
     );
   };
 
+  const globalOff = Boolean(data && !data.global.enabled);
+
   return (
-    <div className="min-h-[100dvh] bg-background">
-      <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:py-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold text-foreground">
-              Cài đặt thông báo
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Quản lý kênh nhận thông báo theo nhu cầu của bạn.
-            </p>
-          </div>
-          <Button asChild variant="outline">
-            <Link to="/">Quay lại chat</Link>
-          </Button>
-        </div>
+    <MainLayout>
+      <div className="flex min-h-0 flex-1 flex-col bg-background">
+        <PageHeader
+          icon={Bell}
+          title="Cài đặt thông báo"
+          description="Chọn việc gì đáng báo cho bạn, và báo qua kênh nào."
+        />
 
-        {isLoading && (
-          <p className="text-sm text-muted-foreground">Đang tải cấu hình...</p>
-        )}
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6">
+          <div className="mx-auto max-w-3xl space-y-4">
+            {isLoading && !data && (
+              <div className="space-y-4">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-40 w-full rounded-xl" />
+                ))}
+              </div>
+            )}
 
-        {data && (
-          <>
-            <section className="space-y-4 rounded-xl border border-border bg-card p-5">
-              <h2 className="font-semibold text-foreground">Tùy chọn chung</h2>
+            {data && (
+              <>
+                {/* --- Master switch --- */}
+                <section className="rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex gap-3">
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "flex size-10 shrink-0 items-center justify-center rounded-xl",
+                          data.global.enabled
+                            ? "bg-accent text-accent-foreground"
+                            : "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {data.global.enabled ? (
+                          <Bell className="size-5" />
+                        ) : (
+                          <BellOff className="size-5" />
+                        )}
+                      </span>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-foreground">
+                          Nhận thông báo
+                        </p>
+                        <p className="text-sm leading-relaxed text-muted-foreground">
+                          Tắt công tắc này sẽ tắt toàn bộ thông báo bên dưới.
+                        </p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={data.global.enabled}
+                      disabled={isSaving}
+                      aria-label="Nhận thông báo"
+                      onCheckedChange={(value) =>
+                        void handleGlobalEnabled(value)
+                      }
+                    />
+                  </div>
 
-            <div className="flex items-center gap-3">
-              <Checkbox
-                id="global-enabled"
-                checked={data.global.enabled}
-                onCheckedChange={(value) =>
-                  void handleGlobalEnabled(Boolean(value))
-                }
-              />
-              <Label htmlFor="global-enabled">
-                Bật notification toàn hệ thống
-              </Label>
-            </div>
-
-            <div className="grid md:grid-cols-3 gap-3">
-              {(
-                ["IN_APP", "EMAIL", "REALTIME"] as Array<keyof ChannelToggles>
-              ).map((channel) => (
-                <div
-                  key={channel}
-                  className="flex items-center gap-3 rounded-md border p-3"
-                >
-                  <Checkbox
-                    id={`global-${channel}`}
-                    checked={data.global.channels[channel]}
-                    disabled={!data.global.enabled || isSaving}
-                    onCheckedChange={(value) =>
-                      void handleGlobalChannelChange(channel, Boolean(value))
-                    }
-                  />
-                  <Label htmlFor={`global-${channel}`}>
-                    {channelLabels[channel]}
-                  </Label>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="space-y-4 rounded-xl border border-border bg-card p-5">
-            <h2 className="font-semibold text-foreground">Tổng hợp email</h2>
-            <div className="flex items-center gap-3">
-              <Checkbox
-                id="digest-enabled"
-                checked={data.digest.enabled}
-                disabled={!data.global.enabled || isSaving}
-                onCheckedChange={(value) =>
-                  void handleDigestEnabled(Boolean(value))
-                }
-              />
-              <Label htmlFor="digest-enabled">Bật email tổng hợp</Label>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Số tin chưa đọc tối thiểu: {data.digest.minUnread} | thời gian chờ:{" "}
-              {data.digest.cooldownMinutes} phút
-            </p>
-          </section>
-
-          <section className="space-y-4 rounded-xl border border-border bg-card p-5">
-            <h2 className="font-semibold text-foreground">
-              Theo từng loại thông báo
-            </h2>
-            <div className="space-y-3">
-              {typeList.map((type) => {
-                const channels = normalizeChannels(data.overrides?.[type]);
-                return (
                   <div
-                    key={type}
-                    className="flex flex-col gap-3 rounded-lg border border-border p-3 md:flex-row md:items-center md:justify-between"
+                    className={cn(
+                      "mt-4 grid gap-2 border-t border-border pt-4 sm:grid-cols-3",
+                      globalOff && "opacity-55",
+                    )}
                   >
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        {typeLabels[type] || type}
+                    {CHANNELS.map(({ key, label, hint, icon: Icon }) => (
+                      <div
+                        key={key}
+                        className="flex items-start justify-between gap-3 rounded-lg border border-border p-3"
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                            <Icon
+                              className="size-3.5 text-muted-foreground"
+                              aria-hidden="true"
+                            />
+                            {label}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {hint}
+                          </p>
+                        </div>
+                        <Switch
+                          checked={data.global.channels[key]}
+                          disabled={globalOff || isSaving}
+                          aria-label={`Kênh ${label}`}
+                          onCheckedChange={(value) =>
+                            void handleGlobalChannelChange(key, value)
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* --- Digest --- */}
+                <section className="rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <p className="font-semibold text-foreground">
+                        Email tổng hợp
+                      </p>
+                      <p className="text-sm leading-relaxed text-muted-foreground">
+                        Gom tin chưa đọc thành một email thay vì báo từng cái.
                       </p>
                     </div>
-                    <div className="flex items-center gap-4">
-                      {(
-                        ["IN_APP", "EMAIL", "REALTIME"] as Array<
-                          keyof ChannelToggles
-                        >
-                      ).map((channel) => (
-                        <div
-                          key={`${type}-${channel}`}
-                          className="flex items-center gap-2"
-                        >
-                          <Checkbox
-                            id={`${type}-${channel}`}
-                            checked={channels[channel]}
-                            disabled={!data.global.enabled || isSaving}
-                            onCheckedChange={(value) =>
-                              void handleTypeChannelChange(
-                                type,
-                                channel,
-                                Boolean(value),
-                              )
-                            }
-                          />
-                          <Label
-                            htmlFor={`${type}-${channel}`}
-                            className="text-xs"
-                          >
-                            {channelLabels[channel]}
-                          </Label>
-                        </div>
-                      ))}
-                    </div>
+                    <Switch
+                      checked={data.digest.enabled}
+                      disabled={globalOff || isSaving}
+                      aria-label="Email tổng hợp"
+                      onCheckedChange={(value) =>
+                        void handleDigestEnabled(value)
+                      }
+                    />
                   </div>
-                );
-              })}
-            </div>
-          </section>
-          </>
-        )}
+                  <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">
+                    Gửi khi có tối thiểu{" "}
+                    <span className="font-medium text-foreground">
+                      {data.digest.minUnread}
+                    </span>{" "}
+                    tin chưa đọc, cách nhau ít nhất{" "}
+                    <span className="font-medium text-foreground">
+                      {data.digest.cooldownMinutes} phút
+                    </span>
+                    .
+                  </p>
+                </section>
+
+                {/* --- Per type --- */}
+                <section className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+                  <div className="border-b border-border p-4 sm:p-5">
+                    <p className="font-semibold text-foreground">
+                      Theo từng loại thông báo
+                    </p>
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      Tinh chỉnh kênh nhận cho từng sự kiện.
+                    </p>
+                  </div>
+
+                  <ul className={cn("divide-y divide-border", globalOff && "opacity-55")}>
+                    {typeList.map((type) => {
+                      const channels = normalizeChannels(data.overrides?.[type]);
+                      return (
+                        <li
+                          key={type}
+                          className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"
+                        >
+                          <p className="text-sm font-medium text-foreground">
+                            {typeLabels[type] || type}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                            {CHANNELS.map(({ key, label }) => (
+                              <label
+                                key={`${type}-${key}`}
+                                className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
+                              >
+                                <Switch
+                                  checked={channels[key]}
+                                  disabled={globalOff || isSaving}
+                                  aria-label={`${typeLabels[type] || type} — ${label}`}
+                                  onCheckedChange={(value) =>
+                                    void handleTypeChannelChange(
+                                      type,
+                                      key,
+                                      value,
+                                    )
+                                  }
+                                  className="h-5 w-9"
+                                />
+                                {label}
+                              </label>
+                            ))}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              </>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </MainLayout>
   );
 }

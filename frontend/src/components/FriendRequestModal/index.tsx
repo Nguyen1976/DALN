@@ -105,10 +105,10 @@ const FriendRequestModal = ({
             Bạn vừa nhận được một lời mời kết bạn mới.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col items-center justify-center py-6 gap-4">
-          <Avatar className="w-24 h-24 border-4 border-background shadow-lg">
+        <div className="flex flex-col items-center justify-center gap-4 py-4">
+          <Avatar className="size-24 border border-border shadow-sm">
             <AvatarImage
-              src={friendRequestData?.fromUser?.avatar || "/placeholder.svg"}
+              src={friendRequestData?.fromUser?.avatar || ""}
               alt={
                 friendRequestData?.fromUser?.username ||
                 "Ảnh đại diện người dùng"
@@ -118,27 +118,22 @@ const FriendRequestModal = ({
               {friendRequestData?.fromUser?.username[0]}
             </AvatarFallback>
           </Avatar>
-          <div className="text-center">
-            <h3 className="text-xl font-bold">
+          <div className="space-y-1 text-center">
+            <h3 className="text-lg font-semibold tracking-[-0.01em] text-foreground">
               {friendRequestData?.fromUser?.username}
             </h3>
-            <p className="text-muted-foreground">
-              {friendRequestData?.fromUser?.email ||
-                `${friendRequestData?.fromUser?.username
-                  .toLowerCase()
-                  .replace(" ", ".")}@example.com`}
-            </p>
+            {friendRequestData?.fromUser?.email && (
+              <p className="text-sm text-muted-foreground">
+                {friendRequestData.fromUser.email}
+              </p>
+            )}
           </div>
         </div>
-        <DialogFooter className="flex sm:justify-center gap-2">
-          <Button
-            variant="outline"
-            className="flex-1 sm:flex-none bg-transparent"
-            onClick={onReject}
-          >
+        <DialogFooter className="gap-2 sm:flex-row">
+          <Button variant="outline" className="flex-1" onClick={onReject}>
             Từ chối
           </Button>
-          <Button className="flex-1 sm:flex-none" onClick={onAccept}>
+          <Button className="flex-1" onClick={onAccept}>
             Chấp nhận
           </Button>
         </DialogFooter>

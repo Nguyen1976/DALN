@@ -1,10 +1,23 @@
 import { cn } from "@/lib/utils";
 import type { Message } from "@/redux/slices/messageSlice";
 import { selectUser } from "@/redux/slices/userSlice";
-import { formatDateTime } from "@/utils/formatDateTime";
+import {
+  formatDateTime,
+  formatDayDivider,
+  formatFullDateTime,
+  isNewDay,
+} from "@/utils/formatDateTime";
 import { useSelector } from "react-redux";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
-import { Check, ChevronRight, MoreVertical, RotateCcw, Trash2, User } from "lucide-react";
+import {
+  BarChart3,
+  Check,
+  ChevronRight,
+  MoreVertical,
+  RotateCcw,
+  Trash2,
+  User,
+} from "lucide-react";
 import { SeenStatus } from "@/components/SeenStatus";
 import {
   DropdownMenu,
@@ -24,8 +37,11 @@ const MessageComponent = ({
   onDeleteMessageForMe,
   onOpenPoll,
   pollVoteSelections,
+  isGroup = false,
 }: {
   messages: Message[];
+  /** Sender names are only shown in group threads. */
+  isGroup?: boolean;
   highlightMessageId?: string | null;
   seenMessages?: Record<
     string,
@@ -64,9 +80,18 @@ const MessageComponent = ({
 
         const isMine = message.senderId === user.id;
 
-        const isSameAsPrev = prevMessage?.senderId === message.senderId;
+        // A day divider also breaks the visual grouping — the first message
+        // after a new day always shows its avatar and sender again.
+        const startsNewDay = isNewDay(message.createdAt, prevMessage?.createdAt);
+        const nextStartsNewDay = isNewDay(
+          nextMessage?.createdAt,
+          message.createdAt,
+        );
 
-        const isSameAsNext = nextMessage?.senderId === message.senderId;
+        const isSameAsPrev =
+          prevMessage?.senderId === message.senderId && !startsNewDay;
+        const isSameAsNext =
+          nextMessage?.senderId === message.senderId && !nextStartsNewDay;
 
         const showAvatar = !isSameAsPrev;
         const isRevoked = Boolean(message.isRevoked);
@@ -80,6 +105,16 @@ const MessageComponent = ({
           ? pollVoteSelections?.[message.poll.id] || []
           : [];
 
+        const dayDivider = startsNewDay ? (
+          <div className="my-4 flex items-center gap-3" role="separator">
+            <span className="h-px flex-1 bg-border" />
+            <span className="rounded-full bg-muted px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {formatDayDivider(message.createdAt)}
+            </span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+        ) : null;
+
         if (isPoll && message.poll) {
           const totalVotes = message.poll.options.reduce(
             (sum, option) => sum + option.count,
@@ -87,105 +122,120 @@ const MessageComponent = ({
           );
 
           return (
-            <div
-              key={message.id}
-              id={`message-${message.id}`}
-              className={cn(
-                "mb-2 scroll-mt-24 rounded-xl transition-colors duration-300",
-                highlightMessageId === message.id &&
-                  "bg-bg-box-message-incoming",
-              )}
-            >
-              <div className="mx-auto w-2/3 max-w-xl px-1 mt-10">
-                <div
-                  className={cn(
-                    "relative overflow-hidden rounded-2xl border px-4 py-3 shadow-sm",
-                    message.poll.isClosed
-                      ? "border-primary/20 bg-card"
-                      : "border-primary/35 bg-card shadow-primary/10",
-                  )}
-                >
-                  <div className="space-y-3">
-                    <h4 className="text-xl font-semibold leading-tight text-foreground sm:text-2xl">
-                      {message.poll.question}
-                    </h4>
+            <div key={message.id}>
+              {dayDivider}
+              <div
+                id={`message-${message.id}`}
+                className={cn(
+                  "mb-3 mt-4 scroll-mt-24 rounded-2xl transition-colors duration-300",
+                  highlightMessageId === message.id && "bg-accent",
+                )}
+              >
+                <div className="mx-auto w-full max-w-md px-1">
+                  <div
+                    className={cn(
+                      "overflow-hidden rounded-2xl border bg-card shadow-sm",
+                      message.poll.isClosed
+                        ? "border-border"
+                        : "border-primary/30",
+                    )}
+                  >
+                    <div className="space-y-3 p-4">
+                      <div className="flex items-start gap-2.5">
+                        <span
+                          aria-hidden="true"
+                          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground"
+                        >
+                          <BarChart3 className="size-4" />
+                        </span>
+                        <div className="min-w-0 space-y-0.5">
+                          <h4 className="text-sm font-semibold leading-snug text-foreground">
+                            {message.poll.question}
+                          </h4>
+                          <p className="text-xs text-muted-foreground">
+                            {message.poll.isClosed
+                              ? "Bình chọn đã đóng"
+                              : message.poll.isMultipleChoice
+                                ? "Chọn nhiều phương án"
+                                : "Chọn một phương án"}
+                            {" · "}
+                            {totalVotes} lượt bình chọn
+                          </p>
+                        </div>
+                      </div>
 
-                    <p className="text-base text-muted-foreground sm:text-lg">
-                      {message.poll.isClosed
-                        ? "Bình chọn đã đóng"
-                        : message.poll.isMultipleChoice
-                          ? "Chọn nhiều phương án"
-                          : "Chọn một phương án"}
-                    </p>
+                      <ul className="space-y-1.5">
+                        {message.poll.options.map((option) => {
+                          const isSelected = selectedPollOptions.includes(
+                            option.id,
+                          );
+                          const share = totalVotes
+                            ? Math.round((option.count / totalVotes) * 100)
+                            : 0;
 
-                    <p className="text-xs font-semibold text-primary">
-                      {totalVotes} lượt bình chọn
-                    </p>
-
-                    <div className="space-y-2">
-                      {message.poll.options.map((option) => {
-                        const isSelected = selectedPollOptions.includes(
-                          option.id,
-                        );
-
-                        return (
-                          <div
-                            key={option.id}
-                            className={cn(
-                              "flex items-center justify-between rounded-lg border px-3 py-2 text-sm",
-                              isSelected
-                                ? "border-primary/60 bg-primary/20 text-foreground"
-                                : "border-border bg-muted text-foreground",
-                              message.poll?.isClosed && "opacity-90",
-                            )}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium leading-snug">
-                                {option.text}
-                              </span>
-                              {isSelected && (
-                                <Check className="h-4 w-4 text-primary" />
+                          return (
+                            <li
+                              key={option.id}
+                              className={cn(
+                                "relative overflow-hidden rounded-lg border px-3 py-2 text-sm",
+                                isSelected
+                                  ? "border-primary/50 bg-accent"
+                                  : "border-border bg-muted/60",
                               )}
-                            </div>
-                            <span className="text-base font-semibold">
-                              {option.count}
-                            </span>
-                          </div>
-                        );
-                      })}
+                            >
+                              {/* Result bar: proportion is also stated as a
+                                  percentage so it never relies on width alone. */}
+                              <span
+                                aria-hidden="true"
+                                className="absolute inset-y-0 left-0 bg-primary/12"
+                                style={{ width: `${share}%` }}
+                              />
+                              <span className="relative flex items-center justify-between gap-2">
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                  {isSelected && (
+                                    <Check
+                                      className="size-3.5 shrink-0 text-brand"
+                                      aria-hidden="true"
+                                    />
+                                  )}
+                                  <span className="truncate font-medium">
+                                    {option.text}
+                                  </span>
+                                </span>
+                                <span className="shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">
+                                  {option.count}
+                                  <span className="sr-only"> lượt chọn</span>
+                                  {totalVotes > 0 && ` · ${share}%`}
+                                </span>
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+
+                      <button
+                        type="button"
+                        onClick={() => onOpenPoll?.(message)}
+                        className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors duration-[--motion-fast] hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      >
+                        {message.poll.isClosed
+                          ? "Xem lựa chọn"
+                          : selectedPollOptions.length > 0
+                            ? "Đổi lựa chọn"
+                            : "Bình chọn"}
+                        <ChevronRight className="size-4" aria-hidden="true" />
+                      </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => onOpenPoll?.(message)}
-                      className={cn(
-                        "w-full rounded-lg border py-2 text-base font-semibold transition-colors",
-                        message.poll.isClosed
-                          ? "border-primary/60 bg-primary/10 text-primary hover:bg-primary/15"
-                          : "border-primary bg-primary/5 text-primary hover:bg-primary/12",
-                      )}
-                    >
-                      {message.poll.isClosed
-                        ? "Xem lựa chọn"
-                        : selectedPollOptions.length > 0
-                          ? "Đổi lựa chọn"
-                          : "Bình chọn"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => onOpenPoll?.(message)}
-                      className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:text-primary/80"
-                    >
-                      {selectedPollOptions.length > 0
-                        ? `${selectedPollOptions.length} lựa chọn của bạn`
-                        : "Xem chi tiết"}
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-
-                    <span className="block text-xs text-muted-foreground">
-                      {formatDateTime(message.createdAt)}
-                    </span>
+                    <div className="border-t border-border bg-muted/40 px-4 py-2">
+                      <time
+                        dateTime={message.createdAt}
+                        title={formatFullDateTime(message.createdAt)}
+                        className="text-[11px] text-muted-foreground"
+                      >
+                        {formatDateTime(message.createdAt)}
+                      </time>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -193,152 +243,198 @@ const MessageComponent = ({
           );
         }
 
+        const senderName = message.senderMember?.username;
+
         return (
-          <div
-            key={message.id}
-            id={`message-${message.id}`}
-            className={cn(
-              "mb-1 scroll-mt-24 rounded-md transition-colors duration-300",
-              highlightMessageId === message.id && "bg-bg-box-message-incoming",
-            )}
-          >
+          <div key={message.id}>
+            {dayDivider}
             <div
+              id={`message-${message.id}`}
               className={cn(
-                "flex items-end gap-2",
-                isMine ? "justify-end" : "justify-start",
+                "scroll-mt-24 rounded-lg transition-colors duration-300",
+                isSameAsNext ? "mb-0.5" : "mb-2",
+                highlightMessageId === message.id && "bg-accent",
               )}
             >
-              {!isMine && showAvatar ? (
-                <Avatar className="size-9 border border-border">
-                  <AvatarImage src={message.senderMember?.avatar} />
-                  <AvatarFallback>
-                    <User className="size-4" />
-                  </AvatarFallback>
-                </Avatar>
-              ) : (
-                !isMine && <div className="size-9 shrink-0" />
-              )}
-
               <div
                 className={cn(
-                  "group relative max-w-md px-4 py-2 text-sm",
-                  isMine
-                    ? "bg-bg-box-message-out text-text"
-                    : "bg-bg-box-message-incoming text-text",
-
-                  // Bo góc theo chuỗi
-                  isMine
-                    ? cn(
-                        "rounded-2xl",
-                        isSameAsPrev && "rounded-tr-md",
-                        isSameAsNext && "rounded-br-md",
-                      )
-                    : cn(
-                        "rounded-2xl",
-                        isSameAsPrev && "rounded-tl-md",
-                        isSameAsNext && "rounded-bl-md",
-                      ),
+                  "flex items-end gap-2",
+                  isMine ? "justify-end" : "justify-start",
                 )}
               >
-                {!isRevoked &&
-                  !isPoll &&
-                  message.medias?.map((media, mediaIndex) => {
-                    const mediaKind = resolveMediaKind(media);
-
-                    if (mediaKind === "IMAGE") {
-                      return (
-                        <img
-                          key={`${message.id}-${mediaIndex}`}
-                          src={media.url}
-                          alt="image-message"
-                          className="max-w-70 max-h-90 rounded-lg mb-2 object-cover"
-                        />
-                      );
-                    }
-
-                    if (mediaKind === "VIDEO") {
-                      return (
-                        <video
-                          key={`${message.id}-${mediaIndex}`}
-                          src={media.url}
-                          controls
-                          className="max-w-75 max-h-90 rounded-lg mb-2"
-                        />
-                      );
-                    }
-
-                    return (
-                      <FileAttachmentPreview
-                        key={`${message.id}-${mediaIndex}`}
-                        url={media.url}
-                        mimeType={media.mimeType}
-                        size={media.size}
-                        fileName={media.fileName}
+                {!isMine &&
+                  (showAvatar ? (
+                    <Avatar className="size-8 border border-border">
+                      <AvatarImage
+                        src={message.senderMember?.avatar}
+                        alt={senderName ? `Ảnh đại diện ${senderName}` : ""}
                       />
-                    );
-                  })}
+                      <AvatarFallback>
+                        {senderName ? (
+                          senderName[0]
+                        ) : (
+                          <User className="size-4" aria-hidden="true" />
+                        )}
+                      </AvatarFallback>
+                    </Avatar>
+                  ) : (
+                    <div className="size-8 shrink-0" aria-hidden="true" />
+                  ))}
 
-                {isRevoked ? (
-                  <p className="italic text-muted-foreground">
-                    Tin nhắn đã bị thu hồi
-                  </p>
-                ) : message.text ? (
-                  <p className="wrap-break-word">{message.text}</p>
-                ) : null}
+                <div
+                  className={cn(
+                    "group relative max-w-[min(30rem,78%)] px-3.5 py-2 text-sm leading-relaxed shadow-bubble",
+                    isMine
+                      ? "bg-bubble-out text-bubble-out-foreground"
+                      : "bg-bubble-in text-bubble-in-foreground",
+                    // Corner shaping follows the run of messages so a group
+                    // reads as one block instead of separate pills.
+                    "rounded-2xl",
+                    isMine
+                      ? cn(isSameAsPrev && "rounded-tr-md", isSameAsNext && "rounded-br-md")
+                      : cn(isSameAsPrev && "rounded-tl-md", isSameAsNext && "rounded-bl-md"),
+                  )}
+                >
+                  {!isMine && isGroup && showAvatar && senderName && (
+                    <p className="mb-0.5 text-xs font-semibold text-brand">
+                      {senderName}
+                    </p>
+                  )}
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="Message actions"
+                  {!isRevoked &&
+                    message.medias?.map((media, mediaIndex) => {
+                      const mediaKind = resolveMediaKind(media);
+
+                      if (mediaKind === "IMAGE") {
+                        return (
+                          <img
+                            key={`${message.id}-${mediaIndex}`}
+                            src={media.url}
+                            alt={
+                              media.fileName
+                                ? `Ảnh: ${media.fileName}`
+                                : `Ảnh do ${senderName || "người dùng"} gửi`
+                            }
+                            loading="lazy"
+                            decoding="async"
+                            // Reserving a box keeps the thread from jumping
+                            // when the image finally decodes.
+                            className="mb-2 max-h-80 w-full max-w-[17rem] rounded-xl bg-muted object-cover"
+                          />
+                        );
+                      }
+
+                      if (mediaKind === "VIDEO") {
+                        return (
+                          <video
+                            key={`${message.id}-${mediaIndex}`}
+                            src={media.url}
+                            controls
+                            preload="metadata"
+                            className="mb-2 max-h-80 w-full max-w-[18rem] rounded-xl bg-muted"
+                          />
+                        );
+                      }
+
+                      return (
+                        <FileAttachmentPreview
+                          key={`${message.id}-${mediaIndex}`}
+                          url={media.url}
+                          mimeType={media.mimeType}
+                          size={media.size}
+                          fileName={media.fileName}
+                        />
+                      );
+                    })}
+
+                  {isRevoked ? (
+                    <p
                       className={cn(
-                        "absolute top-1 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent",
-                        isMine ? "-left-9" : "-right-9",
+                        "italic",
+                        isMine
+                          ? "text-bubble-out-foreground/75"
+                          : "text-muted-foreground",
                       )}
                     >
-                      <MoreVertical className="h-4 w-4" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align={isMine ? "end" : "start"}
-                    className="w-56 bg-popover text-popover-foreground"
-                  >
-                    {canRevoke && (
+                      Tin nhắn đã bị thu hồi
+                    </p>
+                  ) : message.text ? (
+                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+                      {message.text}
+                    </p>
+                  ) : null}
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Tuỳ chọn tin nhắn"
+                        className={cn(
+                          "absolute top-1 inline-flex size-8 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm",
+                          "transition-opacity duration-[--motion-fast]",
+                          // Hover is not the only way in: keyboard focus and an
+                          // open menu reveal it too, and on touch (no hover) it
+                          // is always visible.
+                          "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
+                          "[@media(hover:none)]:opacity-100",
+                          isMine ? "-left-9" : "-right-9",
+                        )}
+                      >
+                        <MoreVertical className="size-4" aria-hidden="true" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align={isMine ? "end" : "start"}
+                      className="w-56"
+                    >
+                      {canRevoke && (
+                        <>
+                          <DropdownMenuGroup>
+                            <DropdownMenuItem
+                              onClick={() => onRevokeMessage?.(message)}
+                            >
+                              <RotateCcw className="size-4" aria-hidden="true" />
+                              Thu hồi với mọi người
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                          <DropdownMenuSeparator />
+                        </>
+                      )}
+
                       <DropdownMenuGroup>
                         <DropdownMenuItem
-                          onClick={() => onRevokeMessage?.(message)}
+                          variant="destructive"
+                          onClick={() => onDeleteMessageForMe?.(message)}
                         >
-                          <RotateCcw className="h-4 w-4" />
-                          Thu hồi
+                          <Trash2 className="size-4" aria-hidden="true" />
+                          Xoá chỉ ở phía tôi
                         </DropdownMenuItem>
                       </DropdownMenuGroup>
-                    )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
 
-                    {isMine && <DropdownMenuSeparator />}
-
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={() => onDeleteMessageForMe?.(message)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        Xóa chỉ ở phía tôi
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {/* Hiện time ở tin cuối */}
-                {!isSameAsNext && (
-                  <span className="text-xs opacity-70 mt-1 block">
-                    {formatDateTime(message.createdAt)}
-                  </span>
-                )}
+                  {/* Timestamp on the last message of each run. */}
+                  {!isSameAsNext && (
+                    <time
+                      dateTime={message.createdAt}
+                      title={formatFullDateTime(message.createdAt)}
+                      className={cn(
+                        "mt-1 block text-[11px] tabular-nums",
+                        isMine
+                          ? "text-bubble-out-foreground/80"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {formatDateTime(message.createdAt)}
+                    </time>
+                  )}
+                </div>
               </div>
+
+              {isMine && !isSameAsNext && (
+                <SeenStatus seenUsers={seenMessages[message.id] || []} />
+              )}
             </div>
-            {isMine && !isSameAsNext && (
-              <SeenStatus seenUsers={seenMessages[message.id] || []} />
-            )}
           </div>
         );
       })}

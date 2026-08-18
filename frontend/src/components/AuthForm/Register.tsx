@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { useForm } from "react-hook-form";
@@ -10,18 +9,18 @@ import {
   FormControl,
   FormField,
   FormItem,
+  FormDescription,
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
 import { registerAPI } from "@/apis";
 import { toast } from "sonner";
 import { useNavigate } from "react-router";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { PasswordField, PasswordStrength } from "./PasswordField";
 
 const Register = () => {
   const navigate = useNavigate();
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const form = useForm<z.infer<typeof formRegisterScheme>>({
     resolver: zodResolver(formRegisterScheme),
     defaultValues: {
@@ -98,121 +97,106 @@ const Register = () => {
     }
   };
 
+  const passwordValue = form.watch("password");
+
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <div className="space-y-2">
-          <FormField
-            control={form.control}
-            name="username"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Tên người dùng</FormLabel>
-                <FormControl>
-                  <Input placeholder="Nhập tên người dùng" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className="space-y-2">
-          <FormField
-            control={form.control}
-            name="email"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Email</FormLabel>
-                <FormControl>
-                  <Input placeholder="Nhập email của bạn" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className="space-y-2">
-          <FormField
-            control={form.control}
-            name="password"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Mật khẩu</FormLabel>
-                <FormControl>
-                  <div className="relative">
-                    <Input
-                      placeholder="••••••••"
-                      type={showPassword ? "text" : "password"}
-                      className="pr-10"
-                      {...field}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                      aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      {showPassword ? (
-                        <EyeOff className="size-4" />
-                      ) : (
-                        <Eye className="size-4" />
-                      )}
-                    </button>
-                  </div>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className="space-y-2">
-          <FormField
-            control={form.control}
-            name="confirmPassword"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Xác nhận mật khẩu</FormLabel>
-                <FormControl>
-                  <div className="relative">
-                    <Input
-                      placeholder="••••••••"
-                      type={showConfirmPassword ? "text" : "password"}
-                      className="pr-10"
-                      {...field}
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShowConfirmPassword((prev) => !prev)
-                      }
-                      aria-label={
-                        showConfirmPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"
-                      }
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      {showConfirmPassword ? (
-                        <EyeOff className="size-4" />
-                      ) : (
-                        <Eye className="size-4" />
-                      )}
-                    </button>
-                  </div>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
+        <FormField
+          control={form.control}
+          name="username"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Tên người dùng</FormLabel>
+              <FormControl>
+                <Input
+                  autoComplete="username"
+                  placeholder="Tên hiển thị của bạn"
+                  {...field}
+                />
+              </FormControl>
+              <FormDescription>Từ 3 đến 30 ký tự.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="email"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Email</FormLabel>
+              <FormControl>
+                <Input
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="ban@email.com"
+                  {...field}
+                />
+              </FormControl>
+              <FormDescription>
+                Mã OTP kích hoạt sẽ được gửi tới địa chỉ này.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="password"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Mật khẩu</FormLabel>
+              <FormControl>
+                <PasswordField
+                  autoComplete="new-password"
+                  placeholder="Ít nhất 6 ký tự"
+                  {...field}
+                />
+              </FormControl>
+              <PasswordStrength value={passwordValue} />
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="confirmPassword"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Xác nhận mật khẩu</FormLabel>
+              <FormControl>
+                <PasswordField
+                  autoComplete="new-password"
+                  placeholder="Nhập lại mật khẩu"
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
         <Button
           type="submit"
+          size="lg"
           className="w-full"
           disabled={form.formState.isSubmitting}
         >
           {form.formState.isSubmitting && (
-            <Loader2 className="size-4 animate-spin" />
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
           )}
-          {form.formState.isSubmitting ? "Đang đăng ký..." : "Đăng ký"}
+          {form.formState.isSubmitting ? "Đang đăng ký..." : "Tạo tài khoản"}
         </Button>
+
+        <p className="text-center text-xs leading-relaxed text-muted-foreground">
+          Ứng dụng xin quyền vị trí khi đăng ký để gợi ý bạn bè quanh bạn. Bạn có
+          thể từ chối, tài khoản vẫn được tạo bình thường.
+        </p>
       </form>
     </Form>
   );

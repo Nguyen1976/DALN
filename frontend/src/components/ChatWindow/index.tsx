@@ -1,4 +1,9 @@
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
+  AvatarWithPresence,
+} from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Phone,
@@ -17,12 +22,14 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { useSelector } from "react-redux";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { RootState } from "@/redux/store";
 import {
   selectMessagePagination,
   selectMessage,
 } from "@/redux/slices/messageSlice";
+import { selectFriend } from "@/redux/slices/friendSlice";
+import { formatRelativeTime } from "@/utils/formatDateTime";
 import MessageComponent from "./Messages";
 import EmojiPicker from "emoji-picker-react";
 import {
@@ -74,6 +81,7 @@ export default function ChatWindow({
   onFocusHandled,
 }: ChatWindowProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [showClearHistoryDialog, setShowClearHistoryDialog] = useState(false);
 
   const {
@@ -88,6 +96,19 @@ export default function ChatWindow({
     seenMessages,
     conversation,
   } = useChatConversationContext(conversationId);
+
+  const friends = useSelector(selectFriend);
+
+  // Header subtitle shows real presence for direct chats instead of the
+  // static "Trò chuyện trực tiếp" label.
+  const peer = useMemo(() => {
+    if (effectiveConversation?.type !== "DIRECT") return undefined;
+    const peerId = effectiveConversation?.members?.find(
+      (member) => member.userId !== user.id,
+    )?.userId;
+    if (!peerId) return undefined;
+    return friends.find((friend) => friend.id === peerId);
+  }, [effectiveConversation, friends, user.id]);
 
   const messages = useSelector((state: RootState) =>
     selectMessage(state, conversationId),
@@ -138,13 +159,21 @@ export default function ChatWindow({
 
   useConversationRoom(conversationId);
 
+  // Keep the textarea exactly as tall as its content, up to the max height.
+  useEffect(() => {
+    const node = composerRef.current;
+    if (!node) return;
+    node.style.height = "auto";
+    node.style.height = `${Math.min(node.scrollHeight, 128)}px`;
+  }, [msg]);
+
   const onConfirmClearHistory = async () => {
     const success = await handleClearHistory();
     if (success) setShowClearHistoryDialog(false);
   };
 
   return (
-    <div className="relative flex min-w-0 flex-1 flex-col bg-bg-box-chat">
+    <div className="relative flex min-w-0 flex-1 flex-col chat-canvas">
       <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-border bg-sidebar px-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-1">
           {onBack && (
@@ -160,23 +189,41 @@ export default function ChatWindow({
           )}
           <button
             onClick={onToggleProfile}
-            className="flex min-w-0 items-center gap-3 rounded-lg p-1 text-left transition-opacity hover:opacity-80"
+            aria-label={`Xem chi tiết ${conversationName || "cuộc trò chuyện"}`}
+            className="flex min-w-0 items-center gap-3 rounded-xl p-1.5 text-left transition-colors duration-[--motion-fast] hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
-            <Avatar className="size-10 shrink-0">
-              <AvatarImage
-                src={conversationAvatar || "/placeholder.svg"}
-                alt={conversationName || "Ảnh đại diện nhóm"}
-              />
-              <AvatarFallback>{conversationName?.[0]}</AvatarFallback>
-            </Avatar>
+            <AvatarWithPresence
+              status={
+                effectiveConversation?.type !== "DIRECT" || !peer
+                  ? null
+                  : peer.status
+                    ? "online"
+                    : "offline"
+              }
+              dotSize="sm"
+            >
+              <Avatar className="size-10">
+                <AvatarImage
+                  src={conversationAvatar || ""}
+                  alt={`Ảnh đại diện ${conversationName || "cuộc trò chuyện"}`}
+                />
+                <AvatarFallback>{conversationName?.[0]}</AvatarFallback>
+              </Avatar>
+            </AvatarWithPresence>
             <div className="min-w-0">
-              <div className="truncate font-medium text-foreground">
+              <div className="truncate font-semibold leading-tight text-foreground">
                 {conversationName}
               </div>
               <div className="truncate text-xs text-muted-foreground">
                 {effectiveConversation?.type === "DIRECT"
-                  ? "Trò chuyện trực tiếp"
-                  : "Nhóm"}
+                  ? peer
+                    ? peer.status
+                      ? "Đang hoạt động"
+                      : peer.lastSeen
+                        ? `Hoạt động ${formatRelativeTime(peer.lastSeen)}`
+                        : "Ngoại tuyến"
+                    : "Trò chuyện trực tiếp"
+                  : `${effectiveConversation?.memberCount ?? 0} thành viên`}
               </div>
             </div>
           </button>
@@ -231,11 +278,18 @@ export default function ChatWindow({
       </div>
 
       <div
-        className="custom-scrollbar flex-1 space-y-4 overflow-y-auto p-4 sm:p-6"
+        className="custom-scrollbar flex-1 overflow-y-auto px-3 py-4 sm:px-6"
         ref={containerRef}
         onScroll={handleScroll}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+        aria-label={`Tin nhắn trong ${conversationName || "cuộc trò chuyện"}`}
       >
         <div ref={topSentinelRef} className="h-px w-full" />
+        {/* Short threads sit at the bottom of the canvas instead of floating
+            at the top with a wall of empty space beneath them. */}
+        <div className="flex min-h-full flex-col justify-end">
         <MessageComponent
           messages={messages}
           highlightMessageId={highlightMessageId}
@@ -244,9 +298,11 @@ export default function ChatWindow({
           onDeleteMessageForMe={handleDeleteMessageForMe}
           onOpenPoll={poll.handleOpenPoll}
           pollVoteSelections={poll.pollVoteSelections}
+          isGroup={isGroupConversation}
         />
         <TypingIndicator userNames={typingUserNames} />
         <div ref={bottomRef} />
+        </div>
       </div>
 
       {!isAtBottom && (
@@ -254,22 +310,26 @@ export default function ChatWindow({
           type="button"
           aria-label="Cuộn xuống tin nhắn mới nhất"
           onClick={scrollToBottom}
-          className="absolute bottom-20 left-1/2 z-10 flex size-10 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-lg transition-colors hover:bg-accent"
+          className="absolute bottom-24 right-4 z-10 flex size-10 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-md transition-[background-color,transform] duration-[--motion-fast] hover:bg-accent active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
-          <ChevronDown className="size-5" />
+          <ChevronDown className="size-5" aria-hidden="true" />
         </button>
       )}
 
       {!canSendMessage && (
-        <div className="border-t border-warning/30 bg-warning/10 px-6 py-2 text-sm text-warning-foreground">
+        <div
+          role="status"
+          className="flex items-center justify-center gap-2 border-t border-border bg-muted px-6 py-3 text-sm text-muted-foreground"
+        >
+          <Lock className="size-4 shrink-0" aria-hidden="true" />
           {membershipStatus === "REMOVED"
-            ? "Bạn không còn trong nhóm này"
-            : "Bạn đã rời khỏi nhóm này"}
+            ? "Bạn không còn trong nhóm này nên không thể gửi tin nhắn."
+            : "Bạn đã rời khỏi nhóm này nên không thể gửi tin nhắn."}
         </div>
       )}
 
-      <div className="shrink-0 border-t border-border bg-sidebar p-3 sm:px-4">
-        <div className="flex items-center gap-1 rounded-2xl border border-border bg-background px-2 py-1.5">
+      <div className="shrink-0 border-t border-border bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+        <div className="flex items-end gap-1 rounded-2xl border border-border bg-card p-1.5 shadow-xs transition-[border-color,box-shadow] duration-[--motion-fast] focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25">
           <input
             ref={fileInputRef}
             type="file"
@@ -282,35 +342,39 @@ export default function ChatWindow({
             }}
           />
           <Button
-            variant="ghost"
+            variant="ghost-muted"
             size="icon"
             onClick={() => fileInputRef.current?.click()}
             disabled={!canSendMessage}
             aria-label="Đính kèm tệp"
-            className="shrink-0 text-muted-foreground hover:text-foreground"
+            className="shrink-0 rounded-xl"
           >
             <Paperclip className="size-5" />
           </Button>
 
           {isGroupConversation && (
             <Button
-              variant="ghost"
+              variant="ghost-muted"
               size="icon"
               disabled={!canSendMessage}
               onClick={poll.handleOpenCreatePollDialog}
               aria-label="Tạo bình chọn"
-              className="shrink-0 text-muted-foreground hover:text-foreground"
+              className="shrink-0 rounded-xl"
             >
               <ListChecks className="size-5" />
             </Button>
           )}
 
-          <input
-            type="text"
-            placeholder="Nhập tin nhắn..."
+          {/* Auto-growing textarea: long messages stay fully visible instead of
+              scrolling inside a one-line input, capped so the thread keeps most
+              of the viewport. Enter sends, Shift+Enter breaks the line. */}
+          <textarea
+            ref={composerRef}
+            rows={1}
+            placeholder="Nhập tin nhắn…"
             disabled={!canSendMessage}
             aria-label="Nhập tin nhắn"
-            className="min-w-0 flex-1 bg-transparent px-1 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+            className="custom-scrollbar max-h-32 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-placeholder disabled:cursor-not-allowed"
             onChange={(e) => {
               setMsg(e.target.value);
               handleTyping(e.target.value);
@@ -330,10 +394,11 @@ export default function ChatWindow({
           <Popover>
             <PopoverTrigger asChild>
               <Button
-                variant="ghost"
+                variant="ghost-muted"
                 size="icon"
+                disabled={!canSendMessage}
                 aria-label="Chèn biểu tượng cảm xúc"
-                className="shrink-0 text-muted-foreground hover:text-foreground"
+                className="shrink-0 rounded-xl"
               >
                 <Smile className="size-5" />
               </Button>
@@ -341,7 +406,7 @@ export default function ChatWindow({
             <PopoverContent
               side="top"
               align="end"
-              className="border-none bg-transparent p-0 shadow-none"
+              className="w-auto border-none bg-transparent p-0 shadow-none"
             >
               <EmojiPicker
                 height={360}
@@ -360,19 +425,30 @@ export default function ChatWindow({
             size="icon"
             disabled={!canSendMessage || msg.trim() === ""}
             aria-label="Gửi tin nhắn"
-            className="shrink-0 rounded-full"
+            className="shrink-0 rounded-xl"
             onClick={handleSendMessage}
           >
-            <Send className="size-5" />
+            <Send className="size-[18px]" />
           </Button>
         </div>
+
+        <p className="mt-1.5 hidden px-2 text-[11px] text-muted-foreground sm:block">
+          <kbd className="rounded border border-border bg-muted px-1 font-sans">
+            Enter
+          </kbd>{" "}
+          để gửi ·{" "}
+          <kbd className="rounded border border-border bg-muted px-1 font-sans">
+            Shift + Enter
+          </kbd>{" "}
+          để xuống dòng
+        </p>
       </div>
 
       <Dialog
         open={showClearHistoryDialog}
         onOpenChange={setShowClearHistoryDialog}
       >
-        <DialogContent className="bg-background text-foreground">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Xóa toàn bộ lịch sử trò chuyện?</DialogTitle>
             <DialogDescription>
@@ -401,9 +477,9 @@ export default function ChatWindow({
         open={poll.showCreatePollDialog}
         onOpenChange={poll.setShowCreatePollDialog}
       >
-        <DialogContent className="max-w-2xl bg-background text-foreground">
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-semibold">
+            <DialogTitle>
               Tạo bình chọn
             </DialogTitle>
             <DialogDescription>
@@ -413,7 +489,7 @@ export default function ChatWindow({
 
           <div className="space-y-5">
             <div>
-              <label className="mb-2 block text-base font-medium text-foreground">
+              <label className="mb-2 block text-sm font-medium text-foreground">
                 Chủ đề bình chọn
               </label>
               <div className="rounded-xl border border-input bg-background p-3">
@@ -423,7 +499,7 @@ export default function ChatWindow({
                     poll.setPollQuestion(event.target.value.slice(0, 200))
                   }
                   placeholder="Đặt câu hỏi bình chọn"
-                  className="h-28 w-full resize-none bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground"
+                  className="h-28 w-full resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-placeholder"
                 />
                 <div className="text-right text-sm text-muted-foreground">
                   {poll.pollQuestion.length}/200
@@ -432,7 +508,7 @@ export default function ChatWindow({
             </div>
 
             <div>
-              <label className="mb-2 block text-base font-medium text-foreground">
+              <label className="mb-2 block text-sm font-medium text-foreground">
                 Các lựa chọn
               </label>
               <div className="space-y-2">
@@ -452,7 +528,7 @@ export default function ChatWindow({
                             poll.setPollOptions(nextOptions);
                           }}
                           placeholder={`Lựa chọn ${index + 1}`}
-                          className="h-9 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground"
+                          className="h-9 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-placeholder"
                         />
                         {poll.pollOptions.length > 2 && (
                           <button
@@ -483,7 +559,7 @@ export default function ChatWindow({
               <button
                 type="button"
                 onClick={() => poll.setPollOptions((prev) => [...prev, ""])}
-                className="mt-3 inline-flex items-center gap-2 text-base font-semibold text-primary hover:text-primary/80"
+                className="mt-3 inline-flex items-center gap-2 rounded-lg text-sm font-semibold text-brand transition-colors hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               >
                 <Plus className="h-5 w-5" />
                 Thêm lựa chọn
@@ -525,12 +601,12 @@ export default function ChatWindow({
         open={poll.showPollDetailDialog}
         onOpenChange={poll.setShowPollDetailDialog}
       >
-        <DialogContent className="max-w-2xl bg-background text-foreground">
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-semibold">
+            <DialogTitle>
               Bình chọn
             </DialogTitle>
-            <DialogDescription className="text-base text-foreground">
+            <DialogDescription>
               {poll.activePoll?.question}
             </DialogDescription>
           </DialogHeader>
@@ -586,7 +662,7 @@ export default function ChatWindow({
                       >
                         {option.text}
                       </div>
-                      <span className="w-6 text-right text-base font-medium text-foreground">
+                      <span className="w-6 text-right text-sm font-medium tabular-nums text-foreground">
                         {option.count}
                       </span>
                     </button>
@@ -639,9 +715,9 @@ export default function ChatWindow({
         open={poll.showClosePollConfirmDialog}
         onOpenChange={poll.setShowClosePollConfirmDialog}
       >
-        <DialogContent className="max-w-xl bg-background text-foreground">
+        <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle className="text-xl">Khóa bình chọn?</DialogTitle>
+            <DialogTitle>Khoá bình chọn?</DialogTitle>
             <DialogDescription>
               Sau khi khóa, bạn và các thành viên khác sẽ không thể tiếp tục
               tham gia bình chọn.

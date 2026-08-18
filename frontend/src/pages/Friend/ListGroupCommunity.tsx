@@ -11,7 +11,8 @@ import {
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import type { AppDispatch } from "@/redux/store";
-import { Search, UsersRound } from "lucide-react";
+import { ChevronRight, Search, SearchX, UsersRound } from "lucide-react";
+import { EmptyState } from "@/components/ui/feedback";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
@@ -109,15 +110,21 @@ const ListGroupCommunity = () => {
       <button
         key={group.id}
         onClick={() => openConversation(group)}
-        className="flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-accent"
+        className="group flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-[--motion-fast] hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
       >
-        <Avatar className="size-12 shrink-0">
-          <AvatarImage
-            src={(group.groupAvatar as string) || "/placeholder.svg"}
-            alt={group.displayAvatar || "Nhóm"}
-          />
-          <AvatarFallback>{(group.displayName || "G")[0]}</AvatarFallback>
-        </Avatar>
+        <div className="relative shrink-0">
+          <Avatar className="size-12">
+            <AvatarImage
+              src={(group.groupAvatar as string) || group.displayAvatar || ""}
+              alt={`Ảnh đại diện nhóm ${group.displayName || ""}`}
+            />
+            <AvatarFallback>{(group.displayName || "G")[0]}</AvatarFallback>
+          </Avatar>
+          <span className="absolute -bottom-0.5 -right-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-secondary px-1 text-[10px] font-semibold tabular-nums text-secondary-foreground ring-2 ring-background">
+            {memberCount > 99 ? "99+" : memberCount}
+            <span className="sr-only"> thành viên</span>
+          </span>
+        </div>
 
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-foreground">
@@ -127,6 +134,11 @@ const ListGroupCommunity = () => {
             {memberCount} thành viên
           </p>
         </div>
+
+        <ChevronRight
+          className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+          aria-hidden="true"
+        />
       </button>
     );
   };
@@ -139,7 +151,8 @@ const ListGroupCommunity = () => {
           <Input
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
-            placeholder="Tìm theo tên nhóm/cộng đồng..."
+            placeholder="Tìm nhóm hoặc cộng đồng"
+            aria-label="Tìm nhóm hoặc cộng đồng"
             className="pl-10"
           />
         </div>
@@ -164,24 +177,27 @@ const ListGroupCommunity = () => {
           )}
 
           {displayedGroups.length === 0 && !isSearching && (
-            <div className="flex flex-col items-center gap-3 py-12 text-center">
-              <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                <UsersRound className="size-7" />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {debouncedKeyword
-                  ? "Không tìm thấy cuộc trò chuyện phù hợp"
-                  : "Chưa có nhóm hoặc cộng đồng"}
-              </p>
-            </div>
+            <EmptyState
+              icon={debouncedKeyword ? SearchX : UsersRound}
+              title={
+                debouncedKeyword
+                  ? "Không tìm thấy nhóm nào"
+                  : "Chưa tham gia nhóm nào"
+              }
+              description={
+                debouncedKeyword
+                  ? `Không có nhóm nào khớp với “${debouncedKeyword}”.`
+                  : "Tạo nhóm mới từ menu ở màn hình trò chuyện để bắt đầu."
+              }
+            />
           )}
 
           {!debouncedKeyword && displayedGroups.length > 0 && (
             <div className="my-3 flex items-center justify-center">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                className="interceptor-loading text-muted-foreground"
+                className="interceptor-loading"
                 onClick={loadMoreGroups}
               >
                 Tải thêm

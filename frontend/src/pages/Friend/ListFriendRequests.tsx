@@ -6,9 +6,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getFriendRequestsAPI, type FriendRequestListItem } from "@/apis";
 import FriendRequestModal from "@/components/FriendRequestModal";
-import { formatDateTime } from "@/utils/formatDateTime";
+import { formatRelativeTime } from "@/utils/formatDateTime";
 import { showErrorToast } from "@/utils/toastError";
-import { UserPlus } from "lucide-react";
+import { ChevronRight, Inbox } from "lucide-react";
+import { EmptyState } from "@/components/ui/feedback";
 
 const ListFriendRequests = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -79,12 +80,12 @@ const ListFriendRequests = () => {
             <button
               key={request.id}
               onClick={() => setSelectedRequestId(request.id)}
-              className="flex w-full items-center gap-3 rounded-xl border border-border p-4 text-left transition-colors hover:bg-accent"
+              className="group flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-xs transition-[background-color,box-shadow] duration-[--motion-fast] hover:bg-accent hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               <Avatar className="size-12 shrink-0">
                 <AvatarImage
-                  src={request.fromUser.avatar || "/placeholder.svg"}
-                  alt={request.fromUser.username}
+                  src={request.fromUser.avatar || ""}
+                  alt={`Ảnh đại diện ${request.fromUser.username}`}
                 />
                 <AvatarFallback>
                   {(request.fromUser.username || "U")[0]}
@@ -96,15 +97,16 @@ const ListFriendRequests = () => {
                   {request.fromUser.username}
                 </p>
                 <p className="truncate text-sm text-muted-foreground">
-                  {request.fromUser.email}
+                  Muốn kết bạn với bạn
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatDateTime(request.createdAt)}
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {formatRelativeTime(request.createdAt)}
                 </p>
               </div>
 
-              <span className="shrink-0 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground">
+              <span className="flex shrink-0 items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors group-hover:border-input">
                 Xem chi tiết
+                <ChevronRight className="size-4" aria-hidden="true" />
               </span>
             </button>
           ))}
@@ -127,22 +129,19 @@ const ListFriendRequests = () => {
           )}
 
           {requests.length === 0 && !isLoading && (
-            <div className="flex flex-col items-center gap-3 py-12 text-center">
-              <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                <UserPlus className="size-7" />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Không có lời mời kết bạn nào
-              </p>
-            </div>
+            <EmptyState
+              icon={Inbox}
+              title="Không có lời mời nào"
+              description="Khi ai đó gửi lời mời kết bạn, lời mời sẽ xuất hiện ở đây."
+            />
           )}
 
           {!isLoading && requests.length > 0 && (
             <div className="my-3 flex items-center justify-center">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                className="interceptor-loading text-muted-foreground"
+                className="interceptor-loading"
                 onClick={() => void fetchRequests({ nextPage: page + 1 })}
               >
                 Tải thêm

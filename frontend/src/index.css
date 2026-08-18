@@ -3,6 +3,429 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ==========================================================================
+   DALN Chat — design tokens
+   Product category: Chat & Messaging App
+   Style: Minimalism/Swiss + Micro-interactions
+   Brand: indigo (hue 272). Every text pair below is verified >= 4.5:1 and
+   every non-text UI boundary (field borders, presence dots) >= 3:1.
+   ========================================================================== */
+
+:root {
+  /* ---- Radius scale ---- */
+  --radius: 0.75rem;
+
+  /* ---- Spacing scale (density 7 / standard-dense app) ---- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  /* ---- Motion ---- */
+  --motion-instant: 90ms;
+  --motion-fast: 140ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+  --ease-out: cubic-bezier(0.22, 0.9, 0.28, 1);
+  --ease-in-out: cubic-bezier(0.6, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+
+  /* ---- Elevation (light: soft, brand-tinted) ---- */
+  --shadow-xs: 0 1px 2px oklch(0.2 0.02 272 / 0.06);
+  --shadow-sm: 0 1px 2px oklch(0.2 0.02 272 / 0.06),
+    0 2px 6px oklch(0.2 0.02 272 / 0.06);
+  --shadow-md: 0 2px 4px oklch(0.2 0.02 272 / 0.05),
+    0 8px 20px oklch(0.2 0.02 272 / 0.09);
+  --shadow-lg: 0 4px 10px oklch(0.2 0.02 272 / 0.06),
+    0 20px 40px oklch(0.2 0.02 272 / 0.13);
+  --shadow-pop: 0 10px 30px oklch(0.2 0.02 272 / 0.14);
+
+  /* ---- Light surfaces ---- */
+  --background: oklch(0.985 0.002 272);
+  --foreground: oklch(0.2 0.02 272);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.02 272);
+  --elevated: oklch(1 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.02 272);
+
+  /* ---- Brand ---- */
+  --primary: oklch(0.52 0.19 272); /* fill — white text = 5.66:1 */
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-hover: oklch(0.47 0.19 272);
+  --brand: oklch(0.48 0.19 272); /* text/icon-safe brand tone */
+
+  --secondary: oklch(0.955 0.008 272);
+  --secondary-foreground: oklch(0.28 0.03 272);
+  --muted: oklch(0.965 0.006 272);
+  --muted-foreground: oklch(0.52 0.025 272); /* 5.29:1 on background */
+  --accent: oklch(0.955 0.025 272);
+  --accent-foreground: oklch(0.42 0.16 272);
+
+  /* ---- Status ---- */
+  --destructive: oklch(0.55 0.21 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --destructive-text: oklch(0.52 0.21 27);
+  --success: oklch(0.55 0.15 152);
+  --success-foreground: oklch(0.99 0 0);
+  --success-text: oklch(0.5 0.14 152);
+  --warning: oklch(0.75 0.15 75);
+  --warning-foreground: oklch(0.27 0.05 75);
+  --warning-text: oklch(0.52 0.13 75);
+
+  /* ---- Lines & fields ---- */
+  --border: oklch(0.885 0.01 272); /* decorative separator */
+  --input: oklch(0.65 0.022 272); /* field border — 3.06:1 vs card */
+  --placeholder: oklch(0.545 0.022 272); /* 4.9:1 on card */
+  --ring: oklch(0.52 0.19 272);
+
+  /* ---- Charts ---- */
+  --chart-1: oklch(0.52 0.19 272);
+  --chart-2: oklch(0.6 0.13 200);
+  --chart-3: oklch(0.62 0.16 152);
+  --chart-4: oklch(0.7 0.16 75);
+  --chart-5: oklch(0.6 0.19 340);
+
+  /* ---- Sidebar ---- */
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.2 0.02 272);
+  --sidebar-primary: oklch(0.52 0.19 272);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.955 0.025 272);
+  --sidebar-accent-foreground: oklch(0.42 0.16 272);
+  --sidebar-border: oklch(0.885 0.01 272);
+  --sidebar-ring: oklch(0.52 0.19 272);
+
+  /* ---- Chat surfaces ---- */
+  --chat-bg: oklch(1 0 0);
+  --chat-bg-pattern: oklch(0.955 0.008 272 / 0.55);
+  --bubble-in: oklch(0.945 0.008 272); /* 1.18:1 vs canvas, text 15.4:1 */
+  --bubble-in-foreground: oklch(0.2 0.02 272);
+  --bubble-out: oklch(0.52 0.19 272); /* 5.66:1 vs canvas */
+  --bubble-out-foreground: oklch(0.99 0 0);
+  --bubble-out-meta: oklch(0.99 0 0 / 0.78);
+  --typing: oklch(0.52 0.025 272);
+
+  /* ---- Presence ---- */
+  --presence-online: oklch(0.62 0.17 152); /* 3.36:1 vs card */
+  --presence-away: oklch(0.72 0.15 75);
+  --presence-busy: oklch(0.55 0.21 27);
+  --presence-offline: oklch(0.72 0.012 272);
+
+  --scroll-thumb: oklch(0.8 0.012 272);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  /* ---- Legacy aliases (kept so existing components keep working) ---- */
+  --bg-box-chat: var(--chat-bg);
+  --bg-box-message-incoming: var(--bubble-in);
+  --bg-box-message-out: var(--bubble-out);
+  --text: var(--foreground);
+  --black-bland: var(--sidebar);
+  --bg-voice-call: oklch(0.965 0.006 272);
+  --button: oklch(0.93 0.008 272);
+  --bg-scroll-thumb: var(--scroll-thumb);
+}
+
+.dark {
+  /* ---- Elevation (dark: depth comes from black shadow + lighter surface) ---- */
+  --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4), 0 2px 6px oklch(0 0 0 / 0.35);
+  --shadow-md: 0 2px 4px oklch(0 0 0 / 0.4), 0 8px 20px oklch(0 0 0 / 0.45);
+  --shadow-lg: 0 4px 10px oklch(0 0 0 / 0.45), 0 20px 40px oklch(0 0 0 / 0.55);
+  --shadow-pop: 0 10px 30px oklch(0 0 0 / 0.6);
+
+  --background: oklch(0.165 0.012 272);
+  --foreground: oklch(0.97 0.004 272);
+  --card: oklch(0.205 0.014 272);
+  --card-foreground: oklch(0.97 0.004 272);
+  --elevated: oklch(0.245 0.016 272);
+  --popover: oklch(0.245 0.016 272);
+  --popover-foreground: oklch(0.97 0.004 272);
+
+  --primary: oklch(0.52 0.19 272); /* fill — white text stays 5.66:1 */
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-hover: oklch(0.57 0.19 272);
+  --brand: oklch(0.74 0.15 272); /* 8.04:1 on background */
+
+  --secondary: oklch(0.27 0.014 272);
+  --secondary-foreground: oklch(0.97 0.004 272);
+  --muted: oklch(0.27 0.014 272);
+  --muted-foreground: oklch(0.715 0.025 272); /* 7.61:1 on background */
+  --accent: oklch(0.315 0.045 272);
+  --accent-foreground: oklch(0.96 0.01 272);
+
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --destructive-text: oklch(0.68 0.19 25);
+  --success: oklch(0.55 0.14 152);
+  --success-foreground: oklch(0.99 0 0);
+  --success-text: oklch(0.75 0.16 152);
+  --warning: oklch(0.7 0.15 75);
+  --warning-foreground: oklch(0.2 0.03 75);
+  --warning-text: oklch(0.8 0.14 80);
+
+  --border: oklch(0.315 0.014 272);
+  --input: oklch(0.545 0.02 272); /* 3.61:1 vs card */
+  --placeholder: oklch(0.66 0.02 272); /* 5.75:1 on card */
+  --ring: oklch(0.68 0.17 272);
+
+  --chart-1: oklch(0.68 0.17 272);
+  --chart-2: oklch(0.72 0.13 200);
+  --chart-3: oklch(0.75 0.16 152);
+  --chart-4: oklch(0.8 0.14 80);
+  --chart-5: oklch(0.7 0.19 340);
+
+  --sidebar: oklch(0.205 0.014 272);
+  --sidebar-foreground: oklch(0.97 0.004 272);
+  --sidebar-primary: oklch(0.52 0.19 272);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.315 0.045 272);
+  --sidebar-accent-foreground: oklch(0.96 0.01 272);
+  --sidebar-border: oklch(0.315 0.014 272);
+  --sidebar-ring: oklch(0.68 0.17 272);
+
+  --chat-bg: oklch(0.175 0.012 272);
+  --chat-bg-pattern: oklch(0.28 0.014 272 / 0.5);
+  --bubble-in: oklch(0.27 0.014 272); /* 1.26:1 vs canvas, text 14:1 */
+  --bubble-in-foreground: oklch(0.97 0.004 272);
+  --bubble-out: oklch(0.52 0.19 272); /* 3.26:1 vs canvas */
+  --bubble-out-foreground: oklch(0.99 0 0);
+  --bubble-out-meta: oklch(0.99 0 0 / 0.8);
+  --typing: oklch(0.715 0.025 272);
+
+  --presence-online: oklch(0.72 0.17 152); /* 7.74:1 vs card */
+  --presence-away: oklch(0.78 0.15 80);
+  --presence-busy: oklch(0.65 0.2 25);
+  --presence-offline: oklch(0.5 0.012 272);
+
+  --scroll-thumb: oklch(0.42 0.014 272);
+
+  --bg-voice-call: oklch(0.225 0.016 272);
+  --button: oklch(0.32 0.014 272);
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-elevated: var(--elevated);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-brand: var(--brand);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-text: var(--destructive-text);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-text: var(--success-text);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-text: var(--warning-text);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-placeholder: var(--placeholder);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Chat-specific */
+  --color-chat-bg: var(--chat-bg);
+  --color-bubble-in: var(--bubble-in);
+  --color-bubble-in-foreground: var(--bubble-in-foreground);
+  --color-bubble-out: var(--bubble-out);
+  --color-bubble-out-foreground: var(--bubble-out-foreground);
+  --color-typing: var(--typing);
+  --color-presence-online: var(--presence-online);
+  --color-presence-away: var(--presence-away);
+  --color-presence-busy: var(--presence-busy);
+  --color-presence-offline: var(--presence-offline);
+
+  /* Legacy aliases */
+  --color-bg-box-chat: var(--bg-box-chat);
+  --color-bg-box-message-incoming: var(--bg-box-message-incoming);
+  --color-bg-box-message-out: var(--bg-box-message-out);
+  --color-text: var(--text);
+  --color-black-bland: var(--black-bland);
+  --color-bg-voice-call: var(--bg-voice-call);
+  --color-button: var(--button);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-pop: var(--shadow-pop);
+
+  --ease-out: var(--ease-out);
+  --ease-spring: var(--ease-spring);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-variant-numeric: tabular-nums;
+    overscroll-behavior-y: none;
+  }
+
+  /* One visible, consistent focus indicator across the whole app.
+     WCAG 2.4.11/2.4.13: 2px ring + 2px offset, >= 3:1 against both surfaces. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) - 4px);
+  }
+
+  /* Never silently remove the indicator for keyboard users. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"],
+  [role="option"],
+  [role="menuitem"],
+  label[for],
+  summary,
+  a[href] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--placeholder);
+    opacity: 1;
+  }
+
+  /* Long URLs / IDs must wrap instead of forcing horizontal scroll. */
+  p,
+  li,
+  dd,
+  blockquote {
+    overflow-wrap: anywhere;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+    letter-spacing: -0.011em;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+
+  /* Touch devices get 44x44 minimum targets. Scoped to the primitives that
+     actually act as targets so desktop density is untouched and inline text
+     never gets stretched. */
+  @media (pointer: coarse) {
+    [data-slot="button"],
+    [data-slot="dropdown-menu-item"],
+    [data-slot="dropdown-menu-checkbox-item"],
+    [data-slot="dropdown-menu-radio-item"],
+    [data-slot="chip"],
+    [role="tab"] {
+      min-block-size: 44px;
+    }
+
+    [data-slot="button"][data-size^="icon"] {
+      min-inline-size: 44px;
+    }
+  }
+}
+
+/* ==========================================================================
+   Scrollbars
+   ========================================================================== */
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+  background-clip: content-box;
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+
+/* ==========================================================================
+   Keyframes
+   ========================================================================== */
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -25,210 +448,49 @@
   }
 }
 
-:root {
-  /* Radius scale */
-  --radius: 0.75rem;
-
-  /* Light theme — neutral surfaces with a violet brand accent */
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.21 0.01 285);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.01 285);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.01 285);
-  --primary: oklch(0.55 0.22 285);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.97 0.005 285);
-  --secondary-foreground: oklch(0.28 0.02 285);
-  --muted: oklch(0.968 0.004 285);
-  --muted-foreground: oklch(0.55 0.015 285);
-  --accent: oklch(0.95 0.02 285);
-  --accent-foreground: oklch(0.4 0.12 285);
-  --destructive: oklch(0.58 0.22 27);
-  --destructive-foreground: oklch(0.99 0 0);
-  --success: oklch(0.7 0.16 155);
-  --success-foreground: oklch(0.99 0 0);
-  --warning: oklch(0.75 0.15 75);
-  --warning-foreground: oklch(0.27 0.05 75);
-  --border: oklch(0.92 0.004 285);
-  --input: oklch(0.92 0.004 285);
-  --ring: oklch(0.55 0.22 285);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.21 0.01 285);
-  --sidebar-primary: oklch(0.55 0.22 285);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.95 0.02 285);
-  --sidebar-accent-foreground: oklch(0.4 0.12 285);
-  --sidebar-border: oklch(0.92 0.004 285);
-  --sidebar-ring: oklch(0.55 0.22 285);
-
-  /* App-specific surfaces (theme-aware) */
-  --bg-box-chat: oklch(0.99 0 0); /* chat canvas background */
-  --bg-box-message-incoming: oklch(0.955 0.003 285); /* incoming bubble */
-  --bg-box-message-out: oklch(0.92 0.05 285); /* outgoing bubble (soft violet) */
-  --text: oklch(0.21 0.01 285);
-
-  --black-bland: oklch(1 0 0); /* navigation / panel surface */
-  --bg-voice-call: oklch(0.97 0.005 285);
-  --button: oklch(0.93 0.005 285);
-
-  --bg-scroll-thumb: oklch(0.8 0.005 285);
-
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-}
-
-.dark {
-  --background: oklch(0.16 0.006 285);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.2 0.007 285);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.2 0.007 285);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.62 0.21 285);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.26 0.01 285);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.26 0.01 285);
-  --muted-foreground: oklch(0.7 0.015 285);
-  --accent: oklch(0.3 0.04 285);
-  --accent-foreground: oklch(0.96 0 0);
-  --destructive: oklch(0.62 0.21 25);
-  --destructive-foreground: oklch(0.99 0 0);
-  --success: oklch(0.72 0.16 155);
-  --success-foreground: oklch(0.16 0.006 285);
-  --warning: oklch(0.8 0.14 80);
-  --warning-foreground: oklch(0.2 0.03 80);
-  --border: oklch(0.29 0.01 285);
-  --input: oklch(0.29 0.01 285);
-  --ring: oklch(0.62 0.21 285);
-  --chart-1: oklch(0.62 0.21 285);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-
-  --sidebar: oklch(0.2 0.007 285);
-  --sidebar-foreground: oklch(0.97 0 0);
-  --sidebar-primary: oklch(0.62 0.21 285);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.3 0.04 285);
-  --sidebar-accent-foreground: oklch(0.96 0 0);
-  --sidebar-border: oklch(0.29 0.01 285);
-  --sidebar-ring: oklch(0.62 0.21 285);
-
-  /* App-specific surfaces (theme-aware) */
-  --bg-box-chat: oklch(0.16 0.006 285);
-  --bg-box-message-incoming: oklch(0.26 0.01 285);
-  --bg-box-message-out: oklch(0.48 0.16 285); /* readable violet with white text */
-  --text: oklch(0.97 0 0);
-
-  --black-bland: oklch(0.2 0.007 285);
-  --bg-voice-call: oklch(0.23 0.012 285);
-  --button: oklch(0.32 0.012 285);
-
-  --bg-scroll-thumb: oklch(0.4 0.01 285);
-}
-
-@theme inline {
-  --font-sans: var(--font-sans);
-
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-success: var(--success);
-  --color-success-foreground: var(--success-foreground);
-  --color-warning: var(--warning);
-  --color-warning-foreground: var(--warning-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-
-  /* App-specific surfaces */
-  --color-bg-box-chat: var(--bg-box-chat);
-  --color-bg-box-message-incoming: var(--bg-box-message-incoming);
-  --color-bg-box-message-out: var(--bg-box-message-out);
-  --color-text: var(--text);
-  --color-black-bland: var(--black-bland);
-  --color-bg-voice-call: var(--bg-voice-call);
-  --color-button: var(--button);
-
-  --bg-scroll-thumb: var(--bg-scroll-thumb);
-}
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
+@keyframes bubbleIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
   }
-  html {
-    -webkit-text-size-adjust: 100%;
-  }
-  body {
-    @apply bg-background text-foreground;
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    text-rendering: optimizeLegibility;
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+@keyframes typingBounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+@keyframes presencePulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--presence-online);
+    opacity: 0.55;
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+    opacity: 0;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    opacity: 0;
+  }
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--bg-scroll-thumb);
-  border-radius: 9999px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-foreground);
-}
-
-.custom-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: var(--bg-scroll-thumb) transparent;
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 @keyframes callRingProgress {
@@ -240,17 +502,95 @@
   }
 }
 
+/* ==========================================================================
+   Utilities
+   ========================================================================== */
+
 @layer utilities {
   .animate-fade-in {
-    animation: fadeIn 0.3s ease-in-out;
+    animation: fadeIn var(--motion-base) var(--ease-out);
   }
 
   .animate-slide-in-up {
-    animation: slideInUp 0.3s ease-in-out;
+    animation: slideInUp var(--motion-base) var(--ease-out);
+  }
+
+  .animate-bubble-in {
+    animation: bubbleIn var(--motion-base) var(--ease-spring);
   }
 
   .animate-call-ring-progress {
     stroke-dashoffset: var(--ring-circumference);
     animation: callRingProgress var(--ring-duration, 30s) linear forwards;
+  }
+
+  /* Chat canvas: a very low-contrast dot grid so bubbles read as raised
+     surfaces without competing with message text. */
+  .chat-canvas {
+    background-color: var(--chat-bg);
+    background-image: radial-gradient(
+      var(--chat-bg-pattern) 1px,
+      transparent 1px
+    );
+    background-size: 22px 22px;
+  }
+
+  .shadow-bubble {
+    box-shadow: var(--shadow-xs);
+  }
+
+  .surface-card {
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Text must survive narrow widths, zoom and long unbroken tokens. */
+  .text-ellipsis-1 {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+
+  .text-ellipsis-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+
+  /* Screen-reader-only, still focusable when needed. */
+  .sr-only-focusable:not(:focus):not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+}
+
+/* ==========================================================================
+   Reduced motion — final state, immediately.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
