@@ -5,6 +5,7 @@ import {
   AvatarWithPresence,
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/feedback";
 import {
   Phone,
   Video,
@@ -20,6 +21,7 @@ import {
   Lock,
   ListChecks,
   ArrowLeft,
+  MessageSquareOff,
 } from "lucide-react";
 import { useSelector } from "react-redux";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -95,6 +97,7 @@ export default function ChatWindow({
     typingUserNames,
     seenMessages,
     conversation,
+    loadError,
   } = useChatConversationContext(conversationId);
 
   const friends = useSelector(selectFriend);
@@ -171,6 +174,28 @@ export default function ChatWindow({
     const success = await handleClearHistory();
     if (success) setShowClearHistoryDialog(false);
   };
+
+  // A conversation that cannot be loaded needs to say so. Falling through to
+  // the normal shell left an empty thread with no explanation.
+  if (loadError && !effectiveConversation) {
+    return (
+      <div className="chat-canvas flex min-w-0 flex-1 flex-col items-center justify-center px-6 text-center">
+        <EmptyState
+          icon={MessageSquareOff}
+          title="Không mở được cuộc trò chuyện"
+          description={loadError}
+          action={
+            onBack && (
+              <Button variant="outline" onClick={onBack}>
+                <ArrowLeft className="size-4" aria-hidden="true" />
+                Quay lại danh sách
+              </Button>
+            )
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex min-w-0 flex-1 flex-col chat-canvas">

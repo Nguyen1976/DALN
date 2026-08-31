@@ -14,6 +14,7 @@ import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
 import { ConversationAssetKind } from '../http/chat-http.dto'
 import { MessageMapper } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
+import { parseKeysetCursor } from '@app/util'
 
 export interface RevokeMessageRequest {
   conversationId: string
@@ -214,7 +215,7 @@ export class MessageService {
     }
 
     const take = Number(params.limit) || 20
-    const cursor = params.cursor ? new Date(params.cursor) : null
+    const cursor = parseKeysetCursor(params.cursor)
 
     const messages =
       await this.messageRepo.findByConversationIdPaginatedForUser(

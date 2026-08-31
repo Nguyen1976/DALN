@@ -76,8 +76,11 @@ export function GroupMemberManager() {
   )?.role;
 
   const isAdmin = myRole === "ADMIN" || myRole === "OWNER";
-  const isDeleteAdmin = myRole === "ADMIN";
-  const canLeaveGroup = !isAdmin && conversation?.membershipStatus === "ACTIVE";
+  // The owner used to be excluded from both of these: they could not delete
+  // the group they created, and — despite the rule that ownership transfers on
+  // exit — they had no way to leave it either.
+  const isDeleteAdmin = isAdmin;
+  const canLeaveGroup = conversation?.membershipStatus === "ACTIVE";
   const canDeleteConversation = isDeleteAdmin && conversation?.type === "GROUP";
 
   useEffect(() => {
@@ -407,6 +410,11 @@ export function GroupMemberManager() {
                                 {member.userId === user.id ? " (Bạn)" : ""}
                               </p>
                               <div className="flex items-center gap-2 mt-0.5">
+                                {member.role === "OWNER" && (
+                                  <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+                                    CHỦ NHÓM
+                                  </span>
+                                )}
                                 {member.role === "ADMIN" && (
                                   <span className="rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-warning-foreground">
                                     QUẢN TRỊ VIÊN

@@ -76,8 +76,8 @@ const ListGroupCommunity = () => {
   const displayedGroups = debouncedKeyword ? searchResults : groups;
 
   const loadMoreGroups = () => {
-    const cursor =
-      conversations[conversations.length - 1]?.lastMessageAt || null;
+    const last = conversations[conversations.length - 1];
+    const cursor = last?.lastMessageAt ? `${last.lastMessageAt}|${last.id}` : null;
 
     dispatch(getConversations({ limit: 20, cursor }));
   };

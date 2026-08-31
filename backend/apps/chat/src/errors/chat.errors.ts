@@ -6,46 +6,46 @@ import {
 
 export class ChatErrors {
   static conversationNotEnoughMembers(): never {
-    throw new BadRequestException('A group conversation must have at least 3 members')
+    throw new BadRequestException('Nhóm phải có ít nhất 3 thành viên')
   }
 
   static userNoPermission(): never {
-    throw new ForbiddenException('User has no permission to perform this action')
+    throw new ForbiddenException('Bạn không có quyền thực hiện thao tác này')
   }
 
   static senderNotMember(): never {
-    throw new BadRequestException('Sender is not a member of the conversation')
+    throw new BadRequestException('Bạn không còn là thành viên của cuộc trò chuyện này')
   }
 
   static conversationNotFound(): never {
-    throw new NotFoundException('Conversation not found')
+    throw new NotFoundException('Không tìm thấy cuộc trò chuyện')
   }
 
   static userNotMember(): never {
-    throw new BadRequestException('User is not a member of the conversation')
+    throw new BadRequestException('Bạn không phải thành viên của cuộc trò chuyện này')
   }
 
   static invalidMessagePayload(): never {
-    throw new BadRequestException('Invalid message payload')
+    throw new BadRequestException('Nội dung tin nhắn không hợp lệ')
   }
 
   static invalidMediaType(): never {
-    throw new BadRequestException('Invalid media type or mime type')
+    throw new BadRequestException('Định dạng tệp không được hỗ trợ')
   }
 
   static fileSizeExceeded(): never {
-    throw new BadRequestException('File size exceeded max limit')
+    throw new BadRequestException('Tệp vượt quá dung lượng tối đa cho phép')
   }
 
   static mediaNotUploaded(): never {
-    throw new BadRequestException('Media file not found in storage')
+    throw new BadRequestException('Không tìm thấy tệp trên kho lưu trữ')
   }
 
   static memberNotFoundInConversation(): never {
-    throw new NotFoundException('Target user is not a member of this conversation')
+    throw new NotFoundException('Người này không phải thành viên của cuộc trò chuyện')
   }
 
-  static invalidMemberAction(message = 'Invalid member action'): never {
+  static invalidMemberAction(message = 'Thao tác với thành viên không hợp lệ'): never {
     throw new BadRequestException(message)
   }
 
@@ -54,32 +54,32 @@ export class ChatErrors {
   }
 
   static messageNotFound(): never {
-    throw new NotFoundException('Message not found')
+    throw new NotFoundException('Không tìm thấy tin nhắn')
   }
 
   static notMessageOwner(): never {
-    throw new ForbiddenException('You can only perform this action on your own message')
+    throw new ForbiddenException('Bạn chỉ có thể thao tác trên tin nhắn của chính mình')
   }
 
-  static invalidPollPayload(message = 'Invalid poll payload'): never {
+  static invalidPollPayload(message = 'Nội dung bình chọn không hợp lệ'): never {
     throw new BadRequestException(message)
   }
 
   static pollNotAllowedInDirectChat(): never {
     throw new BadRequestException(
-      'Polls are only allowed in group conversations',
+      'Chỉ tạo được bình chọn trong nhóm trò chuyện',
     )
   }
 
   static pollNotFound(): never {
-    throw new NotFoundException('Poll not found')
+    throw new NotFoundException('Không tìm thấy bình chọn')
   }
 
   static pollAlreadyClosed(): never {
-    throw new BadRequestException('Poll is already closed')
+    throw new BadRequestException('Bình chọn này đã đóng')
   }
 
   static pollCreatorOnly(): never {
-    throw new ForbiddenException('Only the poll creator can close this poll')
+    throw new ForbiddenException('Chỉ người tạo bình chọn mới đóng được bình chọn')
   }
 }

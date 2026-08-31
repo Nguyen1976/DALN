@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useLocation } from "react-router";
 import {
@@ -13,9 +13,11 @@ import {
 } from "@/redux/slices/seenStatusSlice";
 import { selectUser } from "@/redux/slices/userSlice";
 import { getConversationByIdAPI } from "@/apis";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import type { AppDispatch, RootState } from "@/redux/store";
 
 export function useChatConversationContext(conversationId?: string) {
+  const [loadError, setLoadError] = useState<string | null>(null);
   const dispatch = useDispatch<AppDispatch>();
   const location = useLocation();
   const user = useSelector(selectUser);
@@ -130,19 +132,30 @@ export function useChatConversationContext(conversationId?: string) {
     if (hydratedConversationRef.current === conversationId) return;
 
     hydratedConversationRef.current = conversationId;
+    setLoadError(null);
 
     void (async () => {
       try {
         const response = await getConversationByIdAPI(conversationId);
         if (!response?.conversation) return;
 
+        setLoadError(null);
         dispatch(
           applyConversationUpdate({
             conversation: response.conversation as Conversation,
           }),
         );
-      } catch {
+      } catch (error) {
         hydratedConversationRef.current = null;
+        // Swallowing this left the user staring at "Chọn một cuộc trò chuyện",
+        // as if nothing had been picked, when the real answer is that the
+        // conversation does not exist or is not theirs.
+        setLoadError(
+          getErrorMessage(
+            error,
+            "Không mở được cuộc trò chuyện này. Có thể nó không tồn tại hoặc bạn không còn là thành viên.",
+          ),
+        );
       }
     })();
   }, [conversationId, dispatch, effectiveConversation?.members?.length]);
@@ -158,5 +171,6 @@ export function useChatConversationContext(conversationId?: string) {
     conversationAvatar,
     typingUserNames,
     seenMessages,
+    loadError,
   };
 }

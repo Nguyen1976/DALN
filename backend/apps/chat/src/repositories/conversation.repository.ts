@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common'
 import { conversationType, Prisma } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { RedisService } from '@app/redis'
+import { olderThanCursor, type KeysetCursor } from '@app/util'
 
 @Injectable()
 export class ConversationRepository {
@@ -256,18 +257,19 @@ export class ConversationRepository {
 
   async findByUserIdPaginated(
     userId: string,
-    cursor: Date | null,
+    cursor: KeysetCursor | null,
     take: number,
   ) {
     const memberships = (await this.prisma.conversationMember.findMany({
       where: {
         userId,
         ...this.activeMemberWhere,
-        ...(cursor && {
-          lastMessageAt: { lt: cursor },
-        }),
+        // Ordering by lastMessageAt alone dropped every conversation that
+        // shared the boundary timestamp — the friendship saga stamps several
+        // at once, so this was reachable in normal use.
+        ...olderThanCursor('lastMessageAt', cursor),
       },
-      orderBy: { lastMessageAt: 'desc' },
+      orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
       take,
       select: {
         unreadCount: true,

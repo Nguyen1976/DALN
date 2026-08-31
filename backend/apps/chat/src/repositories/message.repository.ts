@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { messageType } from 'apps/chat/src/generated'
+import { messageType, Prisma } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { MessageBatchWriter } from '../services/message-batch-writer.service'
+import { olderThanCursor, type KeysetCursor } from '@app/util'
 
 type MediaInput = {
   mediaType: 'IMAGE' | 'VIDEO' | 'FILE'
@@ -189,7 +190,7 @@ export class MessageRepository {
     conversationId: string,
     userId: string,
     take: number,
-    cursor?: Date | null,
+    cursor?: KeysetCursor | null,
   ) {
     const member = await this.prisma.conversationMember.findFirst({
       where: {
@@ -216,18 +217,24 @@ export class MessageRepository {
 
     const batchSize = Math.max(take * 3, 30)
     const messages: any[] = []
-    let nextCursor = cursor ?? null
+    let nextCursor: KeysetCursor | null = cursor ?? null
 
     while (messages.length < take) {
+      // Both the cursor and the cleared-history mark constrain `createdAt`.
+      // They used to be spread in as two separate `createdAt` keys, so the
+      // second overwrote the first: a user who had cleared their history lost
+      // the cursor entirely and "load older" kept returning the same newest
+      // page for ever. Collecting them into one AND keeps both in force.
+      const bounds: Prisma.messageWhereInput[] = []
+      if (nextCursor) bounds.push(olderThanCursor('createdAt', nextCursor))
+      if (member?.clearedHistoryAt) {
+        bounds.push({ createdAt: { gt: member.clearedHistoryAt } })
+      }
+
       const batch = await this.prisma.message.findMany({
         where: {
           conversationId,
-          ...(nextCursor && {
-            createdAt: { lt: nextCursor },
-          }),
-          ...(member?.clearedHistoryAt && {
-            createdAt: { gt: member.clearedHistoryAt },
-          }),
+          ...(bounds.length ? { AND: bounds } : {}),
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: batchSize,
@@ -245,8 +252,9 @@ export class MessageRepository {
 
       if (batch.length < batchSize) break
 
-      nextCursor = batch[batch.length - 1]?.createdAt || nextCursor
-      if (!nextCursor) break
+      const last = batch[batch.length - 1]
+      if (!last?.createdAt) break
+      nextCursor = { at: last.createdAt, id: last.id }
     }
 
     return messages.slice(0, take)

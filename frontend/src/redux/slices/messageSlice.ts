@@ -283,10 +283,13 @@ export const messageSlice = createSlice({
 
         state.messages[conversationId] = merged;
 
-        const oldestCursor =
-          merged.length > 0
-            ? (merged[merged.length - 1]?.createdAt ?? null)
-            : null;
+        // Same tie-breaker as the conversation list: two messages written in
+        // the same millisecond by the batch writer would otherwise straddle a
+        // page boundary and one of them would never be fetched.
+        const oldest = merged[merged.length - 1];
+        const oldestCursor = oldest?.createdAt
+          ? `${oldest.createdAt}|${oldest.id}`
+          : null;
 
         state.pagination[conversationId] = {
           oldestCursor,

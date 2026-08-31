@@ -15,6 +15,7 @@ import { Member } from '../http/chat-http.dto'
 import { conversationType } from '../generated'
 import { MessageMapper } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
+import { parseKeysetCursor } from '@app/util'
 
 export interface CreateConversationData {
   members: Member[]
@@ -162,7 +163,7 @@ export class ConversationService {
     params: { limit?: number | string; cursor?: string | null },
   ) {
     const take = Number(params.limit) || 20
-    const cursor = params.cursor ? new Date(params.cursor) : null
+    const cursor = parseKeysetCursor(params.cursor)
     const conversations = await this.conversationRepo.findByUserIdPaginated(
       userId,
       cursor,

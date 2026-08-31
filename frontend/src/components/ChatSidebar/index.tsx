@@ -92,8 +92,11 @@ export function ChatSidebar({ className }: { className?: string }) {
 
   const loadMoreConversations = () => {
     if (isFetchingMoreRef.current) return;
-    const cursor =
-      conversations[conversations.length - 1]?.lastMessageAt || null;
+    const last = conversations[conversations.length - 1];
+    // The id rides along as a tie-breaker: several conversations can share the
+    // same lastMessageAt (the friendship saga stamps them together), and a
+    // timestamp-only cursor skips whichever ones fell on the page boundary.
+    const cursor = last?.lastMessageAt ? `${last.lastMessageAt}|${last.id}` : null;
     if (!cursor) return;
     isFetchingMoreRef.current = true;
     dispatch(getConversations({ limit: 10, cursor }));

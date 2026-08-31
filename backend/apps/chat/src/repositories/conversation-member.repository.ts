@@ -482,6 +482,22 @@ export class ConversationMemberRepository {
   //   })
   // }
 
+  async promoteToOwner(conversationId: string, userId: string) {
+    const result = await this.prisma.conversationMember.updateMany({
+      where: {
+        conversationId,
+        userId,
+        ...this.activeMemberFilter,
+      },
+      data: {
+        role: 'OWNER',
+      },
+    })
+
+    await this.invalidateMembersCache(conversationId)
+    return result
+  }
+
   async promoteToAdmin(conversationId: string, userId: string) {
     const result = await this.prisma.conversationMember.updateMany({
       where: {
