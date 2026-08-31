@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -21,6 +23,18 @@ export class UserErrors {
 
   static accountNotActivated(): never {
     throw new BadRequestException('Tài khoản chưa kích hoạt. Vui lòng xác thực OTP')
+  }
+
+  static otpResendTooSoon(retryAfterSeconds: number): never {
+    throw new HttpException(
+      {
+        message: `Vui lòng chờ ${retryAfterSeconds} giây trước khi yêu cầu mã mới`,
+        error: 'Too Many Requests',
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        retryAfterSeconds,
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    )
   }
 
   static otpInvalidOrExpired(): never {

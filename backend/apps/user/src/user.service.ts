@@ -170,6 +170,14 @@ export class UserService {
     }
   }
 
+  /**
+   * Issue and mail a registration OTP.
+   *
+   * Callers that can be triggered repeatedly (resend, a login against a
+   * pending account) claim `claimOtpResendSlot` first — otherwise the endpoint
+   * is a mail cannon anyone can aim at a third party's inbox. Registration
+   * itself needs no claim: the account is being created right then.
+   */
   private async sendRegistrationOtp(
     email: string,
     username: string,
@@ -324,42 +332,52 @@ export class UserService {
     email: string
     requiresOtpVerification: boolean
   }> {
+    // The cooldown is claimed before the lookup so the endpoint behaves
+    // identically for addresses that exist and ones that do not — neither the
+    // status code nor the response time may reveal which is which.
+    const waitSeconds = await this.redisService.claimOtpResendSlot(data.email)
+    if (waitSeconds > 0) {
+      UserErrors.otpResendTooSoon(waitSeconds)
+    }
+
     const user = await this.userRepo.findByEmail(data.email)
 
-    if (!user) {
-      UserErrors.userNotFound()
+    // Unknown address, or one that is already activated: answer exactly as if
+    // the mail had gone out. Telling the caller "no such user" hands an
+    // attacker a free account-enumeration oracle.
+    if (user && !user.isActive) {
+      await this.sendRegistrationOtp(user.email, user.username)
     }
-
-    if (user.isActive) {
-      UserErrors.emailAlreadyExists()
-    }
-
-    await this.sendRegistrationOtp(user.email, user.username)
 
     return {
-      email: user.email,
+      email: data.email,
       requiresOtpVerification: true,
     }
   }
 
   async login(data: UserLoginRequest): Promise<AuthSession> {
     const user = await this.userRepo.findByEmail(data.email)
-    if (!user) {
-      UserErrors.userNotFound()
-    }
 
-    if (!user.isActive) {
-      await this.sendRegistrationOtp(user.email, user.username)
-      UserErrors.accountNotActivated()
-    }
+    // An unknown address and a wrong password must be indistinguishable, so a
+    // missing user falls through to the same "invalid credentials" answer
+    // rather than a 404 that confirms the address is unregistered.
+    const isPasswordValid = user
+      ? await this.utilService.comparePassword(data.password, user.password)
+      : false
 
-    const isPasswordValid = await this.utilService.comparePassword(
-      data.password,
-      user.password,
-    )
-
-    if (!isPasswordValid) {
+    if (!user || !isPasswordValid) {
       UserErrors.invalidCredentials()
+    }
+
+    // Only now — once the caller has proven the password — is it safe to say
+    // the account is pending, and to spend an email on a fresh code. The
+    // cooldown keeps a login-retry loop from turning into a mail flood.
+    if (!user.isActive) {
+      const waitSeconds = await this.redisService.claimOtpResendSlot(user.email)
+      if (waitSeconds === 0) {
+        await this.sendRegistrationOtp(user.email, user.username)
+      }
+      UserErrors.accountNotActivated()
     }
 
     const payload = {

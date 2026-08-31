@@ -163,6 +163,26 @@ export class RedisService {
     await this.redisClient.del(key)
   }
 
+  private getOtpResendKey(email: string): string {
+    return `otp:resend:${email.trim().toLowerCase()}`
+  }
+
+  /**
+   * Claim the right to send one registration OTP for `email`.
+   *
+   * Returns 0 when the caller may send, or the number of seconds still left on
+   * the cooldown when it may not. The claim is a single atomic SET NX EX, so
+   * two concurrent requests cannot both win it. Enforcing this server side is
+   * the point: the countdown in the browser is a courtesy, not a control.
+   */
+  async claimOtpResendSlot(email: string, cooldownSeconds = 30): Promise<number> {
+    const key = this.getOtpResendKey(email)
+    const won = await this.redisClient.set(key, '1', 'EX', cooldownSeconds, 'NX')
+    if (won) return 0
+    const ttl = await this.redisClient.ttl(key)
+    return ttl > 0 ? ttl : cooldownSeconds
+  }
+
   async get(key: string): Promise<string | null> {
     return await this.redisClient.get(key)
   }
