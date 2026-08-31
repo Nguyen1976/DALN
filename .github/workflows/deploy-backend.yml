@@ -164,9 +164,48 @@ jobs:
             echo "has_deploy=false" >> "$GITHUB_OUTPUT"
           fi
 
+  quality:
+    name: Typecheck & Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # Prisma clients are generated code the rest of the source imports from;
+      # without them the type-check cannot resolve those modules.
+      - name: Generate Prisma clients
+        run: |
+          for schema in apps/*/prisma/schema.prisma; do
+            npx prisma generate --schema="$schema"
+          done
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # Not a gate yet: the codebase still has ~1.3k `no-unsafe-*` findings
+      # from `recommendedTypeChecked`, which is a cleanup of its own. Running it
+      # here keeps the number visible so it can be driven down.
+      - name: Lint (informational)
+        continue-on-error: true
+        run: npm run lint:check
+
   build-and-push:
     name: Build & Push — ${{ matrix.service }}
-    needs: detect-changes
+    needs: [detect-changes, quality]
     if: >-
       github.event_name != 'pull_request'
       && needs.detect-changes.outputs.services != '[]'
@@ -218,9 +257,10 @@ jobs:
 
   deploy:
     name: Deploy to EC2
-    needs: [detect-changes, build-and-push]
+    needs: [detect-changes, quality, build-and-push]
     if: >-
       always()
+      && needs.quality.result == 'success'
       && github.event_name != 'pull_request'
       && needs.detect-changes.outputs.has_deploy == 'true'
       && (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')

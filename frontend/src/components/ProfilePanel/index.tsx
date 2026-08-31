@@ -33,7 +33,6 @@ export default function ProfilePanel({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
-  const [fetchKey, setFetchKey] = useState(0);
 
   const conversation = useSelector(
     (state: { conversations: ConversationState }) => {
@@ -47,13 +46,20 @@ export default function ProfilePanel({
     conversation?.membershipStatus !== "REMOVED" &&
     conversation?.membershipStatus !== "LEFT";
 
-  useEffect(() => {
+  // Reset when the conversation or the tab changes.
+  //
+  // Adjusting state during render is React's documented way to do this; doing
+  // it in an effect renders the old tab's assets once before the reset lands,
+  // which shows the previous conversation's media for a frame.
+  const resetToken = `${conversationId}:${assetKind}:${canAccessConversationData}`;
+  const [loadedToken, setLoadedToken] = useState(resetToken);
+  if (loadedToken !== resetToken) {
+    setLoadedToken(resetToken);
     setAssets([]);
     setCursor(null);
     setNextCursor(null);
     setHasMore(canAccessConversationData);
-    setFetchKey((prev) => prev + 1);
-  }, [conversationId, assetKind, canAccessConversationData]);
+  }
 
   useEffect(() => {
     if (
@@ -93,7 +99,7 @@ export default function ProfilePanel({
     assetKind,
     cursor,
     hasMore,
-    fetchKey,
+    loadedToken,
     canAccessConversationData,
   ]);
 
@@ -300,7 +306,6 @@ export default function ProfilePanel({
                   onClick={() => {
                     if (!isLoading && nextCursor) {
                       setCursor(nextCursor);
-                      setFetchKey((prev) => prev + 1);
                     }
                   }}
                 >

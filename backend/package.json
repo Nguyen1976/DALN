@@ -25,7 +25,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand"
+    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
+    "lint:check": "eslint \"{apps,libs}/**/*.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.966.0",
@@ -130,7 +132,11 @@
       "^@app/redis(|/.*)$": "<rootDir>/libs/redis/src/$1",
       "^@app/saga(|/.*)$": "<rootDir>/libs/saga/src/$1",
       "^@app/storage-s3(|/.*)$": "<rootDir>/libs/storage-s3/src/$1",
-      "^@app/util(|/.*)$": "<rootDir>/libs/util/src/$1"
-    }
+      "^@app/util(|/.*)$": "<rootDir>/libs/util/src/$1",
+      "^(apps|libs)/(.*)$": "<rootDir>/$1/$2"
+    },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(uuid)/)"
+    ]
   }
 }

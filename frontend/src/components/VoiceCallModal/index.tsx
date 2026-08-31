@@ -85,7 +85,12 @@ export default function VoiceCallModal({
     cleanup,
   } = useWebRTC(socket);
 
-  callStatusRef.current = callStatus;
+  // Mirrored into a ref for the ring-timeout callback, which must read the
+  // latest status without re-subscribing. Written in an effect: assigning a
+  // ref during render is not allowed.
+  useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
 
   const isRinging =
     !showBusyResult &&
