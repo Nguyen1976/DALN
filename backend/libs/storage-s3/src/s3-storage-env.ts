@@ -7,6 +7,7 @@ export function getS3StorageConfigFromEnv(): S3StorageConfig {
   const bucket = process.env.S3_BUCKET || ''
   const region = process.env.AWS_REGION || 'ap-southeast-1'
   const endpoint = process.env.S3_ENDPOINT || undefined
+  const publicEndpoint = process.env.S3_PUBLIC_ENDPOINT || undefined
 
   const cdnPublicUrl = (
     process.env.CDN_PUBLIC_URL ||
@@ -20,6 +21,7 @@ export function getS3StorageConfigFromEnv(): S3StorageConfig {
     region,
     cdnPublicUrl,
     endpoint,
+    publicEndpoint,
   }
 }
 

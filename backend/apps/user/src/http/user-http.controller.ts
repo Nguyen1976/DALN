@@ -28,6 +28,25 @@ import {
   VerifyOtpDto,
   CompleteInterestOnboardingDto,
 } from './user-http.dto'
+import {
+  ACCESS_TOKEN_MAX_AGE_MS,
+  REFRESH_TOKEN_MAX_AGE_MS,
+} from '@app/common/auth/auth.guard'
+
+/**
+ * Session cookie attributes, shared by login and logout.
+ *
+ * `secure: true` unconditionally used to be set here: browsers make an
+ * exception for http://localhost so it appeared to work, but any other plain
+ * HTTP origin (a LAN address used to test from a phone, a staging box) would
+ * have silently dropped the cookie and left login looking broken.
+ */
+const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax',
+  path: '/',
+} as const
 
 @Controller('user')
 export class UserHttpController {
@@ -89,14 +108,17 @@ export class UserHttpController {
   ) {
     const session = await this.userService.login(dto)
 
+    // Same attributes the AuthGuard uses when it silently refreshes, so the
+    // rotated cookie replaces this one instead of sitting beside it — and so
+    // `clearCookie` on logout actually matches and removes them.
     response.cookie('accessToken', session.accessToken, {
-      httpOnly: true,
-      secure: true,
+      ...SESSION_COOKIE_OPTIONS,
+      maxAge: ACCESS_TOKEN_MAX_AGE_MS,
     })
 
     response.cookie('refreshToken', session.refreshToken, {
-      httpOnly: true,
-      secure: true,
+      ...SESSION_COOKIE_OPTIONS,
+      maxAge: REFRESH_TOKEN_MAX_AGE_MS,
     })
 
     return {
@@ -117,8 +139,8 @@ export class UserHttpController {
   @Post('logout')
   @WithoutLogin()
   async logout(@Res({ passthrough: true }) response: Response) {
-    response.clearCookie('accessToken')
-    response.clearCookie('refreshToken')
+    response.clearCookie('accessToken', SESSION_COOKIE_OPTIONS)
+    response.clearCookie('refreshToken', SESSION_COOKIE_OPTIONS)
     return { message: 'Logout successful' }
   }
 
@@ -142,10 +164,17 @@ export class UserHttpController {
 
   @Get('')
   @RequireLogin()
-  async getUserById(@Query('userId') userId: string) {
+  async getUserById(@UserInfo() viewer: any, @Query('userId') userId: string) {
     const user = await this.userService.getUserById(userId)
+    const canSeeContact = await this.userService.canSeeContactDetails(
+      viewer?.userId,
+      userId,
+    )
+
     return {
-      email: user.email,
+      // Email is contact detail, not public profile: it goes out only to the
+      // account itself or to an accepted friend.
+      ...(canSeeContact ? { email: user.email } : {}),
       username: user.username,
       fullName: user.fullName || '',
       avatar: user.avatar || '',
@@ -233,11 +262,13 @@ export class UserHttpController {
     @UserInfo() user: any,
     @Query('limit') limit: string,
     @Query('page') page: string,
+    @Query('direction') direction?: string,
   ) {
     const requests = await this.userService.listFriendRequests(
       user.userId,
       Number(limit),
       Number(page),
+      direction === 'sent' ? 'sent' : 'received',
     )
     return {
       friendRequests: requests.map((request) => ({

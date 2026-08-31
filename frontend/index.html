@@ -1,17 +1,52 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#7c5cff" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="Nhắn tin, gọi thoại và kết nối bạn bè theo gợi ý thông minh."
+    />
+    <meta
+      name="theme-color"
+      content="#F9FAFB"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#0C0E14"
+      media="(prefers-color-scheme: dark)"
+    />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <title>Chat app</title>
+    <title>DALN Chat</title>
+    <script>
+      // Apply the stored theme before first paint so the app never flashes
+      // light before switching to dark (or the other way round).
+      (function () {
+        try {
+          var stored = localStorage.getItem("vite-ui-theme");
+          var theme =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          document.documentElement.classList.add(theme);
+          document.documentElement.style.colorScheme = theme;
+        } catch (e) {
+          /* private mode / storage disabled — fall through to light */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

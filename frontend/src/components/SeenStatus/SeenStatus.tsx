@@ -6,7 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Check } from "lucide-react";
+import { Check, CheckCheck } from "lucide-react";
 
 interface SeenUser {
   userId: string;
@@ -19,68 +19,67 @@ interface SeenStatusProps {
 }
 
 /**
- * Seen Status component showing who has viewed the message
- * Displays avatars with tooltip on hover
+ * Delivery / read receipt under the last message of a run.
+ *
+ * Sent and seen use different glyphs (single vs. double check) as well as
+ * different colours, so the two states stay distinguishable without colour
+ * vision. The state is always spelled out for assistive tech.
  */
 export const SeenStatus: React.FC<SeenStatusProps> = ({ seenUsers }) => {
   if (!seenUsers || seenUsers.length === 0) {
-    // Show just the check mark for sent messages without seen
     return (
-      <div className="flex justify-end mr-10 h-5 mt-1">
-        <Check className="w-3 h-3 text-muted-foreground" />
+      <div className="mr-1 mt-1 flex h-4 items-center justify-end gap-1">
+        <Check className="size-3 text-muted-foreground" aria-hidden="true" />
+        <span className="sr-only">Đã gửi</span>
       </div>
     );
   }
 
-  // Count of users who saw
   const seenCount = seenUsers.length;
+  const visible = seenUsers.slice(0, 3);
+  const overflow = seenUsers.slice(3);
 
   return (
-    <div className="flex justify-end mr-10 gap-2 mt-1 items-center">
-      <div className="flex -space-x-2">
-        <TooltipProvider>
-          {seenUsers.slice(0, 3).map((user) => (
+    <div className="mr-1 mt-1 flex items-center justify-end gap-1.5">
+      <TooltipProvider>
+        <div className="flex -space-x-1.5">
+          {visible.map((user) => (
             <Tooltip key={user.userId}>
               <TooltipTrigger asChild>
-                <Avatar className="w-5 h-5 border-2 border-background hover:border-primary transition-colors cursor-pointer hover:scale-110 transform duration-200">
-                  <AvatarImage src={user.avatar || ""} />
+                <Avatar className="size-4 ring-2 ring-chat-bg">
+                  <AvatarImage
+                    src={user.avatar || ""}
+                    alt={`${user.username || "Người dùng"} đã xem`}
+                  />
                   <AvatarFallback className="text-[8px] font-bold">
                     {(user.username || "U")[0]}
                   </AvatarFallback>
                 </Avatar>
               </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs">
-                {user.username || "User"} đã xem
+              <TooltipContent side="top">
+                {user.username || "Người dùng"} đã xem
               </TooltipContent>
             </Tooltip>
           ))}
 
-          {/* Show +N indicator if more than 3 users */}
-          {seenCount > 3 && (
+          {overflow.length > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="w-5 h-5 rounded-full bg-primary/20 border-2 border-background flex items-center justify-center hover:scale-110 transform duration-200 cursor-pointer">
-                  <span className="text-[7px] font-bold text-foreground">
-                    +{seenCount - 3}
-                  </span>
-                </div>
+                <span className="flex size-4 items-center justify-center rounded-full bg-secondary text-[8px] font-bold text-secondary-foreground ring-2 ring-chat-bg">
+                  +{overflow.length}
+                </span>
               </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs">
-                {seenUsers
-                  .slice(3)
-                  .map((u) => u.username || "User")
-                  .join(", ")}{" "}
-                cũng đã xem
+              <TooltipContent side="top">
+                {overflow.map((u) => u.username || "Người dùng").join(", ")} cũng
+                đã xem
               </TooltipContent>
             </Tooltip>
           )}
-        </TooltipProvider>
-      </div>
+        </div>
+      </TooltipProvider>
 
-      {/* Status indicator - check mark with animation */}
-      <div className="flex items-center">
-        <Check className="w-3 h-3 text-primary" strokeWidth={3} />
-      </div>
+      <CheckCheck className="size-3.5 text-brand" aria-hidden="true" />
+      <span className="sr-only">{`${seenCount} người đã xem`}</span>
     </div>
   );
 };

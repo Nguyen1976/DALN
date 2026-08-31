@@ -11,11 +11,18 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
       useFactory: (config: ConfigService) => ({
         transport: {
           host: config.get('SMTP_HOST'),
-          port: config.get('SMTP_PORT'),
-          auth: {
-            user: config.get('SMTP_USER'),
-            pass: config.get('SMTP_PASS'),
-          },
+          port: Number(config.get('SMTP_PORT')) || 587,
+          // MailHog/Mailpit ở local không có AUTH — gửi khối `auth` rỗng sẽ
+          // làm nodemailer báo "Missing credentials for PLAIN". Chỉ đính kèm
+          // thông tin đăng nhập khi thực sự có.
+          ...(config.get('SMTP_USER')
+            ? {
+                auth: {
+                  user: config.get('SMTP_USER'),
+                  pass: config.get('SMTP_PASS'),
+                },
+              }
+            : {}),
         },
         defaults: {
           from: '"Chat App" <no-reply@chat.com>',

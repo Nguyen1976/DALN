@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common'
 import { ScheduleModule } from '@nestjs/schedule'
-import { BullModule } from '@nestjs/bullmq'
 import { ChatController } from './chat.controller'
 import { ChatService } from './chat.service'
-import { MessageService, MessageMediaService, PollService, ConversationMemberService, ConversationService } from './services'
+import { MessageService, MessageMediaService, PollService, ConversationMemberService, ConversationService, MessageBatchWriter } from './services'
 import { UtilModule } from '@app/util'
 import {
   ConversationRepository,
@@ -25,7 +24,7 @@ import { AuthGuard, CommonModule } from '@app/common'
 import { APP_GUARD } from '@nestjs/core'
 import { PrismaModule } from '../prisma/prisma.module'
 import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
-import { getBullMqConnectionConfig, RedisModule } from '@app/redis'
+import { RedisModule } from '@app/redis'
 import { BackgroundJobModule } from './background-jobs/background-jobs.module'
 
 @Module({
@@ -49,14 +48,9 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
     }),
     S3StorageModule.forRoot(getS3StorageConfigFromEnv()),
     ScheduleModule.forRoot(),
-    BullModule.forRootAsync({
-      useFactory: () => ({
-        connection: getBullMqConnectionConfig(),
-      }),
-    }),
-    BullModule.registerQueue({
-      name: 'unreadQueue', // Tên cái xe buýt chở event
-    }),
+    // BullMQ đã được gỡ khỏi đường unread: worker cũ chỉ ghi 3 lệnh Redis,
+    // trong khi vòng đời một job tốn ~8-10 lệnh sổ sách trên cùng Redis đó.
+    // MessageService nay ghi thẳng bằng pipeline.
     BackgroundJobModule,
     RedisModule.forRoot(() => ({}), 'REDIS_CLIENT'),
   ],
@@ -74,6 +68,7 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
     ConversationService,
     ConversationRepository,
     MessageRepository,
+    MessageBatchWriter,
     ConversationMemberRepository,
     PollRepository,
     ChatEventsPublisher,

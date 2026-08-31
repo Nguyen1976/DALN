@@ -2,10 +2,11 @@
 
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { X, Search, Camera } from "lucide-react";
+import { X, Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
+import { SearchField } from "../ui/search-field";
 import { useDispatch, useSelector } from "react-redux";
 import {
   getFriends,
@@ -87,22 +88,27 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
   }, [preview]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm animate-fade-in">
       <form
-        className="flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+        className="flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-lg"
         onSubmit={handleSubmit(onSubmit)}
       >
-        <div className="flex items-center justify-between border-b border-border p-5">
-          <h2 className="text-lg font-semibold text-foreground">
-            Tạo cuộc trò chuyện mới
-          </h2>
+        <div className="flex items-start justify-between gap-3 border-b border-border p-5">
+          <div className="space-y-0.5">
+            <h2 className="text-lg font-semibold tracking-[-0.01em] text-foreground">
+              Tạo nhóm mới
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Đặt tên nhóm và chọn những người bạn muốn thêm vào.
+            </p>
+          </div>
           <Button
             type="button"
-            variant="ghost"
+            variant="ghost-muted"
             size="icon"
             onClick={onClose}
             aria-label="Đóng"
-            className="text-muted-foreground hover:text-foreground"
+            className="-mr-1 -mt-1 shrink-0"
           >
             <X className="size-5" />
           </Button>
@@ -122,40 +128,53 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
             }}
           />
           <div className="flex items-center gap-3">
-            <Avatar
-              className="flex size-12 shrink-0 cursor-pointer items-center justify-center border border-border bg-muted transition-colors hover:bg-accent"
+            <button
+              type="button"
               onClick={() => inputRef.current?.click()}
+              aria-label="Chọn ảnh đại diện nhóm"
+              className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-dashed border-input bg-muted text-muted-foreground transition-colors duration-[--motion-fast] hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               {!preview ? (
-                <Camera className="size-5 text-muted-foreground" />
+                <Camera className="size-5" aria-hidden="true" />
               ) : (
-                <AvatarImage src={preview} alt="Xem trước" />
+                <img
+                  src={preview}
+                  alt="Xem trước ảnh nhóm"
+                  className="size-full object-cover"
+                />
               )}
-            </Avatar>
-            <Input
-              type="text"
-              placeholder="Tên nhóm"
-              {...register("groupName", { required: "Vui lòng nhập tên nhóm" })}
-            />
+            </button>
+            <div className="flex-1 space-y-1">
+              <label
+                htmlFor="new-group-name"
+                className="text-sm font-medium text-foreground"
+              >
+                Tên nhóm
+              </label>
+              <Input
+                id="new-group-name"
+                type="text"
+                placeholder="VD: Nhóm đồ án"
+                {...register("groupName", {
+                  required: "Vui lòng nhập tên nhóm",
+                })}
+              />
+            </div>
           </div>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Tìm người dùng..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
-            />
-          </div>
+          <SearchField
+            value={search}
+            onValueChange={setSearch}
+            placeholder="Tìm bạn bè để thêm"
+            label="Tìm bạn bè"
+          />
 
           <div className="custom-scrollbar max-h-[300px] space-y-1 overflow-y-auto">
             {friends?.map((user) => (
               <label
                 key={user.id}
                 htmlFor={`${user.id}`}
-                className="flex w-full cursor-pointer items-center gap-3 rounded-lg p-3 transition-colors hover:bg-accent"
+                className="flex w-full cursor-pointer items-center gap-3 rounded-lg p-2.5 transition-colors duration-[--motion-fast] hover:bg-accent has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-[-2px] has-[:focus-visible]:outline-ring"
               >
                 <Checkbox
                   id={`${user.id}`}
@@ -172,10 +191,10 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
                   }}
                 />
                 <Avatar className="size-10 shrink-0">
-                  <AvatarImage src={user.avatar || "/placeholder.svg"} alt={user.username} />
+                  <AvatarImage src={user.avatar || ""} alt={user.username} />
                   <AvatarFallback>{user.username[0]}</AvatarFallback>
                 </Avatar>
-                <span className="font-medium text-foreground">
+                <span className="min-w-0 flex-1 truncate font-medium text-foreground">
                   {user.username}
                 </span>
               </label>
@@ -183,9 +202,9 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
             <div className="my-2 flex items-center justify-center">
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                className="interceptor-loading text-muted-foreground"
+                className="interceptor-loading"
                 onClick={() => {
                   loadMoreFriends();
                 }}
@@ -196,10 +215,26 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
           </div>
         </div>
 
-        <div className="flex justify-end border-t border-border p-4">
-          <Button type="submit" className="interceptor-loading">
-            Bắt đầu chat
-          </Button>
+        <div className="flex items-center justify-between gap-3 border-t border-border p-4">
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            Đã chọn{" "}
+            <span className="font-medium text-foreground">
+              {slectedFriends.length}
+            </span>{" "}
+            người
+          </p>
+          <div className="flex gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Huỷ
+            </Button>
+            <Button
+              type="submit"
+              className="interceptor-loading"
+              disabled={slectedFriends.length === 0}
+            >
+              Tạo nhóm
+            </Button>
+          </div>
         </div>
       </form>
     </div>

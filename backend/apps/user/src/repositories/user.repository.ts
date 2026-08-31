@@ -1,13 +1,15 @@
 import { PrismaService } from 'apps/user/prisma/prisma.service'
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 
 @Injectable()
 export class UserRepository {
+  private readonly logger = new Logger(UserRepository.name)
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private toGeoPoint(location?: { lat: number; lon: number }) {
     if (!location) {
-      console.log('[user.repository] toGeoPoint skipped: no location payload')
+      this.logger.debug('[user.repository] toGeoPoint skipped: no location payload')
       return undefined
     }
 
@@ -16,7 +18,7 @@ export class UserRepository {
       coordinates: [location.lon, location.lat],
     }
 
-    console.log('[user.repository] toGeoPoint converted', {
+    this.logger.debug('[user.repository] toGeoPoint converted', {
       input: location,
       output: geoPoint,
     })
@@ -65,7 +67,7 @@ export class UserRepository {
       lon: number
     }
   }) {
-    console.log('[user.repository] create user payload', {
+    this.logger.debug('[user.repository] create user payload', {
       email: data.email,
       username: data.username,
       hasLocation: Boolean(data.location),
@@ -93,7 +95,7 @@ export class UserRepository {
       lon: number
     }
   }) {
-    console.log('[user.repository] update register info payload', {
+    this.logger.debug('[user.repository] update register info payload', {
       email: data.email,
       username: data.username,
       hasLocation: Boolean(data.location),

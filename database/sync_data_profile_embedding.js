@@ -23,7 +23,10 @@ async function run() {
             if (batch.length === BATCH_SIZE) {
                 // Chỉ gửi đi, không cần xử lý kết quả trả về nặng nề
                 console.time("EmbedRequest");
-                await axios.post("http://127.0.0.1:3005/recommendation/embed-and-save", { users: batch });
+                // endpoint là @InternalOnly -> cần shared secret
+                await axios.post("http://127.0.0.1:3005/recommendation/embed-and-save", { users: batch }, {
+                    headers: { "x-internal-token": process.env.INTERNAL_API_TOKEN || "" },
+                });
                 batch = [];
                 console.timeEnd("EmbedRequest");
                 console.log(`🚀 Đã đẩy ${BATCH_SIZE} users sang recommendation service... `);

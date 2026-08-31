@@ -16,7 +16,7 @@ interface ProfileSettingsProps {
 
 export function ProfileSettings({ onClose }: ProfileSettingsProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/55 p-4 text-foreground backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/55 p-4 text-foreground backdrop-blur-sm animate-fade-in">
       <div className="mt-4 flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl sm:mt-8">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border p-4">

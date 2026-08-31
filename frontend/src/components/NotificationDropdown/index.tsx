@@ -4,31 +4,69 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Bell, MoreHorizontal, Check } from "lucide-react";
+import {
+  Bell,
+  BellRing,
+  Check,
+  MessageSquare,
+  Settings2,
+  UserPlus,
+  Users,
+} from "lucide-react";
+import { EmptyState, Spinner } from "@/components/ui/feedback";
 import { cn } from "@/lib/utils";
 import { type UIEvent, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch } from "@/redux/store";
 import {
+  fetchUnreadCount,
   getNotifications,
   markAllNotificationsAsRead,
   markNotificationAsRead,
   selectNotification,
+  selectUnreadNotificationCount,
   type Notification,
 } from "@/redux/slices/notificationSlice";
-import { formatDateTime } from "@/utils/formatDateTime";
+import { formatFullDateTime, formatRelativeTime } from "@/utils/formatDateTime";
 import FriendRequestModal from "../FriendRequestModal";
 import { useNavigate } from "react-router";
+import { socket } from "@/lib/socket";
+
+/** Notification type -> icon, so each row is scannable without reading it. */
+const iconForType = (type?: string) => {
+  if (type === "FRIEND_REQUEST") return UserPlus;
+  if (type?.includes("GROUP")) return Users;
+  if (type?.includes("MESSAGE")) return MessageSquare;
+  return BellRing;
+};
 
 export function NotificationsDropdown() {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
   const notifications = useSelector(selectNotification);
+  // From the server, not from `notifications`: the list holds one page, so
+  // counting it capped the badge at the page size.
+  const unreadCount = useSelector(selectUnreadNotificationCount);
   const [page, setPage] = useState(1);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const limit = 10;
+
+  useEffect(() => {
+    // The count is cheap and must stay right even when the list is not open.
+    void dispatch(fetchUnreadCount());
+  }, [dispatch]);
+
+  // Re-sync after the realtime channel drops and comes back, so a badge that
+  // drifted while disconnected snaps back to the truth.
+  useEffect(() => {
+    const resync = () => void dispatch(fetchUnreadCount());
+    socket.on("connect", resync);
+    return () => {
+      socket.off("connect", resync);
+    };
+  }, [dispatch]);
 
   useEffect(() => {
     if (notifications.length > 0) return;
@@ -107,85 +145,140 @@ export function NotificationsDropdown() {
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Thông báo"
-            className="relative text-muted-foreground hover:text-foreground"
+            aria-label={
+              unreadCount > 0
+                ? `Thông báo, ${unreadCount} chưa đọc`
+                : "Thông báo"
+            }
+            className="relative"
           >
             <Bell className="size-5" />
-            {notifications.filter((n) => !n.isRead).length > 0 && (
-              <span className="absolute right-2 top-2 size-2 rounded-full border-2 border-background bg-destructive" />
+            {unreadCount > 0 && (
+              <span
+                aria-hidden="true"
+                className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums text-destructive-foreground ring-2 ring-sidebar"
+              >
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
             )}
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="w-80 p-0 overflow-hidden"
-          align="start"
+          className="w-[22rem] overflow-hidden p-0"
+          align="end"
           sideOffset={8}
         >
-          <div className="flex items-center justify-between p-4 border-b">
-            <h2 className="text-sm font-semibold">Thông báo</h2>
+          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+            <div className="flex items-baseline gap-2">
+              <h2 className="text-sm font-semibold text-foreground">
+                Thông báo
+              </h2>
+              {unreadCount > 0 && (
+                <span className="text-xs font-medium text-brand">
+                  {unreadCount} mới
+                </span>
+              )}
+            </div>
             <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground"
+              variant="ghost-muted"
+              size="icon-sm"
+              aria-label="Cài đặt thông báo"
               onClick={() => navigate("/settings/notifications")}
             >
-              <MoreHorizontal className="w-4 h-4" />
+              <Settings2 className="size-4" />
             </Button>
           </div>
 
           <div
-            className="max-h-96 h-96 overflow-y-auto"
+            className="custom-scrollbar h-96 overflow-y-auto"
             onScroll={handleNotificationScroll}
           >
             {notifications.length > 0 ? (
-              <div className="flex flex-col">
-                {notifications.map((n) => (
-                  <button
-                    key={n.id}
-                    className={cn(
-                      "w-full px-4 py-3 flex items-start gap-3 hover:bg-accent transition-colors text-left border-b last:border-0",
-                      !n.isRead && "bg-primary/5",
-                    )}
-                    onClick={() => handleClickNotification(n)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs leading-relaxed">{n.message}</p>
-                      <span
+              <ul className="flex flex-col">
+                {notifications.map((n) => {
+                  const Icon = iconForType(n.type);
+                  return (
+                    <li key={n.id}>
+                      <button
                         className={cn(
-                          "text-[10px] mt-1 block text-muted-foreground",
+                          "flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left last:border-0",
+                          "transition-colors duration-[--motion-fast] hover:bg-accent",
+                          "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                          !n.isRead && "bg-accent/45",
                         )}
+                        onClick={() => handleClickNotification(n)}
                       >
-                        {formatDateTime(n.createdAt)}
-                      </span>
-                    </div>
-                    {!n.isRead && (
-                      <div className="w-2 h-2 bg-primary rounded-full mt-2" />
-                    )}
-                  </button>
-                ))}
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg",
+                            n.isRead
+                              ? "bg-muted text-muted-foreground"
+                              : "bg-primary/15 text-brand",
+                          )}
+                        >
+                          <Icon className="size-4" />
+                        </span>
+
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className={cn(
+                              "text-sm leading-relaxed",
+                              n.isRead
+                                ? "text-muted-foreground"
+                                : "font-medium text-foreground",
+                            )}
+                          >
+                            {n.message}
+                          </p>
+                          <time
+                            dateTime={n.createdAt}
+                            title={formatFullDateTime(n.createdAt)}
+                            className="mt-0.5 block text-xs text-muted-foreground"
+                          >
+                            {formatRelativeTime(n.createdAt)}
+                          </time>
+                        </div>
+
+                        {!n.isRead && (
+                          <>
+                            <span
+                              aria-hidden="true"
+                              className="mt-2 size-2 shrink-0 rounded-full bg-primary"
+                            />
+                            <span className="sr-only">Chưa đọc</span>
+                          </>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
                 {isLoadingMore && (
-                  <div className="px-4 py-3 text-center text-xs text-muted-foreground border-b">
-                    Đang tải thêm thông báo...
-                  </div>
+                  <li className="flex items-center justify-center gap-2 px-4 py-3 text-xs text-muted-foreground">
+                    <Spinner label="Đang tải thêm thông báo" />
+                    Đang tải thêm…
+                  </li>
                 )}
-              </div>
+              </ul>
             ) : (
-              <div className="p-8 text-center">
-                <p className="text-muted-foreground text-xs">
-                  Không có thông báo mới
-                </p>
-              </div>
+              <EmptyState
+                icon={Bell}
+                title="Chưa có thông báo"
+                description="Tin nhắn mới và lời mời kết bạn sẽ hiện ở đây."
+                compact
+              />
             )}
           </div>
 
-          <div className="p-2 border-t">
+          <div className="border-t border-border p-2">
             <Button
               variant="ghost"
-              className="w-full text-xs text-primary hover:bg-primary/10 justify-center gap-2 h-8"
+              size="sm"
+              className="w-full justify-center"
               onClick={handleMarkAllRead}
-              disabled={isMarkingAllRead || notifications.length === 0}
+              disabled={isMarkingAllRead || unreadCount === 0}
             >
-              <Check className="w-3 h-3" />
+              <Check className="size-4" aria-hidden="true" />
               {isMarkingAllRead ? "Đang xử lý..." : "Đánh dấu tất cả đã đọc"}
             </Button>
           </div>

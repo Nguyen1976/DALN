@@ -1,10 +1,17 @@
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+  AvatarWithPresence,
+} from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/feedback";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Input } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { MessageCircle, X } from "lucide-react";
+import { AtSign, Mail, MessageCircle, SearchX, UserRound, Users, X } from "lucide-react";
 import {
   getConversationByFriendIdAPI,
   searchUsersAPI,
@@ -25,7 +32,6 @@ import {
 } from "@/redux/slices/friendSlice";
 import type { AppDispatch } from "@/redux/store";
 import { selectUser } from "@/redux/slices/userSlice";
-import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
@@ -164,11 +170,12 @@ const ListFriend = () => {
   const renderProfileDetail = () => {
     if (!selectedFriendId) {
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-          <p className="text-sm text-muted-foreground">
-            Hãy chọn một người bạn để xem thông tin
-          </p>
-        </div>
+        <EmptyState
+          icon={UserRound}
+          title="Chưa chọn ai"
+          description="Chọn một người bạn ở danh sách bên trái để xem thông tin."
+          compact
+        />
       );
     }
 
@@ -178,62 +185,78 @@ const ListFriend = () => {
           <Skeleton className="size-24 rounded-full" />
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-4 w-28" />
-          <Skeleton className="mt-2 h-12 w-full rounded-md" />
+          <Skeleton className="mt-2 h-12 w-full rounded-lg" />
         </div>
       );
     }
 
+    const isOnline = Boolean(selectedFriend?.status);
+
     return (
       <div className="space-y-6">
-        <div className="flex flex-col items-center gap-3">
-          <Avatar className="size-24">
-            <AvatarImage
-              src={selectedProfile?.avatar || "/placeholder.svg"}
-              alt={selectedProfile?.username || "Ảnh đại diện người dùng"}
-            />
-            <AvatarFallback className="text-2xl">
-              {(selectedProfile?.username || "U")[0]}
-            </AvatarFallback>
-          </Avatar>
+        <div className="flex flex-col items-center gap-3 text-center">
+          <AvatarWithPresence
+            status={isOnline ? "online" : "offline"}
+            dotSize="lg"
+          >
+            <Avatar className="size-24 border border-border">
+              <AvatarImage
+                src={selectedProfile?.avatar || ""}
+                alt={`Ảnh đại diện ${selectedProfile?.username || "người dùng"}`}
+              />
+              <AvatarFallback className="text-2xl">
+                {(selectedProfile?.username || "U")[0]}
+              </AvatarFallback>
+            </Avatar>
+          </AvatarWithPresence>
 
-          <div className="text-center">
-            <p className="text-lg font-semibold text-foreground">
+          <div className="space-y-1">
+            <p className="text-lg font-semibold tracking-[-0.01em] text-foreground">
               {selectedProfile?.fullName || selectedProfile?.username}
             </p>
-            <p className="text-sm text-muted-foreground">
-              @{selectedProfile?.username}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {selectedProfile?.email}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {selectedProfile?.bio || "Chưa có tiểu sử"}
-            </p>
-            <span
-              className={cn(
-                "mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
-                selectedFriend?.status
-                  ? "bg-success/15 text-success"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  selectedFriend?.status ? "bg-success" : "bg-muted-foreground",
-                )}
-              />
-              {selectedFriend?.status ? "Đang online" : "Đang offline"}
-            </span>
+            <Badge variant={isOnline ? "success" : "secondary"}>
+              {isOnline
+                ? "Đang hoạt động"
+                : selectedFriend?.lastSeen
+                  ? formatLastSeen(selectedFriend.lastSeen)
+                  : "Ngoại tuyến"}
+            </Badge>
           </div>
+
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {selectedProfile?.bio || "Chưa có giới thiệu."}
+          </p>
         </div>
 
+        {/* Contact facts as labelled rows rather than a stack of grey lines. */}
+        <dl className="space-y-2 rounded-xl border border-border bg-card p-3">
+          <div className="flex items-center gap-2.5">
+            <dt className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <AtSign className="size-4" aria-hidden="true" />
+              <span className="sr-only">Tên người dùng</span>
+            </dt>
+            <dd className="min-w-0 truncate text-sm text-foreground">
+              {selectedProfile?.username}
+            </dd>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <dt className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <Mail className="size-4" aria-hidden="true" />
+              <span className="sr-only">Email</span>
+            </dt>
+            <dd className="min-w-0 truncate text-sm text-foreground">
+              {selectedProfile?.email}
+            </dd>
+          </div>
+        </dl>
+
         <Button
-          className="h-12 w-full gap-2 text-base font-semibold"
+          size="lg"
+          className="w-full"
           onClick={() => void handleChatWithFriend()}
           disabled={isStartingChat}
         >
-          <MessageCircle className="size-5" />
+          <MessageCircle className="size-5" aria-hidden="true" />
           {isStartingChat ? "Đang mở cuộc trò chuyện..." : "Nhắn tin"}
         </Button>
       </div>
@@ -244,15 +267,12 @@ const ListFriend = () => {
     <div className="flex h-full min-h-0 flex-1 lg:flex-row">
       <div className="flex h-full min-h-0 flex-1 flex-col border-border lg:border-r">
         <div className="border-b border-border p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder="Tìm theo username..."
-              className="pl-10"
-            />
-          </div>
+          <SearchField
+            value={keyword}
+            onValueChange={setKeyword}
+            placeholder="Tìm bạn theo tên hoặc username"
+            label="Tìm bạn bè"
+          />
         </div>
 
         <ScrollArea className="min-h-0 flex-1">
@@ -264,35 +284,41 @@ const ListFriend = () => {
                   void handleSelectFriend(friend);
                   setMobileDetailOpen(true);
                 }}
+                aria-current={selectedFriendId === friend.id ? "true" : undefined}
                 className={cn(
-                  "group flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-accent",
+                  "group flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
+                  "transition-colors duration-[--motion-fast] hover:bg-accent",
+                  "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
                   selectedFriendId === friend.id && "bg-accent",
                 )}
               >
-                <div className="relative size-12 shrink-0">
+                <AvatarWithPresence
+                  status={friend.status ? "online" : "offline"}
+                >
                   <Avatar className="size-12">
                     <AvatarImage
-                      src={friend.avatar || "/placeholder.svg"}
-                      alt={friend.username}
+                      src={friend.avatar || ""}
+                      alt={`Ảnh đại diện ${friend.username}`}
                     />
                     <AvatarFallback>{friend.username[0]}</AvatarFallback>
                   </Avatar>
-
-                  {friend.status && (
-                    <span className="absolute bottom-0 right-0 block size-3 rounded-full border-2 border-background bg-success" />
-                  )}
-                </div>
+                </AvatarWithPresence>
 
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium text-foreground">
-                    {friend.username}
+                    {friend.fullName || friend.username}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
                     {friend.status
-                      ? "Đang online"
+                      ? "Đang hoạt động"
                       : formatLastSeen(friend.lastSeen)}
                   </p>
                 </div>
+
+                <MessageCircle
+                  className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                  aria-hidden="true"
+                />
               </button>
             ))}
 
@@ -311,21 +337,28 @@ const ListFriend = () => {
             )}
 
             {displayedFriends.length === 0 && !isSearching && (
-              <div className="py-10 text-center">
-                <p className="text-sm text-muted-foreground">
-                  {debouncedKeyword
-                    ? "Không tìm thấy bạn bè phù hợp"
-                    : "Chưa có bạn bè"}
-                </p>
-              </div>
+              <EmptyState
+                icon={debouncedKeyword ? SearchX : Users}
+                title={
+                  debouncedKeyword
+                    ? "Không tìm thấy ai phù hợp"
+                    : "Chưa có bạn bè nào"
+                }
+                description={
+                  debouncedKeyword
+                    ? `Không có kết quả cho “${debouncedKeyword}”.`
+                    : "Hãy xem mục Gợi ý kết bạn để tìm những người có thể bạn quen."
+                }
+                compact
+              />
             )}
 
             {!debouncedKeyword && displayedFriends.length > 0 && (
               <div className="my-3 flex items-center justify-center">
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  className="interceptor-loading text-muted-foreground"
+                  className="interceptor-loading"
                   onClick={loadMoreFriends}
                 >
                   Tải thêm
@@ -339,7 +372,7 @@ const ListFriend = () => {
       {/* Backdrop for mobile detail sheet */}
       {mobileDetailOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-30 bg-foreground/45 backdrop-blur-[2px] lg:hidden"
           onClick={() => setMobileDetailOpen(false)}
         />
       )}
@@ -348,7 +381,7 @@ const ListFriend = () => {
         className={cn(
           "fixed inset-x-0 bottom-0 z-40 flex max-h-[85dvh] flex-col overflow-y-auto rounded-t-2xl border-t border-border bg-background p-6 shadow-2xl transition-transform duration-300",
           mobileDetailOpen ? "translate-y-0" : "translate-y-full",
-          "lg:static lg:z-auto lg:max-h-none lg:w-80 lg:translate-y-0 lg:justify-center lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none",
+          "lg:static lg:z-auto lg:max-h-none lg:w-[22rem] lg:translate-y-0 lg:justify-start lg:rounded-none lg:border-l lg:border-t-0 lg:pt-8 lg:shadow-none",
         )}
       >
         <div className="mb-4 flex items-center justify-end lg:hidden">

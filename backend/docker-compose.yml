@@ -110,7 +110,9 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      # 6380 trên host để không đụng Redis của dự án khác đang giữ 6379.
+      # Trong Docker network các service vẫn nối qua `redis:6379` như cũ.
+      - "6380:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -158,6 +160,61 @@ services:
     networks:
       - backend
 
+  # Kho đối tượng cho DEV: tệp đính kèm không đi ra AWS.
+  # Console: http://localhost:9001 (minioadmin/minioadmin) — API: :9000
+  minio:
+    image: minio/minio:latest
+    container_name: daln-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Tạo bucket và mở quyền đọc công khai (ảnh trong chat được tải thẳng).
+  minio-init:
+    image: minio/mc:latest
+    container_name: daln-minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - backend
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc mb --ignore-existing local/daln-media &&
+        mc anonymous set download local/daln-media &&
+        echo "bucket daln-media san sang"
+
+  # Mail catcher cho DEV: mọi email (OTP, mời kết bạn, digest) bị giữ lại ở đây,
+  # không gửi ra Internet. UI: http://localhost:8025 — API: http://localhost:8025/api/v2/messages
+  mailhog:
+    image: mailhog/mailhog:latest
+    platform: linux/amd64
+    container_name: daln-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI + API
+    networks:
+      - backend
+
   kong:
     image: kong:3.7
     container_name: daln-kong
@@ -171,7 +228,9 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
     ports:
-      - "8000:8000" # proxy (client gọi qua đây)
+      # 8080 trên host để không đụng dự án khác đang giữ 8000.
+      # Bên trong container Kong vẫn nghe 8000 như cấu hình mặc định.
+      - "8080:8000" # proxy (client gọi qua đây -> VITE_API_ROOT)
       - "8001:8001" # admin API
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
@@ -241,8 +300,22 @@ services:
       PORT: 3005
       DATABASE_URL: mongodb://mongo:27017/recommendation-service?replicaSet=rs0
       USER_MONGO_URI: mongodb://mongo:27017/user-service?replicaSet=rs0
+      RECOMMENDATION_ROLE: api
     ports:
       - "3005:3005"
+
+  # Cùng image, cùng app — chỉ khác RECOMMENDATION_ROLE.
+  # Gánh toàn bộ việc nặng CPU (huấn luyện mô hình, cron gợi ý hằng ngày) để
+  # tiến trình `recommendation` ở trên luôn rảnh tay phục vụ HTTP.
+  recommendation-worker:
+    <<: *app-common
+    container_name: daln-recommendation-worker
+    environment:
+      SERVICE: recommendation
+      PORT: 3105
+      DATABASE_URL: mongodb://mongo:27017/recommendation-service?replicaSet=rs0
+      USER_MONGO_URI: mongodb://mongo:27017/user-service?replicaSet=rs0
+      RECOMMENDATION_ROLE: worker
 
   # Saga orchestrator: RMQ-only (không expose HTTP), điều phối luồng accept friend.
   saga-orchestrator:
@@ -257,6 +330,7 @@ networks:
     driver: bridge
 
 volumes:
+  minio_data:
   mongo_data:
   rabbitmq_data:
   redis_data:

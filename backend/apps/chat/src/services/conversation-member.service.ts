@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import {
   ConversationRepository,
   ConversationMemberRepository,
@@ -28,6 +28,8 @@ export interface LeaveConversationRequest {
 
 @Injectable()
 export class ConversationMemberService {
+  private readonly logger = new Logger(ConversationMemberService.name)
+
   constructor(
     private readonly conversationRepo: ConversationRepository,
     private readonly memberRepo: ConversationMemberRepository,
@@ -122,7 +124,7 @@ export class ConversationMemberService {
         })
       }
     } catch (e) {
-      console.warn('[chat-service] publishUserJoinedGroup failed', e)
+      this.logger.warn('[chat-service] publishUserJoinedGroup failed', e)
     }
 
     return {
@@ -214,7 +216,7 @@ export class ConversationMemberService {
         leftAt: new Date().toISOString(),
       })
     } catch (e) {
-      console.warn('[chat-service] publishUserLeftGroup failed', e)
+      this.logger.warn('[chat-service] publishUserLeftGroup failed', e)
     }
 
     return {
@@ -246,8 +248,32 @@ export class ConversationMemberService {
       }
     }
 
-    if (actor.role === 'ADMIN' || actor.role === 'OWNER') {
-      ChatErrors.adminCannotLeaveGroup()
+    const remaining = existingMembers.filter(
+      (member) => member.userId !== dto.userId,
+    )
+    const isManager = actor.role === 'ADMIN' || actor.role === 'OWNER'
+
+    // Nobody left to hand the group to: deleting it is the right action.
+    if (isManager && remaining.length === 0) {
+      ChatErrors.invalidMemberAction(
+        'Bạn là thành viên cuối cùng. Hãy xoá nhóm thay vì rời nhóm.',
+      )
+    }
+
+    // Management transfers on exit rather than blocking it. The old rule
+    // ("admin không thể rời nhóm") left whoever created a group permanently
+    // stuck inside it, with no way to hand it over.
+    const managersLeft = remaining.some(
+      (member) => member.role === 'ADMIN' || member.role === 'OWNER',
+    )
+    let successorId: string | null = null
+    if (isManager && !managersLeft) {
+      successorId = remaining[0].userId
+      if (actor.role === 'OWNER') {
+        await this.memberRepo.promoteToOwner(dto.conversationId, successorId)
+      } else {
+        await this.memberRepo.promoteToAdmin(dto.conversationId, successorId)
+      }
     }
 
     const actorDisplayName = actor.fullName || actor.username || actor.userId
@@ -266,6 +292,17 @@ export class ConversationMemberService {
 
     if (removed) {
       await this.conversationRepo.incrementMemberCount(dto.conversationId, -1)
+    }
+
+    if (successorId) {
+      const successor = remaining.find((m) => m.userId === successorId)
+      const successorName =
+        successor?.fullName || successor?.username || successorId
+      await this.messageService.createSystemMessageAndSync(
+        dto.conversationId,
+        dto.userId,
+        `${successorName} trở thành người quản lý nhóm`,
+      )
     }
 
     const conversationAfterLeave =
@@ -293,7 +330,7 @@ export class ConversationMemberService {
         leftAt: new Date().toISOString(),
       })
     } catch (e) {
-      console.warn('[chat-service] publishUserLeftGroup failed', e)
+      this.logger.warn('[chat-service] publishUserLeftGroup failed', e)
     }
 
     return {
@@ -305,7 +342,7 @@ export class ConversationMemberService {
     try {
       fn()
     } catch (error) {
-      console.error('[chat-service] publish event failed', error)
+      this.logger.error('[chat-service] publish event failed', error)
     }
   }
 }

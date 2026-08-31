@@ -37,8 +37,10 @@ export class RealtimeGateway
   server!: Server
 
   private userStatusStore: UserStatusStore
-  private readonly socketTouchIntervalMs = 25_000
-  private readonly socketTouchTimers = new Map<string, NodeJS.Timeout>()
+  // Không còn timer 25s cho mỗi socket: `pong` của Socket.IO (pingInterval
+  // 40s, pingTimeout 10s -> tối đa 50s giữa hai lần) đã gia hạn TTL 90s của
+  // key socket, dư 1,8 lần biên an toàn. Timer server-side còn có hại: nó gia
+  // hạn cho cả kết nối đã chết, kéo dài trạng thái online giả.
   private readonly packetListeners = new Map<string, (packet: any) => void>()
   private readonly typingConversationsBySocket = new Map<string, Set<string>>()
   private readonly readBatchByConversation = new Map<
@@ -164,23 +166,14 @@ export class RealtimeGateway
       // 🔥 Lưu Redis + TTL
       await this.userStatusStore.addConnection(userId, client.id)
 
-      const touchConnection = async () => {
-        await this.userStatusStore.touchConnection(userId, client.id)
-      }
-
       const packetListener = async (packet) => {
         if (packet.type === 'pong') {
-          await touchConnection()
+          await this.userStatusStore.touchConnection(userId, client.id)
         }
       }
 
       client.conn.on('packet', packetListener)
       this.packetListeners.set(client.id, packetListener)
-
-      const timer = setInterval(() => {
-        void touchConnection()
-      }, this.socketTouchIntervalMs)
-      this.socketTouchTimers.set(client.id, timer)
 
       if (!prevOnline) {
         //delete lastSeen vì user đã online trở lại
@@ -213,12 +206,6 @@ export class RealtimeGateway
         this.readBatchByConversation.delete(conversationId)
       }
     })
-
-    const timer = this.socketTouchTimers.get(client.id)
-    if (timer) {
-      clearInterval(timer)
-      this.socketTouchTimers.delete(client.id)
-    }
 
     const packetListener = this.packetListeners.get(client.id)
     if (packetListener) {

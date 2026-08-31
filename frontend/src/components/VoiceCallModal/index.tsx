@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   selectConversationById,
   type Conversation,
@@ -6,7 +7,8 @@ import {
 import { selectUser } from "@/redux/slices/userSlice";
 import { Phone, PhoneOff, Mic, MicOff, Volume2, UserX } from "lucide-react";
 import { useSelector } from "react-redux";
-import { useWebRTC } from "@/hooks/useWebRTC";
+import { describeMicrophoneError, useWebRTC } from "@/hooks/useWebRTC";
+import { toast } from "sonner";
 import { useCallRingTimeout } from "@/hooks/useCallRingTimeout";
 import { useIncomingCallRingtone } from "@/hooks/useIncomingCallRingtone";
 import { socket } from "@/lib/socket";
@@ -56,7 +58,7 @@ export default function VoiceCallModal({
   const displayName =
     conversation?.displayName || callerDisplayName || "Cuộc gọi đến";
   const displayAvatar =
-    conversation?.displayAvatar || callerDisplayAvatar || "/placeholder.svg";
+    conversation?.displayAvatar || callerDisplayAvatar || "";
 
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const startedOutgoingRef = useRef(false);
@@ -155,7 +157,8 @@ export default function VoiceCallModal({
 
     startedOutgoingRef.current = true;
     void startCall(peerUserId, conversationId).catch((error) => {
-      console.error("Không thể bắt đầu cuộc gọi:", error);
+      // Closing silently left the user with no idea why the call vanished.
+      toast.error(describeMicrophoneError(error));
       onClose();
     });
   }, [conversationId, mode, onClose, peerUserId, startCall]);
@@ -245,7 +248,7 @@ export default function VoiceCallModal({
     try {
       await acceptCall(callerId, incomingOffer);
     } catch (error) {
-      console.error("Không thể chấp nhận cuộc gọi:", error);
+      toast.error(describeMicrophoneError(error));
       onClose();
     }
   };
@@ -278,11 +281,11 @@ export default function VoiceCallModal({
       role="dialog"
       aria-modal="true"
       aria-label="Cuộc gọi thoại"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
     >
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
-      <div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-2xl">
+      <div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-lg">
         <div className="flex flex-col items-center text-center">
           <CallRingAvatar
             displayName={displayName}
@@ -291,33 +294,38 @@ export default function VoiceCallModal({
             durationMs={CALL_RING_TIMEOUT_MS}
           />
 
-          <h3 className="mb-1 text-2xl font-semibold text-foreground">
+          <h3 className="mb-1 text-xl font-semibold tracking-[-0.01em] text-foreground">
             {displayName}
           </h3>
+          {/* Call state is announced, not just displayed — a blind user gets
+              "đang đổ chuông" / "đã kết nối" without watching the ring. */}
           <p
-            className={`mb-8 text-sm ${
+            role="status"
+            aria-live="polite"
+            className={cn(
+              "mb-8 text-sm",
               showBusyResult || callStatus === "no_answer"
-                ? "font-medium text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground"
-            }`}
+                ? "font-medium text-warning-text"
+                : "text-muted-foreground",
+            )}
           >
             {statusLabel}
           </p>
 
           {showBusyResult || callStatus === "no_answer" ? (
-            <div className="flex size-14 items-center justify-center rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
-              <UserX className="size-7" />
+            <div className="flex size-14 items-center justify-center rounded-full bg-warning/15 text-warning-text">
+              <UserX className="size-7" aria-hidden="true" />
             </div>
           ) : mode === "incoming" && callStatus === "idle" ? (
             <div className="flex gap-6">
               <Button
-                variant="default"
+                variant="success"
                 size="icon"
                 onClick={() => void handleAccept()}
                 aria-label="Chấp nhận cuộc gọi"
-                className="size-14 rounded-full bg-green-600 hover:bg-green-700"
+                className="size-14 rounded-full"
               >
-                <Phone className="size-6" />
+                <Phone className="size-6" aria-hidden="true" />
               </Button>
 
               <Button
@@ -336,7 +344,8 @@ export default function VoiceCallModal({
                 variant="secondary"
                 size="icon"
                 onClick={handleToggleMute}
-                aria-label="Tắt/bật micro"
+                aria-label={isMuted ? "Bật micro" : "Tắt micro"}
+                aria-pressed={isMuted}
                 className="size-14 rounded-full"
               >
                 {isMuted ? (

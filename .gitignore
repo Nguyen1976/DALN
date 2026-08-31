@@ -11,3 +11,5 @@ training/.venv/
 .codegraph
 /backend/apps/**/generated/
 SEQUENCE_DIAGRAMS.md
+
+.claude/

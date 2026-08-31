@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common'
-import { InjectQueue } from '@nestjs/bullmq'
-import { Queue } from 'bullmq'
+import { Injectable, Logger } from '@nestjs/common'
+import { RedisService } from '@app/redis'
+import { DIRTY_CONVERSATIONS_KEY } from '../background-jobs/unread/unread.constants'
 import type {
   MessageSendPayload,
   UpdateMessageReadPayload,
@@ -14,6 +14,7 @@ import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
 import { ConversationAssetKind } from '../http/chat-http.dto'
 import { MessageMapper } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
+import { buildKeysetCursor, parseKeysetCursor } from '@app/util'
 
 export interface RevokeMessageRequest {
   conversationId: string
@@ -52,16 +53,17 @@ type OutboundMessage = {
 
 @Injectable()
 export class MessageService {
+  private readonly logger = new Logger(MessageService.name)
+
   constructor(
     private readonly memberRepo: ConversationMemberRepository,
     private readonly messageRepo: MessageRepository,
     private readonly eventsPublisher: ChatEventsPublisher,
     private readonly messageMediaService: MessageMediaService,
-    @InjectQueue('unreadQueue') private readonly unreadQueue: Queue,
+    private readonly redisService: RedisService,
   ) {}
 
   async sendMessage(data: MessageSendPayload) {
-    console.time('fetch-members')
     const conversationMembers = await this.memberRepo.findByConversationId(
       data.conversationId,
     )
@@ -70,7 +72,6 @@ export class MessageService {
     if (!memberIds.includes(data.senderId)) {
       ChatErrors.senderNotMember()
     }
-    console.timeEnd('fetch-members')
 
     const type = this.messageMediaService.normalizeMessageType(
       data.type || 'TEXT',
@@ -122,7 +123,6 @@ export class MessageService {
       medias.splice(0, medias.length, ...normalizedMedias)
     }
 
-    console.time('save-message')
     const message: OutboundMessage = await this.messageRepo.create({
       conversationId: data.conversationId,
       senderId: data.senderId,
@@ -131,7 +131,6 @@ export class MessageService {
       replyToMessageId: data.replyToMessageId,
       medias,
     })
-    console.timeEnd('save-message')
 
     if (!message) {
       ChatErrors.invalidMessagePayload()
@@ -141,6 +140,19 @@ export class MessageService {
       (member) => member.userId === data.senderId,
     )
     message.senderMember = senderMember
+
+    // Replies are rare next to plain messages, so the quoted message is fetched
+    // here instead of through an `include` that would run for every send.
+    if (data.replyToMessageId) {
+      const [quoted] = await this.messageRepo.findQuotedByIds([
+        data.replyToMessageId,
+      ])
+      // Only quote something from this same conversation: the id arrives from
+      // the client and must not become a way to read another thread.
+      if (quoted && String(quoted.conversationId) === String(data.conversationId)) {
+        ;(message as any).replyTo = quoted
+      }
+    }
 
     return this.notifyMessageCreated({
       conversationId: data.conversationId,
@@ -216,7 +228,7 @@ export class MessageService {
     }
 
     const take = Number(params.limit) || 20
-    const cursor = params.cursor ? new Date(params.cursor) : null
+    const cursor = parseKeysetCursor(params.cursor)
 
     const messages =
       await this.messageRepo.findByConversationIdPaginatedForUser(
@@ -226,8 +238,36 @@ export class MessageService {
         cursor,
       )
 
+    await this.attachQuotedMessages(messages)
+
     return {
       messages: messages.map((m) => MessageMapper.toResponse(m)),
+    }
+  }
+
+  /**
+   * Fill in `replyTo` for a page of messages with one extra query.
+   *
+   * Without this a reply rendered as a bare id: the client cannot show the
+   * quote unless the original happens to be on screen, which stops being true
+   * as soon as the thread is scrolled.
+   */
+  private async attachQuotedMessages(messages: any[]) {
+    const ids = messages
+      .map((m) => m.replyToMessageId)
+      .filter((id): id is string => Boolean(id))
+
+    if (!ids.length) return
+
+    const quoted = await this.messageRepo.findQuotedByIds(ids)
+    const byId = new Map(quoted.map((q) => [String(q.id), q]))
+
+    for (const message of messages) {
+      if (!message.replyToMessageId) continue
+      const original = byId.get(String(message.replyToMessageId))
+      if (original && String(original.conversationId) === String(message.conversationId)) {
+        message.replyTo = original
+      }
     }
   }
 
@@ -361,7 +401,7 @@ export class MessageService {
     }
 
     const take = Number(params.limit) || 20
-    const cursor = params.cursor ? new Date(params.cursor) : null
+    const cursor = parseKeysetCursor(params.cursor)
 
     const kindMap: Record<number, 'MEDIA' | 'LINK' | 'DOC'> = {
       [ConversationAssetKind.ASSET_MEDIA]: 'MEDIA',
@@ -378,9 +418,10 @@ export class MessageService {
       cursor,
     )
 
+    const last = messages[messages.length - 1]
     const nextCursor =
-      messages.length === take
-        ? messages[messages.length - 1]?.createdAt?.toISOString()
+      messages.length === take && last?.createdAt
+        ? buildKeysetCursor(last.createdAt, last.id)
         : undefined
 
     return {
@@ -489,10 +530,23 @@ export class MessageService {
     try {
       fn()
     } catch (error) {
-      console.error('[chat-service] publish event failed', error)
+      this.logger.error('[chat-service] publish event failed', error)
     }
   }
 
+  /**
+   * Tích luỹ số tin chưa đọc + tin nhắn cuối vào Redis; cron sẽ gom xuống Mongo.
+   *
+   * Trước đây bước này đi qua một job BullMQ, nhưng worker của nó cũng chỉ ghi
+   * đúng ba lệnh Redis dưới đây — mà vòng đời một job BullMQ tốn khoảng 8–10
+   * lệnh Redis cho việc sổ sách (wait list, hash job data, event stream,
+   * BRPOPLPUSH, cập nhật trạng thái, removeOnComplete). Ở peak 1000 msg/s đó là
+   * chi phí lớn hơn nhiều lần công việc thật.
+   *
+   * Hàng đợi cũng không mang lại độ bền ở đây: nó nằm trên CHÍNH Redis này, nên
+   * Redis chết thì cả hai cùng chết. Ghi thẳng còn bền hơn — dữ liệu vào ngay
+   * thay vì nằm chờ worker nhặt.
+   */
   private enqueueConversationSyncJob(params: {
     conversationId: string
     senderId: string
@@ -501,24 +555,29 @@ export class MessageService {
   }) {
     const { conversationId, senderId, message, senderMember } = params
 
-    void this.unreadQueue
-      .add(
-        'increase-unread',
-        {
-          conversationId,
-          senderId,
-          lastMessageId: message.id,
-          lastMessageAt: message.createdAt,
-          lastMessageText: MessageMapper.previewText(message),
-          lastMessageSenderId: senderId,
-          lastMessageSenderName:
-            senderMember.fullName || senderMember.username || senderId,
-          lastMessageSenderAvatar: senderMember.avatar || null,
-        },
-        { removeOnComplete: true, removeOnFail: true },
-      )
+    const lastMessage = JSON.stringify({
+      senderId,
+      lastMessageId: message.id,
+      lastMessageAt: message.createdAt
+        ? new Date(message.createdAt).toISOString()
+        : undefined,
+      lastMessageText: MessageMapper.previewText(message),
+      lastMessageSenderId: senderId,
+      lastMessageSenderName:
+        senderMember.fullName || senderMember.username || senderId,
+      lastMessageSenderAvatar: senderMember.avatar || null,
+    })
+
+    // Một round-trip cho cả ba lệnh. SADD đặt CUỐI để khi cron pop được id ra
+    // thì dữ liệu đã nằm sẵn trong Redis.
+    void this.redisService
+      .pipeline([
+        ['hincrby', `unread_count:${conversationId}`, senderId, 1],
+        ['set', `last_message:${conversationId}`, lastMessage],
+        ['sadd', DIRTY_CONVERSATIONS_KEY, conversationId],
+      ])
       .catch((error) => {
-        console.error('[chat-service] unreadQueue.add failed', error)
+        this.logger.error('[chat-service] unread pipeline failed', error)
       })
   }
 }

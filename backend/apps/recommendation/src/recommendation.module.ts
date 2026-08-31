@@ -28,6 +28,14 @@ import { FriendshipRecommendationSubscriber } from './rmq/subscribers/friendship
 import { RecommendationGroupMembershipService } from './services/recommendation-group-membership.service'
 import { GroupMembershipSubscriber } from './rmq/subscribers/group-membership.subscriber'
 import { FriendGraphService } from './services/friend-graph.service'
+import { RecommendationDirtyService } from './services/recommendation-dirty.service'
+import { BullModule } from '@nestjs/bullmq'
+import { getBullMqConnectionConfig } from '@app/redis'
+import {
+  TRAINING_QUEUE,
+  isWorkerRole,
+} from './background-jobs/training/training.constants'
+import { TrainingProcessor } from './background-jobs/training/training.processor'
 
 @Module({
   imports: [
@@ -51,6 +59,10 @@ import { FriendGraphService } from './services/friend-graph.service'
       uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: false },
     }),
+    BullModule.forRootAsync({
+      useFactory: () => ({ connection: getBullMqConnectionConfig() }),
+    }),
+    BullModule.registerQueue({ name: TRAINING_QUEUE }),
   ],
   controllers: [RecommendationController],
   providers: [
@@ -59,6 +71,7 @@ import { FriendGraphService } from './services/friend-graph.service'
       useClass: AuthGuard,
     },
     RecommendationService,
+    RecommendationDirtyService,
     FriendGraphService,
     EmbeddingService,
     FeatureService,
@@ -73,9 +86,11 @@ import { FriendGraphService } from './services/friend-graph.service'
     FriendshipRecommendationSubscriber,
     RecommendationGroupMembershipService,
     GroupMembershipSubscriber,
-    RecommendationCron,
     InterestTagService,
     InterestTagSeedService,
+    // Tác vụ nặng CPU chỉ chạy ở tiến trình worker. Tiến trình API vẫn giữ
+    // producer của hàng đợi (BullModule.registerQueue ở trên) để đẩy job.
+    ...(isWorkerRole() ? [TrainingProcessor, RecommendationCron] : []),
   ],
 })
 export class RecommendationModule {}

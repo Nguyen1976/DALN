@@ -35,6 +35,10 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
     CommonModule,
     UtilModule,
     RabbitMQModule.forRoot({
+      // Khai báo mọi exchange service này chạm tới (publish lẫn subscribe),
+      // không chỉ exchange nó sở hữu. Khai báo topic exchange là idempotent,
+      // nên trùng với service khác vẫn an toàn và loại bỏ phụ thuộc thứ tự
+      // khởi động (bind vào exchange chưa tồn tại -> 404 NOT_FOUND -> app chết).
       exchanges: [
         {
           name: EXCHANGE_RMQ.USER_EVENTS,
@@ -42,6 +46,10 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
         },
         {
           name: EXCHANGE_RMQ.SAGA_EVENTS,
+          type: 'topic',
+        },
+        {
+          name: EXCHANGE_RMQ.REALTIME_EVENTS,
           type: 'topic',
         },
       ],

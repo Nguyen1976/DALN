@@ -26,7 +26,7 @@ const ProfileSetting = () => {
             className="size-10 cursor-pointer ring-offset-background transition-shadow hover:ring-2 hover:ring-ring hover:ring-offset-2"
           >
             <AvatarImage
-              src={user.avatar || "/placeholder.svg"}
+              src={user.avatar || ""}
               alt={user.username}
             />
             <AvatarFallback>{user.username[0]}</AvatarFallback>

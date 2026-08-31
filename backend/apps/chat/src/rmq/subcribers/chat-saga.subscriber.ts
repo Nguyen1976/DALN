@@ -13,6 +13,7 @@ import {
 } from 'libs/constant/rmq/saga'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { ChatEventsPublisher } from '../publishers/chat-events.publisher'
+import { ConversationMemberRepository } from '../../repositories'
 
 @Injectable()
 export class ChatSagaSubscriber {
@@ -21,6 +22,7 @@ export class ChatSagaSubscriber {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly eventsPublisher: ChatEventsPublisher,
+    private readonly memberRepo: ConversationMemberRepository,
   ) {}
 
   /**
@@ -136,6 +138,10 @@ export class ChatSagaSubscriber {
           `Saga ${envelope.sagaId}: đã xoá conversation ${conversationId}`,
         )
       },
+    )
+
+    await this.memberRepo.invalidateMembersCache(
+      envelope.payload.conversationId,
     )
   }
 

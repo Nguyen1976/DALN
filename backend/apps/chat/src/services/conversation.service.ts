@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import type {
   UserUpdatedPayload,
   UserUpdateStatusMakeFriendPayload,
@@ -15,6 +15,7 @@ import { Member } from '../http/chat-http.dto'
 import { conversationType } from '../generated'
 import { MessageMapper } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
+import { parseKeysetCursor } from '@app/util'
 
 export interface CreateConversationData {
   members: Member[]
@@ -32,6 +33,8 @@ export interface DeleteConversationRequest {
 
 @Injectable()
 export class ConversationService {
+  private readonly logger = new Logger(ConversationService.name)
+
   constructor(
     private readonly conversationRepo: ConversationRepository,
     private readonly memberRepo: ConversationMemberRepository,
@@ -112,7 +115,7 @@ export class ConversationService {
         })
       }
     } catch (e) {
-      console.warn(
+      this.logger.warn(
         '[chat-service] publishUserJoinedGroup (createConversation) failed',
         e,
       )
@@ -160,7 +163,7 @@ export class ConversationService {
     params: { limit?: number | string; cursor?: string | null },
   ) {
     const take = Number(params.limit) || 20
-    const cursor = params.cursor ? new Date(params.cursor) : null
+    const cursor = parseKeysetCursor(params.cursor)
     const conversations = await this.conversationRepo.findByUserIdPaginated(
       userId,
       cursor,
@@ -176,29 +179,22 @@ export class ConversationService {
       return []
     }
 
-    console.time('search-conversations')
     const conversations = await this.conversationRepo.searchByKeyword(
       userId,
       safeKeyword,
     )
-    console.timeEnd('search-conversations')
 
-    console.time('search-conversations-friend')
     const converOfFriend =
       await this.conversationRepo.findDirectConversationOfFriend(
         userId,
         safeKeyword,
       )
-    console.timeEnd('search-conversations-friend')
 
-    console.time('merge-conversations')
     const mergedConversations = [...conversations, ...converOfFriend].filter(
       (conversation): conversation is NonNullable<typeof conversation> =>
         conversation != null,
     )
-    console.timeEnd('merge-conversations')
 
-    console.time('deduplicate-sort-conversations')
     const uniqueConversations = Array.from(
       new Map(
         mergedConversations.map((conversation) => [
@@ -211,7 +207,6 @@ export class ConversationService {
       const aTime = new Date(a.updatedAt ?? a.createdAt).getTime()
       return bTime - aTime
     })
-    console.timeEnd('deduplicate-sort-conversations')
 
     return this.enrichConversationsLastMessage(uniqueConversations)
   }

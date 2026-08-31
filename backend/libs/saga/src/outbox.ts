@@ -31,6 +31,22 @@ export async function enqueueOutbox(
       nextAttemptAt: new Date(),
     },
   })
+
+  // Kéo relay về nhịp nhanh: nếu nó đang ở trạng thái backoff (hệ thống vừa
+  // rảnh một lúc), lượt quét kế tiếp sẽ diễn ra sau intervalMs thay vì phải
+  // chờ hết chu kỳ giãn. Không quét ngay lập tức là có chủ đích — transaction
+  // chứa lời gọi này còn chưa commit.
+  kickOutboxRelays()
+}
+
+/**
+ * Các relay đang chạy trong tiến trình. Dùng sổ đăng ký thay vì tiêm phụ thuộc
+ * vào cả 9 điểm gọi enqueueOutbox nằm rải rác ở 5 service.
+ */
+const activeRelays = new Set<OutboxRelay>()
+
+export function kickOutboxRelays(): void {
+  for (const relay of activeRelays) relay.kick()
 }
 
 export interface OutboxRelayOptions {
@@ -40,6 +56,8 @@ export interface OutboxRelayOptions {
   batchSize?: number
   /** Số lần thử tối đa trước khi đánh dấu DEAD. Mặc định 10. */
   maxAttempts?: number
+  /** Chu kỳ tối đa khi hàng đợi rỗng (backoff). Mặc định 15000ms. */
+  maxIdleMs?: number
   /** Nhãn hiển thị trong log. */
   name?: string
 }
@@ -58,8 +76,12 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   private readonly intervalMs: number
   private readonly batchSize: number
   private readonly maxAttempts: number
+  private readonly maxIdleMs: number
   private timer: NodeJS.Timeout | null = null
   private running = false
+  private stopped = false
+  /** Chu kỳ hiện tại: bằng intervalMs khi có việc, nhân đôi dần khi rỗng. */
+  private currentDelayMs: number
 
   constructor(
     private readonly prisma: OutboxCapablePrisma,
@@ -67,22 +89,52 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
     options: OutboxRelayOptions = {},
   ) {
     this.intervalMs = options.intervalMs ?? 1500
+    this.maxIdleMs = options.maxIdleMs ?? 15_000
     this.batchSize = options.batchSize ?? 50
     this.maxAttempts = options.maxAttempts ?? 10
+    this.currentDelayMs = this.intervalMs
     this.logger = new Logger(options.name ?? 'OutboxRelay')
   }
 
   onModuleInit(): void {
-    this.logger.log(`Outbox relay started (interval=${this.intervalMs}ms)`)
-    this.timer = setInterval(() => {
-      void this.tick()
-    }, this.intervalMs)
+    this.logger.log(
+      `Outbox relay started (interval=${this.intervalMs}ms, maxIdle=${this.maxIdleMs}ms)`,
+    )
+    activeRelays.add(this)
+    this.schedule()
   }
 
   onModuleDestroy(): void {
+    this.stopped = true
+    activeRelays.delete(this)
     if (this.timer) {
-      clearInterval(this.timer)
+      clearTimeout(this.timer)
       this.timer = null
+    }
+  }
+
+  /**
+   * setTimeout đệ quy thay cho setInterval: cho phép đổi chu kỳ động, và tự
+   * nó loại bỏ khả năng hai lượt chồng lấn khi một lượt chạy lâu hơn chu kỳ.
+   */
+  private schedule(): void {
+    if (this.stopped) return
+    this.timer = setTimeout(() => {
+      void this.tick().finally(() => this.schedule())
+    }, this.currentDelayMs)
+  }
+
+  /**
+   * Đánh thức relay ngay lập tức. Gọi sau khi ghi outbox để backoff lúc rảnh
+   * không phải đánh đổi bằng độ trễ khi có việc thật.
+   */
+  kick(): void {
+    if (this.stopped) return
+    this.currentDelayMs = this.intervalMs
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+      this.schedule()
     }
   }
 
@@ -101,9 +153,19 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
         take: this.batchSize,
       })) as unknown as OutboxRecord[]
 
-      if (events.length > 0) {
-        this.logger.debug(`Publishing ${events.length} outbox event(s)`)
+      if (events.length === 0) {
+        // Rảnh: giãn dần chu kỳ (1,5s -> 3 -> 6 -> 12 -> 15) để không phải
+        // truy vấn Mongo 40 lần/phút/service khi hệ thống không có việc gì.
+        this.currentDelayMs = Math.min(
+          this.currentDelayMs * 2,
+          this.maxIdleMs,
+        )
+        return
       }
+
+      // Có việc: quay lại nhịp nhanh ngay
+      this.currentDelayMs = this.intervalMs
+      this.logger.debug(`Publishing ${events.length} outbox event(s)`)
       for (const event of events) {
         await this.publishOne(event)
       }

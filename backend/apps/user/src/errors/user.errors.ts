@@ -1,14 +1,30 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common'
 
 export class UserErrors {
+  static cannotFriendSelf(): never {
+    throw new BadRequestException('Bạn không thể tự gửi lời mời kết bạn cho chính mình')
+  }
+
+  static friendRequestAlreadyPending(): never {
+    throw new ConflictException('Bạn đã gửi lời mời cho người này và đang chờ phản hồi')
+  }
+
+  static friendRequestAwaitingYourResponse(): never {
+    throw new ConflictException(
+      'Người này đã gửi lời mời cho bạn trước đó. Hãy vào mục Lời mời kết bạn để chấp nhận',
+    )
+  }
+
   static alreadyFriends(): never {
-    throw new ConflictException('Users are already friends')
+    throw new ConflictException('Hai người đã là bạn bè')
   }
 
   static emailAlreadyExists(): never {
@@ -23,28 +39,40 @@ export class UserErrors {
     throw new BadRequestException('Tài khoản chưa kích hoạt. Vui lòng xác thực OTP')
   }
 
+  static otpResendTooSoon(retryAfterSeconds: number): never {
+    throw new HttpException(
+      {
+        message: `Vui lòng chờ ${retryAfterSeconds} giây trước khi yêu cầu mã mới`,
+        error: 'Too Many Requests',
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        retryAfterSeconds,
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    )
+  }
+
   static otpInvalidOrExpired(): never {
     throw new BadRequestException('Mã OTP không hợp lệ hoặc đã hết hạn')
   }
 
   static usernameAlreadyExists(): never {
-    throw new ConflictException('Username already exists')
+    throw new ConflictException('Tên người dùng đã được sử dụng')
   }
 
   static userNotFound(): never {
-    throw new NotFoundException('User not found')
+    throw new NotFoundException('Không tìm thấy người dùng')
   }
 
   static friendNotFound(): never {
-    throw new NotFoundException('Friend not found')
+    throw new NotFoundException('Không tìm thấy người bạn này')
   }
 
   static friendRequestNotFound(): never {
-    throw new NotFoundException('Friend request not found')
+    throw new NotFoundException('Không tìm thấy lời mời kết bạn')
   }
 
   static friendRequestAlreadyResponded(): never {
-    throw new BadRequestException('Friend request already responded')
+    throw new BadRequestException('Lời mời kết bạn này đã được phản hồi')
   }
 
   static interestOnboardingAlreadyCompleted(): never {

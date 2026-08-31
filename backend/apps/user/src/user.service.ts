@@ -124,7 +124,11 @@ export class UserService {
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // Endpoint này là liên dịch vụ (@InternalOnly), không có phiên JWT.
+          'x-internal-token': process.env.INTERNAL_API_TOKEN ?? '',
+        },
         body: JSON.stringify({
           users: [{ id: userId, bio: bio || '', age: 0 }],
         }),
@@ -166,6 +170,14 @@ export class UserService {
     }
   }
 
+  /**
+   * Issue and mail a registration OTP.
+   *
+   * Callers that can be triggered repeatedly (resend, a login against a
+   * pending account) claim `claimOtpResendSlot` first — otherwise the endpoint
+   * is a mail cannon anyone can aim at a third party's inbox. Registration
+   * itself needs no claim: the account is being created right then.
+   */
   private async sendRegistrationOtp(
     email: string,
     username: string,
@@ -320,42 +332,52 @@ export class UserService {
     email: string
     requiresOtpVerification: boolean
   }> {
+    // The cooldown is claimed before the lookup so the endpoint behaves
+    // identically for addresses that exist and ones that do not — neither the
+    // status code nor the response time may reveal which is which.
+    const waitSeconds = await this.redisService.claimOtpResendSlot(data.email)
+    if (waitSeconds > 0) {
+      UserErrors.otpResendTooSoon(waitSeconds)
+    }
+
     const user = await this.userRepo.findByEmail(data.email)
 
-    if (!user) {
-      UserErrors.userNotFound()
+    // Unknown address, or one that is already activated: answer exactly as if
+    // the mail had gone out. Telling the caller "no such user" hands an
+    // attacker a free account-enumeration oracle.
+    if (user && !user.isActive) {
+      await this.sendRegistrationOtp(user.email, user.username)
     }
-
-    if (user.isActive) {
-      UserErrors.emailAlreadyExists()
-    }
-
-    await this.sendRegistrationOtp(user.email, user.username)
 
     return {
-      email: user.email,
+      email: data.email,
       requiresOtpVerification: true,
     }
   }
 
   async login(data: UserLoginRequest): Promise<AuthSession> {
     const user = await this.userRepo.findByEmail(data.email)
-    if (!user) {
-      UserErrors.userNotFound()
-    }
 
-    if (!user.isActive) {
-      await this.sendRegistrationOtp(user.email, user.username)
-      UserErrors.accountNotActivated()
-    }
+    // An unknown address and a wrong password must be indistinguishable, so a
+    // missing user falls through to the same "invalid credentials" answer
+    // rather than a 404 that confirms the address is unregistered.
+    const isPasswordValid = user
+      ? await this.utilService.comparePassword(data.password, user.password)
+      : false
 
-    const isPasswordValid = await this.utilService.comparePassword(
-      data.password,
-      user.password,
-    )
-
-    if (!isPasswordValid) {
+    if (!user || !isPasswordValid) {
       UserErrors.invalidCredentials()
+    }
+
+    // Only now — once the caller has proven the password — is it safe to say
+    // the account is pending, and to spend an email on a fresh code. The
+    // cooldown keeps a login-retry loop from turning into a mail flood.
+    if (!user.isActive) {
+      const waitSeconds = await this.redisService.claimOtpResendSlot(user.email)
+      if (waitSeconds === 0) {
+        await this.sendRegistrationOtp(user.email, user.username)
+      }
+      UserErrors.accountNotActivated()
     }
 
     const payload = {
@@ -414,10 +436,36 @@ export class UserService {
     return user as UserEntity
   }
 
+  /**
+   * May `viewerId` see `targetId`'s email address?
+   *
+   * Only themselves, or someone they have actually accepted as a friend. The
+   * profile endpoint used to hand the email back to any signed-in caller for
+   * any user id, which turns a browse into an address harvest.
+   */
+  async canSeeContactDetails(
+    viewerId: string,
+    targetId: string,
+  ): Promise<boolean> {
+    if (!viewerId || !targetId) return false
+    if (viewerId === targetId) return true
+    const friendship = await this.friendShipRepo.findFriendshipBetweenUsers(
+      viewerId,
+      targetId,
+    )
+    return Boolean(friendship)
+  }
+
   async makeFriend(data: MakeFriendRequest): Promise<Friendship> {
     const friend = await this.userRepo.findByEmail(data.inviteeEmail)
     if (!friend) {
       UserErrors.friendNotFound()
+    }
+
+    // Inviting yourself used to succeed: it created a real pending request that
+    // then showed up in your own inbox, from you, waiting for you.
+    if (friend.id === data.inviterId) {
+      UserErrors.cannotFriendSelf()
     }
 
     //check xem đã là bạn bè chưa
@@ -429,6 +477,20 @@ export class UserService {
 
     if (existingFriendship) {
       UserErrors.alreadyFriends()
+    }
+
+    // Pressing send twice used to stack up duplicate pending requests. A
+    // request already open the other way round gets its own message: the user
+    // should accept it, not send a competing one.
+    const pending = await this.friendRequestRepo.findPendingBetweenUsers(
+      data.inviterId,
+      friend.id,
+    )
+    if (pending.some((r) => r.fromUserId === data.inviterId)) {
+      UserErrors.friendRequestAlreadyPending()
+    }
+    if (pending.length) {
+      UserErrors.friendRequestAwaitingYourResponse()
     }
 
     const friendRequest = await this.friendRequestRepo.create({
@@ -492,17 +554,51 @@ export class UserService {
 
       // Atomic: cập nhật trạng thái + tạo friendship 2 chiều + ghi trigger saga
       // vào outbox trong CÙNG 1 transaction. Relay sẽ publish trigger sau đó.
+      //
+      // The PENDING check above is only advisory: two accepts arriving together
+      // both read PENDING and both used to run this block, creating four
+      // friendship rows and firing the saga twice. The conditional updateMany
+      // below is the real gate — exactly one caller can flip a PENDING request
+      // to ACCEPTED, and everyone else sees count 0 and backs out.
+      let alreadyHandled = false
       await this.prisma.$transaction(async (tx) => {
-        await tx.friendRequest.updateMany({
-          where: { fromUserId: data.inviterId, toUserId: data.inviteeId },
+        const claimed = await tx.friendRequest.updateMany({
+          where: {
+            fromUserId: data.inviterId,
+            toUserId: data.inviteeId,
+            status: Status.PENDING,
+          },
           data: { status: Status.ACCEPTED },
         })
-        await tx.friendship.create({
-          data: { userId: data.inviterId, friendId: data.inviteeId },
+
+        if (claimed.count === 0) {
+          alreadyHandled = true
+          return
+        }
+
+        // Re-check inside the transaction: a retried request that already made
+        // it this far must not leave a second copy of the relationship behind.
+        const existing = await tx.friendship.findMany({
+          where: {
+            OR: [
+              { userId: data.inviterId, friendId: data.inviteeId },
+              { userId: data.inviteeId, friendId: data.inviterId },
+            ],
+          },
         })
-        await tx.friendship.create({
-          data: { userId: data.inviteeId, friendId: data.inviterId },
-        })
+        const has = (userId: string, friendId: string) =>
+          existing.some((f) => f.userId === userId && f.friendId === friendId)
+
+        if (!has(data.inviterId, data.inviteeId)) {
+          await tx.friendship.create({
+            data: { userId: data.inviterId, friendId: data.inviteeId },
+          })
+        }
+        if (!has(data.inviteeId, data.inviterId)) {
+          await tx.friendship.create({
+            data: { userId: data.inviteeId, friendId: data.inviterId },
+          })
+        }
 
         const sagaId = `${SAGA_TYPE.FRIENDSHIP_ACCEPT}:${friendRequestId}`
         const trigger = buildTrigger<FriendshipAcceptTriggerPayload>(
@@ -524,6 +620,10 @@ export class UserService {
           payload: trigger,
         })
       })
+
+      if (alreadyHandled) {
+        UserErrors.friendRequestAlreadyResponded()
+      }
     } else {
       await this.friendRequestRepo.updateStatus(
         data.inviterId,
@@ -625,35 +725,47 @@ export class UserService {
     userId: string,
     limit = 10,
     page = 1,
+    direction: 'received' | 'sent' = 'received',
   ): Promise<any[]> {
-    const requests = await this.friendRequestRepo.findPendingByToUserId(
-      userId,
-      limit,
-      page,
-    )
+    const requests =
+      direction === 'sent'
+        ? await this.friendRequestRepo.findPendingByFromUserId(
+            userId,
+            limit,
+            page,
+          )
+        : await this.friendRequestRepo.findPendingByToUserId(
+            userId,
+            limit,
+            page,
+          )
 
     if (!requests.length) {
       return []
     }
 
-    const fromUserIds = [
-      ...new Set(requests.map((request) => request.fromUserId)),
-    ]
-    const fromUsers = await this.userRepo.findManyByIds(fromUserIds)
-    const userMap = new Map(
-      fromUsers.map((fromUser) => [fromUser.id, fromUser]),
-    )
+    // The interesting person differs by direction: for a received request it is
+    // whoever sent it, for a sent one it is whoever is being waited on.
+    const counterpartOf = (request: { fromUserId: string; toUserId: string }) =>
+      direction === 'sent' ? request.toUserId : request.fromUserId
+
+    const counterpartIds = [...new Set(requests.map(counterpartOf))]
+    const counterparts = await this.userRepo.findManyByIds(counterpartIds)
+    const userMap = new Map(counterparts.map((person) => [person.id, person]))
 
     return requests
       .map((request) => {
-        const fromUser = userMap.get(request.fromUserId)
-        if (!fromUser) {
+        const counterpart = userMap.get(counterpartOf(request))
+        if (!counterpart) {
           return null
         }
 
+        // `fromUser` keeps its old meaning for existing callers; `counterpart`
+        // is the one the list should actually render.
         return {
           ...request,
-          fromUser,
+          fromUser: counterpart,
+          counterpart,
         }
       })
       .filter(Boolean)
@@ -725,12 +837,21 @@ export class UserService {
       UserErrors.interestOnboardingAlreadyCompleted()
     }
 
-    const allowed = await this.fetchAllowedInterestSlugs()
     const unique = [...new Set(data.slugs.map((s) => s.trim()).filter(Boolean))]
-    const filtered = unique.filter((slug) => allowed.has(slug))
 
-    if (!filtered.length) {
-      UserErrors.invalidInterestSelection()
+    // Skipping is a legitimate outcome: the step exists to improve friend
+    // suggestions, not to gate the app. An empty selection marks the step done
+    // with no interests, and the user can set them later from their profile.
+    let filtered: string[] = []
+    if (unique.length) {
+      const allowed = await this.fetchAllowedInterestSlugs()
+      filtered = unique.filter((slug) => allowed.has(slug))
+
+      // Slugs were sent but none of them are real — that is a bad request, not
+      // a skip, so it still fails loudly.
+      if (!filtered.length) {
+        UserErrors.invalidInterestSelection()
+      }
     }
 
     const updated = await this.userRepo.completeInterestOnboarding(

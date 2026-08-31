@@ -1,39 +1,83 @@
 import { Button } from "@/components/ui/button";
-import { X } from "lucide-react";
+import { AlertCircle, Loader2, UserPlus, X } from "lucide-react";
 import { Input } from "../ui/input";
+import { useRef } from "react";
 import { useForm } from "react-hook-form";
 import { makeFriendRequest } from "@/apis";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 
 interface MakeFriendModalProps {
   onClose: () => void;
 }
 
 export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
-  const { register, handleSubmit } = useForm<{ email: string }>();
+  const {
+    register,
+    handleSubmit,
+    setError,
+    clearErrors,
+    formState: { errors, isSubmitting },
+  } = useForm<{ email: string }>();
+  // `isSubmitting` only disables the button after React re-renders; two clicks
+  // inside the same tick both get through. This ref closes that window.
+  const inFlight = useRef(false);
 
-  const onSubmit = (data: { email: string }) => {
-    makeFriendRequest(data.email).then(() => {
+  /**
+   * The previous version was `makeFriendRequest(email).then(close)` with no
+   * rejection handler: a rejected invite left an unhandled AxiosError in the
+   * console, no busy state (so the button could be hammered), and no sign in
+   * the dialog itself of what went wrong.
+   */
+  const onSubmit = async (data: { email: string }) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    clearErrors("email");
+    try {
+      await makeFriendRequest(data.email.trim());
       toast.success("Đã gửi lời mời kết bạn thành công");
       onClose();
-    });
+    } catch (error) {
+      setError("email", {
+        type: "server",
+        message: getErrorMessage(error, "Không gửi được lời mời kết bạn"),
+      });
+    } finally {
+      inFlight.current = false;
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm animate-fade-in">
       <form
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+        noValidate
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-lg"
         onSubmit={handleSubmit(onSubmit)}
       >
-        <div className="flex items-center justify-between border-b border-border p-5">
-          <h2 className="text-lg font-semibold text-foreground">Thêm bạn bè</h2>
+        <div className="flex items-start justify-between gap-3 border-b border-border p-5">
+          <div className="flex gap-3">
+            <span
+              aria-hidden="true"
+              className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground"
+            >
+              <UserPlus className="size-5" />
+            </span>
+            <div className="space-y-0.5">
+              <h2 className="text-lg font-semibold tracking-[-0.01em] text-foreground">
+                Thêm bạn bè
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Gửi lời mời bằng email đã đăng ký.
+              </p>
+            </div>
+          </div>
           <Button
             type="button"
-            variant="ghost"
+            variant="ghost-muted"
             size="icon"
             onClick={onClose}
             aria-label="Đóng"
-            className="text-muted-foreground hover:text-foreground"
+            className="-mr-1 -mt-1 shrink-0"
           >
             <X className="size-5" />
           </Button>
@@ -49,14 +93,54 @@ export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
           <Input
             id="make-friend-email"
             type="email"
-            placeholder="Nhập email"
-            {...register("email", { required: "Vui lòng nhập email" })}
+            placeholder="ban@email.com"
+            autoComplete="email"
+            inputMode="email"
+            aria-invalid={errors.email ? true : undefined}
+            aria-describedby={
+              errors.email ? "make-friend-email-error" : undefined
+            }
+            {...register("email", {
+              required: "Vui lòng nhập email",
+              pattern: {
+                value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                message: "Email không hợp lệ",
+              },
+            })}
           />
+          {errors.email ? (
+            <p
+              id="make-friend-email-error"
+              role="alert"
+              className="flex items-start gap-1.5 text-sm text-destructive-text"
+            >
+              <AlertCircle
+                className="mt-0.5 size-3.5 shrink-0"
+                aria-hidden="true"
+              />
+              <span>{errors.email.message}</span>
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Người nhận sẽ thấy lời mời trong mục Lời mời kết bạn.
+            </p>
+          )}
         </div>
 
-        <div className="flex justify-end border-t border-border p-4">
-          <Button type="submit" className="interceptor-loading">
-            Gửi lời mời
+        <div className="flex justify-end gap-2 border-t border-border p-4">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
+            Huỷ
+          </Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            )}
+            {isSubmitting ? "Đang gửi..." : "Gửi lời mời"}
           </Button>
         </div>
       </form>

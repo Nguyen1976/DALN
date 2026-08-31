@@ -16,6 +16,8 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LogOut, Plus, User, Users, X } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { useDispatch, useSelector } from "react-redux";
 import {
   removeConversationById,
@@ -71,13 +73,19 @@ export function GroupMemberManager() {
     dispatch(getFriends({ limit: 20, page: page + 1 }));
   };
 
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
   const myRole = conversation?.members?.find(
     (member) => member.userId === user.id,
   )?.role;
 
   const isAdmin = myRole === "ADMIN" || myRole === "OWNER";
-  const isDeleteAdmin = myRole === "ADMIN";
-  const canLeaveGroup = !isAdmin && conversation?.membershipStatus === "ACTIVE";
+  // The owner used to be excluded from both of these: they could not delete
+  // the group they created, and — despite the rule that ownership transfers on
+  // exit — they had no way to leave it either.
+  const isDeleteAdmin = isAdmin;
+  const canLeaveGroup = conversation?.membershipStatus === "ACTIVE";
   const canDeleteConversation = isDeleteAdmin && conversation?.type === "GROUP";
 
   useEffect(() => {
@@ -187,12 +195,8 @@ export function GroupMemberManager() {
         ],
       });
       toast.success("Đã thêm thành viên vào nhóm");
-    } catch (error: any) {
-      const backendMessage =
-        error?.response?.data?.message ||
-        error?.response?.data?.error?.message ||
-        "Không thể thêm thành viên";
-      toast.error(String(backendMessage));
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Không thể thêm thành viên"));
     } finally {
       setPendingMemberId(null);
     }
@@ -208,12 +212,8 @@ export function GroupMemberManager() {
         targetUserId: memberId,
       });
       toast.success("Đã xóa thành viên khỏi nhóm");
-    } catch (error: any) {
-      const backendMessage =
-        error?.response?.data?.message ||
-        error?.response?.data?.error?.message ||
-        "Không thể xóa thành viên";
-      toast.error(String(backendMessage));
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Không thể xóa thành viên"));
     } finally {
       setPendingMemberId(null);
     }
@@ -222,12 +222,9 @@ export function GroupMemberManager() {
   const handleLeaveGroup = async () => {
     if (isLeaving) return;
     if (!conversationId) return;
+    setShowLeaveConfirm(false);
     if (conversation?.membershipStatus !== "ACTIVE") {
       toast.info("Bạn không còn trong nhóm này");
-      return;
-    }
-    if (isAdmin) {
-      toast.error("Admin không thể rời nhóm. Hãy chuyển quyền admin trước.");
       return;
     }
     try {
@@ -244,12 +241,8 @@ export function GroupMemberManager() {
       );
       toast.success("Bạn đã rời khỏi nhóm");
       setOpen(false);
-    } catch (error: any) {
-      const backendMessage =
-        error?.response?.data?.message ||
-        error?.response?.data?.error?.message ||
-        "Không thể rời nhóm";
-      toast.error(String(backendMessage));
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Không thể rời nhóm"));
     } finally {
       setIsLeaving(false);
     }
@@ -260,10 +253,7 @@ export function GroupMemberManager() {
       return;
     }
 
-    const confirmed = window.confirm(
-      "Bạn có chắc muốn xóa cuộc trò chuyện này? Hành động này không thể hoàn tác.",
-    );
-    if (!confirmed) return;
+    setShowDeleteConfirm(false);
 
     try {
       setIsDeletingConversation(true);
@@ -280,12 +270,8 @@ export function GroupMemberManager() {
       toast.success("Đã xóa cuộc trò chuyện");
       setOpen(false);
       navigate("/");
-    } catch (error: any) {
-      const backendMessage =
-        error?.response?.data?.message ||
-        error?.response?.data?.error?.message ||
-        "Không thể xóa cuộc trò chuyện";
-      toast.error(String(backendMessage));
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Không thể xóa cuộc trò chuyện"));
     } finally {
       setIsDeletingConversation(false);
     }
@@ -303,6 +289,32 @@ export function GroupMemberManager() {
           Quản lý
         </Button>
       </PopoverTrigger>
+      <ConfirmDialog
+        open={showLeaveConfirm}
+        onOpenChange={setShowLeaveConfirm}
+        isPending={isLeaving}
+        title="Rời khỏi nhóm này?"
+        description={
+          isAdmin
+            ? `Bạn sẽ không nhận tin nhắn mới của "${conversation?.groupName || "nhóm"}" nữa và nhóm biến mất khỏi danh sách của bạn. Vì bạn đang quản lý nhóm, quyền quản lý sẽ được chuyển cho một thành viên còn lại. Thao tác này không thể hoàn tác.`
+            : `Bạn sẽ không nhận tin nhắn mới của "${conversation?.groupName || "nhóm"}" nữa và nhóm biến mất khỏi danh sách của bạn. Thao tác này không thể hoàn tác.`
+        }
+        confirmLabel="Rời nhóm"
+        pendingLabel="Đang rời nhóm..."
+        onConfirm={() => void handleLeaveGroup()}
+      />
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        isPending={isDeletingConversation}
+        title="Xoá cuộc trò chuyện này?"
+        description={`Toàn bộ nhóm "${conversation?.groupName || "nhóm"}" sẽ bị xoá với mọi thành viên. Thao tác này không thể hoàn tác.`}
+        confirmLabel="Xoá cuộc trò chuyện"
+        pendingLabel="Đang xoá..."
+        onConfirm={() => void handleDeleteConversation()}
+      />
+
       <PopoverContent className="w-80 p-0 bg-background border-accent/20">
         <div className="p-4 border-b border-accent/10">
           <h3 className="text-sm font-semibold text-foreground">
@@ -312,21 +324,17 @@ export function GroupMemberManager() {
             <Button
               size="sm"
               variant="outline"
-              onClick={handleLeaveGroup}
+              onClick={() => setShowLeaveConfirm(true)}
               disabled={isLeaving || !canLeaveGroup}
               className="h-8 gap-2"
             >
               <LogOut className="w-3 h-3" />
-              {isLeaving
-                ? "Đang rời nhóm..."
-                : isAdmin
-                  ? "Quản trị viên không thể rời nhóm"
-                  : "Rời nhóm"}
+              {isLeaving ? "Đang rời nhóm..." : "Rời nhóm"}
             </Button>
             <Button
               size="sm"
               variant="destructive"
-              onClick={handleDeleteConversation}
+              onClick={() => setShowDeleteConfirm(true)}
               disabled={!canDeleteConversation || isDeletingConversation}
               className="mt-2 h-8 gap-2"
             >
@@ -378,7 +386,7 @@ export function GroupMemberManager() {
                       const displayAvatar =
                         member.avatar ||
                         fallbackProfile?.avatar ||
-                        "/placeholder.svg";
+                        "";
 
                       return (
                         <div
@@ -407,6 +415,11 @@ export function GroupMemberManager() {
                                 {member.userId === user.id ? " (Bạn)" : ""}
                               </p>
                               <div className="flex items-center gap-2 mt-0.5">
+                                {member.role === "OWNER" && (
+                                  <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+                                    CHỦ NHÓM
+                                  </span>
+                                )}
                                 {member.role === "ADMIN" && (
                                   <span className="rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-warning-foreground">
                                     QUẢN TRỊ VIÊN
@@ -457,7 +470,7 @@ export function GroupMemberManager() {
                       <div className="flex items-center gap-3">
                         <Avatar className="w-10 h-10">
                           <AvatarImage
-                            src={friend.avatar || "/placeholder.svg"}
+                            src={friend.avatar || ""}
                             alt={friend.username || "Người dùng"}
                           />
                           <AvatarFallback>

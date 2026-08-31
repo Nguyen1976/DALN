@@ -25,6 +25,33 @@ export class FriendRequestRepository {
     })
   }
 
+  /** Pending requests between two users, in either direction. */
+  async findPendingBetweenUsers(userA: string, userB: string) {
+    return await this.prisma.friendRequest.findMany({
+      where: {
+        status: Status.PENDING,
+        OR: [
+          { fromUserId: userA, toUserId: userB },
+          { fromUserId: userB, toUserId: userA },
+        ],
+      },
+    })
+  }
+
+  async findPendingByFromUserId(fromUserId: string, limit: number, page: number) {
+    return await this.prisma.friendRequest.findMany({
+      where: {
+        fromUserId,
+        status: Status.PENDING,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: limit,
+      skip: (page - 1) * limit,
+    })
+  }
+
   async findById(id: string) {
     return await this.prisma.friendRequest.findUnique({
       where: { id },
@@ -50,6 +77,9 @@ export class FriendRequestRepository {
       where: {
         fromUserId,
         toUserId,
+        // Only a request still waiting can be answered; without this a late
+        // duplicate could overwrite a decision that was already made.
+        status: Status.PENDING,
       },
       data: {
         status,

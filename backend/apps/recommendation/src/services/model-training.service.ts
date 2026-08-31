@@ -1,4 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { InjectQueue } from '@nestjs/bullmq'
+import { Queue } from 'bullmq'
+import {
+  TRAINING_QUEUE,
+  TrainingJobKind,
+  TrainingJobPayload,
+} from '../background-jobs/training/training.constants'
 import {
   f1Score,
   GradientBoostingClassifier,
@@ -27,7 +34,22 @@ export class ModelTrainingService {
   constructor(
     private readonly datasetBuilder: DatasetBuilderService,
     private readonly gbRanker: GbRankerService,
+    @InjectQueue(TRAINING_QUEUE) private readonly trainingQueue: Queue,
   ) {}
+
+  /**
+   * Đẩy việc huấn luyện sang worker thay vì chạy tại chỗ.
+   * `train()` là vòng lặp đồng bộ 100 cây quyết định — chạy trong tiến trình
+   * đang phục vụ HTTP sẽ chặn event loop và làm Kong đánh dấu upstream chết.
+   */
+  async enqueueTraining(kind: TrainingJobKind) {
+    const payload: TrainingJobPayload = { kind }
+    return this.trainingQueue.add(kind, payload, {
+      removeOnComplete: 20,
+      removeOnFail: 50,
+      attempts: 1, // train tốn tài nguyên: thất bại thì báo, không tự thử lại
+    })
+  }
 
   private rowsToMatrix(rows: TrainingRow[]): {
     X: number[][]

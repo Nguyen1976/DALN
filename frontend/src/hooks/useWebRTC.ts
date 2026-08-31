@@ -18,6 +18,35 @@ export type CallStatus =
   | "rejected"
   | "no_answer";
 
+/** Bao lâu chờ micro trước khi coi là hỏng. */
+const MIC_ACQUIRE_TIMEOUT_MS = 15000;
+
+export class MicrophoneTimeoutError extends Error {
+  constructor() {
+    super("Không truy cập được micro");
+    this.name = "MicrophoneTimeoutError";
+  }
+}
+
+/** Thông điệp cho người dùng ứng với từng lý do không lấy được micro. */
+export function describeMicrophoneError(error: unknown): string {
+  const name = (error as { name?: string })?.name;
+
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "Bạn đã từ chối quyền dùng micro. Hãy bật lại quyền cho trang này trong cài đặt trình duyệt rồi gọi lại.";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "Không tìm thấy micro nào trên thiết bị này.";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "Micro đang được ứng dụng khác sử dụng. Hãy đóng ứng dụng đó rồi thử lại.";
+  }
+  if (name === "MicrophoneTimeoutError") {
+    return "Không truy cập được micro sau 15 giây. Hãy kiểm tra quyền micro của trình duyệt rồi gọi lại.";
+  }
+  return "Không thể bắt đầu cuộc gọi. Vui lòng thử lại.";
+}
+
 export const useWebRTC = (socket: Socket) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -77,12 +106,33 @@ export const useWebRTC = (socket: Socket) => {
     return pc;
   };
 
+  /**
+   * Get the microphone, but never wait for ever.
+   *
+   * `getUserMedia` can hang indefinitely — another app holding the device, a
+   * permission prompt the user walks away from, a wedged driver. Without a
+   * bound the call screen sat on "Đang kết nối..." with no error and no way
+   * out, which is exactly what the call flow promises not to do.
+   */
   const acquireLocalAudio = useCallback(async () => {
     if (localStreamRef.current) return localStreamRef.current;
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    setStream(stream);
-    return stream;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const stream = await Promise.race([
+        navigator.mediaDevices.getUserMedia({ audio: true }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new MicrophoneTimeoutError()),
+            MIC_ACQUIRE_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      setStream(stream);
+      return stream;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }, [setStream]);
 
   const startCall = useCallback(

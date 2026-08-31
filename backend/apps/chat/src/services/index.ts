@@ -22,3 +22,8 @@ export {
   type CreateConversationData,
   type DeleteConversationRequest,
 } from './conversation.service'
+export {
+  MessageBatchWriter,
+  type BatchMessageInput,
+  type BatchedMessage,
+} from './message-batch-writer.service'

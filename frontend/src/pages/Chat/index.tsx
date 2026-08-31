@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { MessageSquareText } from "lucide-react";
+import { EmptyState } from "@/components/ui/feedback";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import ProfilePanel from "@/components/ProfilePanel";
@@ -43,19 +44,12 @@ export default function ChatPage() {
           onFocusHandled={() => setFocusMessageId(null)}
         />
       ) : (
-        <div className="hidden flex-1 flex-col items-center justify-center gap-4 bg-bg-box-chat px-6 text-center md:flex">
-          <div className="flex size-20 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <MessageSquareText className="size-9" />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold text-foreground">
-              Chưa có cuộc trò chuyện nào được chọn
-            </h2>
-            <p className="max-w-sm text-sm text-muted-foreground">
-              Hãy chọn một cuộc trò chuyện ở danh sách bên trái để bắt đầu nhắn
-              tin.
-            </p>
-          </div>
+        <div className="chat-canvas hidden flex-1 flex-col items-center justify-center px-6 text-center md:flex">
+          <EmptyState
+            icon={MessageSquareText}
+            title="Chọn một cuộc trò chuyện"
+            description="Chọn cuộc trò chuyện ở danh sách bên trái để bắt đầu nhắn tin, hoặc tạo cuộc trò chuyện mới."
+          />
         </div>
       )}
 

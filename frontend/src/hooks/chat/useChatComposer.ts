@@ -1,5 +1,5 @@
 import { useCallback, useState, type RefObject } from "react";
-import { useDispatch } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import {
   createMessageUploadUrlAPI,
   uploadFileToSignedUrl,
@@ -13,13 +13,20 @@ import {
 } from "@/redux/slices/conversationSlice";
 import {
   addMessage,
+  discardMessage,
   failMessage,
+  retryMessage,
+  selectDraft,
+  setDraft,
   type Message,
 } from "@/redux/slices/messageSlice";
 import type { UserState } from "@/redux/slices/userSlice";
-import type { AppDispatch } from "@/redux/store";
+import type { AppDispatch, RootState } from "@/redux/store";
 import { getMessageTypeFromFile, getMimeTypeFromFile } from "@/utils/chatMedia";
+import { validateUploadFile } from "@/utils/mediaLimits";
+import { toast } from "sonner";
 import { showErrorToast } from "@/utils/toastError";
+import { createClientMessageId } from "@/utils/clientId";
 
 interface UseChatComposerOptions {
   conversationId?: string;
@@ -31,6 +38,9 @@ interface UseChatComposerOptions {
   bottomRef: RefObject<HTMLDivElement | null>;
 }
 
+/** Bao lâu không nhận được xác nhận thì coi là gửi hỏng. */
+const ACK_TIMEOUT_MS = 12000;
+
 export function useChatComposer({
   conversationId,
   user,
@@ -41,7 +51,53 @@ export function useChatComposer({
   bottomRef,
 }: UseChatComposerOptions) {
   const dispatch = useDispatch<AppDispatch>();
-  const [msg, setMsg] = useState("");
+  /**
+   * The composer text lives in the store, keyed by conversation.
+   *
+   * Keeping it in component state meant leaving a thread — which unmounts
+   * ChatWindow — threw away whatever was half-typed. Reading and writing the
+   * store directly also avoids having to keep a local copy in sync. The
+   * `message` slice is excluded from persistence, so drafts stay in memory and
+   * are cleared on logout with the rest of the user's data.
+   */
+  const msg = useSelector((state: RootState) =>
+    selectDraft(state, conversationId),
+  );
+
+  /**
+   * Tin nhắn đang được trả lời, kèm cuộc trò chuyện mà nó thuộc về.
+   *
+   * Lưu kèm id cuộc trò chuyện để suy ra trực tiếp khi đổi phòng, thay vì
+   * dùng một effect gọi setState — trích dẫn của phòng cũ tự hết hiệu lực.
+   */
+  const [replyDraft, setReplyDraft] = useState<{
+    conversationId: string;
+    message: Message;
+  } | null>(null);
+
+  const replyingTo =
+    replyDraft && replyDraft.conversationId === conversationId
+      ? replyDraft.message
+      : null;
+
+  const setReplyingTo = useCallback(
+    (message: Message | null) => {
+      if (!conversationId || !message) {
+        setReplyDraft(null);
+        return;
+      }
+      setReplyDraft({ conversationId, message });
+    },
+    [conversationId],
+  );
+
+  const setMsg = useCallback(
+    (text: string) => {
+      if (!conversationId) return;
+      dispatch(setDraft({ conversationId, text }));
+    },
+    [conversationId, dispatch],
+  );
 
   const ensureConversationInStore = useCallback(
     (lastMessage: Message) => {
@@ -81,31 +137,121 @@ export function useChatComposer({
     [conversationId, user],
   );
 
+  /**
+   * Ship a text message and make sure it never sits in limbo.
+   *
+   * A bare `socket.emit` while the connection is down is buffered silently:
+   * the bubble stayed on "đang gửi" for ever with nothing telling the user it
+   * had not left the device. Offline is failed immediately, and an ack that
+   * never arrives fails the message after a bounded wait so the retry control
+   * can appear.
+   */
+  const emitMessage = useCallback(
+    ({
+      conversationId: cid,
+      content,
+      clientMessageId,
+      replyToMessageId,
+    }: {
+      conversationId: string;
+      content: string;
+      clientMessageId: string;
+      replyToMessageId?: string;
+    }) => {
+      if (!socket.connected) {
+        dispatch(failMessage({ conversationId: cid, clientMessageId }));
+        return;
+      }
+
+      socket.emit("message:create", {
+        conversationId: cid,
+        type: "TEXT",
+        content,
+        clientMessageId,
+        replyToMessageId,
+        media: [],
+      });
+
+      window.setTimeout(() => {
+        // `failMessage` is a no-op once the ack has flipped the message to
+        // "sent", so this only bites when nothing came back.
+        dispatch(failMessage({ conversationId: cid, clientMessageId }));
+      }, ACK_TIMEOUT_MS);
+    },
+    [dispatch],
+  );
+
+  const handleRetryMessage = useCallback(
+    (message: Message) => {
+      if (!conversationId) return;
+      const clientMessageId = message.clientMessageId || message.id;
+      dispatch(retryMessage({ conversationId, clientMessageId }));
+      emitMessage({
+        conversationId,
+        content: message.text || "",
+        clientMessageId,
+        replyToMessageId: message.replyToMessageId,
+      });
+    },
+    [conversationId, dispatch, emitMessage],
+  );
+
+  const handleDiscardMessage = useCallback(
+    (message: Message) => {
+      if (!conversationId) return;
+      dispatch(
+        discardMessage({
+          conversationId,
+          clientMessageId: message.clientMessageId || message.id,
+        }),
+      );
+    },
+    [conversationId, dispatch],
+  );
+
   const handleSendMessage = useCallback(() => {
     if (!canSendMessage || msg.trim() === "" || !conversationId) return;
 
-    const clientMessageId = `temp-id-${Date.now()}`;
+    const clientMessageId = createClientMessageId("temp-id");
+    const quoted = replyingTo;
     const tempMessage = createTempMessage({
       id: clientMessageId,
       type: "TEXT",
       text: msg,
       clientMessageId,
+      // Hiển thị trích dẫn ngay ở bản tạm, không đợi máy chủ dựng lại.
+      ...(quoted
+        ? {
+            replyToMessageId: quoted.id,
+            replyTo: {
+              id: quoted.id,
+              senderId: quoted.senderId,
+              senderName:
+                quoted.senderMember?.fullName ||
+                quoted.senderMember?.username ||
+                "",
+              text: quoted.text || "",
+              type: String(quoted.type ?? "TEXT"),
+              isRevoked: Boolean(quoted.isRevoked),
+            },
+          }
+        : {}),
     });
 
     dispatch(addMessage(tempMessage));
     dispatch(updateNewMessage({ conversationId, lastMessage: tempMessage }));
     ensureConversationInStore(tempMessage);
 
-    socket.emit("message:create", {
+    emitMessage({
       conversationId,
-      type: "TEXT",
       content: msg,
       clientMessageId,
-      media: [],
+      replyToMessageId: quoted?.id,
     });
 
     stopTyping();
     setMsg("");
+    setReplyingTo(null);
 
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -116,8 +262,12 @@ export function useChatComposer({
     conversationId,
     createTempMessage,
     dispatch,
+    emitMessage,
     ensureConversationInStore,
     msg,
+    replyingTo,
+    setMsg,
+    setReplyingTo,
     stopTyping,
   ]);
 
@@ -125,9 +275,18 @@ export function useChatComposer({
     async (file: File) => {
       if (!canSendMessage || !conversationId) return;
 
+      // Reject before anything is created: an oversized or unsupported file
+      // used to reach the presign call and fail with a storage error, after
+      // a bubble had already appeared in the thread.
+      const rejection = validateUploadFile(file);
+      if (rejection) {
+        toast.error(rejection);
+        return;
+      }
+
       const mediaType = getMessageTypeFromFile(file);
       const mimeType = getMimeTypeFromFile(file);
-      const clientMessageId = `temp-media-${Date.now()}`;
+      const clientMessageId = createClientMessageId("temp-media");
 
       const tempMedia: MessageMediaInput = {
         mediaType,
@@ -193,6 +352,7 @@ export function useChatComposer({
       dispatch,
       ensureConversationInStore,
       msg,
+      setMsg,
     ],
   );
 
@@ -201,5 +361,9 @@ export function useChatComposer({
     setMsg,
     handleSendMessage,
     handleUploadMedia,
+    handleRetryMessage,
+    handleDiscardMessage,
+    replyingTo,
+    setReplyingTo,
   };
 }

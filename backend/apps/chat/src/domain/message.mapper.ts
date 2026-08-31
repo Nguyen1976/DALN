@@ -16,6 +16,27 @@ export class MessageMapper {
       type: message.type || 'TEXT',
       clientMessageId: message.clientMessageId || message.tempMessageId || undefined,
       replyToMessageId: message.replyToMessageId || undefined,
+      // Quoted message, flattened to exactly what a reply bubble needs. Sending
+      // only the id would force the client to have the original already loaded,
+      // which is not true once the thread has been scrolled.
+      replyTo: message.replyTo
+        ? {
+            id: String(message.replyTo.id),
+            senderId: String(message.replyTo.senderId),
+            senderName:
+              message.replyTo.senderMember?.fullName ||
+              message.replyTo.senderMember?.username ||
+              '',
+            text: message.replyTo.isRevoked
+              ? ''
+              : String(
+                  message.replyTo.text ?? message.replyTo.content ?? '',
+                ).trim(),
+            type: message.replyTo.type || 'TEXT',
+            isRevoked: Boolean(message.replyTo.isRevoked),
+            attachmentName: message.replyTo.medias?.[0]?.fileName || undefined,
+          }
+        : undefined,
       isRevoked: Boolean(message.isRevoked),
       isDeleted: Boolean(message.isDeleted),
       createdAt,

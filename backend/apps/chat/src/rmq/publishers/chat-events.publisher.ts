@@ -1,5 +1,5 @@
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   EmitToUserPayload,
@@ -16,6 +16,8 @@ import { MessageMapper } from '../../domain/message.mapper'
 
 @Injectable()
 export class ChatEventsPublisher {
+  private readonly logger = new Logger(ChatEventsPublisher.name)
+
   constructor(private readonly amqpConnection: AmqpConnection) {}
 
   private emitToUsers(
@@ -276,7 +278,7 @@ export class ChatEventsPublisher {
         payload,
       )
     } catch (e) {
-      console.warn('[chat-events] publishUserJoinedGroup failed', e)
+      this.logger.warn('[chat-events] publishUserJoinedGroup failed', e)
     }
   }
 
@@ -288,7 +290,7 @@ export class ChatEventsPublisher {
         payload,
       )
     } catch (e) {
-      console.warn('[chat-events] publishUserLeftGroup failed', e)
+      this.logger.warn('[chat-events] publishUserLeftGroup failed', e)
     }
   }
 }

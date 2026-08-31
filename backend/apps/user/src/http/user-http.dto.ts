@@ -1,7 +1,6 @@
 import { Status } from 'apps/user/src/generated'
 import {
   ArrayMaxSize,
-  ArrayMinSize,
   ArrayUnique,
   IsArray,
   IsEmail,
@@ -117,8 +116,9 @@ export class UpdateProfileDto {
 }
 
 export class CompleteInterestOnboardingDto {
+  // An empty array is how the client says "skip this step" — the onboarding is
+  // there to sharpen suggestions, not to lock a new account out of the app.
   @IsArray()
-  @ArrayMinSize(1, { message: 'Vui lòng chọn ít nhất một sở thích' })
   @ArrayMaxSize(24)
   @ArrayUnique()
   @IsString({ each: true })

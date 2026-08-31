@@ -38,6 +38,16 @@ export interface Message {
   type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL";
   clientMessageId?: string;
   replyToMessageId?: string;
+  /** Tin nhắn được trích dẫn, đã được máy chủ dựng sẵn để hiển thị. */
+  replyTo?: {
+    id: string;
+    senderId: string;
+    senderName: string;
+    text: string;
+    type: string;
+    isRevoked: boolean;
+    attachmentName?: string;
+  };
   isDeleted?: boolean;
   isRevoked?: boolean;
   createdAt?: string;
@@ -62,6 +72,15 @@ export interface Message {
 }
 
 export interface MessageState {
+  /**
+   * Half-written message per conversation.
+   *
+   * Kept in the store, not in the composer: leaving a thread unmounts
+   * ChatWindow, so a component-local draft died the moment the user clicked
+   * away. The `message` slice is excluded from persistence, so drafts stay in
+   * memory only and are dropped on logout with everything else.
+   */
+  drafts: Record<string, string>;
   messages: Record<string, Message[]>;
   pagination: Record<
     string,
@@ -73,6 +92,7 @@ export interface MessageState {
 }
 
 const initialState: MessageState = {
+  drafts: {},
   messages: {},
   pagination: {},
 };
@@ -102,6 +122,24 @@ export const getMessages = createAsyncThunk(
   },
 );
 
+/**
+ * Newest-first order, matching the server's (createdAt desc, id desc).
+ *
+ * The store keeps messages newest-first and `selectMessage` reverses them for
+ * display. Merging a page from the server with a message that had already
+ * arrived over the socket used to be a plain concatenation, so the newest
+ * message could end up at the tail: it rendered at the top of the thread, and
+ * "the last message" — used for the read receipt and for scrolling — pointed at
+ * an older one. Sorting on merge keeps one true order regardless of which
+ * channel delivered a message first.
+ */
+function compareNewestFirst(a: Message, b: Message): number {
+  const at = new Date(a.createdAt ?? 0).getTime();
+  const bt = new Date(b.createdAt ?? 0).getTime();
+  if (at !== bt) return bt - at;
+  return String(b.id).localeCompare(String(a.id));
+}
+
 export const messageSlice = createSlice({
   name: "message",
   initialState,
@@ -130,8 +168,10 @@ export const messageSlice = createSlice({
         };
         return;
       } else {
-        //message của họ
-        state.messages[message.conversationId].unshift(message);
+        // Chèn đúng vị trí theo thứ tự thời gian: tin đến trễ qua socket không
+        // được nhảy lên đầu và đẩy tin mới hơn xuống dưới.
+        currentMessages.push(message);
+        currentMessages.sort(compareNewestFirst);
       }
     },
     ackMessage: (
@@ -177,13 +217,58 @@ export const messageSlice = createSlice({
           m.id === clientMessageId ||
           (clientMessageId && m.clientMessageId === clientMessageId),
       );
-      if (index !== -1) {
+      // Only a message still waiting can fail. The ack-timeout watchdog fires
+      // for every send; without this guard it would flip messages that had
+      // already been confirmed into "chưa gửi được" twelve seconds later.
+      if (index !== -1 && currentMessages[index].status === "pending") {
         currentMessages[index] = {
           ...currentMessages[index],
           status: "failed",
         };
       }
     },
+    /** Đưa một tin nhắn thất bại trở lại hàng chờ trước khi gửi lại. */
+    retryMessage: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        clientMessageId: string;
+      }>,
+    ) => {
+      const { conversationId, clientMessageId } = action.payload;
+      const list = state.messages[conversationId] || [];
+      const index = list.findIndex(
+        (m) => m.id === clientMessageId || m.clientMessageId === clientMessageId,
+      );
+      if (index !== -1) {
+        list[index] = { ...list[index], status: "pending" };
+      }
+    },
+
+    /** Bỏ hẳn một tin nhắn chưa gửi được khỏi hàng chờ. */
+    discardMessage: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        clientMessageId: string;
+      }>,
+    ) => {
+      const { conversationId, clientMessageId } = action.payload;
+      const list = state.messages[conversationId] || [];
+      state.messages[conversationId] = list.filter(
+        (m) => m.id !== clientMessageId && m.clientMessageId !== clientMessageId,
+      );
+    },
+
+    setDraft: (
+      state,
+      action: PayloadAction<{ conversationId: string; text: string }>,
+    ) => {
+      const { conversationId, text } = action.payload;
+      if (text) state.drafts[conversationId] = text;
+      else delete state.drafts[conversationId];
+    },
+
     revokeMessage: (
       state,
       action: PayloadAction<{
@@ -281,12 +366,16 @@ export const messageSlice = createSlice({
           );
         });
 
+        merged.sort(compareNewestFirst);
         state.messages[conversationId] = merged;
 
-        const oldestCursor =
-          merged.length > 0
-            ? (merged[merged.length - 1]?.createdAt ?? null)
-            : null;
+        // Same tie-breaker as the conversation list: two messages written in
+        // the same millisecond by the batch writer would otherwise straddle a
+        // page boundary and one of them would never be fetched.
+        const oldest = merged[merged.length - 1];
+        const oldestCursor = oldest?.createdAt
+          ? `${oldest.createdAt}|${oldest.id}`
+          : null;
 
         state.pagination[conversationId] = {
           oldestCursor,
@@ -312,6 +401,9 @@ export const selectMessage = createSelector(
     return [...messages].reverse();
   },
 );
+
+export const selectDraft = (state: RootState, conversationId?: string) =>
+  conversationId ? (state.message.drafts[conversationId] ?? "") : "";
 
 export const selectMessagePagination = createSelector(
   [
@@ -339,6 +431,9 @@ export const {
   addMessage,
   ackMessage,
   failMessage,
+  setDraft,
+  retryMessage,
+  discardMessage,
   revokeMessage,
   deleteMessageForMe,
   clearConversationMessages,
