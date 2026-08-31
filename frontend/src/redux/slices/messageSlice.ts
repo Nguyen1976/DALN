@@ -38,6 +38,16 @@ export interface Message {
   type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL";
   clientMessageId?: string;
   replyToMessageId?: string;
+  /** Tin nhắn được trích dẫn, đã được máy chủ dựng sẵn để hiển thị. */
+  replyTo?: {
+    id: string;
+    senderId: string;
+    senderName: string;
+    text: string;
+    type: string;
+    isRevoked: boolean;
+    attachmentName?: string;
+  };
   isDeleted?: boolean;
   isRevoked?: boolean;
   createdAt?: string;

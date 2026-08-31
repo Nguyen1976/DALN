@@ -11,6 +11,7 @@ import { useSelector } from "react-redux";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import {
   AlertCircle,
+  Reply,
   BarChart3,
   Check,
   ChevronRight,
@@ -31,6 +32,15 @@ import {
 } from "../ui/dropdown-menu";
 import FileAttachmentPreview from "./FileAttachmentPreview";
 
+/** Nhãn thay cho nội dung khi tin nhắn gốc không phải văn bản. */
+function quotedPlaceholder(type: string): string {
+  if (type === "IMAGE") return "Hình ảnh";
+  if (type === "VIDEO") return "Video";
+  if (type === "FILE") return "Tệp đính kèm";
+  if (type === "POLL") return "Bình chọn";
+  return "Tin nhắn";
+}
+
 const MessageComponent = ({
   messages,
   highlightMessageId,
@@ -41,6 +51,8 @@ const MessageComponent = ({
   pollVoteSelections,
   onRetryMessage,
   onDiscardMessage,
+  onReplyMessage,
+  onJumpToMessage,
   isGroup = false,
 }: {
   messages: Message[];
@@ -57,6 +69,8 @@ const MessageComponent = ({
   pollVoteSelections?: Record<string, string[]>;
   onRetryMessage?: (message: Message) => void;
   onDiscardMessage?: (message: Message) => void;
+  onReplyMessage?: (message: Message) => void;
+  onJumpToMessage?: (messageId: string) => void;
 }) => {
   const user = useSelector(selectUser);
 
@@ -353,6 +367,60 @@ const MessageComponent = ({
                       );
                     })}
 
+                  {/* Quoted message. Clicking it jumps to the original so a
+                      reply in a busy thread can be traced back. */}
+                  {message.replyTo && (
+                    <button
+                      type="button"
+                      onClick={() => onJumpToMessage?.(message.replyTo!.id)}
+                      className={cn(
+                        "mb-1.5 flex w-full items-stretch gap-2 rounded-lg px-2 py-1.5 text-left",
+                        "transition-colors duration-[--motion-fast]",
+                        isMine
+                          ? "bg-bubble-out-foreground/12 hover:bg-bubble-out-foreground/20"
+                          : "bg-foreground/6 hover:bg-foreground/10",
+                        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+                      )}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "w-0.5 shrink-0 rounded-full",
+                          isMine ? "bg-bubble-out-foreground/60" : "bg-primary",
+                        )}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={cn(
+                            "block truncate text-[11px] font-semibold",
+                            isMine
+                              ? "text-bubble-out-foreground/85"
+                              : "text-brand",
+                          )}
+                        >
+                          {message.replyTo.senderId === user.id
+                            ? "Bạn"
+                            : message.replyTo.senderName || "Người dùng"}
+                        </span>
+                        <span
+                          className={cn(
+                            "block truncate text-xs",
+                            isMine
+                              ? "text-bubble-out-foreground/70"
+                              : "text-muted-foreground",
+                            message.replyTo.isRevoked && "italic",
+                          )}
+                        >
+                          {message.replyTo.isRevoked
+                            ? "Tin nhắn đã bị thu hồi"
+                            : message.replyTo.text ||
+                              message.replyTo.attachmentName ||
+                              quotedPlaceholder(message.replyTo.type)}
+                        </span>
+                      </span>
+                    </button>
+                  )}
+
                   {isRevoked ? (
                     <p
                       className={cn(
@@ -393,6 +461,15 @@ const MessageComponent = ({
                       align={isMine ? "end" : "start"}
                       className="w-56"
                     >
+                      {!isRevoked && !message.id.startsWith("temp-") && (
+                        <DropdownMenuItem
+                          onClick={() => onReplyMessage?.(message)}
+                        >
+                          <Reply className="size-4" />
+                          Trả lời
+                        </DropdownMenuItem>
+                      )}
+
                       {canRevoke && (
                         <>
                           <DropdownMenuGroup>

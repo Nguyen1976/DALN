@@ -141,6 +141,19 @@ export class MessageService {
     )
     message.senderMember = senderMember
 
+    // Replies are rare next to plain messages, so the quoted message is fetched
+    // here instead of through an `include` that would run for every send.
+    if (data.replyToMessageId) {
+      const [quoted] = await this.messageRepo.findQuotedByIds([
+        data.replyToMessageId,
+      ])
+      // Only quote something from this same conversation: the id arrives from
+      // the client and must not become a way to read another thread.
+      if (quoted && String(quoted.conversationId) === String(data.conversationId)) {
+        ;(message as any).replyTo = quoted
+      }
+    }
+
     return this.notifyMessageCreated({
       conversationId: data.conversationId,
       senderId: data.senderId,
@@ -225,8 +238,36 @@ export class MessageService {
         cursor,
       )
 
+    await this.attachQuotedMessages(messages)
+
     return {
       messages: messages.map((m) => MessageMapper.toResponse(m)),
+    }
+  }
+
+  /**
+   * Fill in `replyTo` for a page of messages with one extra query.
+   *
+   * Without this a reply rendered as a bare id: the client cannot show the
+   * quote unless the original happens to be on screen, which stops being true
+   * as soon as the thread is scrolled.
+   */
+  private async attachQuotedMessages(messages: any[]) {
+    const ids = messages
+      .map((m) => m.replyToMessageId)
+      .filter((id): id is string => Boolean(id))
+
+    if (!ids.length) return
+
+    const quoted = await this.messageRepo.findQuotedByIds(ids)
+    const byId = new Map(quoted.map((q) => [String(q.id), q]))
+
+    for (const message of messages) {
+      if (!message.replyToMessageId) continue
+      const original = byId.get(String(message.replyToMessageId))
+      if (original && String(original.conversationId) === String(message.conversationId)) {
+        message.replyTo = original
+      }
     }
   }
 

@@ -34,6 +34,7 @@ import {
 import { selectFriend } from "@/redux/slices/friendSlice";
 import { formatRelativeTime } from "@/utils/formatDateTime";
 import MessageComponent from "./Messages";
+import { MessageMapper } from "@/utils/messageMapper";
 import EmojiPicker from "emoji-picker-react";
 import {
   Popover,
@@ -86,6 +87,7 @@ export default function ChatWindow({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [showClearHistoryDialog, setShowClearHistoryDialog] = useState(false);
+  const [internalJumpId, setInternalJumpId] = useState<string | null>(null);
 
   const {
     user,
@@ -135,8 +137,13 @@ export default function ChatWindow({
     pagination,
     canLoadMessages,
     userId: user.id,
-    focusMessageId,
-    onFocusHandled,
+    // Two sources ask to jump to a message: the shared-media panel (via props)
+    // and tapping a quote inside a reply (local).
+    focusMessageId: focusMessageId ?? internalJumpId,
+    onFocusHandled: () => {
+      setInternalJumpId(null);
+      onFocusHandled?.();
+    },
   });
 
   const { handleTyping, stopTyping, handleInputFocus, handleInputBlur } =
@@ -152,6 +159,8 @@ export default function ChatWindow({
     handleUploadMedia,
     handleRetryMessage,
     handleDiscardMessage,
+    replyingTo,
+    setReplyingTo,
   } = useChatComposer({
     conversationId,
     user,
@@ -341,6 +350,11 @@ export default function ChatWindow({
           pollVoteSelections={poll.pollVoteSelections}
           onRetryMessage={handleRetryMessage}
           onDiscardMessage={handleDiscardMessage}
+          onReplyMessage={(message) => {
+            setReplyingTo(message);
+            composerRef.current?.focus();
+          }}
+          onJumpToMessage={setInternalJumpId}
           isGroup={isGroupConversation}
         />
         <TypingIndicator userNames={typingUserNames} />
@@ -372,6 +386,41 @@ export default function ChatWindow({
       )}
 
       <div className="shrink-0 border-t border-border bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+        {/* Quote bar: shows what is being replied to before the message goes
+            out, and can be dismissed without losing the text already typed. */}
+        {replyingTo && (
+          <div className="mb-2 flex items-stretch gap-2 rounded-xl border border-border bg-card px-3 py-2">
+            <span
+              aria-hidden="true"
+              className="w-0.5 shrink-0 rounded-full bg-primary"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-brand">
+                Trả lời{" "}
+                {replyingTo.senderId === user.id
+                  ? "chính bạn"
+                  : replyingTo.senderMember?.fullName ||
+                    replyingTo.senderMember?.username ||
+                    "người dùng"}
+              </p>
+              <p className="truncate text-sm text-muted-foreground">
+                {replyingTo.isRevoked
+                  ? "Tin nhắn đã bị thu hồi"
+                  : MessageMapper.previewText(replyingTo)}
+              </p>
+            </div>
+            <Button
+              variant="ghost-muted"
+              size="icon-sm"
+              aria-label="Huỷ trả lời"
+              onClick={() => setReplyingTo(null)}
+              className="shrink-0 self-center"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+        )}
+
         <div className="flex items-end gap-1 rounded-2xl border border-border bg-card p-1.5 shadow-xs transition-[border-color,box-shadow] duration-[--motion-fast] focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25">
           <input
             ref={fileInputRef}
@@ -430,6 +479,12 @@ export default function ChatWindow({
             onBlur={handleInputBlur}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
+              // Escape drops the quote without touching what has been typed.
+              if (e.key === "Escape" && replyingTo) {
+                e.preventDefault();
+                setReplyingTo(null);
+                return;
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 handleSendMessage();

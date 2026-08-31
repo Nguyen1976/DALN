@@ -316,6 +316,36 @@ export class MessageRepository {
     })
   }
 
+  /**
+   * Minimal shape of the messages other messages quote.
+   *
+   * Fetched in one bulk query per page rather than through a Prisma `include`:
+   * an include fires a separate query for every message, and the overwhelming
+   * majority of messages are not replies.
+   */
+  async findQuotedByIds(ids: string[]) {
+    const unique = [...new Set(ids.filter(Boolean))]
+    if (!unique.length) return []
+
+    return await this.prisma.message.findMany({
+      where: { id: { in: unique } },
+      select: {
+        id: true,
+        conversationId: true,
+        senderId: true,
+        content: true,
+        type: true,
+        isRevoked: true,
+        isDeleted: true,
+        createdAt: true,
+        senderMember: {
+          select: { userId: true, username: true, fullName: true, avatar: true },
+        },
+        medias: { select: { mediaType: true, fileName: true }, take: 1 },
+      },
+    })
+  }
+
   async findConversationAssets(
     conversationId: string,
     kind: 'MEDIA' | 'LINK' | 'DOC',

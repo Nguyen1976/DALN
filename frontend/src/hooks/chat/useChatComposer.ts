@@ -1,4 +1,4 @@
-import { useCallback, type RefObject } from "react";
+import { useCallback, useState, type RefObject } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   createMessageUploadUrlAPI,
@@ -64,6 +64,33 @@ export function useChatComposer({
     selectDraft(state, conversationId),
   );
 
+  /**
+   * Tin nhắn đang được trả lời, kèm cuộc trò chuyện mà nó thuộc về.
+   *
+   * Lưu kèm id cuộc trò chuyện để suy ra trực tiếp khi đổi phòng, thay vì
+   * dùng một effect gọi setState — trích dẫn của phòng cũ tự hết hiệu lực.
+   */
+  const [replyDraft, setReplyDraft] = useState<{
+    conversationId: string;
+    message: Message;
+  } | null>(null);
+
+  const replyingTo =
+    replyDraft && replyDraft.conversationId === conversationId
+      ? replyDraft.message
+      : null;
+
+  const setReplyingTo = useCallback(
+    (message: Message | null) => {
+      if (!conversationId || !message) {
+        setReplyDraft(null);
+        return;
+      }
+      setReplyDraft({ conversationId, message });
+    },
+    [conversationId],
+  );
+
   const setMsg = useCallback(
     (text: string) => {
       if (!conversationId) return;
@@ -124,10 +151,12 @@ export function useChatComposer({
       conversationId: cid,
       content,
       clientMessageId,
+      replyToMessageId,
     }: {
       conversationId: string;
       content: string;
       clientMessageId: string;
+      replyToMessageId?: string;
     }) => {
       if (!socket.connected) {
         dispatch(failMessage({ conversationId: cid, clientMessageId }));
@@ -139,6 +168,7 @@ export function useChatComposer({
         type: "TEXT",
         content,
         clientMessageId,
+        replyToMessageId,
         media: [],
       });
 
@@ -160,6 +190,7 @@ export function useChatComposer({
         conversationId,
         content: message.text || "",
         clientMessageId,
+        replyToMessageId: message.replyToMessageId,
       });
     },
     [conversationId, dispatch, emitMessage],
@@ -182,21 +213,45 @@ export function useChatComposer({
     if (!canSendMessage || msg.trim() === "" || !conversationId) return;
 
     const clientMessageId = createClientMessageId("temp-id");
+    const quoted = replyingTo;
     const tempMessage = createTempMessage({
       id: clientMessageId,
       type: "TEXT",
       text: msg,
       clientMessageId,
+      // Hiển thị trích dẫn ngay ở bản tạm, không đợi máy chủ dựng lại.
+      ...(quoted
+        ? {
+            replyToMessageId: quoted.id,
+            replyTo: {
+              id: quoted.id,
+              senderId: quoted.senderId,
+              senderName:
+                quoted.senderMember?.fullName ||
+                quoted.senderMember?.username ||
+                "",
+              text: quoted.text || "",
+              type: String(quoted.type ?? "TEXT"),
+              isRevoked: Boolean(quoted.isRevoked),
+            },
+          }
+        : {}),
     });
 
     dispatch(addMessage(tempMessage));
     dispatch(updateNewMessage({ conversationId, lastMessage: tempMessage }));
     ensureConversationInStore(tempMessage);
 
-    emitMessage({ conversationId, content: msg, clientMessageId });
+    emitMessage({
+      conversationId,
+      content: msg,
+      clientMessageId,
+      replyToMessageId: quoted?.id,
+    });
 
     stopTyping();
     setMsg("");
+    setReplyingTo(null);
 
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -210,7 +265,9 @@ export function useChatComposer({
     emitMessage,
     ensureConversationInStore,
     msg,
+    replyingTo,
     setMsg,
+    setReplyingTo,
     stopTyping,
   ]);
 
@@ -306,5 +363,7 @@ export function useChatComposer({
     handleUploadMedia,
     handleRetryMessage,
     handleDiscardMessage,
+    replyingTo,
+    setReplyingTo,
   };
 }
