@@ -10,7 +10,6 @@ export interface UserState {
   fullName: string;
   avatar?: string;
   bio?: string;
-  token?: string;
   interests: string[];
   hasCompletedInterestOnboarding: boolean;
 }
@@ -24,6 +23,20 @@ type InterestOnboardingResult = {
   interests?: string[];
   hasCompletedInterestOnboarding?: boolean;
 };
+
+/**
+ * Remove the JWT copy earlier builds wrote to localStorage.
+ *
+ * Anyone who signed in before this change still has it sitting in their
+ * browser; clearing it on the next auth transition retires it for good.
+ */
+function clearLegacySessionStorage() {
+  try {
+    localStorage.removeItem("token");
+  } catch {
+    /* private mode */
+  }
+}
 
 const initialState: UserState = {
   id: "",
@@ -118,36 +131,38 @@ export const userSlice = createSlice({
     builder.addCase(
       loginAPI.fulfilled,
       (state, action: PayloadAction<AuthUserPayload>) => {
-        const { token, accessToken, ...user } = action.payload;
-      Object.assign(state, initialState, user);
-      const bearer = accessToken || token;
-      if (bearer) {
-        localStorage.setItem("token", bearer);
-      } else {
-        localStorage.removeItem("token");
-      }
-      state.interests = action.payload.interests ?? [];
-      state.hasCompletedInterestOnboarding =
-        action.payload.hasCompletedInterestOnboarding ?? true;
-    });
+        // The tokens are deliberately dropped on the floor. The server already
+        // set them as httpOnly cookies; copying the JWT into localStorage put
+        // a readable duplicate of the session next to the protected one, so
+        // any script on the page could walk off with it.
+        const user: Partial<UserState> = { ...action.payload };
+        delete (user as AuthUserPayload).token;
+        delete (user as AuthUserPayload).accessToken;
+        Object.assign(state, initialState, user);
+        clearLegacySessionStorage();
+        state.interests = action.payload.interests ?? [];
+        state.hasCompletedInterestOnboarding =
+          action.payload.hasCompletedInterestOnboarding ?? true;
+      },
+    );
     builder.addCase(loginAPI.rejected, (state) => {
       Object.assign(state, initialState);
-      localStorage.removeItem("token");
+      clearLegacySessionStorage();
     });
 
     builder.addCase(logoutAPI.pending, (state) => {
       Object.assign(state, initialState);
-      localStorage.removeItem("token");
+      clearLegacySessionStorage();
     });
 
     builder.addCase(logoutAPI.fulfilled, (state) => {
       Object.assign(state, initialState);
-      localStorage.removeItem("token");
+      clearLegacySessionStorage();
     });
 
     builder.addCase(logoutAPI.rejected, (state) => {
       Object.assign(state, initialState);
-      localStorage.removeItem("token");
+      clearLegacySessionStorage();
     });
     builder.addCase(
       updateProfileAPI.fulfilled,

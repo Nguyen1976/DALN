@@ -12,6 +12,12 @@ import { Request, Response } from 'express'
 import { TokenExpiredError, JsonWebTokenError } from 'jsonwebtoken'
 import { timingSafeEqual } from 'crypto'
 
+/** Thời hạn access token — phải khớp với lúc đăng nhập ở user service. */
+export const ACCESS_TOKEN_TTL = '15m'
+export const ACCESS_TOKEN_MAX_AGE_MS = 15 * 60 * 1000
+export const REFRESH_TOKEN_TTL = '7d'
+export const REFRESH_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
 /** So sánh chuỗi theo thời gian hằng định để không rò rỉ độ dài/nội dung token. */
 function timingSafeEqualStr(a: string, b: string): boolean {
   const bufA = Buffer.from(a)
@@ -92,19 +98,24 @@ export class AuthGuard implements CanActivate {
         try {
           const refreshPayload = this.jwtService.verify(refreshToken)
 
+          // The replacement must be as short-lived as the one it replaces.
+          // Minting a 7-day access token here silently turned every silent
+          // refresh into a week-long credential — a stolen cookie would then
+          // outlive the refresh token it was derived from.
           const newAccessToken = this.jwtService.sign(
             {
               userId: refreshPayload['userId'],
+              email: refreshPayload['email'],
               username: refreshPayload['username'],
             },
-            { expiresIn: '7d' },
+            { expiresIn: ACCESS_TOKEN_TTL },
           )
 
           response.cookie('accessToken', newAccessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
-            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+            maxAge: ACCESS_TOKEN_MAX_AGE_MS,
             path: '/',
           })
 
