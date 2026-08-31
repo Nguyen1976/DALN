@@ -1,7 +1,7 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Input } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { searchConversationsAPI, type SearchConversationItem } from "@/apis";
 import {
@@ -11,7 +11,7 @@ import {
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import type { AppDispatch } from "@/redux/store";
-import { ChevronRight, Search, SearchX, UsersRound } from "lucide-react";
+import { ChevronRight, SearchX, UsersRound } from "lucide-react";
 import { EmptyState } from "@/components/ui/feedback";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -146,16 +146,11 @@ const ListGroupCommunity = () => {
   return (
     <div className="h-full min-h-0 flex-1">
       <div className="border-b border-border p-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="Tìm nhóm hoặc cộng đồng"
-            aria-label="Tìm nhóm hoặc cộng đồng"
-            className="pl-10"
-          />
-        </div>
+        <SearchField
+          value={keyword}
+          onValueChange={setKeyword}
+          placeholder="Tìm nhóm hoặc cộng đồng"
+        />
       </div>
 
       <ScrollArea className="h-full">

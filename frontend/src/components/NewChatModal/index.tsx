@@ -2,10 +2,11 @@
 
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { X, Search, Camera } from "lucide-react";
+import { X, Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
+import { SearchField } from "../ui/search-field";
 import { useDispatch, useSelector } from "react-redux";
 import {
   getFriends,
@@ -161,17 +162,12 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
             </div>
           </div>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Tìm bạn bè để thêm"
-              aria-label="Tìm bạn bè"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
-            />
-          </div>
+          <SearchField
+            value={search}
+            onValueChange={setSearch}
+            placeholder="Tìm bạn bè để thêm"
+            label="Tìm bạn bè"
+          />
 
           <div className="custom-scrollbar max-h-[300px] space-y-1 overflow-y-auto">
             {friends?.map((user) => (

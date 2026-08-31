@@ -436,6 +436,26 @@ export class UserService {
     return user as UserEntity
   }
 
+  /**
+   * May `viewerId` see `targetId`'s email address?
+   *
+   * Only themselves, or someone they have actually accepted as a friend. The
+   * profile endpoint used to hand the email back to any signed-in caller for
+   * any user id, which turns a browse into an address harvest.
+   */
+  async canSeeContactDetails(
+    viewerId: string,
+    targetId: string,
+  ): Promise<boolean> {
+    if (!viewerId || !targetId) return false
+    if (viewerId === targetId) return true
+    const friendship = await this.friendShipRepo.findFriendshipBetweenUsers(
+      viewerId,
+      targetId,
+    )
+    return Boolean(friendship)
+  }
+
   async makeFriend(data: MakeFriendRequest): Promise<Friendship> {
     const friend = await this.userRepo.findByEmail(data.inviteeEmail)
     if (!friend) {
@@ -747,12 +767,21 @@ export class UserService {
       UserErrors.interestOnboardingAlreadyCompleted()
     }
 
-    const allowed = await this.fetchAllowedInterestSlugs()
     const unique = [...new Set(data.slugs.map((s) => s.trim()).filter(Boolean))]
-    const filtered = unique.filter((slug) => allowed.has(slug))
 
-    if (!filtered.length) {
-      UserErrors.invalidInterestSelection()
+    // Skipping is a legitimate outcome: the step exists to improve friend
+    // suggestions, not to gate the app. An empty selection marks the step done
+    // with no interests, and the user can set them later from their profile.
+    let filtered: string[] = []
+    if (unique.length) {
+      const allowed = await this.fetchAllowedInterestSlugs()
+      filtered = unique.filter((slug) => allowed.has(slug))
+
+      // Slugs were sent but none of them are real — that is a bad request, not
+      // a skip, so it still fails loudly.
+      if (!filtered.length) {
+        UserErrors.invalidInterestSelection()
+      }
     }
 
     const updated = await this.userRepo.completeInterestOnboarding(

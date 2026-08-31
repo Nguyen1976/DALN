@@ -110,15 +110,27 @@ export default function InterestOnboardingPage() {
     });
   }, []);
 
-  const onSubmit = async () => {
-    if (selected.size === 0) {
+  /**
+   * `skip: true` finishes onboarding with no interests.
+   *
+   * The step sharpens friend suggestions; it is not a gate. Without a way out,
+   * a new account that does not want to answer is simply stuck on this screen,
+   * because every private route redirects back here until it is completed.
+   */
+  const onSubmit = async ({ skip = false } = {}) => {
+    if (!skip && selected.size === 0) {
       toast.info("Vui lòng chọn ít nhất một sở thích");
       return;
     }
     setSubmitting(true);
     try {
-      await dispatch(completeInterestOnboardingAPI([...selected])).unwrap();
-      toast.success("Đã lưu sở thích của bạn");
+      const slugs = skip ? [] : [...selected];
+      await dispatch(completeInterestOnboardingAPI(slugs)).unwrap();
+      toast.success(
+        skip
+          ? "Bạn có thể chọn sở thích sau trong phần hồ sơ"
+          : "Đã lưu sở thích của bạn",
+      );
       navigate("/", { replace: true });
     } catch (e) {
       const message = typeof e === "string" ? e : "Không thể lưu, vui lòng thử lại";
@@ -226,17 +238,28 @@ export default function InterestOnboardingPage() {
                 ? ` — chọn thêm ${remaining} nữa để gợi ý chính xác hơn`
                 : ""}
             </p>
-            <Button
-              type="button"
-              size="lg"
-              disabled={submitting || loadingTags || selected.size === 0}
-              onClick={() => void onSubmit()}
-            >
-              {submitting && (
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-              )}
-              {submitting ? "Đang lưu…" : "Tiếp tục"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="lg"
+                disabled={submitting}
+                onClick={() => void onSubmit({ skip: true })}
+              >
+                Bỏ qua
+              </Button>
+              <Button
+                type="button"
+                size="lg"
+                disabled={submitting || loadingTags || selected.size === 0}
+                onClick={() => void onSubmit()}
+              >
+                {submitting && (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                )}
+                {submitting ? "Đang lưu…" : "Tiếp tục"}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

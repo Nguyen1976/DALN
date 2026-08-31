@@ -164,10 +164,17 @@ export class UserHttpController {
 
   @Get('')
   @RequireLogin()
-  async getUserById(@Query('userId') userId: string) {
+  async getUserById(@UserInfo() viewer: any, @Query('userId') userId: string) {
     const user = await this.userService.getUserById(userId)
+    const canSeeContact = await this.userService.canSeeContactDetails(
+      viewer?.userId,
+      userId,
+    )
+
     return {
-      email: user.email,
+      // Email is contact detail, not public profile: it goes out only to the
+      // account itself or to an accepted friend.
+      ...(canSeeContact ? { email: user.email } : {}),
       username: user.username,
       fullName: user.fullName || '',
       avatar: user.avatar || '',

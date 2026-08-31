@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/feedback";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Input } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { AtSign, Mail, MessageCircle, SearchX, UserRound, Users, X } from "lucide-react";
@@ -32,7 +32,6 @@ import {
 } from "@/redux/slices/friendSlice";
 import type { AppDispatch } from "@/redux/store";
 import { selectUser } from "@/redux/slices/userSlice";
-import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
@@ -268,16 +267,12 @@ const ListFriend = () => {
     <div className="flex h-full min-h-0 flex-1 lg:flex-row">
       <div className="flex h-full min-h-0 flex-1 flex-col border-border lg:border-r">
         <div className="border-b border-border p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder="Tìm bạn theo tên hoặc username"
-              aria-label="Tìm bạn bè"
-              className="pl-10"
-            />
-          </div>
+          <SearchField
+            value={keyword}
+            onValueChange={setKeyword}
+            placeholder="Tìm bạn theo tên hoặc username"
+            label="Tìm bạn bè"
+          />
         </div>
 
         <ScrollArea className="min-h-0 flex-1">
