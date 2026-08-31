@@ -383,6 +383,24 @@ export class ConversationMemberRepository {
 
     await this.ensureUnreadCountInitialized()
 
+    // A read marker may only ever move forward. The client emits one read per
+    // change to its message list, and those arrive out of order often enough
+    // to matter — a late event carrying an older id used to overwrite a newer
+    // one, so the sender's "đã xem" marker silently rolled back to an earlier
+    // message (or disappeared). Mongo ObjectIds start with a timestamp and sort
+    // in creation order, so comparing them is enough to tell newer from older.
+    const current = await this.prisma.conversationMember.findFirst({
+      where: { conversationId, userId },
+      select: { lastReadMessageId: true },
+    })
+
+    if (
+      current?.lastReadMessageId &&
+      current.lastReadMessageId >= lastReadMessageId
+    ) {
+      return { count: 0 }
+    }
+
     return await this.prisma.conversationMember.updateMany({
       where: {
         conversationId,

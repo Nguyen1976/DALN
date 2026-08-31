@@ -102,6 +102,24 @@ export const getMessages = createAsyncThunk(
   },
 );
 
+/**
+ * Newest-first order, matching the server's (createdAt desc, id desc).
+ *
+ * The store keeps messages newest-first and `selectMessage` reverses them for
+ * display. Merging a page from the server with a message that had already
+ * arrived over the socket used to be a plain concatenation, so the newest
+ * message could end up at the tail: it rendered at the top of the thread, and
+ * "the last message" — used for the read receipt and for scrolling — pointed at
+ * an older one. Sorting on merge keeps one true order regardless of which
+ * channel delivered a message first.
+ */
+function compareNewestFirst(a: Message, b: Message): number {
+  const at = new Date(a.createdAt ?? 0).getTime();
+  const bt = new Date(b.createdAt ?? 0).getTime();
+  if (at !== bt) return bt - at;
+  return String(b.id).localeCompare(String(a.id));
+}
+
 export const messageSlice = createSlice({
   name: "message",
   initialState,
@@ -130,8 +148,10 @@ export const messageSlice = createSlice({
         };
         return;
       } else {
-        //message của họ
-        state.messages[message.conversationId].unshift(message);
+        // Chèn đúng vị trí theo thứ tự thời gian: tin đến trễ qua socket không
+        // được nhảy lên đầu và đẩy tin mới hơn xuống dưới.
+        currentMessages.push(message);
+        currentMessages.sort(compareNewestFirst);
       }
     },
     ackMessage: (
@@ -177,7 +197,10 @@ export const messageSlice = createSlice({
           m.id === clientMessageId ||
           (clientMessageId && m.clientMessageId === clientMessageId),
       );
-      if (index !== -1) {
+      // Only a message still waiting can fail. The ack-timeout watchdog fires
+      // for every send; without this guard it would flip messages that had
+      // already been confirmed into "chưa gửi được" twelve seconds later.
+      if (index !== -1 && currentMessages[index].status === "pending") {
         currentMessages[index] = {
           ...currentMessages[index],
           status: "failed",
@@ -314,6 +337,7 @@ export const messageSlice = createSlice({
           );
         });
 
+        merged.sort(compareNewestFirst);
         state.messages[conversationId] = merged;
 
         // Same tie-breaker as the conversation list: two messages written in

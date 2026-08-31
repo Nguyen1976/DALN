@@ -189,11 +189,22 @@ export function useChatMessagesScroll({
     pagination.hasMore,
   ]);
 
+  // Highest message id already reported as read, per conversation. The effect
+  // below runs on every change to `messages`, and the initial fetch can land
+  // after a socket delivery — without this the hook would report an older id
+  // right after a newer one and drag the read marker backwards.
+  const reportedReadRef = useRef<Record<string, string>>({});
+
   useEffect(() => {
     if (!canLoadMessages || !conversationId || messages.length === 0) return;
 
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.senderId === userId) return;
+    if (lastMessage.id.startsWith("temp-")) return;
+
+    const alreadyReported = reportedReadRef.current[conversationId];
+    if (alreadyReported && alreadyReported >= lastMessage.id) return;
+    reportedReadRef.current[conversationId] = lastMessage.id;
 
     socket.emit(SOCKET_EVENTS.CHAT.MESSAGE_READ, {
       conversationId,
