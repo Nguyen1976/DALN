@@ -262,11 +262,13 @@ export class UserHttpController {
     @UserInfo() user: any,
     @Query('limit') limit: string,
     @Query('page') page: string,
+    @Query('direction') direction?: string,
   ) {
     const requests = await this.userService.listFriendRequests(
       user.userId,
       Number(limit),
       Number(page),
+      direction === 'sent' ? 'sent' : 'received',
     )
     return {
       friendRequests: requests.map((request) => ({

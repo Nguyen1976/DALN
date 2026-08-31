@@ -22,7 +22,7 @@ const TITLES: Record<string, { title: string; description: string }> = {
   },
   "/friend_requests": {
     title: "Lời mời kết bạn",
-    description: "Lời mời đang chờ bạn phản hồi.",
+    description: "Lời mời bạn đã nhận và lời mời bạn đã gửi.",
   },
 };
 

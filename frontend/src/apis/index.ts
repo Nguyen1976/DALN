@@ -58,6 +58,7 @@ export const makeFriendRequest = async (
   const response = await authorizeAxiosInstance.post(
     `/user/make-friend`,
     { email },
+    { skipErrorToast: true },
   );
   return response.data;
 };
@@ -175,15 +176,19 @@ export interface FriendRequestListItem {
   fromUser: FromUser;
 }
 
+export type FriendRequestDirection = "received" | "sent";
+
 export const getFriendRequestsAPI = async ({
   limit,
   page,
+  direction = "received",
 }: {
   limit: number;
   page: number;
+  direction?: FriendRequestDirection;
 }): Promise<FriendRequestListItem[]> => {
   const response = await authorizeAxiosInstance.get(
-    `/user/list-friend-requests?limit=${limit}&page=${page}`,
+    `/user/list-friend-requests?limit=${limit}&page=${page}&direction=${direction}`,
   );
   return response.data.data.friendRequests || [];
 };

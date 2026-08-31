@@ -462,6 +462,12 @@ export class UserService {
       UserErrors.friendNotFound()
     }
 
+    // Inviting yourself used to succeed: it created a real pending request that
+    // then showed up in your own inbox, from you, waiting for you.
+    if (friend.id === data.inviterId) {
+      UserErrors.cannotFriendSelf()
+    }
+
     //check xem đã là bạn bè chưa
     const existingFriendship =
       await this.friendShipRepo.findFriendshipBetweenUsers(
@@ -471,6 +477,20 @@ export class UserService {
 
     if (existingFriendship) {
       UserErrors.alreadyFriends()
+    }
+
+    // Pressing send twice used to stack up duplicate pending requests. A
+    // request already open the other way round gets its own message: the user
+    // should accept it, not send a competing one.
+    const pending = await this.friendRequestRepo.findPendingBetweenUsers(
+      data.inviterId,
+      friend.id,
+    )
+    if (pending.some((r) => r.fromUserId === data.inviterId)) {
+      UserErrors.friendRequestAlreadyPending()
+    }
+    if (pending.length) {
+      UserErrors.friendRequestAwaitingYourResponse()
     }
 
     const friendRequest = await this.friendRequestRepo.create({
@@ -534,17 +554,51 @@ export class UserService {
 
       // Atomic: cập nhật trạng thái + tạo friendship 2 chiều + ghi trigger saga
       // vào outbox trong CÙNG 1 transaction. Relay sẽ publish trigger sau đó.
+      //
+      // The PENDING check above is only advisory: two accepts arriving together
+      // both read PENDING and both used to run this block, creating four
+      // friendship rows and firing the saga twice. The conditional updateMany
+      // below is the real gate — exactly one caller can flip a PENDING request
+      // to ACCEPTED, and everyone else sees count 0 and backs out.
+      let alreadyHandled = false
       await this.prisma.$transaction(async (tx) => {
-        await tx.friendRequest.updateMany({
-          where: { fromUserId: data.inviterId, toUserId: data.inviteeId },
+        const claimed = await tx.friendRequest.updateMany({
+          where: {
+            fromUserId: data.inviterId,
+            toUserId: data.inviteeId,
+            status: Status.PENDING,
+          },
           data: { status: Status.ACCEPTED },
         })
-        await tx.friendship.create({
-          data: { userId: data.inviterId, friendId: data.inviteeId },
+
+        if (claimed.count === 0) {
+          alreadyHandled = true
+          return
+        }
+
+        // Re-check inside the transaction: a retried request that already made
+        // it this far must not leave a second copy of the relationship behind.
+        const existing = await tx.friendship.findMany({
+          where: {
+            OR: [
+              { userId: data.inviterId, friendId: data.inviteeId },
+              { userId: data.inviteeId, friendId: data.inviterId },
+            ],
+          },
         })
-        await tx.friendship.create({
-          data: { userId: data.inviteeId, friendId: data.inviterId },
-        })
+        const has = (userId: string, friendId: string) =>
+          existing.some((f) => f.userId === userId && f.friendId === friendId)
+
+        if (!has(data.inviterId, data.inviteeId)) {
+          await tx.friendship.create({
+            data: { userId: data.inviterId, friendId: data.inviteeId },
+          })
+        }
+        if (!has(data.inviteeId, data.inviterId)) {
+          await tx.friendship.create({
+            data: { userId: data.inviteeId, friendId: data.inviterId },
+          })
+        }
 
         const sagaId = `${SAGA_TYPE.FRIENDSHIP_ACCEPT}:${friendRequestId}`
         const trigger = buildTrigger<FriendshipAcceptTriggerPayload>(
@@ -566,6 +620,10 @@ export class UserService {
           payload: trigger,
         })
       })
+
+      if (alreadyHandled) {
+        UserErrors.friendRequestAlreadyResponded()
+      }
     } else {
       await this.friendRequestRepo.updateStatus(
         data.inviterId,
@@ -667,35 +725,47 @@ export class UserService {
     userId: string,
     limit = 10,
     page = 1,
+    direction: 'received' | 'sent' = 'received',
   ): Promise<any[]> {
-    const requests = await this.friendRequestRepo.findPendingByToUserId(
-      userId,
-      limit,
-      page,
-    )
+    const requests =
+      direction === 'sent'
+        ? await this.friendRequestRepo.findPendingByFromUserId(
+            userId,
+            limit,
+            page,
+          )
+        : await this.friendRequestRepo.findPendingByToUserId(
+            userId,
+            limit,
+            page,
+          )
 
     if (!requests.length) {
       return []
     }
 
-    const fromUserIds = [
-      ...new Set(requests.map((request) => request.fromUserId)),
-    ]
-    const fromUsers = await this.userRepo.findManyByIds(fromUserIds)
-    const userMap = new Map(
-      fromUsers.map((fromUser) => [fromUser.id, fromUser]),
-    )
+    // The interesting person differs by direction: for a received request it is
+    // whoever sent it, for a sent one it is whoever is being waited on.
+    const counterpartOf = (request: { fromUserId: string; toUserId: string }) =>
+      direction === 'sent' ? request.toUserId : request.fromUserId
+
+    const counterpartIds = [...new Set(requests.map(counterpartOf))]
+    const counterparts = await this.userRepo.findManyByIds(counterpartIds)
+    const userMap = new Map(counterparts.map((person) => [person.id, person]))
 
     return requests
       .map((request) => {
-        const fromUser = userMap.get(request.fromUserId)
-        if (!fromUser) {
+        const counterpart = userMap.get(counterpartOf(request))
+        if (!counterpart) {
           return null
         }
 
+        // `fromUser` keeps its old meaning for existing callers; `counterpart`
+        // is the one the list should actually render.
         return {
           ...request,
-          fromUser,
+          fromUser: counterpart,
+          counterpart,
         }
       })
       .filter(Boolean)

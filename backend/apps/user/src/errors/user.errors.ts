@@ -9,6 +9,20 @@ import {
 } from '@nestjs/common'
 
 export class UserErrors {
+  static cannotFriendSelf(): never {
+    throw new BadRequestException('Bạn không thể tự gửi lời mời kết bạn cho chính mình')
+  }
+
+  static friendRequestAlreadyPending(): never {
+    throw new ConflictException('Bạn đã gửi lời mời cho người này và đang chờ phản hồi')
+  }
+
+  static friendRequestAwaitingYourResponse(): never {
+    throw new ConflictException(
+      'Người này đã gửi lời mời cho bạn trước đó. Hãy vào mục Lời mời kết bạn để chấp nhận',
+    )
+  }
+
   static alreadyFriends(): never {
     throw new ConflictException('Hai người đã là bạn bè')
   }
