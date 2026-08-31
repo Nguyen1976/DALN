@@ -160,6 +160,19 @@ services:
     networks:
       - backend
 
+  # Mail catcher cho DEV: mọi email (OTP, mời kết bạn, digest) bị giữ lại ở đây,
+  # không gửi ra Internet. UI: http://localhost:8025 — API: http://localhost:8025/api/v2/messages
+  mailhog:
+    image: mailhog/mailhog:latest
+    platform: linux/amd64
+    container_name: daln-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI + API
+    networks:
+      - backend
+
   kong:
     image: kong:3.7
     container_name: daln-kong
