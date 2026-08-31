@@ -20,6 +20,7 @@ import type { UserState } from "@/redux/slices/userSlice";
 import type { AppDispatch } from "@/redux/store";
 import { getMessageTypeFromFile, getMimeTypeFromFile } from "@/utils/chatMedia";
 import { showErrorToast } from "@/utils/toastError";
+import { createClientMessageId } from "@/utils/clientId";
 
 interface UseChatComposerOptions {
   conversationId?: string;
@@ -84,7 +85,7 @@ export function useChatComposer({
   const handleSendMessage = useCallback(() => {
     if (!canSendMessage || msg.trim() === "" || !conversationId) return;
 
-    const clientMessageId = `temp-id-${Date.now()}`;
+    const clientMessageId = createClientMessageId("temp-id");
     const tempMessage = createTempMessage({
       id: clientMessageId,
       type: "TEXT",
@@ -127,7 +128,7 @@ export function useChatComposer({
 
       const mediaType = getMessageTypeFromFile(file);
       const mimeType = getMimeTypeFromFile(file);
-      const clientMessageId = `temp-media-${Date.now()}`;
+      const clientMessageId = createClientMessageId("temp-media");
 
       const tempMedia: MessageMediaInput = {
         mediaType,

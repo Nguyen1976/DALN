@@ -18,6 +18,16 @@ export const useTypingIndicator = ({
   enabled = true,
 }: UseTypingIndicatorProps) => {
   const START_KEEPALIVE_MS = 4000;
+  /**
+   * How long after the last keystroke the user still counts as "typing".
+   *
+   * The keep-alive re-announces `start` every 4s so the bubble does not
+   * flicker during a long message. On its own that meant the indicator stayed
+   * lit for ever: someone who typed one word and then walked away, with the
+   * caret still in the box, was shown as typing indefinitely. The keep-alive
+   * now only fires while there has been recent keyboard activity.
+   */
+  const TYPING_IDLE_MS = 6000;
 
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const keepAliveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
@@ -25,6 +35,7 @@ export const useTypingIndicator = ({
   );
   const isTypingRef = useRef(false);
   const isInputFocusedRef = useRef(false);
+  const lastKeystrokeAtRef = useRef(0);
 
   const clearTypingTimers = useCallback(() => {
     if (typingTimeoutRef.current) {
@@ -47,15 +58,6 @@ export const useTypingIndicator = ({
     });
   }, [conversationId, enabled]);
 
-  const ensureKeepAlive = useCallback(() => {
-    if (keepAliveIntervalRef.current) return;
-
-    keepAliveIntervalRef.current = setInterval(() => {
-      if (!isTypingRef.current || !isInputFocusedRef.current) return;
-      emitTypingStart();
-    }, START_KEEPALIVE_MS);
-  }, [emitTypingStart]);
-
   const stopTyping = useCallback(() => {
     if (!conversationId) return;
 
@@ -69,6 +71,23 @@ export const useTypingIndicator = ({
 
     clearTypingTimers();
   }, [clearTypingTimers, conversationId]);
+
+  const ensureKeepAlive = useCallback(() => {
+    if (keepAliveIntervalRef.current) return;
+
+    keepAliveIntervalRef.current = setInterval(() => {
+      if (!isTypingRef.current || !isInputFocusedRef.current) return;
+
+      if (Date.now() - lastKeystrokeAtRef.current > TYPING_IDLE_MS) {
+        stopTyping();
+        return;
+      }
+
+      emitTypingStart();
+    }, START_KEEPALIVE_MS);
+  }, [emitTypingStart, stopTyping]);
+
+
 
   const handleInputFocus = useCallback(() => {
     isInputFocusedRef.current = true;
@@ -93,6 +112,8 @@ export const useTypingIndicator = ({
         return;
       }
 
+      lastKeystrokeAtRef.current = Date.now();
+
       // Nếu chưa emit 'start', emit start
       if (!isTypingRef.current) {
         emitTypingStart();
@@ -103,12 +124,16 @@ export const useTypingIndicator = ({
       // Nếu đã có typing state, đảm bảo keepalive đang chạy
       ensureKeepAlive();
 
-      // Không dùng timeout auto-stop theo vài giây nữa.
-      // Stop sẽ được gửi ngay khi blur/xóa text/gửi tin/chuyển tab.
+      // Stop cũng được gửi ngay khi blur / xoá hết chữ / gửi tin / chuyển tab;
+      // hẹn giờ này chỉ lo trường hợp người dùng ngừng gõ mà vẫn để con trỏ
+      // trong ô soạn thảo.
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = null;
       }
+      typingTimeoutRef.current = setTimeout(() => {
+        typingTimeoutRef.current = null;
+        stopTyping();
+      }, TYPING_IDLE_MS);
     },
     [conversationId, emitTypingStart, enabled, ensureKeepAlive, stopTyping],
   );

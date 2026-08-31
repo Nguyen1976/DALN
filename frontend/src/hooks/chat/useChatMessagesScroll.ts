@@ -42,10 +42,45 @@ export function useChatMessagesScroll({
     null,
   );
 
+  // Which conversation has already been pinned to its newest message.
+  const initialPinnedForRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!isAtBottom) return;
+    initialPinnedForRef.current = null;
+    setIsAtBottom(true);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!isAtBottom || !messages.length) return;
+
+    const isInitial = initialPinnedForRef.current !== conversationId;
+
+    // Opening a thread must land on the newest message immediately. A smooth
+    // scroll animates through the whole history, and the "load older" observer
+    // at the top fires mid-animation and prepends content underneath it — the
+    // thread then opens stranded somewhere in the middle. Jump on the first
+    // pin, animate only for messages that arrive afterwards.
+    const scrollNow = () => {
+      const container = containerRef.current;
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      } else {
+        bottomRef.current?.scrollIntoView({ behavior: "auto" });
+      }
+    };
+
+    if (isInitial) {
+      initialPinnedForRef.current = conversationId ?? null;
+      scrollNow();
+      // Bubbles settle a frame later (avatars, wrapped text); pin again once
+      // the final height is known.
+      requestAnimationFrame(scrollNow);
+      window.setTimeout(scrollNow, 120);
+      return;
+    }
+
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, isAtBottom]);
+  }, [messages.length, isAtBottom, conversationId]);
 
   useEffect(() => {
     if (!conversationId || !canLoadMessages || messages.length > 0) return;
@@ -105,6 +140,10 @@ export function useChatMessagesScroll({
 
     const observer = new IntersectionObserver(
       (entries) => {
+        // Ignore the sentinel until the thread has been pinned to the bottom:
+        // on mount it is trivially in view, and loading older messages there
+        // yanks the viewport away from the newest message.
+        if (initialPinnedForRef.current !== conversationId) return;
         if (entries[0]?.isIntersecting) {
           void loadOlderMessages();
         }
@@ -118,7 +157,7 @@ export function useChatMessagesScroll({
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [canLoadMessages, loadOlderMessages]);
+  }, [canLoadMessages, conversationId, loadOlderMessages]);
 
   useEffect(() => {
     if (!canLoadMessages || !focusMessageId || !conversationId) return;
