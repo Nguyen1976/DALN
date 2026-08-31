@@ -64,7 +64,7 @@ const Profile = () => {
   };
   return (
     <Form {...formProfile}>
-      <form onSubmit={formProfile.handleSubmit(onSubmit)}>
+      <form noValidate onSubmit={formProfile.handleSubmit(onSubmit)}>
         <div>
           <h3 className="text-lg font-semibold mb-4">Thông tin hồ sơ</h3>
           {/* Avatar Section */}

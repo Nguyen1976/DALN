@@ -129,10 +129,9 @@ export const registerAPI = async (data: {
     lon: number;
   };
 }): Promise<{ email: string; requiresOtpVerification: boolean }> => {
-  const response = await authorizeAxiosInstance.post(
-    `/user/register`,
-    data,
-  );
+  const response = await authorizeAxiosInstance.post(`/user/register`, data, {
+    skipErrorToast: true,
+  });
   return response.data.data;
 };
 

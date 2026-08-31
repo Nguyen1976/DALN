@@ -8,7 +8,7 @@ import {
 
 export class UserErrors {
   static alreadyFriends(): never {
-    throw new ConflictException('Users are already friends')
+    throw new ConflictException('Hai người đã là bạn bè')
   }
 
   static emailAlreadyExists(): never {
@@ -28,23 +28,23 @@ export class UserErrors {
   }
 
   static usernameAlreadyExists(): never {
-    throw new ConflictException('Username already exists')
+    throw new ConflictException('Tên người dùng đã được sử dụng')
   }
 
   static userNotFound(): never {
-    throw new NotFoundException('User not found')
+    throw new NotFoundException('Không tìm thấy người dùng')
   }
 
   static friendNotFound(): never {
-    throw new NotFoundException('Friend not found')
+    throw new NotFoundException('Không tìm thấy người bạn này')
   }
 
   static friendRequestNotFound(): never {
-    throw new NotFoundException('Friend request not found')
+    throw new NotFoundException('Không tìm thấy lời mời kết bạn')
   }
 
   static friendRequestAlreadyResponded(): never {
-    throw new BadRequestException('Friend request already responded')
+    throw new BadRequestException('Lời mời kết bạn này đã được phản hồi')
   }
 
   static interestOnboardingAlreadyCompleted(): never {
