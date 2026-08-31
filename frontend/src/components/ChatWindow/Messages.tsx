@@ -10,9 +10,11 @@ import {
 import { useSelector } from "react-redux";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import {
+  AlertCircle,
   BarChart3,
   Check,
   ChevronRight,
+  Loader2,
   MoreVertical,
   RotateCcw,
   Trash2,
@@ -37,6 +39,8 @@ const MessageComponent = ({
   onDeleteMessageForMe,
   onOpenPoll,
   pollVoteSelections,
+  onRetryMessage,
+  onDiscardMessage,
   isGroup = false,
 }: {
   messages: Message[];
@@ -51,6 +55,8 @@ const MessageComponent = ({
   onDeleteMessageForMe?: (message: Message) => void;
   onOpenPoll?: (message: Message) => void;
   pollVoteSelections?: Record<string, string[]>;
+  onRetryMessage?: (message: Message) => void;
+  onDiscardMessage?: (message: Message) => void;
 }) => {
   const user = useSelector(selectUser);
 
@@ -431,7 +437,43 @@ const MessageComponent = ({
                 </div>
               </div>
 
-              {isMine && !isSameAsNext && (
+              {/* Send status. The store has always tracked pending/sent/failed
+                  but nothing rendered it: a message that never left the device
+                  looked exactly like one that arrived. */}
+              {isMine && message.status === "pending" && (
+                <div className="mr-1 mt-1 flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
+                  <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                  <span>Đang gửi…</span>
+                </div>
+              )}
+
+              {isMine && message.status === "failed" && (
+                <div
+                  role="alert"
+                  className="mr-1 mt-1 flex flex-wrap items-center justify-end gap-2 text-[11px] text-destructive-text"
+                >
+                  <span className="flex items-center gap-1">
+                    <AlertCircle className="size-3" aria-hidden="true" />
+                    Chưa gửi được
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onRetryMessage?.(message)}
+                    className="rounded px-1.5 py-0.5 font-medium underline underline-offset-2 hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+                  >
+                    Gửi lại
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDiscardMessage?.(message)}
+                    className="rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+                  >
+                    Xoá
+                  </button>
+                </div>
+              )}
+
+              {isMine && !isSameAsNext && message.status !== "pending" && message.status !== "failed" && (
                 <SeenStatus seenUsers={seenMessages[message.id] || []} />
               )}
             </div>

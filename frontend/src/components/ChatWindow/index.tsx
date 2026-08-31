@@ -144,7 +144,14 @@ export default function ChatWindow({
       enabled: canSendMessage && !!conversationId,
     });
 
-  const { msg, setMsg, handleSendMessage, handleUploadMedia } = useChatComposer({
+  const {
+    msg,
+    setMsg,
+    handleSendMessage,
+    handleUploadMedia,
+    handleRetryMessage,
+    handleDiscardMessage,
+  } = useChatComposer({
     conversationId,
     user,
     canSendMessage,
@@ -323,6 +330,8 @@ export default function ChatWindow({
           onDeleteMessageForMe={handleDeleteMessageForMe}
           onOpenPoll={poll.handleOpenPoll}
           pollVoteSelections={poll.pollVoteSelections}
+          onRetryMessage={handleRetryMessage}
+          onDiscardMessage={handleDiscardMessage}
           isGroup={isGroupConversation}
         />
         <TypingIndicator userNames={typingUserNames} />
@@ -477,8 +486,8 @@ export default function ChatWindow({
           <DialogHeader>
             <DialogTitle>Xóa toàn bộ lịch sử trò chuyện?</DialogTitle>
             <DialogDescription>
-              Hành động này chỉ ẩn lịch sử ở phía bạn. Người khác vẫn nhìn thấy
-              tin nhắn bình thường.
+              Hành động này chỉ ẩn lịch sử ở phía bạn và không thể hoàn tác.
+              Người khác vẫn nhìn thấy tin nhắn bình thường.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

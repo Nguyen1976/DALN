@@ -124,6 +124,14 @@ export class ConversationMapper {
       members: (conversation.members || []).map((member: any) =>
         this.mapMember(member),
       ),
+      // The list only ever returns conversations the caller is an active
+      // member of, so these are known here. Leaving them out meant the client
+      // saw `membershipStatus: undefined` for every conversation opened from
+      // the sidebar — which kept the "Rời nhóm" button permanently disabled,
+      // because the detail endpoint that would have filled them in is only
+      // fetched when the members are missing.
+      membershipStatus: 'ACTIVE' as const,
+      canSendMessage: true,
       ...lastMessage,
     }
   }

@@ -184,6 +184,39 @@ export const messageSlice = createSlice({
         };
       }
     },
+    /** Đưa một tin nhắn thất bại trở lại hàng chờ trước khi gửi lại. */
+    retryMessage: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        clientMessageId: string;
+      }>,
+    ) => {
+      const { conversationId, clientMessageId } = action.payload;
+      const list = state.messages[conversationId] || [];
+      const index = list.findIndex(
+        (m) => m.id === clientMessageId || m.clientMessageId === clientMessageId,
+      );
+      if (index !== -1) {
+        list[index] = { ...list[index], status: "pending" };
+      }
+    },
+
+    /** Bỏ hẳn một tin nhắn chưa gửi được khỏi hàng chờ. */
+    discardMessage: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        clientMessageId: string;
+      }>,
+    ) => {
+      const { conversationId, clientMessageId } = action.payload;
+      const list = state.messages[conversationId] || [];
+      state.messages[conversationId] = list.filter(
+        (m) => m.id !== clientMessageId && m.clientMessageId !== clientMessageId,
+      );
+    },
+
     revokeMessage: (
       state,
       action: PayloadAction<{
@@ -342,6 +375,8 @@ export const {
   addMessage,
   ackMessage,
   failMessage,
+  retryMessage,
+  discardMessage,
   revokeMessage,
   deleteMessageForMe,
   clearConversationMessages,

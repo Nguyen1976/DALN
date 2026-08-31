@@ -13,7 +13,9 @@ import {
 } from "@/redux/slices/conversationSlice";
 import {
   addMessage,
+  discardMessage,
   failMessage,
+  retryMessage,
   type Message,
 } from "@/redux/slices/messageSlice";
 import type { UserState } from "@/redux/slices/userSlice";
@@ -31,6 +33,9 @@ interface UseChatComposerOptions {
   stopTyping: () => void;
   bottomRef: RefObject<HTMLDivElement | null>;
 }
+
+/** Bao lâu không nhận được xác nhận thì coi là gửi hỏng. */
+const ACK_TIMEOUT_MS = 12000;
 
 export function useChatComposer({
   conversationId,
@@ -82,6 +87,74 @@ export function useChatComposer({
     [conversationId, user],
   );
 
+  /**
+   * Ship a text message and make sure it never sits in limbo.
+   *
+   * A bare `socket.emit` while the connection is down is buffered silently:
+   * the bubble stayed on "đang gửi" for ever with nothing telling the user it
+   * had not left the device. Offline is failed immediately, and an ack that
+   * never arrives fails the message after a bounded wait so the retry control
+   * can appear.
+   */
+  const emitMessage = useCallback(
+    ({
+      conversationId: cid,
+      content,
+      clientMessageId,
+    }: {
+      conversationId: string;
+      content: string;
+      clientMessageId: string;
+    }) => {
+      if (!socket.connected) {
+        dispatch(failMessage({ conversationId: cid, clientMessageId }));
+        return;
+      }
+
+      socket.emit("message:create", {
+        conversationId: cid,
+        type: "TEXT",
+        content,
+        clientMessageId,
+        media: [],
+      });
+
+      window.setTimeout(() => {
+        // `failMessage` is a no-op once the ack has flipped the message to
+        // "sent", so this only bites when nothing came back.
+        dispatch(failMessage({ conversationId: cid, clientMessageId }));
+      }, ACK_TIMEOUT_MS);
+    },
+    [dispatch],
+  );
+
+  const handleRetryMessage = useCallback(
+    (message: Message) => {
+      if (!conversationId) return;
+      const clientMessageId = message.clientMessageId || message.id;
+      dispatch(retryMessage({ conversationId, clientMessageId }));
+      emitMessage({
+        conversationId,
+        content: message.text || "",
+        clientMessageId,
+      });
+    },
+    [conversationId, dispatch, emitMessage],
+  );
+
+  const handleDiscardMessage = useCallback(
+    (message: Message) => {
+      if (!conversationId) return;
+      dispatch(
+        discardMessage({
+          conversationId,
+          clientMessageId: message.clientMessageId || message.id,
+        }),
+      );
+    },
+    [conversationId, dispatch],
+  );
+
   const handleSendMessage = useCallback(() => {
     if (!canSendMessage || msg.trim() === "" || !conversationId) return;
 
@@ -97,13 +170,7 @@ export function useChatComposer({
     dispatch(updateNewMessage({ conversationId, lastMessage: tempMessage }));
     ensureConversationInStore(tempMessage);
 
-    socket.emit("message:create", {
-      conversationId,
-      type: "TEXT",
-      content: msg,
-      clientMessageId,
-      media: [],
-    });
+    emitMessage({ conversationId, content: msg, clientMessageId });
 
     stopTyping();
     setMsg("");
@@ -117,6 +184,7 @@ export function useChatComposer({
     conversationId,
     createTempMessage,
     dispatch,
+    emitMessage,
     ensureConversationInStore,
     msg,
     stopTyping,
@@ -202,5 +270,7 @@ export function useChatComposer({
     setMsg,
     handleSendMessage,
     handleUploadMedia,
+    handleRetryMessage,
+    handleDiscardMessage,
   };
 }
