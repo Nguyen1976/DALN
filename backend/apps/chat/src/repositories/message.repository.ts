@@ -320,16 +320,15 @@ export class MessageRepository {
     conversationId: string,
     kind: 'MEDIA' | 'LINK' | 'DOC',
     take: number,
-    cursor?: Date | null,
+    cursor?: KeysetCursor | null,
   ) {
     const where: any = {
       conversationId,
       isDeleted: false,
-      ...(cursor && {
-        createdAt: {
-          lt: cursor,
-        },
-      }),
+      // Same tie-safe cursor as the message list: several attachments sent
+      // together share a timestamp, and a bare `lt` drops the ones that fell
+      // on the page boundary.
+      ...olderThanCursor('createdAt', cursor ?? null),
     }
 
     if (kind === 'MEDIA') {

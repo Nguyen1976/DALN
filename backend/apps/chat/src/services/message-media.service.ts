@@ -58,7 +58,9 @@ export class MessageMediaService {
       'audio/mpeg',
       'audio/wav',
       'audio/ogg',
-      'application/octet-stream',
+      // 'application/octet-stream' deliberately absent. Every unrecognised
+      // extension resolves to it, so allowing it turned this allow-list into
+      // an allow-everything: a .exe picked in the browser sailed through.
     ],
   }
 

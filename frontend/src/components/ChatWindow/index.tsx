@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
+import { FILE_INPUT_ACCEPT } from "@/utils/mediaLimits";
 import {
   Phone,
   Video,
@@ -367,6 +368,9 @@ export default function ChatWindow({
           <input
             ref={fileInputRef}
             type="file"
+            /* Filter in the picker itself so the user does not choose a file
+               only to be told afterwards that it is not supported. */
+            accept={FILE_INPUT_ACCEPT}
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

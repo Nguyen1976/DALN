@@ -160,6 +160,48 @@ services:
     networks:
       - backend
 
+  # Kho đối tượng cho DEV: tệp đính kèm không đi ra AWS.
+  # Console: http://localhost:9001 (minioadmin/minioadmin) — API: :9000
+  minio:
+    image: minio/minio:latest
+    container_name: daln-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Tạo bucket và mở quyền đọc công khai (ảnh trong chat được tải thẳng).
+  minio-init:
+    image: minio/mc:latest
+    container_name: daln-minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - backend
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc mb --ignore-existing local/daln-media &&
+        mc anonymous set download local/daln-media &&
+        echo "bucket daln-media san sang"
+
   # Mail catcher cho DEV: mọi email (OTP, mời kết bạn, digest) bị giữ lại ở đây,
   # không gửi ra Internet. UI: http://localhost:8025 — API: http://localhost:8025/api/v2/messages
   mailhog:
@@ -288,6 +330,7 @@ networks:
     driver: bridge
 
 volumes:
+  minio_data:
   mongo_data:
   rabbitmq_data:
   redis_data:

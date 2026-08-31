@@ -21,6 +21,8 @@ import {
 import type { UserState } from "@/redux/slices/userSlice";
 import type { AppDispatch } from "@/redux/store";
 import { getMessageTypeFromFile, getMimeTypeFromFile } from "@/utils/chatMedia";
+import { validateUploadFile } from "@/utils/mediaLimits";
+import { toast } from "sonner";
 import { showErrorToast } from "@/utils/toastError";
 import { createClientMessageId } from "@/utils/clientId";
 
@@ -193,6 +195,15 @@ export function useChatComposer({
   const handleUploadMedia = useCallback(
     async (file: File) => {
       if (!canSendMessage || !conversationId) return;
+
+      // Reject before anything is created: an oversized or unsupported file
+      // used to reach the presign call and fail with a storage error, after
+      // a bubble had already appeared in the thread.
+      const rejection = validateUploadFile(file);
+      if (rejection) {
+        toast.error(rejection);
+        return;
+      }
 
       const mediaType = getMessageTypeFromFile(file);
       const mimeType = getMimeTypeFromFile(file);

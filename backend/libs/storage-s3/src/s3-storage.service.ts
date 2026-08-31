@@ -11,6 +11,9 @@ import { S3_STORAGE_CONFIG, type S3StorageConfig } from './s3-storage.constants'
 @Injectable()
 export class S3StorageService {
   private readonly s3: S3Client
+  /** Signs browser-facing URLs; identical to `s3` unless the storage is
+   *  reachable under a different name from outside the network. */
+  private readonly s3ForSigning: S3Client
   private readonly bucket: string
   private readonly cdnPublicUrl: string
 
@@ -22,7 +25,9 @@ export class S3StorageService {
 
     this.s3 = new S3Client({
       region: this.config.region,
-      ...(this.config.endpoint ? { endpoint: this.config.endpoint } : {}),
+      ...(this.config.endpoint
+        ? { endpoint: this.config.endpoint, forcePathStyle: true }
+        : {}),
       requestChecksumCalculation: 'WHEN_REQUIRED',
       responseChecksumValidation: 'WHEN_REQUIRED',
       credentials: {
@@ -30,6 +35,20 @@ export class S3StorageService {
         secretAccessKey: this.config.secretKey,
       },
     })
+
+    this.s3ForSigning = this.config.publicEndpoint
+      ? new S3Client({
+          region: this.config.region,
+          endpoint: this.config.publicEndpoint,
+          forcePathStyle: true,
+          requestChecksumCalculation: 'WHEN_REQUIRED',
+          responseChecksumValidation: 'WHEN_REQUIRED',
+          credentials: {
+            accessKeyId: this.config.accessKey,
+            secretAccessKey: this.config.secretKey,
+          },
+        })
+      : this.s3
   }
 
   buildPublicUrl(objectKey: string): string {
@@ -81,7 +100,7 @@ export class S3StorageService {
       ContentType: mime,
     })
 
-    const uploadUrl = await getSignedUrl(this.s3, command, {
+    const uploadUrl = await getSignedUrl(this.s3ForSigning, command, {
       expiresIn: expiresInSeconds,
     })
 

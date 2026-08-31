@@ -14,7 +14,7 @@ import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
 import { ConversationAssetKind } from '../http/chat-http.dto'
 import { MessageMapper } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
-import { parseKeysetCursor } from '@app/util'
+import { buildKeysetCursor, parseKeysetCursor } from '@app/util'
 
 export interface RevokeMessageRequest {
   conversationId: string
@@ -360,7 +360,7 @@ export class MessageService {
     }
 
     const take = Number(params.limit) || 20
-    const cursor = params.cursor ? new Date(params.cursor) : null
+    const cursor = parseKeysetCursor(params.cursor)
 
     const kindMap: Record<number, 'MEDIA' | 'LINK' | 'DOC'> = {
       [ConversationAssetKind.ASSET_MEDIA]: 'MEDIA',
@@ -377,9 +377,10 @@ export class MessageService {
       cursor,
     )
 
+    const last = messages[messages.length - 1]
     const nextCursor =
-      messages.length === take
-        ? messages[messages.length - 1]?.createdAt?.toISOString()
+      messages.length === take && last?.createdAt
+        ? buildKeysetCursor(last.createdAt, last.id)
         : undefined
 
     return {
