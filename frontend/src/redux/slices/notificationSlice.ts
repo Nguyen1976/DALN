@@ -13,9 +13,23 @@ export interface Notification {
   createdAt: string;
 }
 
-export type NotificationState = Notification[];
+export interface NotificationState {
+  items: Notification[];
+  /**
+   * Unread total as reported by the server.
+   *
+   * This used to be derived by counting unread entries in `items` — but only
+   * one page (ten rows) is ever loaded, so anyone with more than ten unread
+   * notifications saw a badge stuck at ten. The count now comes from the
+   * server and is adjusted locally on read/arrival, then re-synced.
+   */
+  unreadCount: number;
+}
 
-const initialState: NotificationState = [];
+const initialState: NotificationState = {
+  items: [],
+  unreadCount: 0,
+};
 
 export const getNotifications = createAsyncThunk(
   `/notification`,
@@ -28,6 +42,18 @@ export const getNotifications = createAsyncThunk(
       page,
       limit,
     };
+  },
+);
+
+export const fetchUnreadCount = createAsyncThunk(
+  `/notification/unread-count`,
+  async () => {
+    const response = await authorizeAxiosInstance.get(
+      "/notification/unread-count",
+      { skipErrorToast: true },
+    );
+    const data = response.data?.data ?? response.data;
+    return Number(data?.unreadCount ?? data?.count ?? 0) || 0;
   },
 );
 
@@ -55,13 +81,14 @@ export const notificationSlice = createSlice({
   reducers: {
     addNotification: (state, action: PayloadAction<Notification>) => {
       const incoming = action.payload;
-      const existedIndex = state.findIndex((n) => n.id === incoming.id);
+      const existedIndex = state.items.findIndex((n) => n.id === incoming.id);
       if (existedIndex !== -1) {
-        state[existedIndex] = incoming;
+        state.items[existedIndex] = incoming;
         return;
       }
 
-      state.unshift(incoming);
+      state.items.unshift(incoming);
+      if (!incoming.isRead) state.unreadCount += 1;
     },
   },
   extraReducers: (builder) => {
@@ -70,7 +97,7 @@ export const notificationSlice = createSlice({
       (
         state,
         action: PayloadAction<{
-          notifications: NotificationState;
+          notifications: Notification[];
           page: number;
           limit: number;
         }>,
@@ -78,36 +105,40 @@ export const notificationSlice = createSlice({
         const incoming = action.payload.notifications || [];
 
         if (action.payload.page <= 1) {
-          return incoming;
+          state.items = incoming;
+          return;
         }
 
-        const merged = [...state];
         for (const notification of incoming) {
-          if (!merged.some((n) => n.id === notification.id)) {
-            merged.push(notification);
+          if (!state.items.some((n) => n.id === notification.id)) {
+            state.items.push(notification);
           }
         }
-
-        return merged;
       },
     );
+
+    builder.addCase(fetchUnreadCount.fulfilled, (state, action) => {
+      state.unreadCount = action.payload;
+    });
 
     builder.addCase(
       markNotificationAsRead.fulfilled,
       (state, action: PayloadAction<{ notificationId: string }>) => {
-        const target = state.find(
+        const target = state.items.find(
           (n) => n.id === action.payload.notificationId,
         );
-        if (target) {
+        if (target && !target.isRead) {
           target.isRead = true;
+          state.unreadCount = Math.max(0, state.unreadCount - 1);
         }
       },
     );
 
     builder.addCase(markAllNotificationsAsRead.fulfilled, (state) => {
-      state.forEach((notification) => {
+      state.items.forEach((notification) => {
         notification.isRead = true;
       });
+      state.unreadCount = 0;
     });
 
     builder.addCase(logoutAPI.fulfilled, () => initialState);
@@ -116,9 +147,11 @@ export const notificationSlice = createSlice({
 
 export const selectNotification = (state: {
   notification: NotificationState;
-}) => {
-  return state.notification;
-};
+}) => state.notification.items;
+
+export const selectUnreadNotificationCount = (state: {
+  notification: NotificationState;
+}) => state.notification.unreadCount;
 
 export const { addNotification } = notificationSlice.actions;
 export default notificationSlice.reducer;

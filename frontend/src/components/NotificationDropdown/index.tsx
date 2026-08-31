@@ -19,15 +19,18 @@ import { type UIEvent, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch } from "@/redux/store";
 import {
+  fetchUnreadCount,
   getNotifications,
   markAllNotificationsAsRead,
   markNotificationAsRead,
   selectNotification,
+  selectUnreadNotificationCount,
   type Notification,
 } from "@/redux/slices/notificationSlice";
 import { formatFullDateTime, formatRelativeTime } from "@/utils/formatDateTime";
 import FriendRequestModal from "../FriendRequestModal";
 import { useNavigate } from "react-router";
+import { socket } from "@/lib/socket";
 
 /** Notification type -> icon, so each row is scannable without reading it. */
 const iconForType = (type?: string) => {
@@ -41,11 +44,29 @@ export function NotificationsDropdown() {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
   const notifications = useSelector(selectNotification);
+  // From the server, not from `notifications`: the list holds one page, so
+  // counting it capped the badge at the page size.
+  const unreadCount = useSelector(selectUnreadNotificationCount);
   const [page, setPage] = useState(1);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const limit = 10;
+
+  useEffect(() => {
+    // The count is cheap and must stay right even when the list is not open.
+    void dispatch(fetchUnreadCount());
+  }, [dispatch]);
+
+  // Re-sync after the realtime channel drops and comes back, so a badge that
+  // drifted while disconnected snaps back to the truth.
+  useEffect(() => {
+    const resync = () => void dispatch(fetchUnreadCount());
+    socket.on("connect", resync);
+    return () => {
+      socket.off("connect", resync);
+    };
+  }, [dispatch]);
 
   useEffect(() => {
     if (notifications.length > 0) return;
@@ -112,8 +133,6 @@ export function NotificationsDropdown() {
     }
   };
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
-
   return (
     <>
       <FriendRequestModal
@@ -135,8 +154,11 @@ export function NotificationsDropdown() {
           >
             <Bell className="size-5" />
             {unreadCount > 0 && (
-              <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums text-destructive-foreground ring-2 ring-sidebar">
-                {unreadCount > 9 ? "9+" : unreadCount}
+              <span
+                aria-hidden="true"
+                className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums text-destructive-foreground ring-2 ring-sidebar"
+              >
+                {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             )}
           </Button>
