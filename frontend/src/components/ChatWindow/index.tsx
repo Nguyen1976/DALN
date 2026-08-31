@@ -461,7 +461,7 @@ export default function ChatWindow({
                 skinTonesDisabled
                 previewConfig={{ showPreview: false }}
                 onEmojiClick={(emoji) => {
-                  setMsg((prev) => prev + emoji.emoji);
+                  setMsg(msg + emoji.emoji);
                 }}
               />
             </PopoverContent>

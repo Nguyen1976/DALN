@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AuthPage from "./pages/Auth";
 import ChatPage from "./pages/Chat";
@@ -7,9 +7,7 @@ import { createBrowserRouter, RouterProvider } from "react-router";
 import { socket } from "./lib/socket";
 import { FriendsPage } from "./pages/Friend/FriendPage";
 import ListFriend from "./pages/Friend/ListFriend";
-import ListGroupCommunity from "./pages/Friend/ListGroupCommunity";
 import ListFriendRequests from "./pages/Friend/ListFriendRequests";
-import RecommendationPage from "./pages/Recommendation";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch } from "./redux/store";
 import { useSound } from "use-sound";
@@ -27,11 +25,37 @@ import {
   upsertOnlineFriend,
   updateStatusOffline,
 } from "./redux/slices/friendSlice";
-import NotificationSettingsPage from "./pages/NotificationSettings";
 import { useChatSocketEvents } from "./hooks/useChatSocketEvents";
 import IncomingCallManager from "./components/IncomingCallManager";
+import { Spinner } from "@/components/ui/feedback";
 import VerifyOtpPage from "./pages/VerifyOtp";
-import InterestOnboardingPage from "./pages/InterestOnboarding";
+
+/**
+ * Secondary screens are split out of the first bundle.
+ *
+ * Suggestions, notification settings, the interests step and the group list
+ * were all pulled in on the very first load even though most sessions never
+ * open them.
+ */
+const RecommendationPage = lazy(() => import("./pages/Recommendation"));
+const NotificationSettingsPage = lazy(
+  () => import("./pages/NotificationSettings"),
+);
+const InterestOnboardingPage = lazy(() => import("./pages/InterestOnboarding"));
+const ListGroupCommunity = lazy(() => import("./pages/Friend/ListGroupCommunity"));
+
+/** Placeholder while a split chunk downloads. */
+function RouteFallback() {
+  return (
+    <div className="flex min-h-[60vh] w-full items-center justify-center">
+      <Spinner label="Đang tải màn hình" />
+    </div>
+  );
+}
+
+const lazyRoute = (element: React.ReactNode) => (
+  <Suspense fallback={<RouteFallback />}>{element}</Suspense>
+);
 
 const router = createBrowserRouter([
   {
@@ -46,7 +70,7 @@ const router = createBrowserRouter([
     path: "/onboarding/interests",
     element: (
       <ProtectedRoute>
-        <InterestOnboardingPage />
+        {lazyRoute(<InterestOnboardingPage />)}
       </ProtectedRoute>
     ),
   },
@@ -81,7 +105,7 @@ const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <FriendsPage>
-          <ListGroupCommunity />
+          {lazyRoute(<ListGroupCommunity />)}
         </FriendsPage>
       </ProtectedRoute>
     ),
@@ -100,7 +124,7 @@ const router = createBrowserRouter([
     path: "/settings/notifications",
     element: (
       <ProtectedRoute>
-        <NotificationSettingsPage />
+        {lazyRoute(<NotificationSettingsPage />)}
       </ProtectedRoute>
     ),
   },
@@ -108,7 +132,7 @@ const router = createBrowserRouter([
     path: "/recommendations",
     element: (
       <ProtectedRoute>
-        <RecommendationPage />
+        {lazyRoute(<RecommendationPage />)}
       </ProtectedRoute>
     ),
   },

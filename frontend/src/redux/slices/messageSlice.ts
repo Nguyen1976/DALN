@@ -62,6 +62,15 @@ export interface Message {
 }
 
 export interface MessageState {
+  /**
+   * Half-written message per conversation.
+   *
+   * Kept in the store, not in the composer: leaving a thread unmounts
+   * ChatWindow, so a component-local draft died the moment the user clicked
+   * away. The `message` slice is excluded from persistence, so drafts stay in
+   * memory only and are dropped on logout with everything else.
+   */
+  drafts: Record<string, string>;
   messages: Record<string, Message[]>;
   pagination: Record<
     string,
@@ -73,6 +82,7 @@ export interface MessageState {
 }
 
 const initialState: MessageState = {
+  drafts: {},
   messages: {},
   pagination: {},
 };
@@ -240,6 +250,15 @@ export const messageSlice = createSlice({
       );
     },
 
+    setDraft: (
+      state,
+      action: PayloadAction<{ conversationId: string; text: string }>,
+    ) => {
+      const { conversationId, text } = action.payload;
+      if (text) state.drafts[conversationId] = text;
+      else delete state.drafts[conversationId];
+    },
+
     revokeMessage: (
       state,
       action: PayloadAction<{
@@ -373,6 +392,9 @@ export const selectMessage = createSelector(
   },
 );
 
+export const selectDraft = (state: RootState, conversationId?: string) =>
+  conversationId ? (state.message.drafts[conversationId] ?? "") : "";
+
 export const selectMessagePagination = createSelector(
   [
     (state: RootState) => state.message.pagination,
@@ -399,6 +421,7 @@ export const {
   addMessage,
   ackMessage,
   failMessage,
+  setDraft,
   retryMessage,
   discardMessage,
   revokeMessage,

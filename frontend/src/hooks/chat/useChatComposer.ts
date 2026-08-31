@@ -1,5 +1,5 @@
-import { useCallback, useState, type RefObject } from "react";
-import { useDispatch } from "react-redux";
+import { useCallback, type RefObject } from "react";
+import { useDispatch, useSelector } from "react-redux";
 import {
   createMessageUploadUrlAPI,
   uploadFileToSignedUrl,
@@ -16,10 +16,12 @@ import {
   discardMessage,
   failMessage,
   retryMessage,
+  selectDraft,
+  setDraft,
   type Message,
 } from "@/redux/slices/messageSlice";
 import type { UserState } from "@/redux/slices/userSlice";
-import type { AppDispatch } from "@/redux/store";
+import type { AppDispatch, RootState } from "@/redux/store";
 import { getMessageTypeFromFile, getMimeTypeFromFile } from "@/utils/chatMedia";
 import { validateUploadFile } from "@/utils/mediaLimits";
 import { toast } from "sonner";
@@ -49,7 +51,26 @@ export function useChatComposer({
   bottomRef,
 }: UseChatComposerOptions) {
   const dispatch = useDispatch<AppDispatch>();
-  const [msg, setMsg] = useState("");
+  /**
+   * The composer text lives in the store, keyed by conversation.
+   *
+   * Keeping it in component state meant leaving a thread — which unmounts
+   * ChatWindow — threw away whatever was half-typed. Reading and writing the
+   * store directly also avoids having to keep a local copy in sync. The
+   * `message` slice is excluded from persistence, so drafts stay in memory and
+   * are cleared on logout with the rest of the user's data.
+   */
+  const msg = useSelector((state: RootState) =>
+    selectDraft(state, conversationId),
+  );
+
+  const setMsg = useCallback(
+    (text: string) => {
+      if (!conversationId) return;
+      dispatch(setDraft({ conversationId, text }));
+    },
+    [conversationId, dispatch],
+  );
 
   const ensureConversationInStore = useCallback(
     (lastMessage: Message) => {
@@ -189,6 +210,7 @@ export function useChatComposer({
     emitMessage,
     ensureConversationInStore,
     msg,
+    setMsg,
     stopTyping,
   ]);
 
@@ -273,6 +295,7 @@ export function useChatComposer({
       dispatch,
       ensureConversationInStore,
       msg,
+      setMsg,
     ],
   );
 
