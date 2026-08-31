@@ -83,7 +83,35 @@ export default function VoiceCallModal({
     handleReceiveIceCandidate,
     toggleMute,
     cleanup,
+    connectedAt,
   } = useWebRTC(socket);
+
+  /**
+   * Call duration, ticking from the moment audio actually flows.
+   *
+   * There was no timer at all: once connected the screen said "Đang trong
+   * cuộc gọi" and nothing else, so a call could run for twenty minutes with
+   * no way to tell.
+   */
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!connectedAt) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const tick = () =>
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - connectedAt) / 1000)));
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [connectedAt]);
+
+  const durationLabel = useMemo(() => {
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }, [elapsedSeconds]);
 
   // Mirrored into a ref for the ring-timeout callback, which must read the
   // latest status without re-subscribing. Written in an effect: assigning a
@@ -120,7 +148,10 @@ export default function VoiceCallModal({
   const handleRingTimeout = useCallback(() => {
     if (mode === "outgoing" && callStatusRef.current === "calling") {
       if (peerUserId) {
-        endCall(peerUserId, "no_answer");
+        endCall(peerUserId, "no_answer", {
+          conversationId,
+          callerId: user.id,
+        });
       } else {
         cleanup();
       }
@@ -260,7 +291,7 @@ export default function VoiceCallModal({
 
   const handleReject = () => {
     if (callerId) {
-      rejectCall(callerId);
+      rejectCall(callerId, conversationId);
     }
     cleanup();
     onClose();
@@ -268,7 +299,11 @@ export default function VoiceCallModal({
 
   const handleEndCall = () => {
     if (peerUserId) {
-      endCall(peerUserId);
+      endCall(peerUserId, undefined, {
+        conversationId,
+        // Người gọi là bên ghi nhận; ở chế độ incoming thì đó là callerId.
+        callerId: mode === "incoming" ? callerId : user.id,
+      });
     } else {
       cleanup();
     }
@@ -316,6 +351,16 @@ export default function VoiceCallModal({
           >
             {statusLabel}
           </p>
+
+          {callStatus === "connected" && (
+            <p
+              className="mt-1 text-center text-sm font-medium tabular-nums text-muted-foreground"
+              aria-live="off"
+            >
+              <span className="sr-only">Thời lượng cuộc gọi </span>
+              {durationLabel}
+            </p>
+          )}
 
           {showBusyResult || callStatus === "no_answer" ? (
             <div className="flex size-14 items-center justify-center rounded-full bg-warning/15 text-warning-text">

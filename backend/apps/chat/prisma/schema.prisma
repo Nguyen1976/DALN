@@ -92,6 +92,10 @@ model message {
   pollId          String?            @unique @db.ObjectId
   isRevoked       Boolean            @default(false)
   isDeleted       Boolean            @default(false)
+  /// Tin nhắn do hệ thống ghi (thêm/xoá thành viên, kết cục cuộc gọi...).
+  /// Không phải nội dung người dùng gõ, nên hiển thị khác và không có
+  /// trạng thái đã xem.
+  isSystem        Boolean            @default(false)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   conversation    conversation       @relation(fields: [conversationId], references: [id])

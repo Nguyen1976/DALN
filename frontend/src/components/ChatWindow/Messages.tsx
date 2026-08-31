@@ -269,6 +269,36 @@ const MessageComponent = ({
 
         const senderName = message.senderMember?.username;
 
+        // System records — someone joined or left, a call ended — are not
+        // things anyone typed. Rendering them as ordinary outgoing bubbles
+        // (complete with a read receipt) made a missed call look like a
+        // message the user had sent.
+        if (message.isSystem) {
+          return (
+            <div key={message.id}>
+              {dayDivider}
+              <div
+                id={`message-${message.id}`}
+                className={cn(
+                  "my-3 flex scroll-mt-24 justify-center transition-colors duration-300",
+                  highlightMessageId === message.id && "rounded-lg bg-accent",
+                )}
+              >
+                <p className="max-w-[85%] rounded-full bg-muted px-3 py-1 text-center text-xs leading-relaxed text-muted-foreground">
+                  {message.text}
+                  <time
+                    dateTime={message.createdAt}
+                    title={formatFullDateTime(message.createdAt)}
+                    className="ml-1.5 tabular-nums opacity-70"
+                  >
+                    {formatDateTime(message.createdAt)}
+                  </time>
+                </p>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div key={message.id}>
             {dayDivider}

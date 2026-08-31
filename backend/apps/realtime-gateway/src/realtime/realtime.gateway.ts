@@ -523,6 +523,14 @@ export class RealtimeGateway
     this.emitToUserSockets([callerId], SOCKET_EVENTS.CALL.CALL_REJECTED, {
       rejecterId: client.data.userId,
     })
+
+    this.recordCallOutcome({
+      conversationId: data?.conversationId,
+      callerId,
+      calleeId: targetUserId,
+      actorId: targetUserId,
+      outcome: 'REJECTED',
+    })
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_ENDED)
@@ -546,6 +554,51 @@ export class RealtimeGateway
       enderId,
       reason: data?.reason,
     })
+
+    // Chỉ bên GỌI mới ghi nhận, nếu không mỗi lần kết thúc sẽ có hai tin nhắn
+    // hệ thống — cả hai phía đều phát sự kiện này.
+    const callerId = data?.callerId ?? enderId
+    const isCaller = !data?.callerId || data.callerId === enderId
+    if (isCaller) {
+      const reason = String(data?.reason || '')
+      this.recordCallOutcome({
+        conversationId: data?.conversationId,
+        callerId,
+        calleeId: peerUserId,
+        actorId: enderId,
+        outcome:
+          reason === 'no_answer'
+            ? 'MISSED'
+            : reason === 'unreachable'
+              ? 'UNREACHABLE'
+              : 'COMPLETED',
+        durationSeconds: Number(data?.durationSeconds) || 0,
+      })
+    }
+  }
+
+  /**
+   * Hand a finished call to the chat service so it lands in the thread.
+   *
+   * Calls left no trace at all before this: no record of who called, when, or
+   * whether it was answered. Published rather than written here — the gateway
+   * owns sockets, the chat service owns messages.
+   */
+  private recordCallOutcome(payload: {
+    conversationId?: string
+    callerId: string
+    calleeId: string
+    actorId?: string
+    outcome: 'COMPLETED' | 'REJECTED' | 'MISSED' | 'UNREACHABLE'
+    durationSeconds?: number
+  }) {
+    if (!payload.conversationId) return
+
+    this.amqpConnection.publish(
+      EXCHANGE_RMQ.REALTIME_EVENTS,
+      ROUTING_RMQ.CALL_ENDED,
+      payload,
+    )
   }
   @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CANDIDATE)
   async handleIceCandidate(

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import type {
+  CallEndedPayload,
   MessageSendPayload,
   UserUpdatedPayload,
   UserUpdateStatusMakeFriendPayload,
@@ -103,6 +104,10 @@ export class ChatService {
 
   clearConversationHistory(data: ClearConversationHistoryRequest) {
     return this.messageService.clearConversationHistory(data)
+  }
+
+  recordCallOutcome(data: CallEndedPayload) {
+    return this.messageService.recordCallOutcome(data)
   }
 
   getConversationAssets(

@@ -15,4 +15,5 @@ export const ROUTING_RMQ = {
   USER_TYPING: 'user.typing',
   MESSAGE_READ: 'message.read',
   UPDATE_MESSAGE_READ: 'message.updateRead',
+  CALL_ENDED: 'call.ended',
 }

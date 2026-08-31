@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { RedisService } from '@app/redis'
 import { DIRTY_CONVERSATIONS_KEY } from '../background-jobs/unread/unread.constants'
 import type {
+  CallEndedPayload,
   MessageSendPayload,
   UpdateMessageReadPayload,
 } from 'libs/constant/rmq/payload'
@@ -459,6 +460,43 @@ export class MessageService {
     )
   }
 
+  /**
+   * Write a finished call into the conversation.
+   *
+   * Calls used to leave no trace: no record of who called whom, when, whether
+   * it was answered, or how long it lasted — so a missed call was invisible
+   * the moment the ringing screen closed.
+   */
+  async recordCallOutcome(data: CallEndedPayload) {
+    const { conversationId, callerId, calleeId, outcome } = data
+    if (!conversationId || !callerId) return
+
+    const members = await this.memberRepo.findByConversationId(conversationId)
+    const isMember = (id: string) => members.some((m) => m.userId === id)
+    // The ids arrive over a socket; refuse to write into a thread the parties
+    // are not part of.
+    if (!isMember(callerId) || (calleeId && !isMember(calleeId))) return
+
+    const seconds = Math.max(0, Math.floor(Number(data.durationSeconds) || 0))
+    const text = this.describeCallOutcome(outcome, seconds)
+
+    await this.createSystemMessageAndSync(conversationId, callerId, text)
+  }
+
+  private describeCallOutcome(outcome: string, seconds: number): string {
+    if (outcome === 'REJECTED') return 'Cuộc gọi thoại bị từ chối'
+    if (outcome === 'MISSED') return 'Cuộc gọi thoại nhỡ'
+    if (outcome === 'UNREACHABLE') return 'Cuộc gọi thoại không kết nối được'
+
+    if (seconds <= 0) return 'Cuộc gọi thoại đã kết thúc'
+
+    const minutes = Math.floor(seconds / 60)
+    const rest = seconds % 60
+    const duration =
+      minutes > 0 ? `${minutes} phút ${rest} giây` : `${rest} giây`
+    return `Cuộc gọi thoại đã kết thúc — ${duration}`
+  }
+
   async createSystemMessageAndSync(
     conversationId: string,
     actorUserId: string,
@@ -471,6 +509,7 @@ export class MessageService {
       content: text,
       replyToMessageId: undefined,
       medias: [],
+      isSystem: true,
     })
 
     const message = result
