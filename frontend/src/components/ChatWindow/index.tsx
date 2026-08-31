@@ -5,8 +5,8 @@ import {
   AvatarWithPresence,
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/feedback";
-import { FILE_INPUT_ACCEPT } from "@/utils/mediaLimits";
+import { EmptyState, Spinner } from "@/components/ui/feedback";
+import { FILE_INPUT_ACCEPT, formatFileSize } from "@/utils/mediaLimits";
 import {
   Phone,
   Video,
@@ -23,6 +23,8 @@ import {
   ListChecks,
   ArrowLeft,
   MessageSquareOff,
+  FileText,
+  Loader2,
 } from "lucide-react";
 import { useSelector } from "react-redux";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -156,11 +158,14 @@ export default function ChatWindow({
     msg,
     setMsg,
     handleSendMessage,
-    handleUploadMedia,
     handleRetryMessage,
     handleDiscardMessage,
     replyingTo,
     setReplyingTo,
+    attachments,
+    addFiles,
+    removeAttachment,
+    isUploading,
   } = useChatComposer({
     conversationId,
     user,
@@ -386,6 +391,69 @@ export default function ChatWindow({
       )}
 
       <div className="shrink-0 border-t border-border bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+        {/* Attachment tray: what has been picked, before anything is sent.
+            Files used to upload the moment they were chosen — no chance to
+            check the right file was picked, and no way to drop one. */}
+        {attachments.length > 0 && (
+          <div className="mb-2 rounded-xl border border-border bg-card p-2">
+            <div className="mb-1.5 flex items-center justify-between px-1">
+              <p className="text-xs font-medium text-muted-foreground">
+                {attachments.length} tệp đã chọn
+              </p>
+              {isUploading && (
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Spinner label="Đang tải tệp lên" />
+                  Đang tải lên…
+                </span>
+              )}
+            </div>
+            <ul className="custom-scrollbar flex gap-2 overflow-x-auto pb-1">
+              {attachments.map((attachment) => (
+                <li
+                  key={attachment.id}
+                  className="relative flex w-40 shrink-0 flex-col gap-1.5 rounded-lg border border-border bg-background p-2"
+                >
+                  {attachment.kind === "IMAGE" ? (
+                    <img
+                      src={attachment.previewUrl}
+                      alt={`Xem trước ${attachment.file.name}`}
+                      className="h-20 w-full rounded-md object-cover"
+                    />
+                  ) : attachment.kind === "VIDEO" ? (
+                    <video
+                      src={attachment.previewUrl}
+                      muted
+                      className="h-20 w-full rounded-md bg-muted object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-20 w-full items-center justify-center rounded-md bg-muted text-muted-foreground">
+                      <FileText className="size-7" aria-hidden="true" />
+                    </div>
+                  )}
+                  <p
+                    className="truncate text-xs font-medium text-foreground"
+                    title={attachment.file.name}
+                  >
+                    {attachment.file.name}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {formatFileSize(attachment.file.size)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(attachment.id)}
+                    disabled={isUploading}
+                    aria-label={`Gỡ tệp ${attachment.file.name}`}
+                    className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-md bg-background/85 text-muted-foreground backdrop-blur transition-colors hover:bg-destructive/15 hover:text-destructive-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-50"
+                  >
+                    <X className="size-3.5" aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Quote bar: shows what is being replied to before the message goes
             out, and can be dismissed without losing the text already typed. */}
         {replyingTo && (
@@ -428,11 +496,11 @@ export default function ChatWindow({
             /* Filter in the picker itself so the user does not choose a file
                only to be told afterwards that it is not supported. */
             accept={FILE_INPUT_ACCEPT}
+            multiple
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              void handleUploadMedia(file);
+              const files = [...(e.target.files || [])];
+              if (files.length) addFiles(files);
               e.currentTarget.value = "";
             }}
           />
@@ -524,12 +592,21 @@ export default function ChatWindow({
 
           <Button
             size="icon"
-            disabled={!canSendMessage || msg.trim() === ""}
+            /* Attachments alone are a valid message — a caption is optional. */
+            disabled={
+              !canSendMessage ||
+              isUploading ||
+              (msg.trim() === "" && attachments.length === 0)
+            }
             aria-label="Gửi tin nhắn"
             className="shrink-0 rounded-xl"
             onClick={handleSendMessage}
           >
-            <Send className="size-[18px]" />
+            {isUploading ? (
+              <Loader2 className="size-[18px] animate-spin" aria-hidden="true" />
+            ) : (
+              <Send className="size-[18px]" />
+            )}
           </Button>
         </div>
 

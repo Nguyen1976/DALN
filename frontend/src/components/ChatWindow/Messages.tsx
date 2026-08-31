@@ -121,6 +121,10 @@ const MessageComponent = ({
           message.status !== "pending" &&
           message.type !== "POLL";
         const isPoll = message.type === "POLL" && Boolean(message.poll);
+        const visualCount = (message.medias || []).filter((media) => {
+          const kind = resolveMediaKind(media);
+          return kind === "IMAGE" || kind === "VIDEO";
+        }).length;
         const selectedPollOptions = message.poll
           ? pollVoteSelections?.[message.poll.id] || []
           : [];
@@ -321,8 +325,19 @@ const MessageComponent = ({
                     </p>
                   )}
 
-                  {!isRevoked &&
-                    message.medias?.map((media, mediaIndex) => {
+                  {/* Two or more visual attachments tile into a grid. Stacked
+                      full-width they turned a five-image message into a wall of
+                      scrolling. */}
+                  {!isRevoked && (
+                  <div
+                    className={cn(
+                      visualCount > 1 &&
+                        "mb-2 grid gap-1 [&>*]:mb-0 [&>img]:h-32 [&>img]:max-w-none [&>video]:h-32 [&>video]:max-w-none",
+                      visualCount === 2 && "grid-cols-2",
+                      visualCount > 2 && "grid-cols-2 sm:grid-cols-3",
+                    )}
+                  >
+                  {message.medias?.map((media, mediaIndex) => {
                       const mediaKind = resolveMediaKind(media);
 
                       if (mediaKind === "IMAGE") {
@@ -366,6 +381,8 @@ const MessageComponent = ({
                         />
                       );
                     })}
+                  </div>
+                  )}
 
                   {/* Quoted message. Clicking it jumps to the original so a
                       reply in a busy thread can be traced back. */}

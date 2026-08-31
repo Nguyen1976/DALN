@@ -1,4 +1,4 @@
-import { useCallback, useState, type RefObject } from "react";
+import { useCallback, useEffect, useState, type RefObject } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   createMessageUploadUrlAPI,
@@ -40,6 +40,19 @@ interface UseChatComposerOptions {
 
 /** Bao lâu không nhận được xác nhận thì coi là gửi hỏng. */
 const ACK_TIMEOUT_MS = 12000;
+
+/** Số tệp tối đa trong một tin nhắn. */
+const MAX_ATTACHMENTS = 10;
+
+/** Một tệp đã chọn, đang chờ gửi. */
+export interface PendingAttachment {
+  id: string;
+  file: File;
+  kind: "IMAGE" | "VIDEO" | "FILE";
+  /** Object URL dùng cho ảnh/video xem trước ngay trên trình duyệt. */
+  previewUrl: string;
+  progress: number;
+}
 
 export function useChatComposer({
   conversationId,
@@ -209,8 +222,193 @@ export function useChatComposer({
     [conversationId, dispatch],
   );
 
+  // ---------------------------------------------------------------------
+  // Tệp đính kèm: chọn -> xem trước -> gửi
+  // ---------------------------------------------------------------------
+
+  /**
+   * Files chosen but not yet sent.
+   *
+   * Attachments used to upload the instant they were picked: no chance to
+   * check you grabbed the right file, no way to back out, and only one file
+   * per message. They now queue here until the message is sent.
+   */
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const addFiles = useCallback(
+    (files: File[]) => {
+      if (!canSendMessage || !conversationId || !files.length) return;
+
+      const accepted: PendingAttachment[] = [];
+      const rejected: string[] = [];
+
+      for (const file of files) {
+        const problem = validateUploadFile(file);
+        if (problem) {
+          rejected.push(problem);
+          continue;
+        }
+        accepted.push({
+          id: createClientMessageId("att"),
+          file,
+          kind: getMessageTypeFromFile(file),
+          // Object URLs, not data URLs: the thumbnail is ready immediately and
+          // costs no memory beyond a handle. Revoked when the file is removed.
+          previewUrl: URL.createObjectURL(file),
+          progress: 0,
+        });
+      }
+
+      // One bad file must not throw away the good ones picked alongside it.
+      rejected.forEach((message) => toast.error(message));
+
+      if (accepted.length) {
+        setAttachments((prev) => {
+          const room = MAX_ATTACHMENTS - prev.length;
+          if (room <= 0) {
+            toast.error(`Mỗi tin nhắn gửi tối đa ${MAX_ATTACHMENTS} tệp.`);
+            accepted.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+            return prev;
+          }
+          if (accepted.length > room) {
+            toast.error(`Mỗi tin nhắn gửi tối đa ${MAX_ATTACHMENTS} tệp; đã bỏ bớt ${accepted.length - room} tệp.`);
+            accepted.slice(room).forEach((a) => URL.revokeObjectURL(a.previewUrl));
+          }
+          return [...prev, ...accepted.slice(0, room)];
+        });
+      }
+    },
+    [canSendMessage, conversationId],
+  );
+
+  // Rời trang giữa chừng sẽ mất tệp đang tải: hỏi lại trước khi thoát.
+  useEffect(() => {
+    if (!isUploading) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isUploading]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
+
+  const clearAttachments = useCallback(() => {
+    setAttachments((prev) => {
+      prev.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+      return [];
+    });
+  }, []);
+
+  /** Uploads every queued file, then sends one message carrying all of them. */
+  const sendWithAttachments = useCallback(
+    async (pending: PendingAttachment[], text: string, quoted: Message | null) => {
+      if (!conversationId) return;
+
+      const clientMessageId = createClientMessageId("temp-media");
+      const tempMedias: MessageMediaInput[] = pending.map((a, index) => ({
+        mediaType: a.kind,
+        objectKey: "",
+        url: a.previewUrl,
+        mimeType: getMimeTypeFromFile(a.file),
+        size: String(a.file.size),
+        fileName: a.file.name,
+        sortOrder: index,
+      }));
+
+      const kinds = new Set(pending.map((a) => a.kind));
+      const messageType = kinds.size === 1 ? [...kinds][0] : "FILE";
+
+      const tempMessage = createTempMessage({
+        id: clientMessageId,
+        type: messageType,
+        text,
+        medias: tempMedias,
+        clientMessageId,
+        ...(quoted ? { replyToMessageId: quoted.id } : {}),
+      });
+
+      dispatch(addMessage(tempMessage));
+      dispatch(updateNewMessage({ conversationId, lastMessage: tempMessage }));
+      ensureConversationInStore(tempMessage);
+
+      setIsUploading(true);
+      try {
+        const uploaded = await Promise.all(
+          pending.map(async (attachment, index) => {
+            const mimeType = getMimeTypeFromFile(attachment.file);
+            const upload = await createMessageUploadUrlAPI({
+              conversationId,
+              type: attachment.kind,
+              mimeType,
+              fileName: attachment.file.name,
+              size: String(attachment.file.size),
+            });
+
+            await uploadFileToSignedUrl(upload.uploadUrl, attachment.file, mimeType);
+            setAttachments((prev) =>
+              prev.map((a) => (a.id === attachment.id ? { ...a, progress: 100 } : a)),
+            );
+
+            return {
+              mediaType: attachment.kind,
+              objectKey: upload.objectKey,
+              url: upload.publicUrl,
+              mimeType,
+              size: String(attachment.file.size),
+              fileName: attachment.file.name,
+              sortOrder: index,
+            };
+          }),
+        );
+
+        socket.emit("message:create", {
+          conversationId,
+          type: messageType,
+          content: text.trim() || null,
+          clientMessageId,
+          replyToMessageId: quoted?.id,
+          media: uploaded,
+        });
+
+        clearAttachments();
+        setMsg("");
+        setReplyingTo(null);
+      } catch (error) {
+        showErrorToast(error, "Không thể tải tệp lên");
+        dispatch(failMessage({ conversationId, clientMessageId }));
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [
+      clearAttachments,
+      conversationId,
+      createTempMessage,
+      dispatch,
+      ensureConversationInStore,
+      setMsg,
+      setReplyingTo,
+    ],
+  );
+
   const handleSendMessage = useCallback(() => {
-    if (!canSendMessage || msg.trim() === "" || !conversationId) return;
+    if (!canSendMessage || !conversationId || isUploading) return;
+
+    if (attachments.length) {
+      void sendWithAttachments(attachments, msg, replyingTo);
+      return;
+    }
+
+    if (msg.trim() === "") return;
 
     const clientMessageId = createClientMessageId("temp-id");
     const quoted = replyingTo;
@@ -265,105 +463,26 @@ export function useChatComposer({
     emitMessage,
     ensureConversationInStore,
     msg,
+    attachments,
+    isUploading,
     replyingTo,
+    sendWithAttachments,
     setMsg,
     setReplyingTo,
     stopTyping,
   ]);
 
-  const handleUploadMedia = useCallback(
-    async (file: File) => {
-      if (!canSendMessage || !conversationId) return;
-
-      // Reject before anything is created: an oversized or unsupported file
-      // used to reach the presign call and fail with a storage error, after
-      // a bubble had already appeared in the thread.
-      const rejection = validateUploadFile(file);
-      if (rejection) {
-        toast.error(rejection);
-        return;
-      }
-
-      const mediaType = getMessageTypeFromFile(file);
-      const mimeType = getMimeTypeFromFile(file);
-      const clientMessageId = createClientMessageId("temp-media");
-
-      const tempMedia: MessageMediaInput = {
-        mediaType,
-        objectKey: "",
-        url: URL.createObjectURL(file),
-        mimeType,
-        size: String(file.size),
-        fileName: file.name,
-        sortOrder: 0,
-      };
-
-      const tempMessage = createTempMessage({
-        id: clientMessageId,
-        type: mediaType,
-        text: msg,
-        medias: [tempMedia],
-        clientMessageId,
-      });
-
-      dispatch(addMessage(tempMessage));
-      dispatch(updateNewMessage({ conversationId, lastMessage: tempMessage }));
-      ensureConversationInStore(tempMessage);
-
-      try {
-        const upload = await createMessageUploadUrlAPI({
-          conversationId,
-          type: mediaType,
-          mimeType,
-          fileName: file.name,
-          size: String(file.size),
-        });
-
-        await uploadFileToSignedUrl(upload.uploadUrl, file, mimeType);
-
-        socket.emit("message:create", {
-          conversationId,
-          type: mediaType,
-          content: msg.trim() || null,
-          clientMessageId,
-          media: [
-            {
-              mediaType,
-              objectKey: upload.objectKey,
-              url: upload.publicUrl,
-              mimeType,
-              size: String(file.size),
-              fileName: file.name,
-              sortOrder: 0,
-            },
-          ],
-        });
-
-        setMsg("");
-      } catch (error) {
-        showErrorToast(error, "Không thể tải tệp lên");
-        dispatch(failMessage({ conversationId, clientMessageId }));
-      }
-    },
-    [
-      canSendMessage,
-      conversationId,
-      createTempMessage,
-      dispatch,
-      ensureConversationInStore,
-      msg,
-      setMsg,
-    ],
-  );
-
   return {
     msg,
     setMsg,
     handleSendMessage,
-    handleUploadMedia,
     handleRetryMessage,
     handleDiscardMessage,
     replyingTo,
     setReplyingTo,
+    attachments,
+    addFiles,
+    removeAttachment,
+    isUploading,
   };
 }
