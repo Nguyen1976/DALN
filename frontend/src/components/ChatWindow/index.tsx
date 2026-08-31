@@ -267,6 +267,14 @@ export default function ChatWindow({
             variant="ghost"
             size="icon"
             onClick={onVoiceCall}
+            /* Voice call is 1:1 only — the button used to be live in group
+               threads too, where pressing it could only fail. */
+            disabled={isGroupConversation}
+            title={
+              isGroupConversation
+                ? "Chưa hỗ trợ gọi thoại trong nhóm"
+                : "Gọi thoại"
+            }
             aria-label="Gọi thoại"
             className="text-muted-foreground hover:text-foreground"
           >

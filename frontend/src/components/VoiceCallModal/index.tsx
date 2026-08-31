@@ -7,7 +7,8 @@ import {
 import { selectUser } from "@/redux/slices/userSlice";
 import { Phone, PhoneOff, Mic, MicOff, Volume2, UserX } from "lucide-react";
 import { useSelector } from "react-redux";
-import { useWebRTC } from "@/hooks/useWebRTC";
+import { describeMicrophoneError, useWebRTC } from "@/hooks/useWebRTC";
+import { toast } from "sonner";
 import { useCallRingTimeout } from "@/hooks/useCallRingTimeout";
 import { useIncomingCallRingtone } from "@/hooks/useIncomingCallRingtone";
 import { socket } from "@/lib/socket";
@@ -156,7 +157,8 @@ export default function VoiceCallModal({
 
     startedOutgoingRef.current = true;
     void startCall(peerUserId, conversationId).catch((error) => {
-      console.error("Không thể bắt đầu cuộc gọi:", error);
+      // Closing silently left the user with no idea why the call vanished.
+      toast.error(describeMicrophoneError(error));
       onClose();
     });
   }, [conversationId, mode, onClose, peerUserId, startCall]);
@@ -246,7 +248,7 @@ export default function VoiceCallModal({
     try {
       await acceptCall(callerId, incomingOffer);
     } catch (error) {
-      console.error("Không thể chấp nhận cuộc gọi:", error);
+      toast.error(describeMicrophoneError(error));
       onClose();
     }
   };
