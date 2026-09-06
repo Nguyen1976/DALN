@@ -33,6 +33,13 @@ export interface Conversation {
   membershipStatus?: "ACTIVE" | "REMOVED" | "LEFT";
   canSendMessage?: boolean;
   memberCount: number;
+  /**
+   * Id đối phương của hội thoại DIRECT, phi chuẩn hoá từ backend.
+   * Danh sách hội thoại không còn kèm `members` (truy vấn đó đắt tuyến tính
+   * theo số thành viên), nên đây là nguồn duy nhất để biết đối phương là ai
+   * ở màn danh sách.
+   */
+  peerUserId?: string | null;
   createdAt: string;
   updatedAt: string;
   members?: ConversationMember[];

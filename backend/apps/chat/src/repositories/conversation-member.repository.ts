@@ -3,6 +3,7 @@ import { Member } from '../http/chat-http.dto'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { conversationType } from 'apps/chat/src/generated'
 import { RedisService } from '@app/redis'
+import { buildPeerFields } from '../domain/peer-fields'
 
 type CachedMember = {
   userId: string
@@ -175,6 +176,9 @@ export class ConversationMemberRepository {
         unreadCount: 0,
         lastReadMessageId: null,
         lastMessageAt: new Date(),
+        // DIRECT: phi chuẩn hoá đối phương để danh sách hội thoại khỏi phải
+        // include toàn bộ members. GROUP: toàn null, nhóm dùng groupName.
+        ...buildPeerFields(String(type), member.userId, members),
       })),
     })
 
@@ -449,6 +453,18 @@ export class ConversationMemberRepository {
       data: {
         ...(data.avatar !== undefined ? { avatar: data.avatar } : {}),
         ...(data.fullName !== undefined ? { fullName: data.fullName } : {}),
+      },
+    })
+
+    // Đối phương của người khác chính là user này -> phải cập nhật cả bản phi
+    // chuẩn hoá `peer*` trên dòng membership của họ, nếu không danh sách hội
+    // thoại của họ sẽ hiện tên/avatar cũ mãi (danh sách không đọc `members`
+    // nữa nên không có đường tự sửa).
+    await this.prisma.conversationMember.updateMany({
+      where: { peerUserId: userId },
+      data: {
+        ...(data.avatar !== undefined ? { peerAvatar: data.avatar } : {}),
+        ...(data.fullName !== undefined ? { peerFullName: data.fullName } : {}),
       },
     })
 
