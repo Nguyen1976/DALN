@@ -36,6 +36,11 @@ export const SOCKET_EVENTS = {
     NEW_NOTIFICATION: 'notification.new_notification', //listen
   },
 
+  /** Lỗi xác thực ở tầng socket — client dựa vào `code` để quyết định làm gì. */
+  AUTH: {
+    ERROR: 'auth:error',
+  },
+
   CALL: {
     INCOMING_CALL: 'call.incoming_call', //listen
     CALL_ACCEPTED: 'call.accepted', //listen

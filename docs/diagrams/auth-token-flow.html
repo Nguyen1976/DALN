@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Luồng xác thực token — DALN</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper: #f5f5f5; --color-ink: #2d3142;
+      --color-muted: #4f5d75; --color-accent: #eb6c36;
+      --font-sans: 'Geist', system-ui, sans-serif;
+      --font-serif: 'Instrument Serif', serif;
+      --font-mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem;
+    }
+    .frame { max-width: 1280px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 1000px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Flowchart · DALN</p>
+    <h1>Access token hết hạn — hai đường đi, hai kết cục</h1>
+
+    <svg viewBox="0 0 1280 860" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="auth-flow-title auth-flow-desc">
+      <title id="auth-flow-title">Luồng xác thực token khi access token hết hạn</title>
+      <desc id="auth-flow-desc">Flowchart so sánh hai đường xác thực: request HTTP đi qua AuthGuard và được cấp lại access token từ refresh token, còn kết nối WebSocket bị gateway ngắt ngay vì không có bước refresh, và client không tự kết nối lại nên realtime chết cho tới khi tải lại trang.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ================= ARROWS (vẽ trước) ================= -->
+      <!-- start -> phân nhánh -->
+      <line x1="640" y1="112" x2="640" y2="156" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+
+      <!-- diamond -> HTTP (trái) -->
+      <path d="M 560 196 H 360 Q 352 196 352 204 V 244" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="404" y="170" width="60" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="434" y="179" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">HTTP</text>
+
+      <!-- diamond -> WS (phải) -->
+      <path d="M 720 196 H 936 Q 944 196 944 204 V 244" fill="none" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <rect x="812" y="170" width="76" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="850" y="179" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WEBSOCKET</text>
+
+      <!-- HTTP: guard -> quyết định refresh -->
+      <line x1="352" y1="300" x2="352" y2="352" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="360" y="316" width="120" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="364" y="325" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">TokenExpiredError</text>
+
+      <!-- refresh? -> Có -> cấp mới -->
+      <path d="M 264 392 H 168 Q 160 392 160 400 V 476" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="188" y="366" width="46" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="211" y="375" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CÒN HẠN</text>
+
+      <!-- refresh? -> Không -> 401 -->
+      <line x1="352" y1="432" x2="352" y2="476" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="360" y="444" width="60" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="364" y="453" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">HẾT HẠN</text>
+
+      <!-- WS: verify -> disconnect -->
+      <line x1="944" y1="300" x2="944" y2="352" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <rect x="952" y="316" width="152" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="956" y="325" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" letter-spacing="0.04em">verify() ném — KHÔNG thử refresh</text>
+
+      <!-- WS: disconnect -> chết -->
+      <line x1="944" y1="424" x2="944" y2="476" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <rect x="952" y="440" width="160" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="956" y="449" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" letter-spacing="0.04em">io server disconnect</text>
+
+      <!-- refreshToken vẫn nằm trong handshake nhưng bị bỏ qua -->
+      <path d="M 1040 272 H 1160 Q 1168 272 1168 280 V 380" fill="none" stroke="rgba(235,108,54,0.45)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="1168" cy="380" r="2" fill="#eb6c36"/>
+
+      <!-- ================= NODES ================= -->
+      <!-- START (oval) -->
+      <rect x="516" y="64" width="248" height="48" rx="20" fill="#f5f5f5"/>
+      <rect x="516" y="64" width="248" height="48" rx="20" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+      <text x="640" y="86" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Tab mở &gt; 15 phút, không thao tác</text>
+      <text x="640" y="102" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">accessToken 15m ĐÃ HẾT HẠN · refreshToken 7d còn hạn</text>
+
+      <!-- DECISION: loại request (diamond) -->
+      <path d="M 640 156 L 720 196 L 640 236 L 560 196 Z" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="640" y="194" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Loại kết nối?</text>
+      <text x="640" y="208" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">cùng một cookie</text>
+
+      <!-- HTTP: AuthGuard -->
+      <rect x="232" y="244" width="240" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="232" y="244" width="240" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="240" y="250" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="260" y="259" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">GUARD</text>
+      <text x="352" y="282" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">AuthGuard.canActivate</text>
+
+      <!-- HTTP: decision refresh -->
+      <path d="M 352 352 L 440 392 L 352 432 L 264 392 Z" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="352" y="390" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">refreshToken?</text>
+      <text x="352" y="404" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">verify()</text>
+
+      <!-- HTTP: cấp lại (oval kết thúc) -->
+      <rect x="40" y="476" width="240" height="60" rx="20" fill="#f5f5f5"/>
+      <rect x="40" y="476" width="240" height="60" rx="20" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <text x="160" y="500" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Cấp accessToken mới</text>
+      <text x="160" y="516" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">Set-Cookie · request đi tiếp</text>
+      <text x="160" y="529" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">ĐO ĐƯỢC: 200 OK</text>
+
+      <!-- HTTP: 401 (oval kết thúc) -->
+      <rect x="312" y="476" width="200" height="60" rx="20" fill="#f5f5f5"/>
+      <rect x="312" y="476" width="200" height="60" rx="20" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+      <text x="412" y="504" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">401 → đăng xuất</text>
+      <text x="412" y="521" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">đúng, sau 7 ngày</text>
+
+      <!-- WS: gateway -->
+      <rect x="824" y="244" width="240" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="824" y="244" width="240" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <rect x="832" y="250" width="52" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.40)" stroke-width="0.8"/>
+      <text x="858" y="259" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">GATEWAY</text>
+      <text x="944" y="282" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">handleConnection</text>
+
+      <!-- WS: disconnect -->
+      <rect x="824" y="352" width="240" height="72" rx="6" fill="#f5f5f5"/>
+      <rect x="824" y="352" width="240" height="72" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="944" y="380" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">client.disconnect()</text>
+      <text x="944" y="398" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">AuthGuard trả true cho non-http</text>
+      <text x="944" y="412" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">nên không ai chặn ở đây</text>
+
+      <!-- WS: realtime chết -->
+      <rect x="824" y="476" width="240" height="72" rx="20" fill="#f5f5f5"/>
+      <rect x="824" y="476" width="240" height="72" rx="20" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+      <text x="944" y="502" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Realtime chết tới khi F5</text>
+      <text x="944" y="520" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">reconnectionAttempts: Infinity</text>
+      <text x="944" y="534" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" text-anchor="middle">KHÔNG áp dụng cho server disconnect</text>
+
+      <!-- CALLOUT -->
+      <text x="1240" y="352" fill="#eb6c36" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="end">refreshToken nằm sẵn trong</text>
+      <text x="1240" y="370" fill="#eb6c36" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="end">handshake — nhưng bị bỏ qua</text>
+
+      <!-- ĐO ĐƯỢC -->
+      <line x1="40" y1="600" x2="1240" y2="600" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="624" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">ĐO ĐƯỢC</text>
+
+      <rect x="40" y="640" width="576" height="88" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.12)" stroke-width="1"/>
+      <text x="60" y="664" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Đường HTTP — hoạt động đúng</text>
+      <text x="60" y="686" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">access hết hạn 1h + refresh còn hạn -&gt; GET /user/me = 200</text>
+      <text x="60" y="702" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">Set-Cookie cấp accessToken mới · Chrome thật: 6/6 request 200</text>
+      <text x="60" y="718" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">cả hai token hết hạn -&gt; 401 (đúng như thiết kế)</text>
+
+      <rect x="664" y="640" width="576" height="88" rx="6" fill="#ffffff" stroke="rgba(235,108,54,0.35)" stroke-width="1"/>
+      <text x="684" y="664" fill="#eb6c36" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Đường WebSocket — hỏng</text>
+      <text x="684" y="686" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">access còn hạn  -&gt; connect OK</text>
+      <text x="684" y="702" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">access hết hạn -&gt; connect -&gt; disconnect(io server disconnect)</text>
+      <text x="684" y="718" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">theo dõi 9 giây: 0 lần reconnect_attempt</text>
+
+      <!-- LEGEND -->
+      <line x1="40" y1="768" x2="1240" y2="768" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="792" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <ellipse cx="160" cy="788" rx="18" ry="9" fill="none" stroke="#7a8399" stroke-width="1"/>
+      <text x="188" y="792" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">BẮT ĐẦU / KẾT THÚC</text>
+      <rect x="380" y="780" width="36" height="16" rx="4" fill="none" stroke="#2d3142" stroke-width="1"/>
+      <text x="424" y="792" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">BƯỚC XỬ LÝ</text>
+      <path d="M 620 780 L 640 788 L 620 796 L 600 788 Z" fill="none" stroke="#2d3142" stroke-width="1"/>
+      <text x="656" y="792" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">QUYẾT ĐỊNH</text>
+      <line x1="820" y1="788" x2="852" y2="788" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <text x="864" y="792" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" letter-spacing="0.06em">ĐƯỜNG HỎNG</text>
+    </svg>
+  </div>
+</body>
+</html>

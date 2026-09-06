@@ -18,6 +18,7 @@ import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { UserStatusStore } from './user-status.store'
 import type { EmitToUserPayload } from 'libs/constant/rmq/payload'
 import * as cookie from 'cookie'
+import { resolveTokens } from '@app/common'
 
 //nếu k đặt tên cổng thì nó sẽ trùng với cổng của http
 @Injectable()
@@ -136,26 +137,29 @@ export class RealtimeGateway
   async handleConnection(client: Socket) {
     try {
       const rawCookie = client.handshake.headers.cookie
-      if (!rawCookie) {
-        client.disconnect()
+      const parsed = rawCookie ? cookie.parse(rawCookie) : {}
+
+      // Dùng CHUNG hàm phân giải với AuthGuard. Trước đây chỗ này chỉ verify
+      // accessToken và không đụng tới refreshToken — dù nó nằm sẵn trong cùng
+      // handshake header. Access hết hạn (tab mở > 15 phút) là socket bị ngắt,
+      // mà Socket.IO KHÔNG tự nối lại sau `io server disconnect`, nên realtime
+      // chết hẳn tới khi người dùng tải lại trang.
+      //
+      // Socket là kết nối dài hạn nên chấp nhận cả refreshToken là hợp lý: nó
+      // vốn đã được trình duyệt gửi kèm mọi request (cookie path=/), nên không
+      // hề mở rộng bề mặt lộ lọt.
+      const resolved = resolveTokens(
+        this.jwtService,
+        parsed.accessToken,
+        parsed.refreshToken,
+      )
+
+      if (!resolved.ok || !resolved.payload?.userId) {
+        this.rejectConnection(client, resolved.ok ? 'TOKEN_INVALID' : resolved.code)
         return
       }
 
-      const parsed = cookie.parse(rawCookie)
-      const accessToken = parsed.accessToken
-
-      if (!accessToken) {
-        client.disconnect()
-        return
-      }
-
-      const payload = this.jwtService.verify(accessToken)
-      const userId = payload?.userId
-      if (!userId) {
-        client.disconnect()
-        return
-      }
-
+      const userId = resolved.payload.userId
       client.data.userId = userId
 
       const prevOnline = await this.userStatusStore.isOnline(userId)
@@ -188,6 +192,25 @@ export class RealtimeGateway
     } catch {
       client.disconnect()
     }
+  }
+
+  /**
+   * Từ chối kết nối KÈM mã lý do, rồi mới ngắt.
+   *
+   * Client cần phân biệt: hết hạn thì làm mới cookie qua HTTP rồi nối lại,
+   * còn hỏng/thu hồi thì phải đăng xuất. Trước đây mọi trường hợp đều là một
+   * `client.disconnect()` trần trụi nên client không có cách nào biết.
+   *
+   * `volatile: false` + emit trước disconnect để gói tin kịp ra khỏi hàng đợi.
+   */
+  private rejectConnection(client: Socket, code: string) {
+    try {
+      client.emit(SOCKET_EVENTS.AUTH.ERROR, { code })
+    } catch {
+      /* socket có thể đã đứt — không có gì để làm thêm */
+    }
+    // Cho event kịp gửi trước khi đóng transport.
+    setTimeout(() => client.disconnect(true), 50)
   }
 
   async handleDisconnect(client: Socket) {

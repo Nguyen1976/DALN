@@ -5,6 +5,10 @@ import ChatPage from "./pages/Chat";
 
 import { createBrowserRouter, RouterProvider } from "react-router";
 import { socket } from "./lib/socket";
+import {
+  installSocketAuthRecovery,
+  resetSocketAuthRetries,
+} from "./lib/socketAuth";
 import { FriendsPage } from "./pages/Friend/FriendPage";
 import ListFriend from "./pages/Friend/ListFriend";
 import ListFriendRequests from "./pages/Friend/ListFriendRequests";
@@ -149,6 +153,10 @@ function App() {
   useEffect(() => {
     if (!user?.id) return;
 
+    // Gắn cơ chế hồi phục TRƯỚC khi nối: server có thể từ chối ngay ở handshake
+    // (access hết hạn) và Socket.IO không tự thử lại sau `io server disconnect`.
+    installSocketAuthRecovery();
+    resetSocketAuthRetries();
     socket.connect();
 
     return () => {
