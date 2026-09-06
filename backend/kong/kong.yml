@@ -84,8 +84,13 @@ plugins:
   - name: cors
     config:
       origins:
+        # Vite hay nhảy cổng khi 5173 đã bị chiếm -> cho phép sẵn cả 5174,
+        # nếu không trình duyệt chặn CORS và axios báo "Network Error",
+        # giao diện hiện nhầm thành "Không thể kết nối đến máy chủ".
         - http://localhost:5173
         - http://127.0.0.1:5173
+        - http://localhost:5174
+        - http://127.0.0.1:5174
         - https://nguyen1976.xyz
       methods:
         - GET
