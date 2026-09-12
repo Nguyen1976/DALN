@@ -1,3 +1,4 @@
+import { normalizeEmail } from "@/utils/email";
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
 import { API_ROOT } from "@/utils/constant";
 
@@ -57,7 +58,22 @@ export const makeFriendRequest = async (
 ): Promise<{ status: string }> => {
   const response = await authorizeAxiosInstance.post(
     `/user/make-friend`,
-    { email },
+    { email: normalizeEmail(email) },
+    { skipErrorToast: true },
+  );
+  return response.data;
+};
+
+/**
+ * Gửi lời mời theo username — dùng ở thẻ gợi ý kết bạn, nơi client chỉ có
+ * username chứ không có (và không nên có) email của người khác.
+ */
+export const makeFriendRequestByUsername = async (
+  username: string,
+): Promise<{ status: string }> => {
+  const response = await authorizeAxiosInstance.post(
+    `/user/make-friend-by-username`,
+    { username: username.trim() },
     { skipErrorToast: true },
   );
   return response.data;
@@ -130,7 +146,8 @@ export const registerAPI = async (data: {
     lon: number;
   };
 }): Promise<{ email: string; requiresOtpVerification: boolean }> => {
-  const response = await authorizeAxiosInstance.post(`/user/register`, data, {
+  const payload = { ...data, email: normalizeEmail(data.email) };
+  const response = await authorizeAxiosInstance.post(`/user/register`, payload, {
     skipErrorToast: true,
   });
   return response.data.data;
@@ -139,7 +156,7 @@ export const registerAPI = async (data: {
 export const verifyOtpAPI = async (data: { email: string; otp: string }) => {
   const response = await authorizeAxiosInstance.post(
     `/user/verify-otp`,
-    data,
+    { ...data, email: normalizeEmail(data.email) },
   );
   return response.data.data;
 };
@@ -147,7 +164,7 @@ export const verifyOtpAPI = async (data: { email: string; otp: string }) => {
 export const resendOtpAPI = async (data: { email: string }) => {
   const response = await authorizeAxiosInstance.post(
     `/user/resend-otp`,
-    data,
+    { email: normalizeEmail(data.email) },
   );
   return response.data.data;
 };

@@ -13,7 +13,19 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator'
-import { Type } from 'class-transformer'
+import { Transform, Type, type TransformFnParams } from 'class-transformer'
+
+/**
+ * Email so khớp KHÔNG phân biệt hoa thường và không dính khoảng trắng thừa:
+ * `NgMinh4205@gmail.com ` và `ngminh4205@gmail.com` là cùng một hộp thư, nên
+ * phải là cùng một tài khoản. Chuẩn hoá ngay ở đầu vào (ValidationPipe đang bật
+ * `transform`) để mọi tầng phía sau — tra cứu, lưu, khoá OTP — thấy một dạng duy nhất.
+ */
+const toNormalizedEmail = ({ value }: TransformFnParams) =>
+  typeof value === 'string' ? value.trim().toLowerCase() : value
+
+const toTrimmed = ({ value }: TransformFnParams) =>
+  typeof value === 'string' ? value.trim() : value
 
 export class RegisterLocationDto {
   @Type(() => Number)
@@ -28,6 +40,7 @@ export class RegisterLocationDto {
 }
 
 export class RegisterUserDto {
+  @Transform(toNormalizedEmail)
   @IsEmail()
   @IsNotEmpty()
   email: string
@@ -57,6 +70,7 @@ export class RegisterUserDto {
 }
 
 export class LoginUserDto {
+  @Transform(toNormalizedEmail)
   @IsEmail()
   @IsNotEmpty({ message: 'Email must not be empty' })
   email: string
@@ -66,6 +80,7 @@ export class LoginUserDto {
 }
 
 export class VerifyOtpDto {
+  @Transform(toNormalizedEmail)
   @IsEmail()
   @IsNotEmpty({ message: 'Email must not be empty' })
   email  : string
@@ -78,15 +93,30 @@ export class VerifyOtpDto {
 }
 
 export class ResendOtpDto {
+  @Transform(toNormalizedEmail)
   @IsEmail()
   @IsNotEmpty({ message: 'Email must not be empty' })
   email: string
 }
 
+/** Gửi lời mời theo email — ô "Thêm bạn" gõ email. */
 export class MakeFriendDto {
+  @Transform(toNormalizedEmail)
   @IsNotEmpty()
   @IsEmail()
   email: string
+}
+
+/**
+ * Gửi lời mời theo username — thẻ gợi ý kết bạn. Dữ liệu gợi ý cố ý không mang
+ * email của người lạ, nên trước đây nút "Kết bạn" ở đó luôn báo không lấy được email.
+ */
+export class MakeFriendByUsernameDto {
+  @Transform(toTrimmed)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(30)
+  username: string
 }
 
 export class UpdateStatusMakeFriendDto {

@@ -15,8 +15,7 @@ import MainLayout from "@/layouts/MainLayout";
 import { selectUser } from "@/redux/slices/userSlice";
 import {
   getMyRecommendationsAPI,
-  getUserProfileByIdAPI,
-  makeFriendRequest,
+  makeFriendRequestByUsername,
   type RecommendationCandidateItem,
 } from "@/apis";
 import { Button } from "@/components/ui/button";
@@ -119,13 +118,9 @@ export default function RecommendationPage() {
 
     setPendingCandidateIds((prev) => [...prev, candidateId]);
     try {
-      const profile = await getUserProfileByIdAPI(candidate.candidateId);
-      if (!profile?.email) {
-        toast.error("Không lấy được email của người dùng này");
-        return;
-      }
-
-      await makeFriendRequest(profile.email);
+      // Gửi theo username: dữ liệu gợi ý và hồ sơ công khai đều không có email,
+      // nên bước "lấy email rồi mới gửi" cũ luôn dừng ở thông báo lỗi.
+      await makeFriendRequestByUsername(candidate.profile.username);
       toast.success(`Đã gửi lời mời kết bạn đến ${candidate.profile.username}`);
     } catch (error) {
       showErrorToast(error, "Không thể gửi lời mời kết bạn");

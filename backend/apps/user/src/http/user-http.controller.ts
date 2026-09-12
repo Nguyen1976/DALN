@@ -21,6 +21,7 @@ import { LoggerService } from '@app/logger'
 import {
   LoginUserDto,
   MakeFriendDto,
+  MakeFriendByUsernameDto,
   ResendOtpDto,
   RegisterUserDto,
   UpdateProfileDto,
@@ -190,6 +191,27 @@ export class UserHttpController {
       inviterId: user.userId,
       inviterName: user.username,
       inviteeEmail: body.email,
+    })
+
+    return {
+      status: 'SUCCESS',
+    }
+  }
+
+  /**
+   * Gửi lời mời theo username — dùng ở thẻ gợi ý kết bạn, nơi client chỉ có
+   * username chứ không có (và không nên có) email của người lạ.
+   */
+  @Post('make-friend-by-username')
+  @RequireLogin()
+  async makeFriendByUsername(
+    @Body() body: MakeFriendByUsernameDto,
+    @UserInfo() user: any,
+  ) {
+    await this.userService.makeFriend({
+      inviterId: user.userId,
+      inviterName: user.username,
+      inviteeUsername: body.username,
     })
 
     return {
