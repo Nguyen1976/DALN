@@ -173,7 +173,7 @@ export default function ChatWindow({
     conversation,
     effectiveConversation,
     stopTyping,
-    bottomRef,
+    scrollToBottom,
   });
 
   const { handleRevokeMessage, handleDeleteMessageForMe, handleClearHistory } =
@@ -333,7 +333,11 @@ export default function ChatWindow({
       </div>
 
       <div
-        className="custom-scrollbar flex-1 overflow-y-auto px-3 py-4 sm:px-6"
+        // `relative` makes the list the containing block of absolutely
+        // positioned descendants (the 1px `sr-only` labels in SeenStatus and
+        // poll results). Without it they escaped the scroller, overflowed the
+        // `overflow-hidden` app shell, and made the whole app scrollable.
+        className="custom-scrollbar relative flex-1 overflow-y-auto px-3 py-4 sm:px-6"
         ref={containerRef}
         onScroll={handleScroll}
         role="log"
