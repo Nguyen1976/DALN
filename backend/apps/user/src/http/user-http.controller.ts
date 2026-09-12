@@ -31,6 +31,7 @@ import {
 import {
   ACCESS_TOKEN_MAX_AGE_MS,
   REFRESH_TOKEN_MAX_AGE_MS,
+  isSecureCookie,
 } from '@app/common/auth/auth.guard'
 
 /**
@@ -43,7 +44,7 @@ import {
  */
 const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: isSecureCookie(),
   sameSite: 'lax',
   path: '/',
 } as const

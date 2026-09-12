@@ -29,6 +29,21 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # ----------------------------------------------------------------------------
+# Schema: đồng bộ collection + index MongoDB (prisma db push) trước khi app chạy.
+# Image production đã prune sạch prisma CLI nên cần stage riêng có đủ devDeps.
+# Chỉ copy thư mục prisma -> sửa code không làm build lại stage này.
+# ----------------------------------------------------------------------------
+FROM deps AS schema
+COPY apps/user/prisma apps/user/prisma
+COPY apps/chat/prisma apps/chat/prisma
+COPY apps/notification/prisma apps/notification/prisma
+COPY apps/recommendation/prisma apps/recommendation/prisma
+COPY apps/saga-orchestrator/prisma apps/saga-orchestrator/prisma
+COPY docker/db-push.sh /usr/local/bin/db-push.sh
+RUN chmod +x /usr/local/bin/db-push.sh
+ENTRYPOINT ["db-push.sh"]
+
+# ----------------------------------------------------------------------------
 # Development: 1 image cho tất cả service, source được bind-mount lúc runtime
 # ----------------------------------------------------------------------------
 FROM base AS development

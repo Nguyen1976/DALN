@@ -91,6 +91,8 @@ plugins:
         - http://127.0.0.1:5173
         - http://localhost:5174
         - http://127.0.0.1:5174
+        # Production hiện chạy HTTP qua IP (web ở cổng 80 -> Origin không kèm cổng).
+        - http://109.199.115.126
         - https://nguyen1976.xyz
       methods:
         - GET

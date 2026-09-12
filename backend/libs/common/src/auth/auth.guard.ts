@@ -18,6 +18,19 @@ export const ACCESS_TOKEN_MAX_AGE_MS = 15 * 60 * 1000
 export const REFRESH_TOKEN_TTL = '7d'
 export const REFRESH_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
+/**
+ * Cookie phiên có gắn cờ Secure hay không. Mặc định bật khi NODE_ENV=production.
+ * COOKIE_SECURE=false cho phép production chạy qua HTTP thuần (truy cập bằng IP,
+ * chưa có TLS): trên origin http:// trình duyệt lặng lẽ bỏ cookie Secure, và đăng
+ * nhập trông như hỏng mà không có lỗi nào.
+ */
+export function isSecureCookie(): boolean {
+  const flag = process.env.COOKIE_SECURE?.trim().toLowerCase()
+  if (flag === 'true') return true
+  if (flag === 'false') return false
+  return process.env.NODE_ENV === 'production'
+}
+
 /** So sánh chuỗi theo thời gian hằng định để không rò rỉ độ dài/nội dung token. */
 function timingSafeEqualStr(a: string, b: string): boolean {
   const bufA = Buffer.from(a)
@@ -100,7 +113,7 @@ export class AuthGuard implements CanActivate {
 
       response.cookie('accessToken', newAccessToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isSecureCookie(),
         sameSite: 'lax',
         maxAge: ACCESS_TOKEN_MAX_AGE_MS,
         path: '/',

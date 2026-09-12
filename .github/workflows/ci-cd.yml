@@ -1,0 +1,119 @@
+name: CI/CD
+
+# Một workflow cho cả frontend + backend.
+#   - PR vào main  : chỉ kiểm tra (typecheck/test BE, lint/build FE) -> chặn merge nếu đỏ.
+#   - push vào main: kiểm tra xong -> SSH vào server, server kéo đúng commit này
+#                    về và build lại toàn bộ (xem deploy/deploy.sh).
+#   - Run workflow : deploy lại HEAD của main (vd. sau khi sửa env trên server),
+#                    hoặc điền SHA của commit cũ trên main để rollback.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "SHA đủ 40 ký tự của commit trên main để deploy (để trống = HEAD của main)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# PR: bản mới huỷ bản cũ. main: xếp hàng, không bao giờ huỷ một lượt deploy đang chạy.
+concurrency:
+  group: ci-cd-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    name: Backend — typecheck & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # Prisma client là code sinh ra mà phần còn lại của source import tới;
+      # thiếu nó thì typecheck không resolve được module.
+      - name: Generate Prisma clients
+        run: |
+          for schema in apps/*/prisma/schema.prisma; do
+            npx prisma generate --schema="$schema"
+          done
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test -- --ci
+
+      # Chưa phải cổng chặn: codebase còn ~1.3k cảnh báo `no-unsafe-*`, là một
+      # đợt dọn riêng. Chạy ở đây để con số luôn hiện ra mà kéo xuống dần.
+      - name: Lint (informational)
+        continue-on-error: true
+        run: npm run lint:check
+
+  frontend:
+    name: Frontend — lint & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      # Vite 7 cần Node >= 20.19.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    name: Deploy lên server
+    needs: [backend, frontend]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # Key deploy trên server bị khoá bằng forced command (deploy/remote-entry.sh):
+      # nó chỉ nhận một commit SHA đã nằm trên main, không mở được shell.
+      - name: Deploy qua SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ vars.DEPLOY_HOST }}
+          SHA: ${{ inputs.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            "root@${HOST}" "$SHA"
