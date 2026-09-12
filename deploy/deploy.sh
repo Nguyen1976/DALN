@@ -4,6 +4,12 @@
 #
 # Gọi bởi /usr/local/bin/daln-deploy (CI/CD) sau khi đã reset về đúng commit,
 # hoặc chạy tay trên server:  bash deploy/deploy.sh
+#
+# Chỉ phần có thay đổi mới tốn thời gian:
+#   - mỗi image build từ đúng file của nó; image không đổi thì ăn cache BuildKit,
+#     vài giây là xong;
+#   - `up -d` chỉ tạo lại container có image/cấu hình đổi;
+#   - Kong chỉ restart khi một service phía sau nó vừa được tạo lại.
 # ============================================================================
 set -euo pipefail
 
@@ -19,20 +25,65 @@ compose() {
   docker compose -f docker-compose.prod.yml --env-file .env.production "$@"
 }
 
+# Label của Kong mang hash này (docker-compose.prod.yml): đổi kong.yml thì compose
+# tạo lại Kong. Bind mount một file không tự nạp lại khi git thay file đó.
+KONG_CONFIG_SHA="$(sha256sum kong/kong.yml | cut -c1-16)"
+export KONG_CONFIG_SHA
+
+image_id() {
+  docker image inspect -f '{{.Id}}' "daln/$1:latest" 2>/dev/null || true
+}
+
+# "<service> <container id>" của mọi container trong project, kể cả đã dừng.
+containers() {
+  docker ps -a --filter label=com.docker.compose.project=daln-prod \
+    --format '{{.Label "com.docker.compose.service"}} {{.ID}}' | sort
+}
+
 echo "[deploy] Commit $(git -C "${ROOT}" log -1 --format='%h %s')"
 
-# Build TUẦN TỰ: máy 4 core / 8GB, build song song 8 image rất dễ OOM. Image nào
-# không đổi thì ăn cache BuildKit, chỉ mất vài giây.
+# Build TUẦN TỰ: máy 4 core / 8GB, build song song 8 image rất dễ OOM.
+built=""
 for svc in db-push user chat notification realtime-gateway recommendation saga-orchestrator web; do
   echo "[deploy] Build ${svc}"
+  started=${SECONDS}
+  before="$(image_id "${svc}")"
   compose build "${svc}"
+  if [ "$(image_id "${svc}")" != "${before}" ]; then
+    built+=" ${svc}"
+    echo "[deploy] Build ${svc}: image mới ($((SECONDS - started))s)"
+  else
+    echo "[deploy] Build ${svc}: không đổi ($((SECONDS - started))s)"
+  fi
 done
 
+before="$(containers)"
 compose up -d --remove-orphans
+# Container mang ID mới = vừa được tạo (lại).
+recreated="$(comm -13 <(printf '%s\n' "${before}") <(containers) | cut -d' ' -f1 | tr '\n' ' ')"
 
-# Kong cache DNS: container app được tạo lại thì đổi IP, Kong trả 502 cho tới khi
-# phân giải lại. Restart cũng nạp lại kong.yml (bind mount không tự reload).
-compose restart kong
+# Kong cache DNS: service phía sau được tạo lại thì đổi IP, Kong trả 502 cho tới khi
+# phân giải lại. Kong vừa được tạo lại thì đã phân giải mới, khỏi restart.
+kong="giữ nguyên"
+if [[ " ${recreated} " == *" kong "* ]]; then
+  kong="tạo lại"
+else
+  for svc in user chat notification realtime-gateway recommendation; do
+    if [[ " ${recreated} " == *" ${svc} "* ]]; then
+      compose restart kong
+      kong="restart (${svc} vừa được tạo lại)"
+      break
+    fi
+  done
+fi
+
+summary() {
+  echo "[deploy] ===== Tóm tắt ====="
+  echo "[deploy] Image mới :${built:- không có}"
+  echo "[deploy] Tạo lại   : ${recreated:-không có}"
+  echo "[deploy] Kong      : ${kong}"
+  echo "[deploy] Tổng      : ${SECONDS}s"
+}
 
 # ---- Smoke check ----
 # "<500": Kong đã chạm tới service (401/404 là service trả lời); 502/503 là không tới.
@@ -63,9 +114,11 @@ check minio          "http://127.0.0.1:9000/minio/health/live"                  
 if [ "${failed}" -ne 0 ]; then
   compose ps
   compose logs --tail 80
+  summary
   exit 1
 fi
 
 docker image prune -f >/dev/null
 docker builder prune -f --filter until=168h >/dev/null
+summary
 echo "[deploy] Xong"

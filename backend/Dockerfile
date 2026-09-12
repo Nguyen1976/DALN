@@ -63,8 +63,16 @@ FROM base AS build
 ARG SERVICE
 ARG TARGETARCH
 ENV SERVICE=${SERVICE}
+# Thiếu SERVICE thì COPY bên dưới thành `apps/` -> lặng lẽ build cả monorepo.
+RUN test -n "${SERVICE}" || { echo "Thiếu build-arg SERVICE" >&2; exit 1; }
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+# Chỉ copy thứ service này cần, KHÔNG `COPY . .`: sửa code service khác (hay
+# scripts/, kong/, compose...) không làm mất cache của image này, nên deploy chỉ
+# build lại service thật sự đổi. An toàn vì không app nào import code của app
+# khác — chỉ import libs/.
+COPY package.json package-lock.json nest-cli.json tsconfig*.json ./
+COPY libs libs
+COPY apps/${SERVICE} apps/${SERVICE}
 # Prisma: chỉ sinh query engine cho OS/arch của image (không ship native/darwin).
 RUN if [ -f "apps/${SERVICE}/prisma/schema.prisma" ]; then \
       rm -rf "apps/${SERVICE}/src/generated" && \

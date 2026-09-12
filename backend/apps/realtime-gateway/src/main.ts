@@ -3,6 +3,8 @@ import { RealtimeGatewayModule } from './realtime-gateway.module'
 import { RedisIoAdapter } from './realtime/redis.adapter'
 async function bootstrap() {
   const app = await NestFactory.create(RealtimeGatewayModule)
+  // Deploy gửi SIGTERM: đóng kết nối gọn rồi thoát, thay vì chờ Docker SIGKILL.
+  app.enableShutdownHooks()
   const redisIoAdapter = new RedisIoAdapter(app)
   await redisIoAdapter.connectToRedis()
 

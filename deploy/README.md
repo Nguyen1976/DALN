@@ -24,6 +24,23 @@ Cấu hình trên GitHub: secret `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`; variabl
 Key deploy bị khoá bằng forced command: nó chỉ nhận một commit SHA đã nằm trên `main`,
 không mở được shell.
 
+## Deploy chỉ làm lại phần có thay đổi
+
+| Sửa ở đâu | Deploy làm gì |
+|---|---|
+| `backend/apps/<svc>/` | build + tạo lại đúng `<svc>`; restart Kong nếu `<svc>` nằm sau Kong |
+| `backend/apps/*/prisma/` | như trên, cộng db-push đồng bộ index |
+| `backend/libs/`, `backend/docker/`, `package*.json`, `tsconfig*.json`, `nest-cli.json`, `Dockerfile` | build lại cả 6 service backend; chỉ service ra image khác mới bị tạo lại |
+| `frontend/` | chỉ build + tạo lại `web`, API không gián đoạn |
+| `backend/kong/kong.yml` | chỉ tạo lại Kong |
+| docs, `backend/scripts/`, `deploy/` | không build lại gì |
+
+Cuối log deploy có bảng tóm tắt: image nào mới, container nào được tạo lại, Kong có
+restart không, tổng thời gian. Lần đầu sau khi sửa `Dockerfile` thì build lại tất cả.
+
+Chạy tay `dc up -d` (không qua `deploy.sh`) thì Kong bị tạo lại một lần, vì label
+`daln.kong-config` thành `manual`. Vô hại.
+
 ## Env
 
 - File thật: `/root/workspace/DALN/backend/.env.production` — chỉ nằm trên server (quyền 600),

@@ -26,6 +26,10 @@ x-app-env: &app-env
 
 x-app: &app
   restart: unless-stopped
+  # tini làm PID 1 và chuyển tín hiệu cho node. Không có nó, node là PID 1 và
+  # kernel bỏ qua SIGTERM không có handler: container chỉ chết khi Docker SIGKILL
+  # sau 10s — mỗi container bị tạo lại lúc deploy là mất trắng 10s.
+  init: true
   env_file:
     - .env.production
   networks:
@@ -333,6 +337,10 @@ services:
     image: kong:3.7
     container_name: daln-prod-kong
     restart: unless-stopped
+    # deploy/deploy.sh đặt KONG_CONFIG_SHA = hash của kong/kong.yml: đổi file thì
+    # label đổi và compose tạo lại Kong (bind mount một file không tự nạp lại).
+    labels:
+      daln.kong-config: ${KONG_CONFIG_SHA:-manual}
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yml

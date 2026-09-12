@@ -5,6 +5,9 @@ import { AppHttpExceptionFilter, ResponseInterceptor, validationExceptionFactory
 import cookieParser from 'cookie-parser'
 async function bootstrap() {
   const app = await NestFactory.create(ChatModule)
+  // Deploy gửi SIGTERM: chạy onModuleDestroy (MessageBatchWriter ghi nốt lô tin nhắn
+  // đang đệm, OutboxRelay dừng, Prisma ngắt kết nối) rồi mới thoát.
+  app.enableShutdownHooks()
 
   app.use(cookieParser())
   app.useGlobalPipes(

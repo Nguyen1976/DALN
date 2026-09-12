@@ -6,6 +6,8 @@ import cookieParser from 'cookie-parser'
 
 async function bootstrap() {
   const app = await NestFactory.create(UserModule)
+  // Deploy gửi SIGTERM: đóng kết nối gọn rồi thoát, thay vì chờ Docker SIGKILL.
+  app.enableShutdownHooks()
 
   app.use(cookieParser())
   app.useGlobalPipes(
