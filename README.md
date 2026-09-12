@@ -1,135 +1,270 @@
-<p align="center">
-  <a href="https://nestjs.com/" target="_blank"><img src="https://nestjs.com/img/logo-small.svg" width="80" alt="Nest Logo" /></a>
-  &nbsp;&nbsp;
-  <a href="https://react.dev/" target="_blank"><img src="https://upload.wikimedia.org/wikipedia/commons/a/a7/React-icon.svg" width="80" alt="React Logo" /></a>
-</p>
+<div align="center">
 
-<p align="center">
-  <strong>DALN — Real-time Chat Platform</strong>
-</p>
+# DALN Chat
 
-<p align="center">
-  Event-driven microservices chat application built with NestJS and React.
-</p>
+**A real-time messaging platform built as event-driven NestJS microservices.**
 
-<p align="center">
-  <a href="https://nguyen1976.xyz" target="_blank"><img src="https://img.shields.io/badge/demo-live-22c55e?style=flat-square" alt="Live Demo" /></a>
-  <a href="https://github.com/Nguyen1976/DALN" target="_blank"><img src="https://img.shields.io/github/stars/Nguyen1976/DALN?style=flat-square" alt="GitHub Stars" /></a>
-  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/NestJS-E0234E?style=flat-square&logo=nestjs&logoColor=white" alt="NestJS" />
-  <img src="https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React" />
-</p>
+1:1 and group chat · voice and video calls · friend suggestions from a trained link-prediction model
 
----
+[![CI/CD](https://github.com/Nguyen1976/DALN/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/Nguyen1976/DALN/actions/workflows/ci-cd.yml) ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white) ![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?style=flat-square&logo=nestjs&logoColor=white) ![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black) ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.13-FF6600?style=flat-square&logo=rabbitmq&logoColor=white) ![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?style=flat-square&logo=mongodb&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
-## Description
+[**Live demo**](http://109.199.115.126) · [Architecture](#architecture) · [Engineering notes](#engineering-notes) · [Run it locally](#run-it-locally)
 
-**DALN** is a full-stack real-time messaging platform with a microservices backend. It supports 1:1 and group chat, online presence, friend requests, and AI-powered friend recommendations — designed for scalability with async messaging, caching, and distributed transaction patterns.
+</div>
 
-**Live demo**
+<br>
 
-| | URL |
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/ui-screenshots/10-chat-direct-dark.png">
+  <img alt="DALN Chat: a direct conversation next to the conversation list with unread counters" src="docs/ui-screenshots/10-chat-direct-light.png">
+</picture>
+
+## At a glance
+
+| Number | What it is |
 |---|---|
-| Frontend | [https://nguyen1976.xyz](https://nguyen1976.xyz) |
-| API (Kong) | [https://api.nguyen1976.xyz](https://api.nguyen1976.xyz) |
+| **3,500 msg/s** | sustained by a **single** chat instance in a k6 ramp, at **p95 115 ms** |
+| **~139× less CPU** | per stored message, by batching writes into one `createMany` |
+| **6 services** | behind one Kong gateway, coordinated over one RabbitMQ bus |
+| **0.93 AUC** | Gradient Boosting link-prediction model behind friend suggestions |
+| **45 automated checks** | 21 unit tests and 24 end-to-end cases driving two real browsers |
+| **75 user stories** | across 15 epics, in [`docs/DALN-User-Stories.xlsx`](docs/DALN-User-Stories.xlsx) |
 
-## Highlights
+## Features
 
-- **Microservices architecture** — 6 NestJS services behind Kong API Gateway
-- **Real-time messaging** — Socket.IO gateway with Redis-backed presence tracking
-- **Event-driven writes** — RabbitMQ + Redis batching to reduce database pressure
-- **Distributed consistency** — Saga Orchestration + Transactional Outbox pattern
-- **Friend recommendation** — Top-K suggestions via social graph, bio similarity (Qdrant), and location signals
-- **CI/CD on AWS** — GitHub Actions, Docker, ECR, EC2, S3, CloudFront
+**Messaging**
+- Direct and group conversations with unread counters, search and an "unread only" filter
+- Replies that quote the original message, emoji, multi-line composer
+- Image and file attachments uploaded straight to object storage through presigned URLs
+- Read receipts, typing indicator, online / offline presence
+- Revoke a message for everyone or delete it just for yourself; clear a conversation's history
+- Polls inside group chats
+
+**Calls**
+- Voice and video calls over WebRTC, with a ringing timeout and a call record left in the conversation
+
+**Social**
+- Friend requests, friends list, groups with member management (add, remove, leave)
+- Friend suggestions ranked by a trained model, plus an interest onboarding step after sign-up
+
+**Account and notifications**
+- Email sign-up with OTP verification and a password strength meter
+- In-app notifications with per-channel settings (in-app, email, realtime)
+- Light and dark themes, responsive down to phone width
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/ui-screenshots/18-chat-group-poll-dark.png" alt="Group chat with a poll"></td>
+    <td width="50%"><img src="docs/ui-screenshots/17-modal-voice-call-dark.png" alt="Voice call"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Group chat with a live poll</sub></td>
+    <td align="center"><sub>Voice call over WebRTC</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/ui-screenshots/24-recommendations-dark.png" alt="Friend suggestions"></td>
+    <td width="50%"><img src="docs/ui-screenshots/16-chat-profile-panel-dark.png" alt="Conversation profile panel"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Friend suggestions</sub></td>
+    <td align="center"><sub>Conversation details panel</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/ui-screenshots/101-m-chat-list-dark.png" alt="Mobile: conversation list" width="30%">
+  &nbsp;
+  <img src="docs/ui-screenshots/102-m-chat-thread-dark.png" alt="Mobile: conversation" width="30%">
+  &nbsp;
+  <img src="docs/ui-screenshots/104-m-recommendations-dark.png" alt="Mobile: friend suggestions" width="30%">
+</p>
+
+All 32 screens, in light and dark, live in [`docs/ui-screenshots`](docs/ui-screenshots).
 
 ## Architecture
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────────────────────────┐
-│  React SPA  │────▶│  Kong :8000  │────▶│  user · chat · notification · …     │
-│  (Vite)     │     │  API Gateway │     │  NestJS microservices               │
-└──────┬──────┘     └──────────────┘     └──────────┬──────────────────────────┘
-       │                                              │
-       │ WebSocket                                    │ RabbitMQ / BullMQ
-       ▼                                              ▼
-┌─────────────┐                            ┌──────────────────┐
-│  Realtime   │◀──────────────────────────▶│  MongoDB · Redis │
-│  Gateway    │                            │  Qdrant          │
-└─────────────┘                            └──────────────────┘
-```
+![DALN architecture: the web client reaches five services through Kong; all six services exchange events over RabbitMQ](docs/diagrams/architecture.png)
 
-### Services
+- **One way in.** The browser only ever talks to Kong on port 8000: REST for every service and the Socket.IO connection for realtime, with CORS and rate limiting in one place.
+- **One bus between services.** Each service owns its MongoDB database and publishes domain events to RabbitMQ topic exchanges; the realtime gateway turns those events into socket pushes.
+- **Consistency without distributed transactions.** State changes that other services depend on leave through a transactional outbox, consumers deduplicate through an inbox, and multi-step workflows run as an orchestrated saga.
 
-| Service | Responsibility |
-|---------|----------------|
-| `user` | Auth, profiles, friendships |
-| `chat` | Conversations, messages, read receipts |
-| `notification` | Email & in-app notifications |
-| `realtime-gateway` | WebSocket events, presence |
-| `recommendation` | Friend suggestions (Qdrant + graph) |
-| `saga-orchestrator` | Cross-service workflows (e.g. accept friend) |
+| Service | Owns | Notes |
+|---|---|---|
+| `user` | accounts, auth, friendships, profiles | issues JWT cookies; starts the friend-accept saga |
+| `chat` | conversations, messages, polls, call records, media | micro-batched writes; presigned uploads to MinIO |
+| `notification` | in-app notifications, email | OTP and friend-request emails over SMTP |
+| `realtime-gateway` | Socket.IO connections, presence | turns bus events into pushes to rooms |
+| `recommendation` | friend suggestions | an API process plus a worker for training and nightly batches |
+| `saga-orchestrator` | saga state | coordinates friend-accept, including compensation |
 
-## Tech Stack
+**Infrastructure:** MongoDB 7 (replica set, one database per service, 30 Prisma models) · Redis 7 (presence, membership cache, unread counters, BullMQ) · RabbitMQ 3.13 · Qdrant 1.19 (bio embeddings) · MinIO (S3-compatible media) · Kong 3.7.
 
-**Backend** — NestJS, TypeScript, Prisma, MongoDB, Redis, RabbitMQ, BullMQ, Socket.IO, Kong, Qdrant
+## Engineering notes
 
-**Frontend** — React, TypeScript, Vite, Redux Toolkit, TailwindCSS, Radix UI
+### 1. 3,500 messages a second on one instance
 
-**DevOps** — Docker, GitHub Actions, AWS (EC2, ECR, S3, CloudFront, Route 53)
+![Message pipeline: sockets fan into the gateway, RabbitMQ buffers, a batch writer stores up to 100 messages per createMany](docs/diagrams/message-pipeline.png)
 
-## Project Structure
+Before batching, the same chat instance saturated at about 690 msg/s. The fix was to stop paying a database round-trip per message:
 
-```
-DALN/
-├── backend/          # NestJS monorepo (microservices)
-│   ├── apps/       # user, chat, notification, realtime-gateway, …
-│   ├── libs/       # shared modules
-│   ├── kong/       # API gateway config
-│   └── docker-compose.yml
-├── frontend/       # React SPA (Vite)
-├── testing/        # k6 / Playwright load & E2E tests
-└── training/       # offline ML pipeline for recommendations
-```
+- The gateway turns each socket event into a RabbitMQ message; the chat consumer keeps up to **300 in flight** (prefetch).
+- Each message goes to a batch writer, and the handler awaits a promise that is **not resolved yet**. The writer flushes when **100 messages** are buffered or **20 ms** have passed, in a single `createMany`, then resolves every waiting handler.
+- The RabbitMQ message is acked only after its promise resolves, so a crash mid-batch means redelivery, not loss.
+- Ids are generated in the app (`ObjectId`), so the batch insert and the realtime fan-out agree on the id before the row exists.
+- Unread counters stay off MongoDB's hot path: a Redis `HINCRBY` plus a dirty set, flushed by a cron every 5 seconds.
 
-## Getting Started
+Measured with [`testing/test_sendmessage.js`](testing/test_sendmessage.js) (k6 over Socket.IO): a 500 → 2,000 → 3,500 msg/s ramp at p95 115 ms on a clean collection. The script documents its own traps too: the load generator's ceiling, and why test data must be cleared between runs.
 
-### Prerequisites
+### 2. Consistency across services: the friend-accept saga
 
-- Node.js 20+
-- Docker & Docker Compose
+![Friend-accept saga: user service, saga orchestrator, chat and notification, with an ALT fragment for completion versus compensation](docs/diagrams/friend-accept-saga.png)
 
-### Backend (local)
+Accepting a friend request touches three services and there is no distributed transaction, so:
+
+- The user service commits the friendship **and an outbox row in the same MongoDB transaction**; the `OutboxRelay` publishes it. The event exists if, and only if, the write happened.
+- The orchestrator persists saga state and issues commands (create conversation, then notify). Each participant replies `OK` or `FAILED`.
+- Every consumer runs inside `consumeIdempotent`: the message id goes into an inbox with a unique index, so a redelivered message hits `P2002` and is skipped.
+- Failures compensate in reverse: notify is retried three times, then the conversation is deleted and the friendship reverted.
+
+### 3. Auth that survives expired tokens, on HTTP and WebSocket
+
+- A 15-minute access token and a 7-day refresh token, both in httpOnly cookies.
+- One `resolveTokens()` decides for both the HTTP guard and the Socket.IO handshake. HTTP silently re-issues the access cookie; the socket accepts a still-valid refresh token.
+- A rejected socket first receives a machine-readable `auth:error` code. The client retries with bounded exponential backoff (at most 5 attempts) instead of going silent until the page is reloaded.
+- Covered by [`testing/e2e/socket-auth.spec.js`](testing/e2e/socket-auth.spec.js), which was checked to fail against the previous gateway.
+
+### 4. Friend suggestions from a trained model
+
+Offline, [`training/`](training) builds a link-prediction dataset from the Brightkite social graph in Neo4j and compares five models:
+
+| Model | Test F1 | Test AUC |
+|---|---|---|
+| Logistic Regression | 0.822 | 0.909 |
+| Random Forest | 0.852 | 0.931 |
+| **Gradient Boosting** | **0.851** | **0.932** |
+| k-Nearest Neighbors | 0.839 | 0.901 |
+| C4.5 | 0.848 | 0.930 |
+
+Online, the recommendation service ranks candidates with the exported Gradient Boosting model. Candidates come from friends-of-friends and shared groups in MongoDB, plus bio similarity from multilingual MiniLM embeddings in Qdrant. A separate worker process runs the training queue (BullMQ) and the nightly recompute, so the API stays responsive.
+
+### 5. Shipping: one workflow, one server
+
+- [`ci-cd.yml`](.github/workflows/ci-cd.yml): pull requests to `main` run backend typecheck and unit tests plus frontend lint and build; merging deploys.
+- The deploy key can only deploy. An SSH forced command accepts a 40-character SHA that must already be on `main`, takes a lock, resets to it and runs [`deploy/deploy.sh`](deploy/deploy.sh).
+- Images are built on the server. A build-time check fails any image whose bundle `require()`s a module that per-service dependency pruning removed, so a broken image never replaces a running container.
+- A fresh MongoDB gets its unique indexes from a `db-push` step before any service starts. After every deploy, smoke checks hit each route through Kong.
+
+Details are in [`deploy/README.md`](deploy/README.md).
+
+## Tech stack
+
+| Layer | Tools |
+|---|---|
+| Frontend | React 19, TypeScript, Vite 7, Redux Toolkit + redux-persist, React Router 7, Tailwind CSS 4, Radix UI, React Hook Form + Zod, Socket.IO client, WebRTC |
+| Backend | NestJS 11 monorepo (6 apps), Prisma 6 on MongoDB, `@golevelup/nestjs-rabbitmq`, Socket.IO, ioredis, BullMQ, Nodemailer, AWS SDK v3 (S3 API), prom-client |
+| Data | MongoDB 7 replica set, Redis 7, RabbitMQ 3.13, Qdrant 1.19, MinIO |
+| ML | Transformers.js (multilingual MiniLM embeddings), Gradient Boosting ranker; Python, scikit-learn, NetworkX and Neo4j for offline training |
+| Infra | Kong 3.7, Docker Compose, Nginx, GitHub Actions |
+| Testing | Jest, Playwright (two-browser e2e), k6 |
+
+## Run it locally
+
+You need Docker and Node.js 20.19 or newer.
 
 ```bash
-cd backend
-# Cần file .env và .env.docker (xem docker-compose.yml)
+git clone https://github.com/Nguyen1976/DALN.git
+cd DALN/backend
+touch .env
 docker compose up -d
 ```
 
-Services will be available through Kong at `http://localhost:8080`.
-
-### Frontend (local)
+The first `up` builds one dev image shared by all six services, then starts them with hot reload next to MongoDB, Redis, RabbitMQ, Qdrant, MinIO, MailHog and Kong. Dev defaults live in the tracked `.env.docker`; the empty `.env` is only there for your own overrides, such as real SMTP credentials.
 
 ```bash
-cd frontend
-npm install
+cd ../frontend
+npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+| URL | What |
+|---|---|
+| http://localhost:5173 | the web app |
+| http://localhost:8080 | Kong: API and WebSocket |
+| http://localhost:8025 | MailHog, where sign-up OTP emails land |
+| http://localhost:9001 | MinIO console (`minioadmin` / `minioadmin`) |
+| http://localhost:15672 | RabbitMQ management (`user` / `user`) |
 
-### Production deploy
+## Tests
 
-Pushing to `main` triggers GitHub Actions:
+**Unit tests**
 
-- **Backend** — build Docker images → push to ECR → deploy to EC2 via SSM
-- **Frontend** — build static assets → sync to S3 → invalidate CloudFront
+```bash
+cd backend
+npm test
+```
 
-Manual deploy: **Actions → Deploy Backend / Deploy Frontend → Run workflow**.
+**End-to-end.** Two real Chrome sessions act as two users: sign-in, friend request, accept, the new conversation appearing on both sides with the right name, and messages flowing both ways. The suite seeds its own accounts and removes them afterwards.
+
+```bash
+cd testing
+npm ci
+npm install --no-save playwright
+cd ..
+docker cp testing/e2e/seed.js daln-user:/tmp/seed.js
+export E2E_SEED="$(docker exec -e NODE_PATH=/app/node_modules daln-user node /tmp/seed.js)"
+node testing/e2e/realtime.spec.js
+node testing/e2e/socket-auth.spec.js
+```
+
+Clean up afterwards:
+
+```bash
+docker cp testing/e2e/cleanup.js daln-user:/tmp/cleanup.js
+docker exec -e NODE_PATH=/app/node_modules \
+  -e CHAT_DATABASE_URL="mongodb://mongo:27017/chat-service?replicaSet=rs0" \
+  daln-user node /tmp/cleanup.js
+```
+
+**Load test.** `k6 run testing/test_sendmessage.js` runs the 3,500 msg/s ramp. Read the header of [`test_sendmessage.js`](testing/test_sendmessage.js) first: it covers the accounts it expects, other stage plans, and the cleanup step between runs.
+
+## Project structure
+
+```
+DALN/
+├── backend/                     NestJS monorepo
+│   ├── apps/                    user · chat · notification · realtime-gateway · recommendation · saga-orchestrator
+│   ├── libs/                    common (auth) · saga (outbox, inbox) · redis · qdrant · storage-s3 · mailer · logger · …
+│   ├── kong/kong.yml            gateway routes, CORS, rate limits
+│   ├── docker-compose.yml       dev stack: hot reload and local infrastructure
+│   └── docker-compose.prod.yml  production stack
+├── frontend/                    React SPA, plus the nginx image used in production
+├── deploy/                      server-side deploy scripts
+├── testing/                     k6 load test, Playwright end-to-end suites
+├── training/                    offline link-prediction pipeline (Neo4j, scikit-learn)
+└── docs/                        user stories, diagrams, UI screenshots
+```
+
+## Documentation
+
+- [`docs/DALN-User-Stories.xlsx`](docs/DALN-User-Stories.xlsx): 75 user stories across 15 epics, with acceptance criteria
+- [`docs/diagrams/`](docs/diagrams): the diagrams above, as editable HTML sources and PNG exports
+- [`docs/socketio-presence-online-offline.md`](docs/socketio-presence-online-offline.md): how online presence is tracked
+- [`training/README.md`](training/README.md): the training pipeline
+- [`deploy/README.md`](deploy/README.md): deployment and operations
+
+## Roadmap
+
+- HTTPS on a domain (the demo currently runs over plain HTTP on the server's IP)
+- A revocation channel that closes sockets when a session is revoked
+- Scheduled MongoDB backups
+- Running more than one chat consumer (today a deliberate single instance)
 
 ## Author
 
-**Nguyen Ha Nguyen** — Backend Developer
+**Nguyen Ha Nguyen**, Backend Developer
 
 - GitHub: [@Nguyen1976](https://github.com/Nguyen1976)
 - Email: nguyenhanguyen25.work@gmail.com

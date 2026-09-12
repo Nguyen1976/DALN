@@ -1,73 +1,40 @@
-# React + TypeScript + Vite
+# DALN Chat: frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The React single-page app for DALN Chat. For the architecture, features and how the backend fits in, see the [root README](../README.md).
 
-Currently, two official plugins are available:
+**Stack:** React 19, TypeScript, Vite 7, Redux Toolkit + redux-persist, React Router 7, Tailwind CSS 4, Radix UI, React Hook Form + Zod, Socket.IO client, WebRTC.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Scripts
 
-## React Compiler
+| Command | What it does |
+|---|---|
+| `npm run dev` | Vite dev server on http://localhost:5173 |
+| `npm run build` | type-check (`tsc -b`) and production build into `dist/` |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | type-check only |
+| `npm run preview` | serve the production build locally |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Configuration
 
-## Expanding the ESLint configuration
+Two variables, both baked into the bundle at build time:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+| Variable | Dev default (`.env.development`) | Meaning |
+|---|---|---|
+| `VITE_API_ROOT` | `http://localhost:8080` | Kong gateway, the only API entry point |
+| `VITE_SOCKET_URL` | `http://localhost:8080/realtime` | Socket.IO namespace, also routed through Kong |
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+For production, [`Dockerfile`](Dockerfile) takes them as build args and serves the build with nginx ([`nginx.conf`](nginx.conf): SPA fallback, long-lived caching for hashed assets, `index.html` never cached).
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Layout
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+src/
+├── apis/         API calls over one axios instance that sends the session cookies
+├── components/   shared UI
+├── hooks/        chat, socket events, typing, WebRTC calls, ringtones
+├── layouts/      app shells
+├── lib/          Socket.IO client and its auth-recovery logic
+├── pages/        Auth, VerifyOtp, InterestOnboarding, Chat, Friend, Recommendation, NotificationSettings
+├── redux/        slices + redux-persist
+└── utils/        helpers, constants, media limits
 ```
