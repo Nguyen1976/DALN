@@ -98,6 +98,23 @@ function probeSocket(cookie, ms = 6000) {
       `mã lỗi sai: nhận '${r.authCode}' (${r.ev.join(' -> ')})`)
   })
 
+  // Trình duyệt xoá cookie accessToken đúng lúc JWT hết hạn (maxAge = TTL), nên
+  // từ phút thứ 15 mọi request chỉ còn mang refreshToken. TCS1 không bắt được
+  // tình huống này: nó tự dựng cookie chứa access hết hạn — thứ trình duyệt thật
+  // không bao giờ gửi.
+  await tc('TCS5 chỉ còn cookie refresh (access đã bị trình duyệt xoá) -> socket VẪN nối được', async () => {
+    const r = await probeSocket(`refreshToken=${GOOD_REFRESH}`)
+    assert(r.stayed, `bị ngắt dù refresh còn hạn: ${r.ev.join(' -> ')}`)
+    assert(!r.authCode, `không được phát auth:error, nhận: ${r.authCode}`)
+  })
+
+  await tc('TCS6 chỉ còn cookie refresh -> HTTP 200 và được cấp lại cookie accessToken', async () => {
+    const res = await fetch(`${API}/user/me`, { headers: { Cookie: `refreshToken=${GOOD_REFRESH}` } })
+    const renewed = res.headers.getSetCookie().some((c) => c.startsWith('accessToken='))
+    assert(res.status === 200, `mong 200, nhận ${res.status}`)
+    assert(renewed, 'server không cấp lại cookie accessToken')
+  })
+
   // ---- kiểm trong TRÌNH DUYỆT THẬT ----
   await tc('TCS4 Trình duyệt: phiên chết -> KHÔNG lặp vô hạn, có báo mã lỗi', async () => {
     const b = await chromium.launch({ headless: true, channel: 'chrome' })
