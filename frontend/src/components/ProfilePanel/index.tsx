@@ -34,11 +34,12 @@ export default function ProfilePanel({
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
-  const conversation = useSelector(
-    (state: { conversations: ConversationState }) => {
-      return state.conversations?.find((c) => c.id === conversationId);
-    },
-  ) as Conversation;
+  // Có thể chưa có: bảng được mở trước khi danh sách hội thoại (hoặc bản tải theo
+  // id) về tới store.
+  const conversation: Conversation | undefined = useSelector(
+    (state: { conversations: ConversationState }) =>
+      state.conversations?.find((c) => c.id === conversationId),
+  );
 
   const title = conversation?.displayName || "Cuộc trò chuyện";
 
@@ -132,21 +133,51 @@ export default function ProfilePanel({
     return message.medias?.[0]?.url || "";
   };
 
-  return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-sidebar md:static md:z-auto md:w-80 md:shrink-0 md:border-l md:border-border lg:w-96">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h2 className="text-base font-semibold tracking-[-0.01em] text-foreground">
-          Thông tin cuộc trò chuyện
-        </h2>
-        <Button
-          variant="ghost-muted"
-          size="icon"
-          onClick={onClose}
-          aria-label="Đóng bảng thông tin"
+  const panelClassName =
+    "fixed inset-0 z-40 flex flex-col bg-sidebar md:static md:z-auto md:w-80 md:shrink-0 md:border-l md:border-border lg:w-96";
+  const header = (
+    <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+      <h2 className="text-base font-semibold tracking-[-0.01em] text-foreground">
+        Thông tin cuộc trò chuyện
+      </h2>
+      <Button
+        variant="ghost-muted"
+        size="icon"
+        onClick={onClose}
+        aria-label="Đóng bảng thông tin"
+      >
+        <X className="size-5" />
+      </Button>
+    </div>
+  );
+
+  // Mở thẳng /chat/<id> (hay F5) rồi bấm "Xem chi tiết" trước khi hội thoại về
+  // tới store thì chưa có gì để hiện. Trước đây bảng vẫn đọc
+  // conversation.groupAvatar và làm sập cả trang; giờ nó chờ rồi tự hiện.
+  if (!conversation) {
+    return (
+      <div className={panelClassName}>
+        {header}
+        <div
+          role="status"
+          aria-busy="true"
+          aria-label="Đang tải thông tin cuộc trò chuyện"
+          className="space-y-6 p-6"
         >
-          <X className="size-5" />
-        </Button>
+          <div className="flex flex-col items-center gap-3">
+            <Skeleton className="size-24 rounded-full" />
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-4 w-28" />
+          </div>
+          <Skeleton className="h-24 w-full rounded-xl" />
+        </div>
       </div>
+    );
+  }
+
+  return (
+    <div className={panelClassName}>
+      {header}
 
       <div className="custom-scrollbar flex-1 overflow-y-auto">
         <div className="space-y-6 p-6">
