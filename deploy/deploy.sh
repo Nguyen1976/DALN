@@ -30,8 +30,12 @@ compose() {
 KONG_CONFIG_SHA="$(sha256sum kong/kong.yml | cut -c1-16)"
 export KONG_CONFIG_SHA
 
+# Dấu vân tay NỘI DUNG của image (layer + config), không phải .Id: với containerd
+# image store (server đang dùng), .Id là digest của index và đổi sau mỗi lần build,
+# kể cả khi build ăn cache hoàn toàn.
 image_id() {
-  docker image inspect -f '{{.Id}}' "daln/$1:latest" 2>/dev/null || true
+  { docker image inspect -f '{{json .RootFS.Layers}}{{json .Config}}' "daln/$1:latest" 2>/dev/null || true; } |
+    sha256sum | cut -c1-16
 }
 
 # "<service> <container id>" của mọi container trong project, kể cả đã dừng.
