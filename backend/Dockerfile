@@ -108,6 +108,10 @@ COPY --from=build /app/libs/mailer/src/templates ./libs/mailer/src/templates
 COPY docker/link-prisma-generated.sh /tmp/link-prisma-generated.sh
 RUN chmod +x /tmp/link-prisma-generated.sh \
     && /tmp/link-prisma-generated.sh "${SERVICE}"
+# Prune xoá nhầm package mà service còn dùng -> build fail ở đây, không để tới
+# lúc container mới khởi động rồi chết ("Cannot find module").
+COPY docker/check-externals.js /tmp/check-externals.js
+RUN node /tmp/check-externals.js "${SERVICE}" && rm /tmp/check-externals.js
 COPY docker/entrypoint.prod.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 EXPOSE 3001 3002 3003 3004 3005
