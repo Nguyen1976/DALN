@@ -85,8 +85,15 @@ export function useChatMessagesScroll({
     setIsAtBottom(true);
   }, [conversationId]);
 
+  // Tự cuộn xuống chỉ khi tin CUỐI đổi (tin mới tới, hoặc lần ghim đầu), không
+  // phải khi tải thêm tin cũ ở đầu danh sách. Trước đây effect theo
+  // messages.length: tải lịch sử cũng làm length đổi, và nếu lúc đó còn cách
+  // đáy dưới 120px (mới mở, danh sách 20 tin rất ngắn) thì bị kéo tuột về đáy —
+  // người đang cuộn lên đọc bị giật xuống, và tin tới sau bị tính là đã xem.
+  const lastMessageId = messages[messages.length - 1]?.id;
+
   useEffect(() => {
-    if (!isAtBottom || !messages.length) return;
+    if (!isAtBottom || !lastMessageId) return;
 
     const isInitial = initialPinnedForRef.current !== conversationId;
 
@@ -107,7 +114,7 @@ export function useChatMessagesScroll({
     }
 
     scrollListToBottom("smooth");
-  }, [messages.length, isAtBottom, conversationId, scrollListToBottom]);
+  }, [lastMessageId, isAtBottom, conversationId, scrollListToBottom]);
 
   useEffect(() => {
     if (!conversationId || !canLoadMessages || messages.length > 0) return;
@@ -121,14 +128,26 @@ export function useChatMessagesScroll({
     );
   }, [canLoadMessages, conversationId, dispatch, messages.length]);
 
+  // Chặn gọi chồng: IntersectionObserver và handleScroll (scrollTop <= 24) có
+  // thể cùng gọi trong một nhịp, trước khi state isLoadingOlder kịp đổi — hai
+  // request cùng cursor, phần giữ vị trí cuộn bị cộng hai lần và người đang đọc
+  // lịch sử bị đẩy tụt xuống gần đáy. Chỉ nhả sau khi đã giữ lại vị trí cuộn.
+  const loadingOlderRef = useRef(false);
+
   const loadOlderMessages = useCallback(async () => {
     if (!conversationId || !canLoadMessages) return;
-    if (!pagination.hasMore || !pagination.oldestCursor || isLoadingOlder) {
+    if (
+      !pagination.hasMore ||
+      !pagination.oldestCursor ||
+      loadingOlderRef.current
+    ) {
       return;
     }
+    loadingOlderRef.current = true;
 
     const container = containerRef.current;
     const previousHeight = container?.scrollHeight || 0;
+    const previousTop = container?.scrollTop || 0;
 
     setIsLoadingOlder(true);
     try {
@@ -143,9 +162,15 @@ export function useChatMessagesScroll({
       requestAnimationFrame(() => {
         const current = containerRef.current;
         if (current) {
-          const nextHeight = current.scrollHeight;
-          current.scrollTop = nextHeight - previousHeight + current.scrollTop;
+          // Đặt TUYỆT ĐỐI từ vị trí trước khi tải. Cộng vào scrollTop hiện tại
+          // thì bù hai lần khi Chrome tự neo cuộn (scroll anchoring) — trình
+          // duyệt đã bù phần tin chèn lên trên, cộng thêm nữa là đẩy người đọc
+          // tụt xuống tận đáy. Sát đỉnh (scrollTop 0) trình duyệt không neo nên
+          // vẫn cần tự bù; công thức này đúng cho cả hai trường hợp.
+          current.scrollTop =
+            previousTop + (current.scrollHeight - previousHeight);
         }
+        loadingOlderRef.current = false;
       });
       setIsLoadingOlder(false);
     }
@@ -153,7 +178,6 @@ export function useChatMessagesScroll({
     canLoadMessages,
     conversationId,
     dispatch,
-    isLoadingOlder,
     pagination.hasMore,
     pagination.oldestCursor,
   ]);
