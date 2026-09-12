@@ -1,64 +1,38 @@
 import { useEffect } from "react";
-import { useDispatch, useSelector } from "react-redux";
+import { useDispatch } from "react-redux";
 import { socket } from "@/lib/socket";
-import {
-  markConversationRead,
-  selectConversationById,
-} from "@/redux/slices/conversationSlice";
 import { clearTypingUsers } from "@/redux/slices/typingIndicatorSlice";
-import { selectUser } from "@/redux/slices/userSlice";
-import { SOCKET_EVENTS } from "@/lib/socket.events";
-import type { AppDispatch, RootState } from "@/redux/store";
+import type { AppDispatch } from "@/redux/store";
 
+/**
+ * Join room `conversation:<id>` để nhận typing / user:read_batch của hội thoại
+ * đang mở.
+ *
+ * Effect chỉ phụ thuộc vào `conversationId`. Trước đây nó còn phụ thuộc vào tin
+ * nhắn cuối cùng, nên mỗi tin mới lại leave rồi join lại room — socket có thể
+ * lỡ typing / user:read_batch trong khoảng hở đó — và gửi thêm một
+ * `message:read` trùng. Việc báo "đã xem" giờ chỉ do useChatMessagesScroll lo,
+ * và chỉ khi người dùng thực sự nhìn thấy tin nhắn.
+ */
 export const useConversationRoom = (conversationId?: string) => {
   const dispatch = useDispatch<AppDispatch>();
-  const conversation = useSelector((state: RootState) =>
-    conversationId ? selectConversationById(state, conversationId) : null,
-  );
-  const user = useSelector(selectUser);
-
-  const isObjectId = (value?: string | null) =>
-    typeof value === "string" && /^[a-f\d]{24}$/i.test(value);
 
   useEffect(() => {
     if (!conversationId) return;
 
-    const handleConnect = () => {
+    const joinRoom = () => {
       socket.emit("conversation:join", { conversationId });
-      dispatch(markConversationRead({ conversationId }));
-
-      const lastMessageId =
-        conversation?.lastMessageId || conversation?.lastMessage?.id;
-
-      if (
-        lastMessageId &&
-        isObjectId(lastMessageId) &&
-        conversation?.lastMessageSenderId !== user.id
-      ) {
-        socket.emit(SOCKET_EVENTS.CHAT.MESSAGE_READ, {
-          conversationId,
-          lastMessageId,
-        });
-      }
     };
 
-    if (socket.connected) {
-      handleConnect();
-    } else {
-      socket.on("connect", handleConnect);
-    }
+    // Room gắn với từng kết nối: sau khi reconnect server coi đây là socket mới
+    // và không còn giữ room cũ, nên phải join lại mỗi lần "connect".
+    if (socket.connected) joinRoom();
+    socket.on("connect", joinRoom);
 
     return () => {
-      socket.off("connect", handleConnect);
+      socket.off("connect", joinRoom);
       socket.emit("conversation:leave", { conversationId });
       dispatch(clearTypingUsers(conversationId));
     };
-  }, [
-    conversation?.lastMessage?.id,
-    conversation?.lastMessageId,
-    conversation?.lastMessageSenderId,
-    conversationId,
-    dispatch,
-    user.id,
-  ]);
+  }, [conversationId, dispatch]);
 };
