@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { RedisService } from '@app/redis'
-import { DIRTY_CONVERSATIONS_KEY } from '../background-jobs/unread/unread.constants'
+import {
+  DIRTY_CONVERSATIONS_KEY,
+  SET_NEWEST_ID_SCRIPT,
+  lastMessageKey,
+  unreadCountKey,
+  unreadLastKey,
+} from '../background-jobs/unread/unread.constants'
 import type {
   CallEndedPayload,
   MessageSendPayload,
@@ -622,14 +628,46 @@ export class MessageService {
       lastMessageSenderAvatar: senderMember.avatar || null,
     })
 
-    // Một round-trip cho cả ba lệnh. SADD đặt CUỐI để khi cron pop được id ra
-    // thì dữ liệu đã nằm sẵn trong Redis.
-    void this.redisService
-      .pipeline([
-        ['hincrby', `unread_count:${conversationId}`, senderId, 1],
-        ['set', `last_message:${conversationId}`, lastMessage],
-        ['sadd', DIRTY_CONVERSATIONS_KEY, conversationId],
+    const commands: (string | number)[][] = []
+
+    // Id tin mới nhất theo người gửi: cron dùng nó để KHÔNG cộng unread cho
+    // người đã đọc tới tin này. "Chỉ ghi khi lớn hơn" (Lua) để lệnh tới trễ
+    // không kéo lùi. Đặt TRƯỚC HINCRBY: nếu lượt claim của cron lỡ chen vào
+    // giữa pipeline (hiếm — Redis thường chạy liền cả gói), thà đếm dư một tin
+    // (lần đọc sau tự lành) còn hơn đếm thiếu (người nhận mất badge).
+    const messageId = String(message.id ?? '').toLowerCase()
+    if (this.isObjectId(messageId)) {
+      commands.push([
+        'eval',
+        SET_NEWEST_ID_SCRIPT,
+        1,
+        unreadLastKey(conversationId),
+        senderId,
+        messageId,
       ])
+    }
+
+    // Một round-trip cho cả gói. SADD đặt CUỐI để khi cron pop được id ra thì
+    // dữ liệu đã nằm sẵn trong Redis.
+    commands.push(
+      ['hincrby', unreadCountKey(conversationId), senderId, 1],
+      ['set', lastMessageKey(conversationId), lastMessage],
+      ['sadd', DIRTY_CONVERSATIONS_KEY, conversationId],
+    )
+
+    void this.redisService
+      .pipeline(commands)
+      .then((results) => {
+        // Pipeline không reject khi MỘT lệnh lỗi (vd. script hỏng): lỗi nằm
+        // trong từng phần tử kết quả, phải tự soi.
+        const failed = (results ?? []).find(([error]) => error)
+        if (failed) {
+          this.logger.error(
+            '[chat-service] unread pipeline command failed',
+            failed[0],
+          )
+        }
+      })
       .catch((error) => {
         this.logger.error('[chat-service] unread pipeline failed', error)
       })

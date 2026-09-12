@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
+import type Redis from 'ioredis'
 // import Redis, { Redis as RedisClient, RedisOptions } from 'ioredis'
 
 /** Set chỉ mục các user đang online — phải khớp với UserStatusStore. */
@@ -142,6 +143,20 @@ export class RedisService {
   ): Promise<[Error | null, unknown][]> {
     if (!commands.length) return []
     return await this.redisClient.pipeline(commands).exec()
+  }
+
+  /**
+   * Chạy một Lua script (EVAL). Cả script chạy nguyên tử trên Redis: không lệnh
+   * nào của client khác chen vào giữa. Mọi key script đụng tới phải truyền qua
+   * `keys`, không tự ghép tên key bên trong script.
+   */
+  async eval(
+    script: string,
+    keys: string[],
+    args: (string | number)[] = [],
+  ): Promise<unknown> {
+    const client = this.redisClient as Redis
+    return await client.eval(script, keys.length, ...keys, ...args)
   }
 
   private getRegistrationOtpKey(email: string): string {
