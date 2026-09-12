@@ -75,6 +75,11 @@ export function GroupMemberManager() {
 
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Xoá thành viên từng chạy ngay ở cú bấm vào dấu X.
+  const [memberToRemove, setMemberToRemove] = useState<{
+    userId: string;
+    name: string;
+  } | null>(null);
 
   const myRole = conversation?.members?.find(
     (member) => member.userId === user.id,
@@ -315,6 +320,21 @@ export function GroupMemberManager() {
         onConfirm={() => void handleDeleteConversation()}
       />
 
+      <ConfirmDialog
+        open={memberToRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) setMemberToRemove(null);
+        }}
+        title="Xoá thành viên khỏi nhóm?"
+        description={`${memberToRemove?.name ?? "Thành viên này"} sẽ bị xoá khỏi "${conversation?.groupName || "nhóm"}" và không nhận tin nhắn mới nữa. Muốn cho vào lại, bạn phải thêm lại từ đầu.`}
+        confirmLabel="Xoá khỏi nhóm"
+        onConfirm={() => {
+          const target = memberToRemove;
+          setMemberToRemove(null);
+          if (target) void handleRemoveMember(target.userId);
+        }}
+      />
+
       <PopoverContent className="w-80 p-0 bg-background border-accent/20">
         <div className="p-4 border-b border-accent/10">
           <h3 className="text-sm font-semibold text-foreground">
@@ -438,7 +458,13 @@ export function GroupMemberManager() {
                               variant="ghost"
                               size="icon"
                               disabled={pendingMemberId === member.userId}
-                              onClick={() => handleRemoveMember(member.userId)}
+                              onClick={() =>
+                                setMemberToRemove({
+                                  userId: member.userId,
+                                  name: displayName,
+                                })
+                              }
+                              aria-label={`Xoá ${displayName} khỏi nhóm`}
                               className="h-8 w-8 text-muted-foreground hover:text-destructive"
                             >
                               <X className="w-4 h-4" />

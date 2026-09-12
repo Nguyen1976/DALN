@@ -38,6 +38,7 @@ import { formatRelativeTime } from "@/utils/formatDateTime";
 import MessageComponent from "./Messages";
 import { MessageMapper } from "@/utils/messageMapper";
 import EmojiPicker from "emoji-picker-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Popover,
   PopoverContent,
@@ -178,6 +179,13 @@ export default function ChatWindow({
 
   const { handleRevokeMessage, handleDeleteMessageForMe, handleClearHistory } =
     useChatMessageActions({ conversationId, messages });
+
+  // Thu hồi với mọi người và xoá phía mình đều không hoàn tác được, mà trước
+  // đây chạy ngay ở cú bấm đầu tiên trong menu tin nhắn.
+  const [pendingMessageAction, setPendingMessageAction] = useState<{
+    kind: "revoke" | "deleteForMe";
+    message: Parameters<typeof handleRevokeMessage>[0];
+  } | null>(null);
 
   const poll = useChatPoll({ conversationId, messages });
   const isGroupConversation = effectiveConversation?.type === "GROUP";
@@ -353,8 +361,12 @@ export default function ChatWindow({
           messages={messages}
           highlightMessageId={highlightMessageId}
           seenMessages={seenMessages}
-          onRevokeMessage={handleRevokeMessage}
-          onDeleteMessageForMe={handleDeleteMessageForMe}
+          onRevokeMessage={(message) =>
+            setPendingMessageAction({ kind: "revoke", message })
+          }
+          onDeleteMessageForMe={(message) =>
+            setPendingMessageAction({ kind: "deleteForMe", message })
+          }
           onOpenPoll={poll.handleOpenPoll}
           pollVoteSelections={poll.pollVoteSelections}
           onRetryMessage={handleRetryMessage}
@@ -625,6 +637,32 @@ export default function ChatWindow({
           để xuống dòng
         </p>
       </div>
+
+      <ConfirmDialog
+        open={pendingMessageAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingMessageAction(null);
+        }}
+        title={
+          pendingMessageAction?.kind === "revoke"
+            ? "Thu hồi tin nhắn này?"
+            : "Xoá tin nhắn ở phía bạn?"
+        }
+        description={
+          pendingMessageAction?.kind === "revoke"
+            ? "Tin nhắn sẽ bị gỡ với mọi người trong cuộc trò chuyện. Thao tác này không thể hoàn tác."
+            : "Tin nhắn chỉ biến mất ở phía bạn, người khác vẫn thấy. Thao tác này không thể hoàn tác."
+        }
+        confirmLabel={pendingMessageAction?.kind === "revoke" ? "Thu hồi" : "Xoá"}
+        onConfirm={() => {
+          const action = pendingMessageAction;
+          setPendingMessageAction(null);
+          if (!action) return;
+          void (action.kind === "revoke"
+            ? handleRevokeMessage(action.message)
+            : handleDeleteMessageForMe(action.message));
+        }}
+      />
 
       <Dialog
         open={showClearHistoryDialog}

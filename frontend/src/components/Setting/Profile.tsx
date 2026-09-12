@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Form } from "../ui/form";
 import {
   fetchUserByIdAPI,
+  logoutAPI,
   selectUser,
   updateProfileAPI,
 } from "@/redux/slices/userSlice";
@@ -15,6 +16,8 @@ import { useDispatch, useSelector } from "react-redux";
 import { useEffect, useState } from "react";
 import type { AppDispatch } from "@/redux/store";
 import { toast } from "sonner";
+import { useNavigate } from "react-router";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const formProfileScheme = z.object({
   fullName: z.string().min(1),
@@ -27,6 +30,13 @@ const Profile = () => {
   const user = useSelector(selectUser);
 
   const dispatch = useDispatch<AppDispatch>();
+  const navigate = useNavigate();
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const handleLogout = () => {
+    setConfirmLogout(false);
+    dispatch(logoutAPI());
+    navigate("/auth");
+  };
 
   useEffect(() => {
     dispatch(fetchUserByIdAPI(user.id));
@@ -145,7 +155,14 @@ const Profile = () => {
           </div>
         </div>
         <div className="border-t border-border p-6 flex items-center justify-between gap-4">
-          <Button variant="destructive" className="gap-2">
+          {/* Nút này từng là nút submit ngầm của form (không có type/onClick):
+              bấm "Đăng xuất" lại lưu hồ sơ chứ không đăng xuất. */}
+          <Button
+            type="button"
+            variant="destructive"
+            className="gap-2"
+            onClick={() => setConfirmLogout(true)}
+          >
             <LogOut className="w-4 h-4" />
             Đăng xuất
           </Button>
@@ -158,6 +175,14 @@ const Profile = () => {
           </Button>
         </div>
       </form>
+      <ConfirmDialog
+        open={confirmLogout}
+        onOpenChange={setConfirmLogout}
+        title="Đăng xuất khỏi DALN Chat?"
+        description="Bạn sẽ thoát khỏi tài khoản trên thiết bị này. Thay đổi hồ sơ chưa lưu và tin nhắn đang soạn dở sẽ không được giữ lại."
+        confirmLabel="Đăng xuất"
+        onConfirm={handleLogout}
+      />
     </Form>
   );
 };
