@@ -100,7 +100,10 @@ model message {
   type            messageType        @default(TEXT)
   content         String?
   replyToMessageId String?           @db.ObjectId
-  pollId          String?            @unique @db.ObjectId
+  /// KHÔNG đặt @unique: MongoDB coi tin thiếu field là `null`, nên unique index
+  /// chỉ cho đúng MỘT tin không kèm bình chọn tồn tại — mọi tin sau đó vỡ P2002.
+  /// Một-bình-chọn-một-tin do PollService giữ (tạo tin ngay khi tạo poll).
+  pollId          String?            @db.ObjectId
   isRevoked       Boolean            @default(false)
   isDeleted       Boolean            @default(false)
   /// Tin nhắn do hệ thống ghi (thêm/xoá thành viên, kết cục cuộc gọi...).
@@ -117,6 +120,7 @@ model message {
   medias          messageMedia[]
 
   @@index([conversationId, createdAt, id])
+  @@index([pollId])
 }
 
 type PollOption {
@@ -132,7 +136,7 @@ model poll {
   isClosed         Boolean     @default(false)
   closedAt         DateTime?
   options          PollOption[]
-  message          message?
+  messages         message[]
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 

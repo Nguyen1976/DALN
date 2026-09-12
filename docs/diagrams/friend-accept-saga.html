@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DALN · Friend-accept saga</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · Saga orchestration · DALN</p>
+    <h1>Accepting a friend request across three services</h1>
+
+    <svg viewBox="0 0 960 756" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="daln-friend-saga-title daln-friend-saga-desc">
+      <title id="daln-friend-saga-title">Friend-accept saga</title>
+      <desc id="daln-friend-saga-desc">Sequence showing the user service committing a friendship with an outbox event, the saga orchestrator commanding the chat service to create the conversation that is pushed to both users, then either completing after the notification step or compensating by deleting the conversation and reverting the friendship.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ============ LIFELINES — Clients 120 · User 300 · Saga 480 · Chat 660 · Notification 840 ============ -->
+      <line x1="120" y1="96" x2="120" y2="624" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="300" y1="96" x2="300" y2="624" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="480" y1="96" x2="480" y2="624" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="660" y1="96" x2="660" y2="624" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="840" y1="96" x2="840" y2="624" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+
+      <!-- ============ ALT FRAME (drawn early so messages sit on top) ============ -->
+      <rect x="240" y="376" width="624" height="232" rx="4" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <rect x="240" y="376" width="40" height="16" rx="2" fill="#f5f5f5" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <text x="260" y="388" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">ALT</text>
+      <text x="252" y="408" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">[ok]</text>
+      <line x1="248" y1="496" x2="856" y2="496" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="252" y="516" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">[fails]</text>
+
+      <!-- ============ ACTIVATION BARS ============ -->
+      <rect x="296" y="128" width="8" height="104" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="656" y="256" width="8" height="96" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="836" y="416" width="8" height="56" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+
+      <!-- ============ MESSAGES ============ -->
+      <!-- M1: Clients -> User  accept (HTTP) -->
+      <line x1="120" y1="136" x2="296" y2="136" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <rect x="164" y="116" width="92" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="210" y="125" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">POST · ACCEPT</text>
+
+      <!-- M2: User self — one transaction writes the friendship and the outbox row -->
+      <path d="M 304,168 H 336 V 192 H 308" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="344" y="176" width="64" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="376" y="185" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TX · OUTBOX</text>
+
+      <!-- M3: User -> Saga  trigger (async) -->
+      <line x1="304" y1="224" x2="476" y2="224" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <rect x="342" y="204" width="96" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="390" y="213" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ACCEPT.REQUESTED</text>
+
+      <!-- M4: Saga -> Chat  command (async) -->
+      <line x1="484" y1="264" x2="656" y2="264" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <rect x="500" y="244" width="140" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="570" y="253" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CMD.CREATE_CONVERSATION</text>
+
+      <!-- M5: Chat -> Saga  reply (return) -->
+      <line x1="656" y1="304" x2="484" y2="304" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="540" y="284" width="60" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="570" y="293" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">REPLY OK</text>
+
+      <!-- M6: Chat -> Clients  headline: conversation pushed to both users -->
+      <line x1="656" y1="344" x2="124" y2="344" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <rect x="328" y="324" width="124" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="390" y="333" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CONVERSATION.CREATED</text>
+
+      <!-- ALT region 1 [ok] -->
+      <!-- M7: Saga -> Notification  command (async) -->
+      <line x1="484" y1="424" x2="836" y2="424" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <rect x="512" y="404" width="116" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="570" y="413" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CMD.NOTIFY_ACCEPTED</text>
+
+      <!-- M8: Notification -> Saga  reply (return) -->
+      <line x1="836" y1="464" x2="484" y2="464" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="704" y="444" width="92" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="750" y="453" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">OK · COMPLETED</text>
+
+      <!-- ALT region 2 [fails] -->
+      <!-- M9: Saga -> Chat  compensation (async) -->
+      <line x1="484" y1="544" x2="656" y2="544" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <rect x="500" y="524" width="140" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="570" y="533" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CMP.DELETE_CONVERSATION</text>
+
+      <!-- M10: Saga -> User  compensation (async) -->
+      <line x1="476" y1="584" x2="304" y2="584" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <rect x="326" y="564" width="128" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="390" y="573" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CMP.REVERT_FRIENDSHIP</text>
+
+      <!-- ============ ACTOR BOXES (after arrows) ============ -->
+      <!-- Clients (input) -->
+      <rect x="48" y="40" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="48" y="40" width="144" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+      <rect x="56" y="48" width="28" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.40)" stroke-width="0.8"/>
+      <text x="70" y="57" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SPA</text>
+      <text x="120" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Clients</text>
+      <text x="120" y="88" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">user A · user B</text>
+
+      <!-- User service -->
+      <rect x="228" y="40" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="228" y="40" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="236" y="48" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="250" y="57" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+      <text x="300" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">User service</text>
+      <text x="300" y="88" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">friendship</text>
+
+      <!-- Saga orchestrator (focal actor) -->
+      <rect x="408" y="40" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="408" y="40" width="144" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <rect x="416" y="48" width="36" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="434" y="57" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SAGA</text>
+      <text x="480" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Saga orchestrator</text>
+      <text x="480" y="88" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">state machine</text>
+
+      <!-- Chat service -->
+      <rect x="588" y="40" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="588" y="40" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="596" y="48" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="610" y="57" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+      <text x="660" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Chat service</text>
+      <text x="660" y="88" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">conversation</text>
+
+      <!-- Notification service -->
+      <rect x="768" y="40" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="768" y="40" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="776" y="48" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="790" y="57" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+      <text x="840" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Notification</text>
+      <text x="840" y="88" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">email · in-app</text>
+
+      <!-- Editorial asides -->
+      <text x="48" y="652" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">Every command and reply leaves through an outbox and is deduplicated on arrival.</text>
+      <text x="48" y="672" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">Notify gets three tries before compensating; if the conversation can't be created, the saga reverts the friendship directly.</text>
+
+      <!-- ============ LEGEND ============ -->
+      <line x1="48" y1="696" x2="912" y2="696" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="48" y="712" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <rect x="48" y="724" width="14" height="10" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="68" y="732" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Orchestrator</text>
+
+      <rect x="152" y="720" width="28" height="18" rx="2" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <text x="160" y="732" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace">ALT</text>
+      <text x="188" y="732" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Fragment</text>
+
+      <line x1="264" y1="728" x2="292" y2="728" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <text x="300" y="732" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">HTTP call</text>
+
+      <line x1="384" y1="728" x2="412" y2="728" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <text x="420" y="732" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Command / event (RabbitMQ)</text>
+
+      <line x1="572" y1="728" x2="600" y2="728" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <text x="608" y="732" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Reply</text>
+
+      <line x1="664" y1="728" x2="692" y2="728" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="700" y="732" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Pushed to both users over the realtime gateway</text>
+    </svg>
+  </div>
+</body>
+</html>

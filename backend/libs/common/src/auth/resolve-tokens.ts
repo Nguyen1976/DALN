@@ -26,17 +26,17 @@ export type TokenResolution =
   | {
       ok: true
       payload: JwtPayload
-      /** true = access hết hạn, danh tính lấy từ refresh token -> nên cấp access mới. */
+      /** true = access hết hạn hoặc không còn, danh tính lấy từ refresh token -> nên cấp access mới. */
       usedRefresh: boolean
     }
   | { ok: false; code: TokenErrorCode }
 
 export type TokenErrorCode =
-  /** Không có access token nào trong cookie. */
+  /** Không có cookie phiên nào — cả access lẫn refresh. Chưa đăng nhập. */
   | 'ACCESS_TOKEN_MISSING'
   /** Access hết hạn và không có refresh token đi kèm. */
   | 'REFRESH_TOKEN_MISSING'
-  /** Access hết hạn, refresh cũng hỏng hoặc hết hạn -> phiên chấm dứt thật. */
+  /** Phải dựa vào refresh, nhưng refresh hỏng hoặc hết hạn -> phiên chấm dứt thật. */
   | 'REFRESH_TOKEN_INVALID'
   /** Access sai chữ ký / méo mó (không phải hết hạn). */
   | 'TOKEN_INVALID'
@@ -47,7 +47,15 @@ export function resolveTokens(
   refreshToken?: string | null,
 ): TokenResolution {
   if (!accessToken) {
-    return { ok: false, code: 'ACCESS_TOKEN_MISSING' }
+    // Cookie accessToken có maxAge đúng bằng TTL của JWT, nên trình duyệt xoá
+    // nó đúng lúc token hết hạn: từ phút thứ 15 mọi request chỉ còn mang
+    // refreshToken. "Không có access" vì thế thường là "access đã hết hạn",
+    // không phải "chưa đăng nhập" — trả ACCESS_TOKEN_MISSING ở đây từng đá
+    // người dùng ra ngoài dù refresh còn hạn 7 ngày.
+    if (!refreshToken) {
+      return { ok: false, code: 'ACCESS_TOKEN_MISSING' }
+    }
+    return resolveFromRefresh(jwtService, refreshToken)
   }
 
   try {
@@ -67,15 +75,23 @@ export function resolveTokens(
       return { ok: false, code: 'REFRESH_TOKEN_MISSING' }
     }
 
-    try {
-      return {
-        ok: true,
-        payload: jwtService.verify(refreshToken) as JwtPayload,
-        usedRefresh: true,
-      }
-    } catch {
-      return { ok: false, code: 'REFRESH_TOKEN_INVALID' }
+    return resolveFromRefresh(jwtService, refreshToken)
+  }
+}
+
+/** Nhánh làm mới dùng chung cho "access hết hạn" và "access đã bị xoá". */
+function resolveFromRefresh(
+  jwtService: JwtService,
+  refreshToken: string,
+): TokenResolution {
+  try {
+    return {
+      ok: true,
+      payload: jwtService.verify(refreshToken) as JwtPayload,
+      usedRefresh: true,
     }
+  } catch {
+    return { ok: false, code: 'REFRESH_TOKEN_INVALID' }
   }
 }
 
