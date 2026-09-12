@@ -1,3 +1,4 @@
+import { normalizeEmail } from "@/utils/email";
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
@@ -53,7 +54,10 @@ export const loginAPI = createAsyncThunk(
   `/user/login`,
   async (data: { email: string; password: string }, { rejectWithValue }) => {
     try {
-      const response = await authorizeAxiosInstance.post("/user/login", data);
+      const response = await authorizeAxiosInstance.post("/user/login", {
+        ...data,
+        email: normalizeEmail(data.email),
+      });
       return response.data.data;
     } catch (error) {
       return rejectWithValue(getErrorMessage(error));

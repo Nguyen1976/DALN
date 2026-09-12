@@ -6,6 +6,8 @@ import { RecommendationModule } from './recommendation.module'
 
 async function bootstrap() {
   const app = await NestFactory.create(RecommendationModule)
+  // Deploy gửi SIGTERM: đóng kết nối gọn rồi thoát, thay vì chờ Docker SIGKILL.
+  app.enableShutdownHooks()
 
   app.use(cookieParser())
   app.useGlobalPipes(

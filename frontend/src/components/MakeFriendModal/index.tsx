@@ -34,7 +34,7 @@ export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
     inFlight.current = true;
     clearErrors("email");
     try {
-      await makeFriendRequest(data.email.trim());
+      await makeFriendRequest(data.email);
       toast.success("Đã gửi lời mời kết bạn thành công");
       onClose();
     } catch (error) {

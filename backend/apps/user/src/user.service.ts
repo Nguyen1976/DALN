@@ -60,7 +60,9 @@ interface ResendOtpRequest {
 interface MakeFriendRequest {
   inviterId: string
   inviterName: string
-  inviteeEmail: string
+  /** Ô "Thêm bạn" gửi email; thẻ gợi ý gửi username. Có một là đủ. */
+  inviteeEmail?: string
+  inviteeUsername?: string
 }
 
 interface UpdateStatusRequest {
@@ -457,7 +459,10 @@ export class UserService {
   }
 
   async makeFriend(data: MakeFriendRequest): Promise<Friendship> {
-    const friend = await this.userRepo.findByEmail(data.inviteeEmail)
+    // Thẻ gợi ý gửi username (dữ liệu gợi ý không mang email), ô "Thêm bạn" gửi email.
+    const friend = data.inviteeUsername
+      ? await this.userRepo.findByUsername(data.inviteeUsername)
+      : await this.userRepo.findByEmail(data.inviteeEmail ?? '')
     if (!friend) {
       UserErrors.friendNotFound()
     }
@@ -502,7 +507,8 @@ export class UserService {
       friendRequestId: friendRequest.id,
       inviterId: data.inviterId,
       inviterName: data.inviterName,
-      inviteeEmail: data.inviteeEmail,
+      // Email thật của người nhận: gửi theo username thì request không có email.
+      inviteeEmail: friend.email,
       inviteeName: friend.username,
       inviteeId: friend.id,
     })

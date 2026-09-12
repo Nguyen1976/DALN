@@ -19,7 +19,9 @@ RUN test -n "${VITE_API_ROOT}" && test -n "${VITE_SOCKET_URL}" \
     || { echo "Thiếu build-arg VITE_API_ROOT / VITE_SOCKET_URL" >&2; exit 1; }
 ENV VITE_API_ROOT=${VITE_API_ROOT} \
     VITE_SOCKET_URL=${VITE_SOCKET_URL}
-RUN npm run build
+# Chỉ chạy vite: `npm run build` = `tsc -b && vite build`, mà job CI frontend đã
+# typecheck đúng commit này trước khi deploy -> bớt ~17s mỗi lần build web.
+RUN npx vite build
 
 FROM nginx:1.27-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Users, MessageSquare, LogOut, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -19,7 +21,11 @@ export function LeftNavigation() {
   const pathname = useLocation().pathname;
 
   const dispatch = useDispatch<AppDispatch>();
+  // The logout button sits at the bottom of the rail, right where a stray
+  // click lands; it used to sign out on the spot and drop unsent drafts.
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const handleLogout = () => {
+    setConfirmLogout(false);
     dispatch(logoutAPI());
     navigate("/auth");
   };
@@ -114,7 +120,7 @@ export function LeftNavigation() {
               variant="ghost"
               size="icon"
               aria-label="Đăng xuất"
-              onClick={handleLogout}
+              onClick={() => setConfirmLogout(true)}
               className="size-11 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive-text md:mt-auto"
             >
               <LogOut className="size-5" />
@@ -125,6 +131,15 @@ export function LeftNavigation() {
           </TooltipContent>
         </Tooltip>
       </nav>
+
+      <ConfirmDialog
+        open={confirmLogout}
+        onOpenChange={setConfirmLogout}
+        title="Đăng xuất khỏi DALN Chat?"
+        description="Bạn sẽ thoát khỏi tài khoản trên thiết bị này. Tin nhắn đang soạn dở chưa gửi sẽ không được giữ lại."
+        confirmLabel="Đăng xuất"
+        onConfirm={handleLogout}
+      />
     </TooltipProvider>
   );
 }
