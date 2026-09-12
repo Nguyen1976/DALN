@@ -45,6 +45,17 @@ export function useChatMessagesScroll({
   // Which conversation has already been pinned to its newest message.
   const initialPinnedForRef = useRef<string | null>(null);
 
+  // Scroll ONLY the message list. `element.scrollIntoView()` scrolls every
+  // scrollable ancestor as well — including the app shell, which is
+  // `overflow-hidden` but still scrollable from script — and with its default
+  // `block: "start"` it lifts the bottom of the thread to the top of the
+  // screen, dragging the whole app up and leaving empty space below.
+  const scrollListToBottom = useCallback((behavior: ScrollBehavior) => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+  }, []);
+
   useEffect(() => {
     initialPinnedForRef.current = null;
     setIsAtBottom(true);
@@ -60,17 +71,9 @@ export function useChatMessagesScroll({
     // at the top fires mid-animation and prepends content underneath it — the
     // thread then opens stranded somewhere in the middle. Jump on the first
     // pin, animate only for messages that arrive afterwards.
-    const scrollNow = () => {
-      const container = containerRef.current;
-      if (container) {
-        container.scrollTop = container.scrollHeight;
-      } else {
-        bottomRef.current?.scrollIntoView({ behavior: "auto" });
-      }
-    };
-
     if (isInitial) {
       initialPinnedForRef.current = conversationId ?? null;
+      const scrollNow = () => scrollListToBottom("auto");
       scrollNow();
       // Bubbles settle a frame later (avatars, wrapped text); pin again once
       // the final height is known.
@@ -79,8 +82,8 @@ export function useChatMessagesScroll({
       return;
     }
 
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, isAtBottom, conversationId]);
+    scrollListToBottom("smooth");
+  }, [messages.length, isAtBottom, conversationId, scrollListToBottom]);
 
   useEffect(() => {
     if (!conversationId || !canLoadMessages || messages.length > 0) return;
@@ -163,8 +166,20 @@ export function useChatMessagesScroll({
     if (!canLoadMessages || !focusMessageId || !conversationId) return;
 
     const targetElement = document.getElementById(`message-${focusMessageId}`);
-    if (targetElement) {
-      targetElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    const container = containerRef.current;
+    if (targetElement && container) {
+      // Centre the message inside the list only (see scrollListToBottom for
+      // why scrollIntoView is not used).
+      const offset =
+        targetElement.getBoundingClientRect().top -
+        container.getBoundingClientRect().top;
+      container.scrollTo({
+        top:
+          container.scrollTop +
+          offset -
+          (container.clientHeight - targetElement.clientHeight) / 2,
+        behavior: "smooth",
+      });
       setHighlightMessageId(focusMessageId);
       window.setTimeout(() => {
         setHighlightMessageId((prev) =>
@@ -230,8 +245,8 @@ export function useChatMessagesScroll({
   }, [canLoadMessages, loadOlderMessages]);
 
   const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
+    scrollListToBottom("smooth");
+  }, [scrollListToBottom]);
 
   return {
     containerRef,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type RefObject } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   createMessageUploadUrlAPI,
@@ -35,7 +35,8 @@ interface UseChatComposerOptions {
   conversation?: Conversation;
   effectiveConversation?: Conversation;
   stopTyping: () => void;
-  bottomRef: RefObject<HTMLDivElement | null>;
+  /** Cuộn danh sách tin xuống đáy — chỉ danh sách, không kéo cả trang. */
+  scrollToBottom: () => void;
 }
 
 /** Bao lâu không nhận được xác nhận thì coi là gửi hỏng. */
@@ -61,7 +62,7 @@ export function useChatComposer({
   conversation,
   effectiveConversation,
   stopTyping,
-  bottomRef,
+  scrollToBottom,
 }: UseChatComposerOptions) {
   const dispatch = useDispatch<AppDispatch>();
   /**
@@ -452,10 +453,10 @@ export function useChatComposer({
     setReplyingTo(null);
 
     requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      scrollToBottom();
     });
   }, [
-    bottomRef,
+    scrollToBottom,
     canSendMessage,
     conversationId,
     createTempMessage,
