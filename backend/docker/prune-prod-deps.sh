@@ -36,8 +36,8 @@ if [ "${SERVICE}" != "user" ] && [ "${SERVICE}" != "chat" ]; then
   rm -rf node_modules/@aws-sdk node_modules/@smithy
 fi
 
-# BullMQ — chỉ chat
-if [ "${SERVICE}" != "chat" ]; then
+# BullMQ — chỉ recommendation (hàng đợi huấn luyện). Chat đã bỏ BullMQ.
+if [ "${SERVICE}" != "recommendation" ]; then
   rm_rf bullmq @nestjs/bullmq
 fi
 
