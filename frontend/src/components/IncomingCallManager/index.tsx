@@ -31,7 +31,8 @@ function findConversationByCaller(
   return conversations.find(
     (item) =>
       item.type === "DIRECT" &&
-      item.members?.some((member) => member.userId === callerId),
+      (item.peerUserId === callerId ||
+        item.members?.some((member) => member.userId === callerId)),
   );
 }
 

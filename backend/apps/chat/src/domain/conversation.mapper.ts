@@ -1,6 +1,9 @@
+import { Logger } from '@nestjs/common'
 import { MessageMapper } from './message.mapper'
 
 export class ConversationMapper {
+  private static readonly logger = new Logger(ConversationMapper.name)
+
   static resolveUnreadCount(conversation: any, userId?: string): string {
     if (
       conversation?.unreadCount !== undefined &&
@@ -29,18 +32,53 @@ export class ConversationMapper {
       }
     }
 
+    // Ưu tiên trường phi chuẩn hoá trên dòng membership: danh sách hội thoại
+    // không còn kéo `members` nữa (include đó đắt tuyến tính theo số thành
+    // viên). `members` chỉ còn là đường dự phòng cho các payload vẫn mang nó
+    // — chi tiết hội thoại, sự kiện realtime.
     const peer = (conversation?.members || []).find(
       (member: any) => member.userId !== userId,
     )
 
-    return {
-      displayName:
-        peer?.username ||
-        peer?.fullName ||
-        conversation?.groupName ||
-        'Trò chuyện trực tiếp',
-      displayAvatar: peer?.avatar || conversation?.groupAvatar || '',
+    const displayName =
+      conversation?.peerUsername ||
+      conversation?.peerFullName ||
+      peer?.username ||
+      peer?.fullName ||
+      conversation?.groupName ||
+      null
+
+    if (!displayName) {
+      // Không rơi im lặng về chuỗi mặc định nữa. Trước đây payload realtime
+      // thiếu `members` khiến hội thoại vừa tạo hiện "Trò chuyện trực tiếp"
+      // và bug sống sót rất lâu vì chẳng ai kêu.
+      ConversationMapper.warnMissingPeer(conversation, userId)
     }
+
+    return {
+      displayName: displayName || 'Trò chuyện trực tiếp',
+      displayAvatar:
+        conversation?.peerAvatar ||
+        peer?.avatar ||
+        conversation?.groupAvatar ||
+        '',
+    }
+  }
+
+  /** Cảnh báo có tiết chế — DIRECT mà không xác định được đối phương là lỗi dữ liệu. */
+  private static warnedConversations = new Set<string>()
+  private static warnMissingPeer(conversation: any, userId?: string) {
+    const id = String(conversation?.id ?? 'unknown')
+    if (ConversationMapper.warnedConversations.has(id)) return
+    ConversationMapper.warnedConversations.add(id)
+    if (ConversationMapper.warnedConversations.size > 500) {
+      ConversationMapper.warnedConversations.clear()
+    }
+    ConversationMapper.logger.warn(
+      `DIRECT ${id}: không xác định được đối phương cho viewer ${userId ?? '?'} ` +
+        `(peerUsername=${conversation?.peerUsername ?? 'null'}, ` +
+        `members=${conversation?.members?.length ?? 0}) -> hiển thị tên mặc định`,
+    )
   }
 
   private static toIso(value: any): string | null {
@@ -118,6 +156,15 @@ export class ConversationMapper {
       displayName: display.displayName,
       displayAvatar: display.displayAvatar,
       memberCount: conversation.memberCount ?? conversation.members?.length ?? 0,
+      // Danh sách hội thoại không còn kèm `members`, nên client lấy id đối
+      // phương từ đây (dùng cho chấm trạng thái online ở sidebar).
+      peerUserId:
+        conversation.peerUserId ??
+        (conversation.type === 'DIRECT'
+          ? ((conversation.members || []).find(
+              (m: any) => m.userId !== userId,
+            )?.userId ?? null)
+          : null),
       unreadCount: this.resolveUnreadCount(conversation, userId),
       createdAt: this.toIso(conversation.createdAt)!,
       updatedAt: this.toIso(conversation.updatedAt)!,

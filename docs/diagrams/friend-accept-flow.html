@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Luồng chấp nhận kết bạn — DALN</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1360px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+      color: var(--color-ink); margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 1000px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · DALN</p>
+    <h1>Kết bạn → chấp nhận → tạo cuộc trò chuyện DIRECT</h1>
+
+    <svg viewBox="0 0 1360 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="friend-accept-title friend-accept-desc">
+      <title id="friend-accept-title">Luồng chấp nhận kết bạn và tạo cuộc trò chuyện DIRECT</title>
+      <desc id="friend-accept-desc">Sequence diagram cho thấy lời mời kết bạn đi từ frontend qua user-service, kích hoạt saga, chat-service ghi cuộc trò chuyện kèm tên thành viên vào database, nhưng sự kiện realtime chỉ mang danh sách id nên giao diện hiển thị tên dự phòng "Trò chuyện trực tiếp".</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ============ LIFELINES ============ -->
+      <line x1="120"  y1="88" x2="120"  y2="700" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="360"  y1="88" x2="360"  y2="700" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="600"  y1="88" x2="600"  y2="700" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="840"  y1="88" x2="840"  y2="700" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="1080" y1="88" x2="1080" y2="700" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+
+      <!-- ============ ACTIVATION BARS ============ -->
+      <rect x="356"  y="136" width="8" height="64"  fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="1076" y="184" width="8" height="24"  fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="356"  y="248" width="8" height="136" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="596"  y="360" width="8" height="228" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="836"  y="408" width="8" height="180" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="1076" y="520" width="8" height="132" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+
+      <!-- ============ MESSAGES ============ -->
+      <!-- M1 -->
+      <line x1="120" y1="144" x2="352" y2="144" stroke="#2e5aa8" stroke-width="1" marker-end="url(#arrow-link)"/>
+      <rect x="180" y="124" width="112" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="236" y="133" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /make-friend</text>
+
+      <!-- M2 -->
+      <line x1="364" y1="192" x2="1072" y2="192" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <rect x="656" y="172" width="128" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="720" y="181" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">user.new_friend_request</text>
+
+      <!-- M3 -->
+      <line x1="120" y1="256" x2="352" y2="256" stroke="#2e5aa8" stroke-width="1" marker-end="url(#arrow-link)"/>
+      <rect x="156" y="236" width="160" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="236" y="245" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /update-status  ACCEPT</text>
+
+      <!-- M4 self -->
+      <path d="M 368 296 H 408 V 316 H 368" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="416" y="292" width="152" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="420" y="301" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">TX: ACCEPTED + friendship</text>
+      <rect x="416" y="308" width="152" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="420" y="317" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">+ outbox trigger</text>
+
+      <!-- M5 -->
+      <line x1="364" y1="368" x2="592" y2="368" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <rect x="396" y="348" width="164" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="478" y="357" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">trigger · members[username]</text>
+
+      <!-- M6 -->
+      <line x1="604" y1="416" x2="832" y2="416" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <rect x="660" y="396" width="116" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="718" y="405" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">cmd.createConversation</text>
+
+      <!-- M7 self -->
+      <path d="M 848 456 H 888 V 476 H 848" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="896" y="452" width="156" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="900" y="461" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">TX: conversation + members</text>
+      <rect x="896" y="468" width="156" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="900" y="477" fill="#2d3142" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" letter-spacing="0.04em">username GHI ĐÚNG</text>
+
+      <!-- M8  BUG -->
+      <line x1="844" y1="528" x2="1072" y2="528" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <rect x="878" y="508" width="164" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="960" y="517" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">new_conversation { memberIds }</text>
+
+      <!-- M9 return -->
+      <line x1="832" y1="576" x2="608" y2="576" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="692" y="556" width="56" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="720" y="565" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">reply OK</text>
+
+      <!-- M10  BUG hiển thị -->
+      <line x1="1072" y1="640" x2="124" y2="640" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <rect x="512" y="620" width="176" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="600" y="629" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">displayName: Trò chuyện trực tiếp</text>
+
+      <!-- ============ ANNOTATION CALLOUT ============ -->
+      <text x="1344" y="600" fill="#eb6c36" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="end">payload thiếu members[]</text>
+      <path d="M 1336 608 Q 1220 584 1096 540" fill="none" stroke="rgba(235,108,54,0.50)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="1096" cy="540" r="2" fill="#eb6c36"/>
+
+      <!-- ============ ACTORS ============ -->
+      <rect x="40" y="40" width="160" height="48" rx="6" fill="#f5f5f5"/>
+      <rect x="40" y="40" width="160" height="48" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+      <rect x="48" y="46" width="28" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.40)" stroke-width="0.8"/>
+      <text x="62" y="55" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SPA</text>
+      <text x="120" y="78" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Frontend A / B</text>
+
+      <rect x="280" y="40" width="160" height="48" rx="6" fill="#f5f5f5"/>
+      <rect x="280" y="40" width="160" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="288" y="46" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="302" y="55" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SVC</text>
+      <text x="360" y="78" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">user-service</text>
+
+      <rect x="520" y="40" width="160" height="48" rx="6" fill="#f5f5f5"/>
+      <rect x="520" y="40" width="160" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="528" y="46" width="32" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="544" y="55" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SAGA</text>
+      <text x="600" y="78" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">saga-orchestrator</text>
+
+      <rect x="760" y="40" width="160" height="48" rx="6" fill="#f5f5f5"/>
+      <rect x="760" y="40" width="160" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="768" y="46" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="782" y="55" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SVC</text>
+      <text x="840" y="78" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">chat-service</text>
+
+      <rect x="1000" y="40" width="160" height="48" rx="6" fill="#f5f5f5"/>
+      <rect x="1000" y="40" width="160" height="48" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="1008" y="46" width="28" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.40)" stroke-width="0.8"/>
+      <text x="1022" y="55" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">WS</text>
+      <text x="1080" y="78" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">realtime-gateway</text>
+
+      <!-- ============ LEGEND ============ -->
+      <line x1="40" y1="724" x2="1320" y2="724" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="748" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+
+      <line x1="140" y1="744" x2="168" y2="744" stroke="#2e5aa8" stroke-width="1" marker-end="url(#arrow-link)"/>
+      <text x="176" y="748" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">HTTP QUA KONG</text>
+
+      <line x1="340" y1="744" x2="368" y2="744" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <text x="376" y="748" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">SỰ KIỆN RABBITMQ</text>
+
+      <line x1="560" y1="744" x2="588" y2="744" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <text x="596" y="748" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">PHẢN HỒI SAGA</text>
+
+      <line x1="768" y1="744" x2="796" y2="744" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <text x="804" y="748" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono', monospace" letter-spacing="0.06em">ĐƯỜNG SINH BUG</text>
+    </svg>
+  </div>
+</body>
+</html>

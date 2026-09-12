@@ -50,6 +50,7 @@ export class MessageRepository {
     replyToMessageId?: string | null
     pollId?: string | null
     medias?: MediaInput[]
+    isSystem?: boolean
   }) {
     // Đường nóng: tin nhắn thuần văn bản, không media, không poll — chiếm đại
     // đa số lưu lượng. Gom lô qua createMany thay vì mỗi tin một create().
@@ -62,6 +63,7 @@ export class MessageRepository {
         type: data.type,
         content: data.content,
         replyToMessageId: data.replyToMessageId,
+        isSystem: data.isSystem,
       })
     }
 

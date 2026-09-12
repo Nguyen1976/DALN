@@ -9,8 +9,13 @@ export function useCallRingTimeout({
   durationMs: number;
   onTimeout: () => void;
 }) {
+  // Kept in a ref so a new callback identity does not restart the timer, and
+  // written inside an effect — assigning during render is not allowed.
   const onTimeoutRef = useRef(onTimeout);
-  onTimeoutRef.current = onTimeout;
+
+  useEffect(() => {
+    onTimeoutRef.current = onTimeout;
+  }, [onTimeout]);
 
   useEffect(() => {
     if (!active) return;

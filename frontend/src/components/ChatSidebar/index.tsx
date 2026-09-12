@@ -153,8 +153,11 @@ export function ChatSidebar({ className }: { className?: string }) {
     const unread = unreadCountOf(conversation);
     const isDirect = conversation.type === "DIRECT";
 
+    // `peerUserId` do backend phi chuẩn hoá; `members` chỉ còn là đường dự
+    // phòng cho payload nào vẫn mang nó (chi tiết hội thoại, realtime).
     const peerId = isDirect
-      ? conversation.members?.find((m) => m.userId !== user?.id)?.userId
+      ? (conversation.peerUserId ??
+        conversation.members?.find((m) => m.userId !== user?.id)?.userId)
       : undefined;
     const peerOnline = peerId ? presenceByUserId.get(peerId) : undefined;
 

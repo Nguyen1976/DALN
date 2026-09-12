@@ -14,6 +14,7 @@ import {
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { ChatEventsPublisher } from '../publishers/chat-events.publisher'
 import { ConversationMemberRepository } from '../../repositories'
+import { buildPeerFields } from '../../domain/peer-fields'
 
 @Injectable()
 export class ChatSagaSubscriber {
@@ -67,6 +68,9 @@ export class ChatSagaSubscriber {
               isActive: true,
               unreadCount: 0,
               lastMessageAt: new Date(),
+              // Phi chuẩn hoá đối phương -> danh sách hội thoại không cần
+              // include toàn bộ members để hiển thị tên/avatar.
+              ...buildPeerFields('DIRECT', m.userId, uniqueMembers),
             })),
           })
 
@@ -83,16 +87,23 @@ export class ChatSagaSubscriber {
           return {
             conversationId: conversation.id,
             memberIds: uniqueMembers.map((m) => m.userId),
+            members: uniqueMembers,
           }
         },
       )
 
       // Best-effort realtime "new conversation" (chỉ phát khi xử lý lần đầu).
       if (processed && result) {
+        // `members` là BẮT BUỘC: ConversationMapper.resolveDisplay lấy tên +
+        // avatar đối phương từ mảng này. Thiếu nó, giao diện rơi về chuỗi dự
+        // phòng "Trò chuyện trực tiếp" ngay khi hội thoại vừa hiện ra, và chỉ
+        // đúng lại sau khi tải lại trang (đường HTTP đọc members từ DB).
         this.eventsPublisher.publishConversationCreated({
           id: result.conversationId,
           type: 'DIRECT',
           memberIds: result.memberIds,
+          members: result.members,
+          memberCount: result.members.length,
         })
         this.logger.log(
           `Saga ${envelope.sagaId}: đã tạo conversation ${result.conversationId}`,

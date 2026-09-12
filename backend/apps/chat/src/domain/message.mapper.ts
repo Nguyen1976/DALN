@@ -38,6 +38,7 @@ export class MessageMapper {
           }
         : undefined,
       isRevoked: Boolean(message.isRevoked),
+      isSystem: Boolean(message.isSystem),
       isDeleted: Boolean(message.isDeleted),
       createdAt,
       senderMember: message.senderMember

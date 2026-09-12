@@ -75,6 +75,17 @@ model conversationMember {
   sentMessages      message[]         @relation("SenderMessages")
   lastMessageAt     DateTime?
 
+  /// Phi chuẩn hoá "người đối diện" — CHỈ dùng cho hội thoại DIRECT.
+  /// Danh sách hội thoại cần tên + avatar đối phương để hiển thị, nhưng
+  /// `include: { members }` khiến truy vấn đắt tuyến tính theo số thành viên
+  /// (đo được: 2 thành viên 1,56ms -> 500 thành viên 6,10ms, trong khi bỏ
+  /// include thì phẳng 0,85ms). Vì "đối phương là ai" phụ thuộc người đang
+  /// xem, dữ liệu này thuộc về dòng membership chứ không phải conversation.
+  peerUserId        String?           @db.ObjectId
+  peerUsername      String?
+  peerFullName      String?
+  peerAvatar        String?
+
   @@index([userId, isActive, lastMessageAt(sort: Desc)])
   
   @@unique([conversationId, userId])
@@ -92,6 +103,10 @@ model message {
   pollId          String?            @unique @db.ObjectId
   isRevoked       Boolean            @default(false)
   isDeleted       Boolean            @default(false)
+  /// Tin nhắn do hệ thống ghi (thêm/xoá thành viên, kết cục cuộc gọi...).
+  /// Không phải nội dung người dùng gõ, nên hiển thị khác và không có
+  /// trạng thái đã xem.
+  isSystem        Boolean            @default(false)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   conversation    conversation       @relation(fields: [conversationId], references: [id])

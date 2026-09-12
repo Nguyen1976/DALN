@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { RedisService } from '@app/redis'
 import { DIRTY_CONVERSATIONS_KEY } from '../background-jobs/unread/unread.constants'
 import type {
+  CallEndedPayload,
   MessageSendPayload,
   UpdateMessageReadPayload,
 } from 'libs/constant/rmq/payload'
@@ -73,39 +74,49 @@ export class MessageService {
       ChatErrors.senderNotMember()
     }
 
-    const type = this.messageMediaService.normalizeMessageType(
-      data.type || 'TEXT',
-    )
     const content = data.text?.trim() || null
     const medias = data.medias || []
 
-    if (type === 'TEXT' && !content) {
+    // A message needs to carry something: text, attachments, or both. It used
+    // to be one or the other — a caption alongside files was impossible, and so
+    // was attaching an image and a document in the same message, because every
+    // attachment was validated against a single message-level type.
+    if (!content && medias.length === 0) {
       ChatErrors.invalidMessagePayload()
     }
 
-    if (type !== 'TEXT' && medias.length === 0) {
-      ChatErrors.invalidMessagePayload()
-    }
+    let type = this.messageMediaService.normalizeMessageType(
+      data.type || 'TEXT',
+    )
 
-    if (type !== 'TEXT') {
+    if (medias.length) {
       const normalizedMedias = medias.map((media) => {
         const fileName = String(media.objectKey || '').split('/').pop() || ''
         const resolvedMimeType = this.messageMediaService.resolveMimeType(
           fileName,
           media.mimeType,
         )
+        // The kind is derived from the resolved mime, never taken from the
+        // client: `mediaType` arrives over the socket and must not be able to
+        // talk an image past the document rules.
+        const resolvedKind =
+          this.messageMediaService.inferMediaKind(resolvedMimeType)
 
         return {
           ...media,
           mimeType: resolvedMimeType,
+          mediaType: resolvedKind,
         }
       })
 
       await Promise.all(
         normalizedMedias.map(async (media) => {
           const fileName = String(media.objectKey || '').split('/').pop() || ''
+          // 'TEXT' makes the validator infer the kind per attachment, so a
+          // mixed batch is checked against the right allow-list and size cap
+          // for each file rather than for whatever the message as a whole is.
           this.messageMediaService.validateMimeAndSize(
-            type,
+            'TEXT',
             media.mimeType,
             Number(media.size),
             fileName,
@@ -121,6 +132,11 @@ export class MessageService {
       )
 
       medias.splice(0, medias.length, ...normalizedMedias)
+
+      // Stored kind: the common one when every attachment agrees, otherwise
+      // FILE as the umbrella. Rendering keys off each media anyway.
+      const kinds = new Set(normalizedMedias.map((m) => m.mediaType))
+      type = (kinds.size === 1 ? [...kinds][0] : 'FILE') as typeof type
     }
 
     const message: OutboundMessage = await this.messageRepo.create({
@@ -444,6 +460,43 @@ export class MessageService {
     )
   }
 
+  /**
+   * Write a finished call into the conversation.
+   *
+   * Calls used to leave no trace: no record of who called whom, when, whether
+   * it was answered, or how long it lasted — so a missed call was invisible
+   * the moment the ringing screen closed.
+   */
+  async recordCallOutcome(data: CallEndedPayload) {
+    const { conversationId, callerId, calleeId, outcome } = data
+    if (!conversationId || !callerId) return
+
+    const members = await this.memberRepo.findByConversationId(conversationId)
+    const isMember = (id: string) => members.some((m) => m.userId === id)
+    // The ids arrive over a socket; refuse to write into a thread the parties
+    // are not part of.
+    if (!isMember(callerId) || (calleeId && !isMember(calleeId))) return
+
+    const seconds = Math.max(0, Math.floor(Number(data.durationSeconds) || 0))
+    const text = this.describeCallOutcome(outcome, seconds)
+
+    await this.createSystemMessageAndSync(conversationId, callerId, text)
+  }
+
+  private describeCallOutcome(outcome: string, seconds: number): string {
+    if (outcome === 'REJECTED') return 'Cuộc gọi thoại bị từ chối'
+    if (outcome === 'MISSED') return 'Cuộc gọi thoại nhỡ'
+    if (outcome === 'UNREACHABLE') return 'Cuộc gọi thoại không kết nối được'
+
+    if (seconds <= 0) return 'Cuộc gọi thoại đã kết thúc'
+
+    const minutes = Math.floor(seconds / 60)
+    const rest = seconds % 60
+    const duration =
+      minutes > 0 ? `${minutes} phút ${rest} giây` : `${rest} giây`
+    return `Cuộc gọi thoại đã kết thúc — ${duration}`
+  }
+
   async createSystemMessageAndSync(
     conversationId: string,
     actorUserId: string,
@@ -456,6 +509,7 @@ export class MessageService {
       content: text,
       replyToMessageId: undefined,
       medias: [],
+      isSystem: true,
     })
 
     const message = result

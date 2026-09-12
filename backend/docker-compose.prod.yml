@@ -1,27 +1,334 @@
 # ============================================================================
-# Docker Compose — PRODUCTION app tier (stateless only).
+# Docker Compose — PRODUCTION: toàn bộ ứng dụng tự host trên 1 server.
 #
-# Stateful infra (Mongo, RabbitMQ, Redis, Qdrant) dùng managed cloud — khai báo
-# URL trong .env.production (xem .env.production.example).
-#
-#   cp .env.production.example .env.production   # điền link cloud thật
+# Được deploy/deploy.sh gọi (CI/CD). Chạy tay từ thư mục backend/:
 #   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 #
-# Trên máy local: tắt stack dev trước (trùng port 3001–3005, 8000):
-#   docker compose down
-# Nếu còn container cũ: docker rm -f $(docker ps -aq --filter "name=daln-")
+# Cổng công khai: 80 (web), 8000 (Kong: API + socket), 9000 (MinIO: ảnh/tệp).
+# Mọi thứ khác chỉ nói chuyện với nhau trong mạng docker `backend`.
+# Biến môi trường: .env.production (chỉ nằm trên server — xem .env.production.example).
 # ============================================================================
 
-name: daln-backend-prod
+name: daln-prod
 
-x-app-prod: &app-prod
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Biến ghép từ .env.production -> mỗi mật khẩu chỉ khai ở một chỗ.
+x-app-env: &app-env
+  NODE_ENV: production
+  RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?thiếu trong .env.production}:${RABBITMQ_DEFAULT_PASS:?thiếu trong .env.production}@rabbitmq:5672
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?thiếu trong .env.production}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?thiếu trong .env.production}
+
+x-app: &app
   restart: unless-stopped
   env_file:
     - .env.production
   networks:
     - backend
+  logging: *logging
+  depends_on:
+    db-push:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    qdrant:
+      condition: service_started
+    minio-init:
+      condition: service_completed_successfully
 
 services:
+  # ==========================================================================
+  # HẠ TẦNG — không publish cổng ra ngoài (trừ MinIO API cho trình duyệt)
+  # ==========================================================================
+  mongo:
+    image: mongo:7
+    container_name: daln-prod-mongo
+    restart: unless-stopped
+    # Mặc định WiredTiger giữ ~50% RAM làm cache; máy 8GB còn chạy 15 container khác.
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "1"]
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - backend
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # Khởi tạo replica set (Prisma MongoDB bắt buộc). Chạy mỗi lần up, đã có thì bỏ qua.
+  mongo-init:
+    image: mongo:7
+    container_name: daln-prod-mongo-init
+    restart: "no"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - backend
+    logging: *logging
+    entrypoint:
+      - bash
+      - -c
+      - |
+        mongosh --host mongo:27017 --quiet --eval "
+          try { rs.status(); } catch (e) {
+            rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
+            print('Replica set initialized');
+          }
+          // db-push chạy ngay sau bước này: gặp lúc chưa bầu xong primary
+          // sẽ lỗi ReplicaSetNoPrimary -> chờ tới khi ghi được.
+          for (let i = 0; i < 60 && !db.hello().isWritablePrimary; i++) sleep(500);
+          if (!db.hello().isWritablePrimary) { print('Replica set chưa có primary'); quit(1); }
+          print('Replica set ready');
+        "
+
+  redis:
+    image: redis:7-alpine
+    container_name: daln-prod-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: daln-prod-rabbitmq
+    # RabbitMQ lưu dữ liệu theo tên node rabbit@<hostname>. Không cố định hostname
+    # thì mỗi lần tạo lại container ra một node mới và "mất" user/queue cũ.
+    hostname: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?thiếu trong .env.production}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?thiếu trong .env.production}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - backend
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    container_name: daln-prod-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - backend
+    logging: *logging
+
+  # Kho ảnh/tệp (thay S3). Cổng 9000 mở cho trình duyệt: GET ảnh công khai và
+  # PUT bằng URL ký sẵn. Console 9001 không mở ra ngoài.
+  # MinIO đã ngừng đẩy image lên Docker Hub; quay.io vẫn còn đúng bản đang dùng ở dev.
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: daln-prod-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?thiếu trong .env.production}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?thiếu trong .env.production}
+    ports:
+      - "9000:9000"
+    volumes:
+      - minio_data:/data
+    networks:
+      - backend
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Tạo bucket + mở quyền đọc công khai (ảnh trong chat được tải thẳng).
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: daln-prod-minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?thiếu trong .env.production}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?thiếu trong .env.production}
+      S3_BUCKET: ${S3_BUCKET:-daln-media}
+    networks:
+      - backend
+    logging: *logging
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$S3_BUCKET" &&
+        mc anonymous set download "local/$$S3_BUCKET" &&
+        echo "bucket $$S3_BUCKET san sang"
+
+  # Đồng bộ collection + unique index mọi DB trước khi app chạy (docker/db-push.sh).
+  db-push:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: schema
+    image: daln/db-push:latest
+    container_name: daln-prod-db-push
+    restart: "no"
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+    networks:
+      - backend
+    logging: *logging
+
+  # ==========================================================================
+  # APP (NestJS) — mỗi service một image production riêng
+  # ==========================================================================
+  user:
+    <<: *app
+    container_name: daln-prod-user
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: user
+    image: daln/user:latest
+    environment:
+      <<: *app-env
+      SERVICE: user
+      PORT: 3002
+      DATABASE_URL: mongodb://mongo:27017/user-service?replicaSet=rs0
+
+  chat:
+    <<: *app
+    container_name: daln-prod-chat
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: chat
+    image: daln/chat:latest
+    environment:
+      <<: *app-env
+      SERVICE: chat
+      PORT: 3003
+      DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
+
+  notification:
+    <<: *app
+    container_name: daln-prod-notification
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: notification
+    image: daln/notification:latest
+    environment:
+      <<: *app-env
+      SERVICE: notification
+      PORT: 3004
+      DATABASE_URL: mongodb://mongo:27017/notification-service?replicaSet=rs0
+
+  realtime-gateway:
+    <<: *app
+    container_name: daln-prod-realtime
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: realtime-gateway
+    image: daln/realtime-gateway:latest
+    environment:
+      <<: *app-env
+      SERVICE: realtime-gateway
+      # realtime-gateway đọc cả `port` (thường) lẫn PORT.
+      port: 3001
+      PORT: 3001
+
+  recommendation:
+    <<: *app
+    container_name: daln-prod-recommendation
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: recommendation
+    image: daln/recommendation:latest
+    environment:
+      <<: *app-env
+      SERVICE: recommendation
+      PORT: 3005
+      DATABASE_URL: mongodb://mongo:27017/recommendation-service?replicaSet=rs0
+      USER_MONGO_URI: mongodb://mongo:27017/user-service?replicaSet=rs0
+      RECOMMENDATION_ROLE: api
+    volumes:
+      - recommendation_models:/app/apps/recommendation/models
+
+  # Cùng image với `recommendation`, chỉ khác RECOMMENDATION_ROLE: gánh việc nặng
+  # CPU (huấn luyện, cron gợi ý hằng ngày) để tiến trình API luôn rảnh phục vụ HTTP.
+  recommendation-worker:
+    <<: *app
+    container_name: daln-prod-recommendation-worker
+    image: daln/recommendation:latest
+    pull_policy: never
+    environment:
+      <<: *app-env
+      SERVICE: recommendation
+      PORT: 3105
+      DATABASE_URL: mongodb://mongo:27017/recommendation-service?replicaSet=rs0
+      USER_MONGO_URI: mongodb://mongo:27017/user-service?replicaSet=rs0
+      RECOMMENDATION_ROLE: worker
+    # Worker huấn luyện rồi ghi gb.json; API đọc lại. Ở dev hai tiến trình chung
+    # bind mount, ở đây là hai container nên phải dùng chung volume.
+    volumes:
+      - recommendation_models:/app/apps/recommendation/models
+
+  # Saga orchestrator: chỉ nói chuyện qua RabbitMQ, không có HTTP.
+  saga-orchestrator:
+    <<: *app
+    container_name: daln-prod-saga-orchestrator
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        SERVICE: saga-orchestrator
+    image: daln/saga-orchestrator:latest
+    environment:
+      <<: *app-env
+      SERVICE: saga-orchestrator
+      DATABASE_URL: mongodb://mongo:27017/saga-orchestrator-service?replicaSet=rs0
+
+  # ==========================================================================
+  # CỔNG VÀO
+  # ==========================================================================
   kong:
     image: kong:3.7
     container_name: daln-prod-kong
@@ -33,14 +340,15 @@ services:
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      # Admin API chỉ nghe bên trong container, không bao giờ ra ngoài.
+      KONG_ADMIN_LISTEN: 127.0.0.1:8001
     ports:
       - "8000:8000"
-      - "8001:8001"
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
     networks:
       - backend
+    logging: *logging
     depends_on:
       - user
       - chat
@@ -48,112 +356,31 @@ services:
       - realtime-gateway
       - recommendation
 
-  user:
-    <<: *app-prod
-    container_name: daln-prod-user
+  # Frontend: VITE_* được build vào bundle -> đổi địa chỉ thì image tự build lại.
+  web:
     build:
-      context: .
+      context: ../frontend
       dockerfile: Dockerfile
-      target: production
       args:
-        SERVICE: user
-    image: ${ECR_REGISTRY}/chat-app/user:${IMAGE_TAG:-latest}
-    environment:
-      SERVICE: user
-      PORT: 3002
-      NODE_ENV: production
-      DATABASE_URL: ${USER_DATABASE_URL}
+        VITE_API_ROOT: ${VITE_API_ROOT:?thiếu trong .env.production}
+        VITE_SOCKET_URL: ${VITE_SOCKET_URL:?thiếu trong .env.production}
+    image: daln/web:latest
+    container_name: daln-prod-web
+    restart: unless-stopped
     ports:
-      - "3002:3002"
-
-  chat:
-    <<: *app-prod
-    container_name: daln-prod-chat
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-      args:
-        SERVICE: chat
-    image: ${ECR_REGISTRY}/chat-app/chat:${IMAGE_TAG:-latest}
-    environment:
-      SERVICE: chat
-      PORT: 3003
-      NODE_ENV: production
-      DATABASE_URL: ${CHAT_DATABASE_URL}
-    ports:
-      - "3003:3003"
-
-  notification:
-    <<: *app-prod
-    container_name: daln-prod-notification
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-      args:
-        SERVICE: notification
-    image: ${ECR_REGISTRY}/chat-app/notification:${IMAGE_TAG:-latest}
-    environment:
-      SERVICE: notification
-      PORT: 3004
-      NODE_ENV: production
-      DATABASE_URL: ${NOTIFICATION_DATABASE_URL}
-    ports:
-      - "3004:3004"
-
-  realtime-gateway:
-    <<: *app-prod
-    container_name: daln-prod-realtime
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-      args:
-        SERVICE: realtime-gateway
-    image: ${ECR_REGISTRY}/chat-app/realtime-gateway:${IMAGE_TAG:-latest}
-    environment:
-      SERVICE: realtime-gateway
-      port: 3001
-      PORT: 3001
-      NODE_ENV: production
-    ports:
-      - "3001:3001"
-
-  recommendation:
-    <<: *app-prod
-    container_name: daln-prod-recommendation
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-      args:
-        SERVICE: recommendation
-    image: ${ECR_REGISTRY}/chat-app/recommendation:${IMAGE_TAG:-latest}
-    environment:
-      SERVICE: recommendation
-      PORT: 3005
-      NODE_ENV: production
-      DATABASE_URL: ${RECOMMENDATION_DATABASE_URL}
-      USER_MONGO_URI: ${USER_MONGO_URI}
-    ports:
-      - "3005:3005"
-
-  saga-orchestrator:
-    <<: *app-prod
-    container_name: daln-prod-saga-orchestrator
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-      args:
-        SERVICE: saga-orchestrator
-    image: ${ECR_REGISTRY}/chat-app/saga-orchestrator:${IMAGE_TAG:-latest}
-    environment:
-      SERVICE: saga-orchestrator
-      NODE_ENV: production
-      DATABASE_URL: ${SAGA_DATABASE_URL}
+      - "80:80"
+    networks:
+      - backend
+    logging: *logging
 
 networks:
   backend:
     driver: bridge
+
+volumes:
+  mongo_data:
+  redis_data:
+  rabbitmq_data:
+  qdrant_data:
+  minio_data:
+  recommendation_models:

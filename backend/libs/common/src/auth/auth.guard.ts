@@ -9,7 +9,7 @@ import {
 import { JwtService } from '@nestjs/jwt'
 import { Reflector } from '@nestjs/core'
 import { Request, Response } from 'express'
-import { TokenExpiredError, JsonWebTokenError } from 'jsonwebtoken'
+import { resolveTokens } from './resolve-tokens'
 import { timingSafeEqual } from 'crypto'
 
 /** Thời hạn access token — phải khớp với lúc đăng nhập ở user service. */
@@ -17,6 +17,19 @@ export const ACCESS_TOKEN_TTL = '15m'
 export const ACCESS_TOKEN_MAX_AGE_MS = 15 * 60 * 1000
 export const REFRESH_TOKEN_TTL = '7d'
 export const REFRESH_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Cookie phiên có gắn cờ Secure hay không. Mặc định bật khi NODE_ENV=production.
+ * COOKIE_SECURE=false cho phép production chạy qua HTTP thuần (truy cập bằng IP,
+ * chưa có TLS): trên origin http:// trình duyệt lặng lẽ bỏ cookie Secure, và đăng
+ * nhập trông như hỏng mà không có lỗi nào.
+ */
+export function isSecureCookie(): boolean {
+  const flag = process.env.COOKIE_SECURE?.trim().toLowerCase()
+  if (flag === 'true') return true
+  if (flag === 'false') return false
+  return process.env.NODE_ENV === 'production'
+}
 
 /** So sánh chuỗi theo thời gian hằng định để không rò rỉ độ dài/nội dung token. */
 function timingSafeEqualStr(a: string, b: string): boolean {
@@ -74,74 +87,41 @@ export class AuthGuard implements CanActivate {
     const refreshToken =
       request.cookies?.refreshToken ||
       this.getCookieValue(request.headers?.cookie, 'refreshToken')
-    if (!accessToken) {
+    const resolved = resolveTokens(this.jwtService, accessToken, refreshToken)
+
+    if (!resolved.ok) {
       throw new UnauthorizedException({
         message: 'UNAUTHORIZED',
-        code: 'ACCESS_TOKEN_MISSING',
+        code: resolved.code,
       })
     }
 
-    try {
-      const payload = this.jwtService.verify(accessToken)
-      request['user'] = payload
-      return true
-    } catch (err) {
-      // 🔥 Chỉ refresh khi access hết hạn
-      if (err instanceof TokenExpiredError) {
-        if (!refreshToken) {
-          throw new UnauthorizedException({
-            message: 'UNAUTHORIZED',
-            code: 'REFRESH_TOKEN_MISSING',
-          })
-        }
+    // Access hết hạn nhưng refresh còn hạn -> cấp access mới qua cookie.
+    // Đây là phần RIÊNG của HTTP: handshake WebSocket không có Response nên
+    // gateway chỉ dùng kết quả phân giải, không cấp lại token.
+    if (resolved.usedRefresh) {
+      // Bản thay thế phải ngắn hạn đúng bằng bản nó thay. Cấp access 7 ngày ở
+      // đây từng biến mỗi lần refresh ngầm thành một chứng chỉ sống cả tuần.
+      const newAccessToken = this.jwtService.sign(
+        {
+          userId: resolved.payload.userId,
+          email: resolved.payload.email,
+          username: resolved.payload.username,
+        },
+        { expiresIn: ACCESS_TOKEN_TTL },
+      )
 
-        try {
-          const refreshPayload = this.jwtService.verify(refreshToken)
-
-          // The replacement must be as short-lived as the one it replaces.
-          // Minting a 7-day access token here silently turned every silent
-          // refresh into a week-long credential — a stolen cookie would then
-          // outlive the refresh token it was derived from.
-          const newAccessToken = this.jwtService.sign(
-            {
-              userId: refreshPayload['userId'],
-              email: refreshPayload['email'],
-              username: refreshPayload['username'],
-            },
-            { expiresIn: ACCESS_TOKEN_TTL },
-          )
-
-          response.cookie('accessToken', newAccessToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge: ACCESS_TOKEN_MAX_AGE_MS,
-            path: '/',
-          })
-
-          request['user'] = refreshPayload
-          return true
-        } catch {
-          throw new UnauthorizedException({
-            message: 'UNAUTHORIZED',
-            code: 'REFRESH_TOKEN_INVALID',
-          })
-        }
-      }
-
-      // 🔥 Token invalid (signature sai)
-      if (err instanceof JsonWebTokenError) {
-        throw new UnauthorizedException({
-          message: 'UNAUTHORIZED',
-          code: 'TOKEN_INVALID',
-        })
-      }
-
-      throw new UnauthorizedException({
-        message: 'UNAUTHORIZED',
-        code: 'AUTH_FAILED',
+      response.cookie('accessToken', newAccessToken, {
+        httpOnly: true,
+        secure: isSecureCookie(),
+        sameSite: 'lax',
+        maxAge: ACCESS_TOKEN_MAX_AGE_MS,
+        path: '/',
       })
     }
+
+    request['user'] = resolved.payload
+    return true
   }
 
   /**

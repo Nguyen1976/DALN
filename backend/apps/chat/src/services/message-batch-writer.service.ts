@@ -8,6 +8,7 @@ export type BatchMessageInput = {
   type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE' | 'POLL'
   content?: string | null
   replyToMessageId?: string | null
+  isSystem?: boolean
 }
 
 /** Hình dạng trả về khớp với `messageRepo.create()` để bên gọi không phải đổi. */
@@ -18,6 +19,7 @@ export type BatchedMessage = {
   type: string
   content: string | null
   replyToMessageId: string | null
+  isSystem: boolean
   pollId: null
   isRevoked: boolean
   isDeleted: boolean
@@ -77,6 +79,7 @@ export class MessageBatchWriter implements OnModuleDestroy {
       type: input.type,
       content: input.content || null,
       replyToMessageId: input.replyToMessageId || null,
+      isSystem: Boolean(input.isSystem),
       pollId: null,
       isRevoked: false,
       isDeleted: false,
@@ -120,6 +123,7 @@ export class MessageBatchWriter implements OnModuleDestroy {
           type: item.doc.type as never,
           content: item.doc.content,
           replyToMessageId: item.doc.replyToMessageId,
+          isSystem: item.doc.isSystem,
           isRevoked: false,
           isDeleted: false,
           createdAt: item.doc.createdAt,

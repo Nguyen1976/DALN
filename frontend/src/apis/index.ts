@@ -465,10 +465,15 @@ export const createMessageUploadUrlAPI = async (payload: {
 export const uploadFileToSignedUrl = async (
   uploadUrl: string,
   file: File,
-  _mimeType: string,
+  mimeType: string,
 ): Promise<void> => {
   const response = await fetch(uploadUrl, {
     method: "PUT",
+    // The pre-signed URL is signed with this content type; sending the value
+    // the server resolved (rather than letting the browser guess from the
+    // File) keeps the signature valid for files whose extension and reported
+    // type disagree.
+    headers: { "Content-Type": mimeType },
     body: file,
   });
 

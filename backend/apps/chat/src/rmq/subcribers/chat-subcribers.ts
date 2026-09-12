@@ -6,6 +6,7 @@ import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { safeExecute } from '@app/common/rpc/safe-execute'
 import type {
+  CallEndedPayload,
   MessageSendPayload,
   UserUpdatedPayload,
   UserUpdateStatusMakeFriendPayload,
@@ -45,6 +46,15 @@ export class MessageSubscriber {
   })
   async handleUserUpdated(data: UserUpdatedPayload): Promise<void> {
     await safeExecute(() => this.chatService.handleUserUpdated(data))
+  }
+
+  @RabbitSubscribe({
+    exchange: EXCHANGE_RMQ.REALTIME_EVENTS,
+    routingKey: ROUTING_RMQ.CALL_ENDED,
+    queue: QUEUE_RMQ.CHAT_CALL_ENDED,
+  })
+  async recordCallOutcome(data: CallEndedPayload): Promise<void> {
+    await safeExecute(() => this.chatService.recordCallOutcome(data))
   }
 
   @RabbitSubscribe({

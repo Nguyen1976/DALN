@@ -222,6 +222,13 @@ export class MessageMediaService {
       : aliasedReported
   }
 
+  /** Kind of a single attachment, derived from its resolved mime type. */
+  inferMediaKind(mimeType: string): 'IMAGE' | 'VIDEO' | 'FILE' {
+    if (mimeType.startsWith('image/')) return 'IMAGE'
+    if (mimeType.startsWith('video/')) return 'VIDEO'
+    return 'FILE'
+  }
+
   private inferMessageTypeFromMime(mimeType: string, fileName: string): string {
     if (mimeType.startsWith('image/')) return 'IMAGE'
     if (mimeType.startsWith('video/')) return 'VIDEO'

@@ -30,7 +30,15 @@ const authorizeAxiosInstance = axios.create({
 authorizeAxiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // 401 ở đây có hai nghĩa hoàn toàn khác nhau:
+    //  - phiên hết hạn / bị thu hồi  -> phải đăng xuất
+    //  - đăng nhập sai mật khẩu      -> KHÔNG được đăng xuất, người dùng còn
+    //    chưa có phiên nào để mà thoát
+    // Trong toàn bộ luồng công khai của user-service, chỉ /user/login trả 401
+    // (các lỗi OTP đều là 400), nên loại trừ đúng đường này là đủ.
+    const isLoginAttempt = Boolean(error.config?.url?.includes("/user/login"));
+
+    if (error.response?.status === 401 && !isLoginAttempt) {
       axiosReduxStore?.dispatch(logoutAPI());
     }
 

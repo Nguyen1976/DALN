@@ -48,6 +48,9 @@ export function describeMicrophoneError(error: unknown): string {
 }
 
 export const useWebRTC = (socket: Socket) => {
+  /** Thời điểm hai bên thực sự nghe được nhau; null khi chưa kết nối. */
+  const connectedAtRef = useRef<number | null>(null);
+  const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [callStatus, setCallStatus] = useState<CallStatus>("idle");
@@ -99,6 +102,10 @@ export const useWebRTC = (socket: Socket) => {
 
     pc.ontrack = (event) => {
       setRemoteStream(event.streams[0] ?? null);
+      // Mốc bắt đầu tính thời lượng: khi tiếng thực sự chảy giữa hai máy, chứ
+      // không phải khi bấm nút gọi.
+      if (!connectedAtRef.current) connectedAtRef.current = Date.now();
+      setConnectedAt(connectedAtRef.current);
       setCallStatus("connected");
     };
 
@@ -173,19 +180,34 @@ export const useWebRTC = (socket: Socket) => {
   );
 
   const rejectCall = useCallback(
-    (callerId: string) => {
-      socket.emit(SOCKET_EVENTS.CALL.CALL_REJECTED, { callerId });
+    (callerId: string, conversationId?: string) => {
+      socket.emit(SOCKET_EVENTS.CALL.CALL_REJECTED, {
+        callerId,
+        conversationId,
+      });
       setCallStatus("rejected");
     },
     [socket],
   );
 
   const endCall = useCallback(
-    (peerUserId: string, reason?: "no_answer") => {
+    (
+      peerUserId: string,
+      reason?: "no_answer" | "unreachable",
+      context?: { conversationId?: string; callerId?: string },
+    ) => {
+      const startedAt = connectedAtRef.current;
       socket.emit(SOCKET_EVENTS.CALL.CALL_ENDED, {
         targetUserId: peerUserId,
         reason,
+        conversationId: context?.conversationId,
+        callerId: context?.callerId,
+        durationSeconds: startedAt
+          ? Math.round((Date.now() - startedAt) / 1000)
+          : 0,
       });
+      connectedAtRef.current = null;
+      setConnectedAt(null);
       cleanup();
       setCallStatus(reason === "no_answer" ? "no_answer" : "ended");
     },
@@ -232,6 +254,7 @@ export const useWebRTC = (socket: Socket) => {
     acceptCall,
     rejectCall,
     endCall,
+    connectedAt,
     handleReceiveAnswer,
     handleReceiveIceCandidate,
     toggleMute,

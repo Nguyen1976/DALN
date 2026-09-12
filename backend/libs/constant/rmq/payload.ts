@@ -179,3 +179,15 @@ export interface UpdateMessageReadPayload {
   userId: string
   lastReadMessageId: string
 }
+
+/** Kết cục của một cuộc gọi thoại, để ghi lại trong dòng trò chuyện. */
+export interface CallEndedPayload {
+  conversationId: string
+  callerId: string
+  calleeId: string
+  /** Ai là người kết thúc/từ chối; bỏ trống nếu do hết thời gian chờ. */
+  actorId?: string
+  outcome: 'COMPLETED' | 'REJECTED' | 'MISSED' | 'UNREACHABLE'
+  /** Thời lượng tính bằng giây, chỉ có với cuộc gọi đã kết nối. */
+  durationSeconds?: number
+}
