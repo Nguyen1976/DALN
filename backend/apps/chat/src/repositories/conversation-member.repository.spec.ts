@@ -94,8 +94,8 @@ function setup(
   row: Row | null,
   opts: { messageExists?: boolean; unreadIds?: string[] } = {},
 ) {
+  // Không có $runCommandRaw: repo gọi backfill lúc runtime là test nổ ngay.
   const prisma = {
-    $runCommandRaw: jest.fn().mockResolvedValue({}),
     message: {
       findFirst: jest.fn<
         Promise<{ createdAt: Date } | null>,
@@ -353,5 +353,42 @@ describe('ConversationMemberRepository.updateUnreadCount', () => {
     })
 
     expect(rows.map((row) => row.unreadCount)).toEqual([0, 1, 2, 1, 1, 0])
+  })
+})
+
+describe('ConversationMemberRepository — không còn backfill lúc runtime', () => {
+  // Dữ liệu cũ do migrations/chat/0002, 0003 xử lý lúc deploy. Repo phải gọi
+  // thẳng Prisma: không $runCommandRaw, không nuốt lỗi enum rồi thử lại.
+  it('findByConversationIdAndUserId: đúng một findFirst, lỗi enum ném thẳng ra ngoài', async () => {
+    const enumError = new Error(
+      "Value 'member' not found in enum 'participantRole'",
+    )
+    const prisma = {
+      conversationMember: { findFirst: jest.fn().mockRejectedValue(enumError) },
+    }
+    const repo = new ConversationMemberRepository(prisma as never, {} as never)
+
+    await expect(repo.findByConversationIdAndUserId(CONV, USER)).rejects.toBe(
+      enumError,
+    )
+    expect(prisma.conversationMember.findFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it('findByConversationIdAndUserIds / clearHistoryForMember: chỉ một lời gọi Prisma', async () => {
+    const prisma = {
+      conversationMember: {
+        findMany: jest.fn().mockResolvedValue([{ userId: USER }]),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    }
+    const repo = new ConversationMemberRepository(prisma as never, {} as never)
+
+    await expect(
+      repo.findByConversationIdAndUserIds(CONV, [USER]),
+    ).resolves.toEqual([{ userId: USER }])
+    await repo.clearHistoryForMember(CONV, USER, new Date())
+
+    expect(prisma.conversationMember.findMany).toHaveBeenCalledTimes(1)
+    expect(prisma.conversationMember.updateMany).toHaveBeenCalledTimes(1)
   })
 })

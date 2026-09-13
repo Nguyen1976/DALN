@@ -45,8 +45,8 @@ export class ConversationMemberRepository {
     private readonly redisService: RedisService,
   ) {}
 
-  private participantRoleBackfilled = false
-  private unreadCountBackfilled = false
+  // role chữ thường / unreadCount thiếu của dữ liệu cũ do migrations/chat/0002,
+  // 0003 chuẩn hoá một lần lúc deploy — repository không còn backfill runtime.
   private readonly activeMemberFilter = {
     isActive: true,
   }
@@ -78,96 +78,6 @@ export class ConversationMemberRepository {
       select: { conversationId: true },
     })
     await this.invalidateMembersCache(...rows.map((r) => r.conversationId))
-  }
-
-  private async forceBackfillUnreadCount() {
-    await this.prisma.$runCommandRaw({
-      update: 'conversationMember',
-      updates: [
-        {
-          q: {
-            $or: [{ unreadCount: null }, { unreadCount: { $exists: false } }],
-          },
-          u: [
-            {
-              $set: {
-                unreadCount: 0,
-              },
-            },
-          ],
-          multi: true,
-        },
-      ],
-    })
-  }
-
-  private async ensureUnreadCountInitialized() {
-    if (this.unreadCountBackfilled) return
-    await this.forceBackfillUnreadCount()
-    this.unreadCountBackfilled = true
-  }
-
-  private async forceBackfillParticipantRole() {
-    await this.prisma.$runCommandRaw({
-      update: 'conversationMember',
-      updates: [
-        {
-          q: {
-            $or: [
-              { role: null },
-              { role: { $exists: false } },
-              { role: 'member' },
-              { role: 'admin' },
-              { role: 'owner' },
-            ],
-          },
-          u: [
-            {
-              $set: {
-                role: {
-                  $switch: {
-                    branches: [
-                      { case: { $eq: ['$role', 'admin'] }, then: 'ADMIN' },
-                      { case: { $eq: ['$role', 'owner'] }, then: 'OWNER' },
-                      { case: { $eq: ['$role', 'member'] }, then: 'MEMBER' },
-                    ],
-                    default: 'MEMBER',
-                  },
-                },
-              },
-            },
-          ],
-          multi: true,
-        },
-      ],
-    })
-  }
-
-  private async ensureParticipantRoleNormalized() {
-    if (this.participantRoleBackfilled) return
-    await this.forceBackfillParticipantRole()
-    this.participantRoleBackfilled = true
-  }
-
-  private async withRoleRetry<T>(fn: () => Promise<T>): Promise<T> {
-    try {
-      return await fn()
-    } catch (error) {
-      const message = String((error as any)?.message || '')
-      const isParticipantRoleError =
-        message.includes(
-          "Value 'member' not found in enum 'participantRole'",
-        ) ||
-        message.includes("Value 'admin' not found in enum 'participantRole'") ||
-        message.includes("Value 'owner' not found in enum 'participantRole'")
-
-      if (!isParticipantRoleError) {
-        throw error
-      }
-
-      await this.forceBackfillParticipantRole()
-      return await fn()
-    }
   }
 
   async createMany(
@@ -228,22 +138,20 @@ export class ConversationMemberRepository {
       )
     }
 
-    const members = await this.withRoleRetry(() =>
-      this.prisma.conversationMember.findMany({
-        where: {
-          conversationId,
-          ...this.activeMemberFilter,
-        },
-        select: {
-          userId: true,
-          role: true,
-          username: true,
-          fullName: true,
-          avatar: true,
-          joinedAt: true,
-        },
-      }),
-    )
+    const members = await this.prisma.conversationMember.findMany({
+      where: {
+        conversationId,
+        ...this.activeMemberFilter,
+      },
+      select: {
+        userId: true,
+        role: true,
+        username: true,
+        fullName: true,
+        avatar: true,
+        joinedAt: true,
+      },
+    })
 
     try {
       await this.redisService.setEx(
@@ -324,34 +232,24 @@ export class ConversationMemberRepository {
     conversationId: string,
     userIds: string[],
   ) {
-    await this.ensureParticipantRoleNormalized()
-    await this.ensureUnreadCountInitialized()
-
-    return await this.withRoleRetry(() =>
-      this.prisma.conversationMember.findMany({
-        where: {
-          conversationId,
-          userId: { in: userIds },
-          ...this.activeMemberFilter,
-        },
-        select: { userId: true },
-      }),
-    )
+    return await this.prisma.conversationMember.findMany({
+      where: {
+        conversationId,
+        userId: { in: userIds },
+        ...this.activeMemberFilter,
+      },
+      select: { userId: true },
+    })
   }
 
   async findByConversationIdAndUserId(conversationId: string, userId: string) {
-    await this.ensureParticipantRoleNormalized()
-    await this.ensureUnreadCountInitialized()
-
-    return await this.withRoleRetry(() =>
-      this.prisma.conversationMember.findFirst({
-        where: {
-          conversationId,
-          userId,
-          ...this.activeMemberFilter,
-        },
-      }),
-    )
+    return await this.prisma.conversationMember.findFirst({
+      where: {
+        conversationId,
+        userId,
+        ...this.activeMemberFilter,
+      },
+    })
   }
 
   async addMembers(
@@ -433,8 +331,6 @@ export class ConversationMemberRepository {
     const messageId = normalizeObjectId(lastReadMessageId)
     if (!messageId) return { count: 0 }
 
-    await this.ensureUnreadCountInitialized()
-
     // Tin phải thuộc CHÍNH hội thoại này. Id đến từ client: trước đây một id
     // giả thật lớn đẩy được marker lên "tương lai" và chặn mọi lần đọc sau đó.
     const message = await this.prisma.message.findFirst({
@@ -513,8 +409,6 @@ export class ConversationMemberRepository {
     userId: string,
     clearedHistoryAt: Date,
   ) {
-    await this.ensureUnreadCountInitialized()
-
     return await this.prisma.conversationMember.updateMany({
       where: {
         conversationId,
