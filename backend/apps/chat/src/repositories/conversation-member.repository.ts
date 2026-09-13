@@ -23,6 +23,19 @@ const membersKey = (conversationId: string) => `conv:members:${conversationId}`
  */
 const MEMBERS_TTL_SECONDS = 300
 
+/**
+ * Trần số tin đếm lại khi đọc. Giao diện chỉ hiện tới "5+", đếm chính xác hơn
+ * mức này là tốn công vô ích.
+ */
+const UNREAD_RECOUNT_CAP = 99
+
+/** ObjectId hex -> chữ thường; không phải ObjectId hợp lệ -> null. */
+function normalizeObjectId(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const id = value.toLowerCase()
+  return /^[a-f\d]{24}$/.test(id) ? id : null
+}
+
 @Injectable()
 export class ConversationMemberRepository {
   private readonly logger = new Logger(ConversationMemberRepository.name)
@@ -256,11 +269,40 @@ export class ConversationMemberRepository {
     })
   }
 
+  /**
+   * Điều kiện "marker đọc đứng TRƯỚC `messageId`, hoặc chưa có marker".
+   *
+   * Prisma MongoDB phân biệt field null và field KHÔNG tồn tại: `{ field: null }`
+   * được dịch thành `$eq null AND $ne $$REMOVE`, `lt` cũng kèm `$ne $$REMOVE`,
+   * nên cả hai đều bỏ qua document thiếu field. Dòng tạo qua createMany có
+   * `lastReadMessageId: null`, dòng tạo qua create() trong addMembers thì không
+   * có field này (trên dev: 33/68 dòng) — phải thêm `isSet: false`.
+   */
+  private markerBefore(messageId: string) {
+    return {
+      OR: [
+        { lastReadMessageId: null },
+        { lastReadMessageId: { isSet: false } },
+        { lastReadMessageId: { lt: messageId } },
+      ],
+    }
+  }
+
+  /**
+   * Cộng `unreadCount` cho mọi thành viên trừ người gửi — do cron gọi.
+   *
+   * `newestMessageId` là id tin mới nhất của người gửi trong lượt cộng này. Có
+   * nó thì BỎ QUA người đã đọc tới tin đó: họ đang mở hội thoại và đã đọc ngay
+   * (unread về 0) trước khi cron kịp chạy, cộng nữa là ra số ảo. Không có (dữ
+   * liệu Redis từ bản cũ) hoặc id hỏng thì giữ hành vi cũ: cộng cho tất cả.
+   */
   async updateUnreadCount(
     conversationId: string,
     senderId: string,
     unreadCount: number,
+    newestMessageId?: string | null,
   ) {
+    const newest = normalizeObjectId(newestMessageId)
     return await this.prisma.conversationMember.updateMany({
       where: {
         conversationId,
@@ -268,6 +310,7 @@ export class ConversationMemberRepository {
           not: senderId,
         },
         ...this.activeMemberFilter,
+        ...(newest ? this.markerBefore(newest) : {}),
       },
       data: {
         unreadCount: {
@@ -376,16 +419,35 @@ export class ConversationMemberRepository {
     return changedCount
   }
 
+  /**
+   * Ghi nhận user đã đọc tới `lastReadMessageId` và tính lại unreadCount.
+   *
+   * Trả `{ count }` = số dòng có marker tiến lên (0 hoặc 1), cùng hình dạng
+   * BatchPayload như trước để bên gọi không phải đổi.
+   */
   async updateLastRead(
     conversationId: string,
     userId: string,
     lastReadMessageId: string,
   ) {
-    if (!/^[a-f\d]{24}$/i.test(lastReadMessageId)) {
-      return { count: 0 }
-    }
+    const messageId = normalizeObjectId(lastReadMessageId)
+    if (!messageId) return { count: 0 }
 
     await this.ensureUnreadCountInitialized()
+
+    // Tin phải thuộc CHÍNH hội thoại này. Id đến từ client: trước đây một id
+    // giả thật lớn đẩy được marker lên "tương lai" và chặn mọi lần đọc sau đó.
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, conversationId },
+      select: { createdAt: true },
+    })
+    if (!message) return { count: 0 }
+
+    const member = await this.prisma.conversationMember.findFirst({
+      where: { conversationId, userId, ...this.activeMemberFilter },
+      select: { lastReadMessageId: true },
+    })
+    if (!member) return { count: 0 }
 
     // A read marker may only ever move forward. The client emits one read per
     // change to its message list, and those arrive out of order often enough
@@ -393,29 +455,57 @@ export class ConversationMemberRepository {
     // one, so the sender's "đã xem" marker silently rolled back to an earlier
     // message (or disappeared). Mongo ObjectIds start with a timestamp and sort
     // in creation order, so comparing them is enough to tell newer from older.
-    const current = await this.prisma.conversationMember.findFirst({
-      where: { conversationId, userId },
-      select: { lastReadMessageId: true },
-    })
-
-    if (
-      current?.lastReadMessageId &&
-      current.lastReadMessageId >= lastReadMessageId
-    ) {
-      return { count: 0 }
-    }
-
-    return await this.prisma.conversationMember.updateMany({
+    //
+    // Điều kiện nằm TRONG updateMany nên kiểm-rồi-ghi là một thao tác nguyên tử
+    // phía Mongo. Trước đây findFirst rồi mới update: hai lần đọc đồng thời
+    // (consumer prefetch 300) có thể để id cũ ghi đè id mới.
+    const moved = await this.prisma.conversationMember.updateMany({
       where: {
         conversationId,
         userId,
+        ...this.activeMemberFilter,
+        ...this.markerBefore(messageId),
       },
-      data: {
-        lastReadAt: new Date(),
-        lastReadMessageId,
-        unreadCount: 0,
-      },
+      data: { lastReadMessageId: messageId, lastReadAt: new Date() },
     })
+
+    // Luôn đếm lại từ dữ liệu thật, kể cả khi marker không đổi, để dòng đang
+    // kẹt số ảo tự lành ở lần đọc kế tiếp. Trước đây nhánh "id cũ hơn hoặc
+    // bằng" thoát sớm, nên +1 cron cộng muộn cho tin đã đọc không bao giờ về 0.
+    const stored = normalizeObjectId(member.lastReadMessageId)
+    const effective = stored && stored > messageId ? stored : messageId
+
+    // Chặn dưới bằng createdAt để truy vấn bám index (conversationId,
+    // createdAt, _id): lọc riêng theo _id quét gấp 5 lần số key index trên
+    // prod. Tin sau `effective` đều tạo sau tin vừa đọc nên không loại nhầm.
+    const unread = await this.prisma.message.findMany({
+      where: {
+        conversationId,
+        senderId: { not: userId },
+        id: { gt: effective },
+        createdAt: { gte: message.createdAt },
+      },
+      select: { id: true },
+      // Sắp theo đúng thứ tự của index. Không có orderBy, Prisma tự thêm
+      // `$sort: { _id: 1 }` và Mongo có thể chọn index _id để khỏi sort — quét
+      // mọi tin mới hơn marker của TOÀN BỘ collection thay vì một hội thoại.
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: UNREAD_RECOUNT_CAP,
+    })
+
+    // Chỉ ghi khi marker vẫn đúng là `effective`: lần đọc đồng thời nào đã đẩy
+    // marker xa hơn thì con số của lần đó mới đúng, bản này bỏ qua.
+    await this.prisma.conversationMember.updateMany({
+      where: {
+        conversationId,
+        userId,
+        ...this.activeMemberFilter,
+        lastReadMessageId: effective,
+      },
+      data: { unreadCount: unread.length },
+    })
+
+    return { count: moved.count }
   }
 
   async clearHistoryForMember(

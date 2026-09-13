@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useDispatch } from "react-redux";
 import { socket } from "@/lib/socket";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
@@ -21,6 +27,17 @@ interface UseChatMessagesScrollOptions {
   onFocusHandled?: () => void;
 }
 
+// Tab đang hiển thị hay không. Đọc qua useSyncExternalStore để không lỡ lần đổi
+// nào xảy ra giữa lúc render và lúc đăng ký listener.
+function subscribeToVisibility(onChange: () => void) {
+  document.addEventListener("visibilitychange", onChange);
+  return () => document.removeEventListener("visibilitychange", onChange);
+}
+
+function isDocumentVisible() {
+  return document.visibilityState === "visible";
+}
+
 export function useChatMessagesScroll({
   conversationId,
   messages,
@@ -37,6 +54,10 @@ export function useChatMessagesScroll({
   const topSentinelRef = useRef<HTMLDivElement | null>(null);
 
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const isPageVisible = useSyncExternalStore(
+    subscribeToVisibility,
+    isDocumentVisible,
+  );
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(
     null,
@@ -56,13 +77,23 @@ export function useChatMessagesScroll({
     container.scrollTo({ top: container.scrollHeight, behavior });
   }, []);
 
+  // Hội thoại nào mở ra cũng bắt đầu ở cuối danh sách. `isAtBottom` còn là điều
+  // kiện để báo "đã xem" (xem effect bên dưới): giá trị true này, cùng việc ghim
+  // xuống cuối khi tải xong, là thứ khiến mở hội thoại được tính là đã xem ngay.
   useEffect(() => {
     initialPinnedForRef.current = null;
     setIsAtBottom(true);
   }, [conversationId]);
 
+  // Tự cuộn xuống chỉ khi tin CUỐI đổi (tin mới tới, hoặc lần ghim đầu), không
+  // phải khi tải thêm tin cũ ở đầu danh sách. Trước đây effect theo
+  // messages.length: tải lịch sử cũng làm length đổi, và nếu lúc đó còn cách
+  // đáy dưới 120px (mới mở, danh sách 20 tin rất ngắn) thì bị kéo tuột về đáy —
+  // người đang cuộn lên đọc bị giật xuống, và tin tới sau bị tính là đã xem.
+  const lastMessageId = messages[messages.length - 1]?.id;
+
   useEffect(() => {
-    if (!isAtBottom || !messages.length) return;
+    if (!isAtBottom || !lastMessageId) return;
 
     const isInitial = initialPinnedForRef.current !== conversationId;
 
@@ -83,7 +114,7 @@ export function useChatMessagesScroll({
     }
 
     scrollListToBottom("smooth");
-  }, [messages.length, isAtBottom, conversationId, scrollListToBottom]);
+  }, [lastMessageId, isAtBottom, conversationId, scrollListToBottom]);
 
   useEffect(() => {
     if (!conversationId || !canLoadMessages || messages.length > 0) return;
@@ -97,14 +128,26 @@ export function useChatMessagesScroll({
     );
   }, [canLoadMessages, conversationId, dispatch, messages.length]);
 
+  // Chặn gọi chồng: IntersectionObserver và handleScroll (scrollTop <= 24) có
+  // thể cùng gọi trong một nhịp, trước khi state isLoadingOlder kịp đổi — hai
+  // request cùng cursor, phần giữ vị trí cuộn bị cộng hai lần và người đang đọc
+  // lịch sử bị đẩy tụt xuống gần đáy. Chỉ nhả sau khi đã giữ lại vị trí cuộn.
+  const loadingOlderRef = useRef(false);
+
   const loadOlderMessages = useCallback(async () => {
     if (!conversationId || !canLoadMessages) return;
-    if (!pagination.hasMore || !pagination.oldestCursor || isLoadingOlder) {
+    if (
+      !pagination.hasMore ||
+      !pagination.oldestCursor ||
+      loadingOlderRef.current
+    ) {
       return;
     }
+    loadingOlderRef.current = true;
 
     const container = containerRef.current;
     const previousHeight = container?.scrollHeight || 0;
+    const previousTop = container?.scrollTop || 0;
 
     setIsLoadingOlder(true);
     try {
@@ -119,9 +162,15 @@ export function useChatMessagesScroll({
       requestAnimationFrame(() => {
         const current = containerRef.current;
         if (current) {
-          const nextHeight = current.scrollHeight;
-          current.scrollTop = nextHeight - previousHeight + current.scrollTop;
+          // Đặt TUYỆT ĐỐI từ vị trí trước khi tải. Cộng vào scrollTop hiện tại
+          // thì bù hai lần khi Chrome tự neo cuộn (scroll anchoring) — trình
+          // duyệt đã bù phần tin chèn lên trên, cộng thêm nữa là đẩy người đọc
+          // tụt xuống tận đáy. Sát đỉnh (scrollTop 0) trình duyệt không neo nên
+          // vẫn cần tự bù; công thức này đúng cho cả hai trường hợp.
+          current.scrollTop =
+            previousTop + (current.scrollHeight - previousHeight);
         }
+        loadingOlderRef.current = false;
       });
       setIsLoadingOlder(false);
     }
@@ -129,7 +178,6 @@ export function useChatMessagesScroll({
     canLoadMessages,
     conversationId,
     dispatch,
-    isLoadingOlder,
     pagination.hasMore,
     pagination.oldestCursor,
   ]);
@@ -210,24 +258,50 @@ export function useChatMessagesScroll({
   // right after a newer one and drag the read marker backwards.
   const reportedReadRef = useRef<Record<string, string>>({});
 
+  // Chỉ báo "đã xem" khi người dùng thực sự nhìn thấy tin nhắn: hội thoại đang
+  // mở, tab đang hiển thị và danh sách đang ở (gần) cuối. Chưa đủ điều kiện thì
+  // hoãn lại; effect chạy lại ngay khi điều kiện thành đúng — tab hiện lên lại
+  // (`isPageVisible`), hoặc người dùng cuộn / bấm nút xuống cuối (`handleScroll`
+  // đặt `isAtBottom` = true). Trước đây tin được báo đã xem ngay khi tới, kể cả
+  // lúc người dùng đang cuộn lên đọc lịch sử hay tab đang ở nền.
   useEffect(() => {
     if (!canLoadMessages || !conversationId || messages.length === 0) return;
+    if (!isPageVisible || !isAtBottom) return;
 
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage.senderId === userId) return;
-    if (lastMessage.id.startsWith("temp-")) return;
+    // Tin mới nhất của người khác đã có id thật. Tin của chính mình (kể cả tin
+    // `temp-` đang chờ gửi) không bao giờ được báo, nhưng cũng không được che
+    // mất tin của người khác đứng trước nó: đang cuộn lên thì có tin tới, rồi
+    // người dùng trả lời luôn — tin tới đó vẫn phải được báo là đã xem.
+    let latestFromOthers: Message | undefined;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.senderId === userId || message.id.startsWith("temp-")) {
+        continue;
+      }
+      latestFromOthers = message;
+      break;
+    }
+    if (!latestFromOthers) return;
 
     const alreadyReported = reportedReadRef.current[conversationId];
-    if (alreadyReported && alreadyReported >= lastMessage.id) return;
-    reportedReadRef.current[conversationId] = lastMessage.id;
+    if (alreadyReported && alreadyReported >= latestFromOthers.id) return;
+    reportedReadRef.current[conversationId] = latestFromOthers.id;
 
     socket.emit(SOCKET_EVENTS.CHAT.MESSAGE_READ, {
       conversationId,
-      lastMessageId: lastMessage.id,
+      lastMessageId: latestFromOthers.id,
     });
 
     dispatch(markConversationRead({ conversationId }));
-  }, [canLoadMessages, conversationId, dispatch, messages, userId]);
+  }, [
+    canLoadMessages,
+    conversationId,
+    dispatch,
+    isAtBottom,
+    isPageVisible,
+    messages,
+    userId,
+  ]);
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
