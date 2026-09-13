@@ -3,11 +3,15 @@
 Toàn bộ ứng dụng (FE + BE + hạ tầng) chạy trên **một server** bằng Docker Compose:
 `backend/docker-compose.prod.yml` (project `daln-prod`). Source nằm ở `/root/workspace/DALN`.
 
-| Cổng | Dịch vụ |
+Ra ngoài chỉ có **nginx trên host**: cổng 80 (chuyển sang HTTPS) và 443, domain
+`https://nguyen1976.xyz` — xem mục [HTTPS](#https-nginx--certbot).
+
+| Đường dẫn | Chuyển tới (các cổng này chỉ nghe 127.0.0.1) |
 |---|---|
-| 80 | web (nginx phục vụ bản build Vite) |
-| 8000 | Kong — API + socket (`/realtime`, `/socket.io`) |
-| 9000 | MinIO — ảnh/tệp (GET công khai, PUT bằng URL ký sẵn) |
+| `/` | web — nginx trong container phục vụ bản build Vite (`8081`) |
+| `/api/` | Kong — API, bỏ tiền tố `/api` (`8000`) |
+| `/socket.io/` | Kong — socket, namespace `/realtime` (`8000`) |
+| `/daln-media/` | MinIO — ảnh/tệp: GET công khai, PUT bằng URL ký sẵn (`9000`) |
 
 Mongo, Redis, RabbitMQ, Qdrant, Kong admin và các cổng 3001–3005 **không** mở ra ngoài.
 
@@ -189,6 +193,26 @@ Bỏ hẳn (đã xem, không cần chạy lại):
 docker exec daln-prod-rabbitmq rabbitmqctl purge_queue daln.dead-letters
 ```
 
+## HTTPS (nginx + certbot)
+
+- nginx cài thẳng trên host (apt), cấu hình ở `deploy/nginx/daln.conf`. `deploy.sh` cài lại file
+  này ở mỗi lần deploy: `nginx -t` **trước** khi đụng tới container (lỗi thì trả lại file cũ và
+  dừng, app cũ vẫn chạy), reload sau `up -d`. Muốn đổi cấu hình nginx thì sửa file trong repo.
+- Chứng chỉ Let's Encrypt, đăng ký không kèm email. certbot tự gia hạn (systemd
+  `certbot.timer`) qua webroot `/var/www/certbot` rồi reload nginx.
+- Chứng chỉ hiện mới có `nguyen1976.xyz`: Let's Encrypt chưa tra được CAA của `www` vì
+  nameserver Mắt Bão lúc được lúc trả SERVFAIL. `http://www…` vẫn chuyển về domain gốc; riêng
+  `https://www…` báo sai chứng chỉ. DNS ổn thì thêm `www` (không phải dừng gì):
+  `certbot certonly --webroot -w /var/www/certbot --cert-name nguyen1976.xyz -d nguyen1976.xyz -d www.nguyen1976.xyz --expand --deploy-hook 'systemctl reload nginx'`
+- `http://` và truy cập bằng IP đều chuyển sang `https://nguyen1976.xyz`.
+
+```bash
+certbot certificates                 # hạn chứng chỉ
+certbot renew --dry-run              # thử gia hạn, không đổi gì
+nginx -t && systemctl reload nginx   # nạp lại tay
+tail -f /var/log/nginx/error.log
+```
+
 ## Env
 
 - File thật: `/root/workspace/DALN/backend/.env.production` — chỉ nằm trên server (quyền 600),
@@ -220,7 +244,7 @@ echo '/swapfile none swap sw 0 0' >> /etc/fstab
 echo 'vm.swappiness=10' > /etc/sysctl.d/99-swappiness.conf && sysctl --system
 
 # 2. Firewall — mở 22 trước để không tự khoá mình
-ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 8000/tcp && ufw allow 9000/tcp
+ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp
 ufw --force enable
 
 # 3. Source (repo public, không cần key để kéo)
@@ -234,6 +258,20 @@ chmod 600 /root/workspace/DALN/backend/.env.production
 install -m 755 /root/workspace/DALN/deploy/remote-entry.sh /usr/local/bin/daln-deploy
 #    rồi thêm public key vào /root/.ssh/authorized_keys theo dạng:
 #    restrict,command="/usr/local/bin/daln-deploy" ssh-ed25519 AAAA... github-actions-deploy
+
+# 6. HTTPS — nginx + certbot. Chặn nginx tự khởi động lúc cài: chứng chỉ chưa có thì
+#    cấu hình SSL chưa chạy được; deploy kế tiếp sẽ cài cấu hình và bật nginx.
+printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d
+apt-get install -y nginx certbot; rm -f /usr/sbin/policy-rc.d
+rm -f /etc/nginx/sites-enabled/default && install -d -m 755 /var/www/certbot
+#    Lấy chứng chỉ bằng standalone (cần cổng 80 trống: nếu container web của bản cũ
+#    còn giữ cổng 80 thì `docker stop daln-prod-web` trước, `docker start` lại sau).
+certbot certonly --standalone -d nguyen1976.xyz -d www.nguyen1976.xyz \
+  --non-interactive --agree-tos --register-unsafely-without-email
+#    Sau khi deploy xong (nginx đã chạy): gia hạn qua webroot, xong thì reload nginx.
+certbot reconfigure --cert-name nguyen1976.xyz --webroot -w /var/www/certbot \
+  --deploy-hook 'systemctl reload nginx'
 ```
 
-Docker publish cổng đi vòng qua ufw, nên compose chỉ publish đúng 3 cổng ở bảng trên.
+Docker publish cổng đi vòng qua ufw, nên compose chỉ publish lên `127.0.0.1` (web 8081,
+Kong 8000, MinIO 9000); ra ngoài chỉ có nginx (80/443).
