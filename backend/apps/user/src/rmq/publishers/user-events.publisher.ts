@@ -1,5 +1,6 @@
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
 import { Injectable } from '@nestjs/common'
+import { publishEvent } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   EmitToUserPayload,
@@ -20,7 +21,8 @@ export class UserEventsPublisher {
   constructor(private readonly amqpConnection: AmqpConnection) {}
 
   publishUserCreated(payload: UserCreatedPayload): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_CREATED,
       payload,
@@ -28,7 +30,8 @@ export class UserEventsPublisher {
   }
 
   publishUserRegisterOtp(payload: UserRegisterOtpPayload): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_REGISTER_OTP,
       payload,
@@ -36,7 +39,8 @@ export class UserEventsPublisher {
   }
 
   publishUserMakeFriend(payload: UserMakeFriendPayload): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_MAKE_FRIEND,
       payload,
@@ -46,7 +50,8 @@ export class UserEventsPublisher {
   publishUserUpdateStatusMakeFriend(
     payload: UserUpdateStatusMakeFriendPayload,
   ): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_UPDATE_STATUS_MAKE_FRIEND,
       payload,
@@ -54,7 +59,8 @@ export class UserEventsPublisher {
   }
 
   publishUserUpdated(payload: UserUpdatedPayload): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_UPDATED,
       payload,
@@ -62,7 +68,8 @@ export class UserEventsPublisher {
   }
 
   publishUserInterestsUpdated(payload: UserInterestsUpdatedPayload): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_INTERESTS_UPDATED,
       payload,
@@ -70,7 +77,8 @@ export class UserEventsPublisher {
   }
 
   publishUserJoinedGroup(payload: UserJoinGroupPayload): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_JOINED_GROUP,
       payload,
@@ -78,7 +86,8 @@ export class UserEventsPublisher {
   }
 
   publishUserLeftGroup(payload: UserLeftGroupPayload): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_LEFT_GROUP,
       payload,
@@ -86,7 +95,8 @@ export class UserEventsPublisher {
   }
 
   publisherUserOnline(payload: { userIds: string[]; userId: string }): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -101,7 +111,8 @@ export class UserEventsPublisher {
     userId: string
     lastSeen: string
   }): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {

@@ -29,8 +29,10 @@ export interface ConsumeOptions {
  *     - Nếu trùng messageId -> DB ném P2002 -> coi như đã xử lý -> bỏ qua.
  *  3. Nếu insert thành công -> chạy handler(tx) (business write + ghi outbox)
  *     trong cùng transaction.
- *  4. Commit. Nếu handler lỗi -> rollback cả inbox lẫn business -> message sẽ
- *     được redeliver và thử lại sạch sẽ.
+ *  4. Commit. Nếu handler lỗi -> rollback cả inbox lẫn business -> lỗi ném ra
+ *     subscriber, `retryThenDeadLetter` (@app/common/rmq) publish lại message
+ *     tối đa RMQ_MAX_RETRIES lần rồi mới dead-letter. Mỗi lần thử lại đều sạch
+ *     vì inbox chưa commit; lần nào chạm P2002 thì coi như đã xử lý và ack.
  *
  * Nhờ unique index trên messageId, khi tải cao 2 message trùng tới đồng thời thì
  * DB đảm bảo chỉ 1 transaction commit được, transaction còn lại chắc chắn rơi

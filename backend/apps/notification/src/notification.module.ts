@@ -3,7 +3,10 @@ import { NotificationController } from './notification.controller'
 import { NotificationService } from './notification.service'
 import { MailerModule } from '@app/mailer'
 import { ConfigModule } from '@nestjs/config'
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
+import {
+  MessageHandlerErrorBehavior,
+  RabbitMQModule,
+} from '@golevelup/nestjs-rabbitmq'
 import { UtilModule } from '@app/util'
 import { RedisModule } from '@app/redis'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
@@ -62,6 +65,11 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
       ],
       uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: true },
+      // Lưới an toàn: lỗi lọt khỏi handler thì NACK không requeue (-> dead-letter
+      // qua policy daln-dlx) thay cho REQUEUE mặc định của golevelup — REQUEUE
+      // từng làm một message lỗi vĩnh viễn lặp vô hạn (sự cố 2026-09-12). Mọi
+      // subscriber đã dùng @RabbitSubscribeWithRetry (retry có giới hạn trước).
+      defaultSubscribeErrorBehavior: MessageHandlerErrorBehavior.NACK,
     }),
     UtilModule,
     LoggerModule.forService('Notification-Service'),

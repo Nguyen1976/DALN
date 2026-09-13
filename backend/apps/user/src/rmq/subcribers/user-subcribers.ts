@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
+import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
@@ -10,7 +10,7 @@ import { UserService } from '../../user.service'
 export class MessageSubscriber {
   constructor(private readonly userService: UserService) {}
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.REALTIME_EVENTS,
     routingKey: ROUTING_RMQ.USER_ONLINE,
     queue: QUEUE_RMQ.USER_ONLINE,
@@ -19,7 +19,7 @@ export class MessageSubscriber {
     await safeExecute(() => this.userService.handleUserOnline(data.userId))
   }
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.REALTIME_EVENTS,
     routingKey: ROUTING_RMQ.USER_OFFLINE,
     queue: QUEUE_RMQ.USER_OFFLINE,

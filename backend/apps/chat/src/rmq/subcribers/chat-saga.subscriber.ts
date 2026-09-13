@@ -1,6 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
-import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
-import { consumeIdempotent, enqueueOutbox } from '@app/saga'
+import type { ConsumeMessage } from 'amqplib'
+import {
+  assertSupportedVersion,
+  RabbitSubscribeWithRetry,
+} from '@app/common/rmq'
+import {
+  consumeIdempotent,
+  enqueueOutbox,
+  SUPPORTED_SAGA_VERSIONS,
+} from '@app/saga'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   buildReply,
@@ -31,14 +39,18 @@ export class ChatSagaSubscriber {
    * Tạo conversation + members + reply OK(conversationId) trong cùng transaction.
    * Lỗi -> reply FAILED để saga chạy compensation (revert friendship).
    */
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.SAGA_EVENTS,
     routingKey: SAGA_ROUTING.CMD_CREATE_CONVERSATION,
     queue: SAGA_QUEUE.CHAT_CREATE_CONVERSATION,
   })
   async createConversation(
     envelope: SagaEnvelope<CreateConversationCommandPayload>,
+    raw?: ConsumeMessage,
   ): Promise<void> {
+    // Đặt NGOÀI try: version lạ phải dead-letter, không được biến thành reply
+    // FAILED (saga sẽ compensate oan cho một bước nó không hiểu).
+    assertSupportedVersion(raw, SUPPORTED_SAGA_VERSIONS)
     try {
       const { processed, result } = await consumeIdempotent(
         this.prisma as any,
@@ -117,14 +129,16 @@ export class ChatSagaSubscriber {
   /**
    * Compensation: xoá conversation đã tạo (khi bước sau của saga thất bại).
    */
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.SAGA_EVENTS,
     routingKey: SAGA_ROUTING.CMP_DELETE_CONVERSATION,
     queue: SAGA_QUEUE.CHAT_DELETE_CONVERSATION,
   })
   async deleteConversation(
     envelope: SagaEnvelope<DeleteConversationCommandPayload>,
+    raw?: ConsumeMessage,
   ): Promise<void> {
+    assertSupportedVersion(raw, SUPPORTED_SAGA_VERSIONS)
     await consumeIdempotent(
       this.prisma as any,
       {

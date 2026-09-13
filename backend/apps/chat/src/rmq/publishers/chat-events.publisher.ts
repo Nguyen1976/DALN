@@ -1,5 +1,6 @@
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
 import { Injectable, Logger } from '@nestjs/common'
+import { publishEvent } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   EmitToUserPayload,
@@ -26,7 +27,8 @@ export class ChatEventsPublisher {
     buildData: (userId: string) => Record<string, unknown>,
   ) {
     for (const userId of userIds) {
-      this.amqpConnection.publish(
+      publishEvent(
+        this.amqpConnection,
         EXCHANGE_RMQ.REALTIME_EVENTS,
         ROUTING_RMQ.EMIT_REALTIME_EVENT,
         {
@@ -55,7 +57,8 @@ export class ChatEventsPublisher {
     const senderId = String(normalized.senderId)
     const otherMemberIds = memberIds.filter((id) => id !== senderId)
 
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -72,7 +75,8 @@ export class ChatEventsPublisher {
       } as EmitToUserPayload,
     )
 
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -89,7 +93,8 @@ export class ChatEventsPublisher {
       (payload.newMemberIds || []).includes(member.userId),
     )
 
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -124,7 +129,8 @@ export class ChatEventsPublisher {
   }) {
     const { conversation, actorId, targetUserId, remainingMemberIds } = payload
 
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -161,7 +167,8 @@ export class ChatEventsPublisher {
     const { conversation, actorId, remainingMemberIds, promotedUserId } =
       payload
 
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -192,7 +199,8 @@ export class ChatEventsPublisher {
   publishSystemMessage(memberIds: string[], message: any) {
     const normalized = MessageMapper.toResponse(message)
 
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -213,7 +221,8 @@ export class ChatEventsPublisher {
       retryable: boolean
     },
   ): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -235,7 +244,8 @@ export class ChatEventsPublisher {
         : undefined,
     }
 
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -247,7 +257,8 @@ export class ChatEventsPublisher {
   }
 
   publishPollUpdated(payload: PollUpdatedPayload, userIds: string[]): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -259,7 +270,8 @@ export class ChatEventsPublisher {
   }
 
   publishPollClosed(payload: PollClosedPayload, userIds: string[]): void {
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -272,7 +284,8 @@ export class ChatEventsPublisher {
 
   publishUserJoinedGroup(payload: UserJoinGroupPayload): void {
     try {
-      this.amqpConnection.publish(
+      publishEvent(
+        this.amqpConnection,
         EXCHANGE_RMQ.USER_EVENTS,
         ROUTING_RMQ.USER_JOINED_GROUP,
         payload,
@@ -284,7 +297,8 @@ export class ChatEventsPublisher {
 
   publishUserLeftGroup(payload: UserLeftGroupPayload): void {
     try {
-      this.amqpConnection.publish(
+      publishEvent(
+        this.amqpConnection,
         EXCHANGE_RMQ.USER_EVENTS,
         ROUTING_RMQ.USER_LEFT_GROUP,
         payload,

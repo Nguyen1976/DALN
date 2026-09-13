@@ -13,7 +13,10 @@ import { FeatureService } from './services/feature.service'
 import { GbRankerService } from './services/gb-ranker.service'
 import { DatasetBuilderService } from './services/dataset-builder.service'
 import { ModelTrainingService } from './services/model-training.service'
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
+import {
+  MessageHandlerErrorBehavior,
+  RabbitMQModule,
+} from '@golevelup/nestjs-rabbitmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { UserSnapshotSyncService } from './services/user-snapshot-sync.service'
 import { UserSnapshotSyncSubscriber } from './rmq/subscribers/user-snapshot-sync.subscriber'
@@ -58,6 +61,11 @@ import { TrainingProcessor } from './background-jobs/training/training.processor
       ],
       uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: false },
+      // Lưới an toàn: lỗi lọt khỏi handler thì NACK không requeue (-> dead-letter
+      // qua policy daln-dlx) thay cho REQUEUE mặc định của golevelup — REQUEUE
+      // từng làm một message lỗi vĩnh viễn lặp vô hạn (sự cố 2026-09-12). Mọi
+      // subscriber đã dùng @RabbitSubscribeWithRetry (retry có giới hạn trước).
+      defaultSubscribeErrorBehavior: MessageHandlerErrorBehavior.NACK,
     }),
     BullModule.forRootAsync({
       useFactory: () => ({ connection: getBullMqConnectionConfig() }),
