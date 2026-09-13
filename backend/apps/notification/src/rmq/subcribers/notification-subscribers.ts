@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
+import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import type {
   UserCreatedPayload,
@@ -16,7 +16,7 @@ import { NotificationService } from '../../notification.service'
 export class NotificationSubscriber {
   constructor(private readonly notificationService: NotificationService) {}
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,
     routingKey: ROUTING_RMQ.USER_CREATED,
     queue: QUEUE_RMQ.NOTIFICATION_USER_CREATED,
@@ -25,7 +25,7 @@ export class NotificationSubscriber {
     await safeExecute(() => this.notificationService.handleUserRegistered(data))
   }
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,
     routingKey: ROUTING_RMQ.USER_REGISTER_OTP,
     queue: QUEUE_RMQ.NOTIFICATION_USER_REGISTER_OTP,
@@ -36,7 +36,7 @@ export class NotificationSubscriber {
     )
   }
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,
     routingKey: ROUTING_RMQ.USER_MAKE_FRIEND,
     queue: QUEUE_RMQ.NOTIFICATION_USER_MAKE_FRIEND,
@@ -45,7 +45,7 @@ export class NotificationSubscriber {
     await safeExecute(() => this.notificationService.handleMakeFriend(data))
   }
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,
     routingKey: ROUTING_RMQ.USER_UPDATE_STATUS_MAKE_FRIEND,
     queue: QUEUE_RMQ.NOTIFICATION_USER_UPDATE_STATUS_MAKE_FRIEND,

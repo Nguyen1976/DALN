@@ -14,6 +14,13 @@ export interface OutboxRecord {
   attempt: number
   maxAttempts: number
   nextAttemptAt: Date | null
+  /**
+   * Version schema của payload, publish thành header `x-event-version`.
+   * Model OutboxEvent (Prisma) CHƯA có cột này nên hiện luôn undefined -> relay
+   * dùng 1. Khi cần phát version 2: thêm `version Int @default(1)` vào model
+   * OutboxEvent của từng service, rồi mới mở `version` trong OutboxEventInput.
+   */
+  version?: number | null
 }
 
 export interface PrismaDelegateLike {
@@ -43,4 +50,6 @@ export interface OutboxEventInput {
   exchange: string
   routingKey: string
   payload: unknown
+  // Cố ý CHƯA có `version`: ghi field schema không có, Prisma ném "Unknown
+  // argument" và rollback luôn business write. Xem OutboxRecord.version.
 }

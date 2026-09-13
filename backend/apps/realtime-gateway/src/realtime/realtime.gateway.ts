@@ -11,7 +11,8 @@ import {
 import { JwtService } from '@nestjs/jwt'
 import { Inject, Injectable } from '@nestjs/common'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
-import { AmqpConnection, RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
+import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
+import { publishEvent, RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
@@ -183,7 +184,8 @@ export class RealtimeGateway
         //delete lastSeen vì user đã online trở lại
         await this.redisClient.del(`user:${userId}:lastSeen`)
 
-        this.amqpConnection.publish(
+        publishEvent(
+          this.amqpConnection,
           EXCHANGE_RMQ.REALTIME_EVENTS,
           ROUTING_RMQ.USER_ONLINE,
           { userId },
@@ -250,7 +252,8 @@ export class RealtimeGateway
         60 * 60 * 24 * 7,
       ) // lưu lastSeen trong 7 ngày
 
-      this.amqpConnection.publish(
+      publishEvent(
+        this.amqpConnection,
         EXCHANGE_RMQ.REALTIME_EVENTS,
         ROUTING_RMQ.USER_OFFLINE,
         { userId, lastSeen },
@@ -308,7 +311,7 @@ export class RealtimeGateway
     return this.userStatusStore.isOnline(userId)
   }
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.REALTIME_EVENTS,
     routingKey: ROUTING_RMQ.EMIT_REALTIME_EVENT,
     queue: QUEUE_RMQ.REALTIME_EMIT_EVENT,
@@ -346,7 +349,8 @@ export class RealtimeGateway
       return
     }
 
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.SEND_MESSAGE,
       {
@@ -453,7 +457,8 @@ export class RealtimeGateway
     this.queueReadBroadcast(client, conversationId, userId, lastMessageId)
 
     // 2️⃣ Gửi async message tới Chat Service để cập nhật MongoDB
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.UPDATE_MESSAGE_READ,
       {
@@ -617,7 +622,8 @@ export class RealtimeGateway
   }) {
     if (!payload.conversationId) return
 
-    this.amqpConnection.publish(
+    publishEvent(
+      this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.CALL_ENDED,
       payload,

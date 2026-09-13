@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
+import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
@@ -15,7 +15,7 @@ export class FriendshipRecommendationSubscriber {
     private readonly friendGraphService: FriendGraphService,
   ) {}
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,
     routingKey: ROUTING_RMQ.USER_UPDATE_STATUS_MAKE_FRIEND,
     queue: QUEUE_RMQ.RECOMMENDATION_USER_UPDATE_STATUS_MAKE_FRIEND,

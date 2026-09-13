@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { conversationType, Prisma } from 'apps/chat/src/generated'
+import { conversationType } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { RedisService } from '@app/redis'
 import { olderThanCursor, type KeysetCursor } from '@app/util'
@@ -11,130 +11,13 @@ export class ConversationRepository {
     private readonly redisService: RedisService,
   ) {}
 
-  private updatedAtBackfilled = false
-  private participantRoleBackfilled = false
+  // Dữ liệu cũ (updatedAt null, role chữ thường) do migrations/chat/0001, 0002
+  // chuẩn hoá một lần lúc deploy — repository không còn backfill lúc runtime.
   private readonly activeMemberWhere = {
     isActive: true,
   }
 
-  private async forceBackfillConversationUpdatedAt() {
-    await this.prisma.$runCommandRaw({
-      update: 'conversation',
-      updates: [
-        {
-          q: {
-            $or: [{ updatedAt: null }, { updatedAt: { $exists: false } }],
-          },
-          u: [
-            {
-              $set: {
-                updatedAt: {
-                  $ifNull: ['$createdAt', '$$NOW'],
-                },
-              },
-            },
-          ],
-          multi: true,
-        },
-      ],
-    })
-  }
-
-  private async ensureConversationUpdatedAtNotNull() {
-    if (this.updatedAtBackfilled) return
-    await this.forceBackfillConversationUpdatedAt()
-    this.updatedAtBackfilled = true
-  }
-
-  private async forceBackfillParticipantRole() {
-    await this.prisma.$runCommandRaw({
-      update: 'conversationMember',
-      updates: [
-        {
-          q: {
-            $or: [
-              { role: null },
-              { role: { $exists: false } },
-              { role: 'member' },
-              { role: 'admin' },
-              { role: 'owner' },
-            ],
-          },
-          u: [
-            {
-              $set: {
-                role: {
-                  $switch: {
-                    branches: [
-                      { case: { $eq: ['$role', 'admin'] }, then: 'ADMIN' },
-                      { case: { $eq: ['$role', 'owner'] }, then: 'OWNER' },
-                      { case: { $eq: ['$role', 'member'] }, then: 'MEMBER' },
-                    ],
-                    default: 'MEMBER',
-                  },
-                },
-              },
-            },
-          ],
-          multi: true,
-        },
-      ],
-    })
-  }
-
-  private async ensureParticipantRoleNormalized() {
-    if (this.participantRoleBackfilled) return
-    await this.forceBackfillParticipantRole()
-    this.participantRoleBackfilled = true
-  }
-
-  private async findConversationsWithRetry(
-    args: Prisma.conversationFindManyArgs,
-  ) {
-    try {
-      return await this.prisma.conversation.findMany(args)
-    } catch (error) {
-      const prismaError = error as {
-        code?: string
-        meta?: {
-          field_name?: string
-        }
-      }
-      const isUpdatedAtTypeError =
-        prismaError?.code === 'P2032' &&
-        String(prismaError?.meta?.field_name || '').includes('updatedAt')
-
-      const errorMessage = String((error as any)?.message || '')
-      const isParticipantRoleError =
-        errorMessage.includes(
-          "Value 'member' not found in enum 'participantRole'",
-        ) ||
-        errorMessage.includes(
-          "Value 'admin' not found in enum 'participantRole'",
-        ) ||
-        errorMessage.includes(
-          "Value 'owner' not found in enum 'participantRole'",
-        )
-
-      if (!isUpdatedAtTypeError && !isParticipantRoleError) {
-        throw error
-      }
-
-      if (isParticipantRoleError) {
-        await this.forceBackfillParticipantRole()
-      }
-
-      if (isUpdatedAtTypeError) {
-        await this.forceBackfillConversationUpdatedAt()
-      }
-
-      return await this.prisma.conversation.findMany(args)
-    }
-  }
-
   async findConversationByFriendId(friendId: string, userId: string) {
-    // await this.ensureParticipantRoleNormalized()
-
     return await this.prisma.conversation.findFirst({
       where: {
         type: 'DIRECT',
@@ -204,8 +87,6 @@ export class ConversationRepository {
   }
 
   async findByIdWithMembers(id: string): Promise<any> {
-    await this.ensureParticipantRoleNormalized()
-
     return await this.prisma.conversation.findUnique({
       where: { id },
       include: {
@@ -515,7 +396,7 @@ export class ConversationRepository {
     if (myConversationIds.length === 0) return []
 
     // BƯỚC 2: Tìm kiếm Conversation bằng toán tử "in" (Bỏ qua hoàn toàn lệnh Join "some")
-    return this.findConversationsWithRetry({
+    return await this.prisma.conversation.findMany({
       where: {
         id: { in: myConversationIds }, // Chỉ tìm trong các nhóm tôi đã tham gia
         type: 'GROUP',
@@ -550,8 +431,6 @@ export class ConversationRepository {
   }
 
   async findDirectConversationOfFriend(userId: string, keyword: string) {
-    // await this.ensureParticipantRoleNormalized()
-
     // 1️⃣ Tìm member KHÁC user match username
     const matchedMembers = await this.prisma.conversationMember.findMany({
       where: {
@@ -586,9 +465,7 @@ export class ConversationRepository {
     if (!memberships.length) return []
 
     // 3️⃣ Lấy conversation giống như cũ
-    await this.ensureConversationUpdatedAtNotNull()
-
-    const conversations = await this.findConversationsWithRetry({
+    const conversations = await this.prisma.conversation.findMany({
       where: {
         id: { in: memberships.map((m) => m.conversationId) },
       },

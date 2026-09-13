@@ -46,6 +46,12 @@
       "@app/mailer/*": [
         "libs/mailer/src/*"
       ],
+      "@app/migrations": [
+        "libs/migrations/src"
+      ],
+      "@app/migrations/*": [
+        "libs/migrations/src/*"
+      ],
       "@app/qdrant": [
         "libs/qdrant/src"
       ],

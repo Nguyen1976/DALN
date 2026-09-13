@@ -1,6 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
-import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
-import { consumeIdempotent, enqueueOutbox } from '@app/saga'
+import type { ConsumeMessage } from 'amqplib'
+import {
+  assertSupportedVersion,
+  RabbitSubscribeWithRetry,
+} from '@app/common/rmq'
+import {
+  consumeIdempotent,
+  enqueueOutbox,
+  SUPPORTED_SAGA_VERSIONS,
+} from '@app/saga'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   buildReply,
@@ -24,14 +32,16 @@ export class UserSagaSubscriber {
    * Compensation: rollback friendship đã tạo ở bước đồng bộ (HTTP) khi saga thất bại.
    * Xoá 2 bản ghi friendship 2 chiều + đưa friendRequest về PENDING, rồi reply OK.
    */
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.SAGA_EVENTS,
     routingKey: SAGA_ROUTING.CMP_REVERT_FRIENDSHIP,
     queue: SAGA_QUEUE.USER_REVERT_FRIENDSHIP,
   })
   async revertFriendship(
     envelope: SagaEnvelope<RevertFriendshipCommandPayload>,
+    raw?: ConsumeMessage,
   ): Promise<void> {
+    assertSupportedVersion(raw, SUPPORTED_SAGA_VERSIONS)
     await consumeIdempotent(
       this.prisma as any,
       {

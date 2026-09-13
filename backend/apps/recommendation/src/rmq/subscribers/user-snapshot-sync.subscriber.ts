@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
+import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
@@ -17,7 +17,7 @@ export class UserSnapshotSyncSubscriber {
     private readonly userSnapshotSyncService: UserSnapshotSyncService,
   ) {}
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,
     routingKey: ROUTING_RMQ.USER_CREATED,
     queue: QUEUE_RMQ.RECOMMENDATION_USER_CREATED,
@@ -28,7 +28,7 @@ export class UserSnapshotSyncSubscriber {
     )
   }
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,
     routingKey: ROUTING_RMQ.USER_UPDATED,
     queue: QUEUE_RMQ.RECOMMENDATION_USER_UPDATED,
@@ -39,7 +39,7 @@ export class UserSnapshotSyncSubscriber {
     )
   }
 
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,
     routingKey: ROUTING_RMQ.USER_INTERESTS_UPDATED,
     queue: QUEUE_RMQ.RECOMMENDATION_USER_INTERESTS_UPDATED,

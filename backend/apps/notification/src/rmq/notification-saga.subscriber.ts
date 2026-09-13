@@ -1,7 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
-import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq'
+import type { ConsumeMessage } from 'amqplib'
+import {
+  assertSupportedVersion,
+  RabbitSubscribeWithRetry,
+} from '@app/common/rmq'
 import { RedisService } from '@app/redis'
-import { consumeIdempotent, enqueueOutbox } from '@app/saga'
+import {
+  consumeIdempotent,
+  enqueueOutbox,
+  SUPPORTED_SAGA_VERSIONS,
+} from '@app/saga'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 import {
@@ -30,14 +38,18 @@ export class NotificationSagaSubscriber {
    * Tạo notification + reply OK trong cùng transaction (idempotent theo messageId).
    * Lỗi -> reply FAILED để saga retry/compensate.
    */
-  @RabbitSubscribe({
+  @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.SAGA_EVENTS,
     routingKey: SAGA_ROUTING.CMD_NOTIFY_ACCEPTED,
     queue: SAGA_QUEUE.NOTIFICATION_NOTIFY_ACCEPTED,
   })
   async notifyAccepted(
     envelope: SagaEnvelope<NotifyAcceptedCommandPayload>,
+    raw?: ConsumeMessage,
   ): Promise<void> {
+    // Đặt NGOÀI try: version lạ phải dead-letter, không được biến thành reply
+    // FAILED (saga sẽ compensate oan cho một bước nó không hiểu).
+    assertSupportedVersion(raw, SUPPORTED_SAGA_VERSIONS)
     const p = envelope.payload
     const message = `Lời mời kết bạn của ${p.inviteeName} đã được chấp nhận.`
 

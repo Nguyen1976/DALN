@@ -1,4 +1,7 @@
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
+import {
+  MessageHandlerErrorBehavior,
+  RabbitMQModule,
+} from '@golevelup/nestjs-rabbitmq'
 import { Global, Module } from '@nestjs/common'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 
@@ -28,6 +31,11 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
       // song Prisma càng đắt: 4,1ms CPU/tin ở mức 10, 6,9ms ở mức 50) mà nằm
       // chờ trong buffer rồi gộp thành 3 lệnh createMany.
       prefetchCount: Number(process.env.CHAT_RMQ_PREFETCH ?? 300),
+      // Lưới an toàn: lỗi lọt khỏi handler thì NACK không requeue (-> dead-letter
+      // qua policy daln-dlx) thay cho REQUEUE mặc định của golevelup — REQUEUE
+      // từng làm một message lỗi vĩnh viễn lặp vô hạn (sự cố 2026-09-12). Mọi
+      // subscriber đã dùng @RabbitSubscribeWithRetry (retry có giới hạn trước).
+      defaultSubscribeErrorBehavior: MessageHandlerErrorBehavior.NACK,
     }),
   ],
   exports: [RabbitMQModule],

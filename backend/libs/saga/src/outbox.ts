@@ -1,5 +1,5 @@
 import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
-import type { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
+import { publishEvent, type AmqpPublisher } from '@app/common/rmq'
 import type {
   OutboxCapablePrisma,
   OutboxEventInput,
@@ -85,7 +85,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly prisma: OutboxCapablePrisma,
-    private readonly amqp: AmqpConnection,
+    private readonly amqp: AmqpPublisher,
     options: OutboxRelayOptions = {},
   ) {
     this.intervalMs = options.intervalMs ?? 1500
@@ -180,7 +180,15 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
 
   private async publishOne(event: OutboxRecord): Promise<void> {
     try {
-      await this.amqp.publish(event.exchange, event.routingKey, event.payload)
+      // messageId của outbox cũng là AMQP messageId -> lần theo được một event
+      // từ bảng outbox tới log dead-letter. Version lấy từ bản ghi (mặc định 1).
+      await publishEvent(
+        this.amqp,
+        event.exchange,
+        event.routingKey,
+        event.payload,
+        { version: event.version ?? 1, messageId: event.messageId },
+      )
 
       await this.prisma.outboxEvent.update({
         where: { id: event.id },

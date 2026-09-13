@@ -4,7 +4,10 @@ import { RealtimeGatewayService } from './realtime-gateway.service'
 import { RealtimeGateway } from './realtime/realtime.gateway'
 import { RedisModule } from '@app/redis'
 import { CommonModule } from '@app/common'
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq'
+import {
+  MessageHandlerErrorBehavior,
+  RabbitMQModule,
+} from '@golevelup/nestjs-rabbitmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 
 @Module({
@@ -19,6 +22,11 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
       ],
       uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: true },
+      // Lưới an toàn: lỗi lọt khỏi handler thì NACK không requeue (-> dead-letter
+      // qua policy daln-dlx) thay cho REQUEUE mặc định của golevelup — REQUEUE
+      // từng làm một message lỗi vĩnh viễn lặp vô hạn (sự cố 2026-09-12). Mọi
+      // subscriber đã dùng @RabbitSubscribeWithRetry (retry có giới hạn trước).
+      defaultSubscribeErrorBehavior: MessageHandlerErrorBehavior.NACK,
     }),
     CommonModule,
   ],
