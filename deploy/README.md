@@ -24,22 +24,170 @@ Cấu hình trên GitHub: secret `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`; variabl
 Key deploy bị khoá bằng forced command: nó chỉ nhận một commit SHA đã nằm trên `main`,
 không mở được shell.
 
+## Thứ tự khởi động
+
+`up -d` dựng theo `depends_on`. Các bước one-shot chạy lại ở **mỗi** lần up và đều idempotent:
+
+```
+mongo ──> mongo-init ──> db-push ──> migrate ──┬──> app (6 service + worker) ──> Kong
+rabbitmq ──> rabbitmq-init ────────────────────┤
+minio ──> minio-init ──────────────────────────┘
+                              migrate ──> migrate-background   (app KHÔNG chờ)
+```
+
+| Bước | Làm gì | Lỗi thì |
+|---|---|---|
+| `db-push` | `prisma db push`: collection + unique index của 5 DB | app không chạy, deploy dừng |
+| `migrate` | `migrate.sh up`: migration dữ liệu đang chờ (`backend/migrations/<service>/`) | app không chạy, deploy dừng |
+| `rabbitmq-init` | exchange `daln.dlx`, queue `daln.dead-letters`, policy `daln-dlx` | app không chạy, deploy dừng |
+| `migrate-background` | `migrate.sh background`: backfill dài, chạy tiếp được từ chỗ dừng | chỉ hiện trong log của nó, deploy không chờ |
+
+`db-push`, `migrate`, `migrate-background` dùng chung image `daln/db-push` (target `schema`
+của `backend/Dockerfile`), chỉ khác entrypoint/command.
+
 ## Deploy chỉ làm lại phần có thay đổi
 
 | Sửa ở đâu | Deploy làm gì |
 |---|---|
 | `backend/apps/<svc>/` | build + tạo lại đúng `<svc>`; restart Kong nếu `<svc>` nằm sau Kong |
 | `backend/apps/*/prisma/` | như trên, cộng db-push đồng bộ index |
+| `backend/migrations/` | chỉ build lại image `db-push`; có migration chờ thì backup Mongo + chạy migrate trước khi đụng tới app |
 | `backend/libs/`, `backend/docker/`, `package*.json`, `tsconfig*.json`, `nest-cli.json`, `Dockerfile` | build lại cả 6 service backend; chỉ service ra image khác mới bị tạo lại |
 | `frontend/` | chỉ build + tạo lại `web`, API không gián đoạn |
 | `backend/kong/kong.yml` | chỉ tạo lại Kong |
 | docs, `backend/scripts/`, `deploy/` | không build lại gì |
 
 Cuối log deploy có bảng tóm tắt: image nào mới, container nào được tạo lại, Kong có
-restart không, tổng thời gian. Lần đầu sau khi sửa `Dockerfile` thì build lại tất cả.
+restart không, migration, backup, số message dead-letter, tổng thời gian. Lần đầu sau khi
+sửa `Dockerfile` thì build lại tất cả.
 
 Chạy tay `dc up -d` (không qua `deploy.sh`) thì Kong bị tạo lại một lần, vì label
-`daln.kong-config` thành `manual`. Vô hại.
+`daln.kong-config` thành `manual`. Vô hại. Nhưng `dc up -d` chạy migrate **không backup**
+trước: có migration mới thì dùng `bash ../deploy/deploy.sh`.
+
+## Migration dữ liệu
+
+Trước `up -d`, `deploy.sh`:
+
+1. đếm migration đang chờ bằng image vừa build (`migrate status --pending-count`) trên DB đang chạy;
+2. có ≥ 1: backup Mongo (mục dưới);
+3. `migrate-background` của lần trước còn chạy thì dừng êm (xong lô đang chạy, ghi checkpoint,
+   nhả lock) — nó giữ lock migrate của DB đang backfill, để nguyên thì `migrate` chờ 30s rồi lỗi;
+4. có migration chờ: chạy `migrate` **riêng** trong lúc app cũ vẫn phục vụ. Lỗi thì deploy
+   dừng ở đây, app cũ vẫn chạy, log `migrate` in ở cuối log deploy;
+5. `up -d` như thường (db-push + migrate chạy lại, lúc này không còn gì chờ nên chỉ vài giây;
+   `migrate-background` chạy lại sau đó, làm tiếp từ checkpoint).
+
+Vì sao chạy riêng: `up -d` dừng và gỡ container app cần tạo lại **trước** khi chờ migrate
+(compose chỉ chờ `depends_on` lúc start). Để migrate lỗi ở bước đó thì các app ấy đã sập.
+
+Mongo chưa chạy (deploy lần đầu) hoặc không đếm được thì `Migration : không rõ` và không backup.
+Dòng tóm tắt: `Migration : <n chạy | không có | không rõ | LỖI>`.
+
+Trên server (`dc` là alias ở mục Vận hành):
+
+```bash
+dc run --rm --no-deps migrate status                  # migration nào đã / chưa chạy
+dc run --rm --no-deps migrate status --pending-count  # chỉ in số đang chờ
+dc logs --tail 100 migrate                            # các lần chạy gần nhất
+dc logs -f migrate-background                         # tiến độ backfill
+dc ps -a migrate-background                           # Exited (0) = xong
+dc start migrate-background                           # chạy lại backfill (tiếp từ chỗ dừng)
+```
+
+## Backup Mongo
+
+- **Khi nào:** deploy có ≥ 1 migration đang chờ. Dump lỗi hoặc ra file rỗng thì deploy dừng,
+  migration chưa chạy.
+- **Ở đâu:** `/root/backups/mongo/daln-<UTC>-<sha ngắn>.archive.gz` (thư mục 700, file 600).
+  Chạy tay có thể đổi chỗ bằng biến `DALN_BACKUP_DIR`.
+- **Giữ:** 7 bản `daln-*.archive.gz` mới nhất; bản cũ hơn tự xoá. File tên khác không bị đụng tới.
+- Backup nằm **cùng ổ đĩa** với Mongo: mất server là mất cả hai. Cần giữ lâu thì chép ra ngoài.
+- Dump chạy khi app cũ vẫn đang ghi: đủ để quay về trước migration, không phải ảnh chụp
+  tức thời tuyệt đối.
+
+```bash
+# Backup tay (tên manual-* nên không bị xoay vòng)
+docker exec daln-prod-mongo mongodump --archive --gzip \
+  > /root/backups/mongo/manual-$(date -u +%Y%m%dT%H%M%SZ).archive.gz
+```
+
+### Khôi phục
+
+> **CẢNH BÁO:** `--drop` xoá từng collection có trong backup rồi nạp lại. Mọi thứ ghi sau
+> lúc backup **mất hẳn**. Collection sinh ra sau lúc backup (không có trong file) thì vẫn nằm
+> nguyên, xoá tay nếu cần. Chưa chắc chắn thì backup tay bản hiện tại trước.
+
+```bash
+cd /root/workspace/DALN/backend
+# 1. Dừng mọi thứ ghi vào Mongo
+dc stop user chat notification realtime-gateway recommendation recommendation-worker \
+  saga-orchestrator migrate-background
+# 2. Nạp lại
+docker exec -i daln-prod-mongo mongorestore --archive --gzip --drop \
+  < /root/backups/mongo/daln-<...>.archive.gz
+# 3. Deploy commit TRƯỚC migration (Actions → Run workflow + SHA). `dc up -d` với code
+#    hiện tại sẽ chạy lại đúng migration vừa gỡ.
+```
+
+## Dead-letter (RabbitMQ)
+
+`rabbitmq-init` (`backend/docker/rabbitmq-init.sh`) dựng ở mỗi lần up, trước app:
+
+- exchange `daln.dlx` (fanout, durable) → queue `daln.dead-letters` (durable);
+- policy `daln-dlx`: mọi queue trừ `daln.dead-letters` có `dead-letter-exchange = daln.dlx`.
+
+Message bị consumer nack/reject **không requeue** (hoặc hết TTL, tràn max-length) rơi vào
+`daln.dead-letters` thay vì mất. Header `x-death` của từng message ghi queue gốc (`queue`),
+exchange + routing key gốc, lý do (`reason`: `rejected` / `expired` / `maxlen`) và số lần.
+Cuối log deploy có dòng `Dead-letter : <n>`: khác 0 là có message xử lý hỏng.
+
+Mỗi queue chỉ chịu **một** policy (priority cao nhất thắng): thêm policy khác khớp các queue
+này thì phải chép `dead-letter-exchange` vào policy đó. Tham số `x-dead-letter-exchange` khai
+trong code thì thắng policy.
+
+```bash
+cd /root/workspace/DALN/backend
+# Đếm
+docker exec daln-prod-rabbitmq rabbitmqctl -q list_queues name messages | grep -F daln.dead-letters
+
+# Management API: 15672 không mở ra ngoài -> gọi từ một container curl trong mạng docker
+rmq_env() { grep "^$1=" .env.production | cut -d= -f2-; }
+rmq() {
+  docker run --rm --network daln-prod_backend curlimages/curl:8.22.0 -sS \
+    -u "$(rmq_env RABBITMQ_DEFAULT_USER):$(rmq_env RABBITMQ_DEFAULT_PASS)" \
+    -H 'content-type: application/json' "$@"
+}
+
+# Xem 10 message đầu. ack_requeue_true: trả lại queue, không mất
+rmq -X POST http://rabbitmq:15672/api/queues/%2F/daln.dead-letters/get \
+  -d '{"count":10,"ackmode":"ack_requeue_true","encoding":"auto"}'
+```
+
+**Chạy lại** (sau khi đã sửa lỗi và deploy bản vá). Nếu mọi message cùng một queue gốc
+(xem `x-death`), shovel chuyển chúng về đúng queue đó. Nó publish qua default exchange nên
+không lan sang consumer khác của topic exchange:
+
+```bash
+docker exec daln-prod-rabbitmq rabbitmq-plugins enable rabbitmq_shovel  # bật lại nếu container rabbitmq bị tạo lại
+docker exec daln-prod-rabbitmq rabbitmqctl set_parameter shovel daln-replay \
+  '{"src-uri":"amqp://","src-queue":"daln.dead-letters","dest-uri":"amqp://","dest-queue":"<queue gốc>","src-delete-after":"queue-length"}'
+# Shovel chuyển đúng số message đang có rồi tự xoá. Kiểm tra lại bằng lệnh Đếm.
+```
+
+Lẫn nhiều queue gốc: lấy từng message ra (`"ackmode":"ack_requeue_false"`, lưu lại output),
+rồi publish về đúng queue:
+
+```bash
+rmq -X POST http://rabbitmq:15672/api/exchanges/%2F/amq.default/publish \
+  -d '{"routing_key":"<queue gốc>","payload":"<payload>","payload_encoding":"string","properties":{"content_type":"application/json"}}'
+```
+
+Bỏ hẳn (đã xem, không cần chạy lại):
+
+```bash
+docker exec daln-prod-rabbitmq rabbitmqctl purge_queue daln.dead-letters
+```
 
 ## Env
 
@@ -58,6 +206,8 @@ cd /root/workspace/DALN/backend
 alias dc='docker compose -f docker-compose.prod.yml --env-file .env.production'
 dc ps                      # trạng thái các container
 dc logs -f chat            # log một service
+dc run --rm --no-deps migrate status   # migration đã / chưa chạy
+ls -lh /root/backups/mongo # các bản backup Mongo
 bash ../deploy/deploy.sh   # deploy tay từ source hiện tại
 ```
 

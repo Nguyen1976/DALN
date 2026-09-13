@@ -7,6 +7,11 @@
 # Cổng công khai: 80 (web), 8000 (Kong: API + socket), 9000 (MinIO: ảnh/tệp).
 # Mọi thứ khác chỉ nói chuyện với nhau trong mạng docker `backend`.
 # Biến môi trường: .env.production (chỉ nằm trên server — xem .env.production.example).
+#
+# Thứ tự khởi động (các one-shot chạy lại ở MỖI lần up, đều idempotent):
+#   mongo -> mongo-init -> db-push -> migrate -> app -> migrate-background
+#   rabbitmq -> rabbitmq-init -> app            minio -> minio-init -> app
+# App không chờ migrate-background: backfill dài không bao giờ chặn deploy.
 # ============================================================================
 
 name: daln-prod
@@ -24,6 +29,25 @@ x-app-env: &app-env
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?thiếu trong .env.production}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?thiếu trong .env.production}
 
+# Mongo cho các bước schema/migration: db-push, migrate, migrate-background phải
+# trỏ cùng một chỗ.
+x-schema-env: &schema-env
+  MONGO_HOST: mongo:27017
+  MONGO_REPLICA_SET: rs0
+
+# migrate + migrate-background: cùng image với db-push (target `schema`), chỉ đổi
+# entrypoint sang docker/migrate.sh.
+x-migrate: &migrate
+  image: daln/db-push:latest
+  # Image do service db-push build ra; không bao giờ kéo từ registry.
+  pull_policy: never
+  restart: "no"
+  entrypoint: ["migrate.sh"]
+  environment: *schema-env
+  networks:
+    - backend
+  logging: *logging
+
 x-app: &app
   restart: unless-stopped
   # tini làm PID 1 và chuyển tín hiệu cho node. Không có nó, node là PID 1 và
@@ -36,7 +60,12 @@ x-app: &app
     - backend
   logging: *logging
   depends_on:
-    db-push:
+    # migrate chờ db-push, db-push chờ mongo-init: app chỉ chạy khi schema và
+    # migration đã xong. migrate-background cố ý KHÔNG nằm đây.
+    migrate:
+      condition: service_completed_successfully
+    # Policy dead-letter có trước khi consumer nhận message đầu tiên.
+    rabbitmq-init:
       condition: service_completed_successfully
     redis:
       condition: service_healthy
@@ -119,7 +148,7 @@ services:
     # thì mỗi lần tạo lại container ra một node mới và "mất" user/queue cũ.
     hostname: rabbitmq
     restart: unless-stopped
-    environment:
+    environment: &rabbitmq-credentials
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?thiếu trong .env.production}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?thiếu trong .env.production}
     volumes:
@@ -132,6 +161,23 @@ services:
       interval: 10s
       timeout: 10s
       retries: 10
+
+  # Dead-letter cho mọi queue: exchange daln.dlx, queue daln.dead-letters, policy
+  # daln-dlx (docker/rabbitmq-init.sh, qua management API, idempotent).
+  rabbitmq-init:
+    image: curlimages/curl:8.22.0
+    container_name: daln-prod-rabbitmq-init
+    restart: "no"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment: *rabbitmq-credentials
+    volumes:
+      - ./docker/rabbitmq-init.sh:/rabbitmq-init.sh:ro
+    networks:
+      - backend
+    logging: *logging
+    entrypoint: ["sh", "/rabbitmq-init.sh"]
 
   qdrant:
     image: qdrant/qdrant:v1.19.0
@@ -192,6 +238,7 @@ services:
         echo "bucket $$S3_BUCKET san sang"
 
   # Đồng bộ collection + unique index mọi DB trước khi app chạy (docker/db-push.sh).
+  # Image này (target `schema`) cũng chứa CLI migration cho migrate bên dưới.
   db-push:
     build:
       context: .
@@ -200,12 +247,40 @@ services:
     image: daln/db-push:latest
     container_name: daln-prod-db-push
     restart: "no"
+    environment: *schema-env
     depends_on:
       mongo-init:
         condition: service_completed_successfully
     networks:
       - backend
     logging: *logging
+
+  # Migration dữ liệu (libs/migrations, file ở migrations/<service>/): chạy sau
+  # db-push, trước app. Lỗi -> app không khởi động, deploy dừng.
+  # deploy/deploy.sh đếm migration đang chờ và backup Mongo trước khi chạy.
+  migrate:
+    <<: *migrate
+    container_name: daln-prod-migrate
+    command: ["up"]
+    depends_on:
+      db-push:
+        condition: service_completed_successfully
+
+  # Backfill dài, chạy tiếp được từ chỗ dừng. Không app nào chờ bước này.
+  # Tiến độ: dc logs -f migrate-background
+  migrate-background:
+    <<: *migrate
+    container_name: daln-prod-migrate-background
+    # tini chuyển SIGTERM cho node: bị dừng giữa lúc backfill thì nó xong lô
+    # đang chạy, ghi checkpoint, nhả lock rồi thoát. 60s cho lô đó xong — bị
+    # SIGKILL thì lock kẹt tới khi hết hạn (10 phút) và migrate kế tiếp báo bận.
+    # deploy.sh dừng nó trước bước migrate vì nó giữ lock của DB đang backfill.
+    init: true
+    stop_grace_period: 60s
+    command: ["background"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   # ==========================================================================
   # APP (NestJS) — mỗi service một image production riêng

@@ -29,9 +29,12 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # ----------------------------------------------------------------------------
-# Schema: đồng bộ collection + index MongoDB (prisma db push) trước khi app chạy.
-# Image production đã prune sạch prisma CLI nên cần stage riêng có đủ devDeps.
-# Chỉ copy thư mục prisma -> sửa code không làm build lại stage này.
+# Schema: chạy TRƯỚC app ở mỗi lần deploy (docker-compose.prod.yml):
+#   - db-push (ENTRYPOINT mặc định): đồng bộ collection + index MongoDB (prisma db push);
+#   - migrate / migrate-background: cùng image, entrypoint migrate.sh -> CLI
+#     migration dữ liệu (libs/migrations) chạy bằng ts-node từ source.
+# Image production đã prune sạch prisma CLI, ts-node nên cần stage riêng có đủ devDeps.
+# Chỉ copy prisma + migration -> sửa code app không làm build lại stage này.
 # ----------------------------------------------------------------------------
 FROM deps AS schema
 COPY apps/user/prisma apps/user/prisma
@@ -40,7 +43,13 @@ COPY apps/notification/prisma apps/notification/prisma
 COPY apps/recommendation/prisma apps/recommendation/prisma
 COPY apps/saga-orchestrator/prisma apps/saga-orchestrator/prisma
 COPY docker/db-push.sh /usr/local/bin/db-push.sh
-RUN chmod +x /usr/local/bin/db-push.sh
+COPY docker/migrate.sh /usr/local/bin/migrate.sh
+RUN chmod +x /usr/local/bin/db-push.sh /usr/local/bin/migrate.sh
+# ts-node đọc tsconfig.json (paths) ở thư mục hiện tại (/app). File migration để
+# cuối cùng: thêm migration mới chỉ build lại đúng layer này.
+COPY tsconfig.json ./
+COPY libs/migrations libs/migrations
+COPY migrations migrations
 ENTRYPOINT ["db-push.sh"]
 
 # ----------------------------------------------------------------------------

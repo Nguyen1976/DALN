@@ -10,6 +10,13 @@
 #
 #   docker compose down         -> dừng container (volume dev vẫn còn)
 #   docker compose down -v      -> xoá luôn dữ liệu local
+#
+# One-shot trước app (giống prod):
+#   mongo-init -> db-push -> migrate -> app -> migrate-background (app không chờ)
+#   rabbitmq -> rabbitmq-init -> app
+# DB dev có thể có dữ liệu trùng: các bước này lỗi CHỈ in cảnh báo rồi thoát 0
+# -> app vẫn khởi động, dev không bao giờ bị chặn. Chạy tay:
+#   docker compose run --rm migrate bash docker/migrate.sh status
 # ============================================================================
 
 name: daln-backend
@@ -30,7 +37,10 @@ x-app-common: &app-common
   networks:
     - backend
   depends_on:
-    mongo-init:
+    # migrate chờ db-push, db-push chờ mongo-init (xem x-dev-oneshot).
+    migrate:
+      condition: service_completed_successfully
+    rabbitmq-init:
       condition: service_completed_successfully
     redis:
       condition: service_healthy
@@ -38,6 +48,30 @@ x-app-common: &app-common
       condition: service_healthy
     qdrant:
       condition: service_started
+
+# ---- One-shot schema/migration cho DEV: db-push, migrate, migrate-background ----
+# Cùng image + volume với app: node_modules (linux) của image dev có sẵn prisma,
+# ts-node, tsconfig-paths. Entrypoint chạy `command`; lỗi thì in cảnh báo to rồi
+# vẫn thoát 0 -> app chờ bằng service_completed_successfully mà không bao giờ bị
+# chặn (DB dev có dữ liệu trùng thì unique index không tạo được, v.v.).
+x-dev-oneshot: &dev-oneshot
+  image: daln-backend-dev:latest
+  restart: "no"
+  environment:
+    MONGO_HOST: mongo:27017
+    MONGO_REPLICA_SET: rs0
+  volumes:
+    - ./:/app
+    - /app/node_modules
+  networks:
+    - backend
+  entrypoint:
+    - sh
+    - -c
+    - >-
+      "$$@" ||
+      echo "[dev] ===== CẢNH BÁO: '$$*' LỖI (xem log phía trên). App vẫn khởi động nhưng schema/dữ liệu có thể chưa đúng. =====" >&2
+    - dev-oneshot
 
 services:
   # ==========================================================================
@@ -77,18 +111,23 @@ services:
       - |
         mongosh --host mongo:27017 --quiet --eval "
           try {
-            const s = rs.status();
-            if (s.ok === 1) { print('Replica set already initialized'); quit(0); }
-          } catch (e) {}
-          rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
-          print('Replica set initialized');
+            rs.status();
+            print('Replica set already initialized');
+          } catch (e) {
+            rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
+            print('Replica set initialized');
+          }
+          // db-push chạy ngay sau bước này: chưa bầu xong primary thì nó lỗi
+          // ReplicaSetNoPrimary -> chờ tới khi ghi được (dev: không chặn nếu quá hạn).
+          for (let i = 0; i < 60 && !db.hello().isWritablePrimary; i++) sleep(500);
+          print(db.hello().isWritablePrimary ? 'Replica set ready' : 'CẢNH BÁO: replica set chưa có primary');
         "
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: daln-rabbitmq
     restart: unless-stopped
-    environment:
+    environment: &rabbitmq-credentials
       RABBITMQ_DEFAULT_USER: user
       RABBITMQ_DEFAULT_PASS: user
     ports:
@@ -103,6 +142,27 @@ services:
       interval: 10s
       timeout: 10s
       retries: 10
+
+  # Dead-letter (docker/rabbitmq-init.sh) — giống prod. Lỗi chỉ cảnh báo: dev không
+  # bị chặn, nhưng khi đó message bị nack sẽ mất thay vì nằm ở daln.dead-letters.
+  rabbitmq-init:
+    image: curlimages/curl:8.22.0
+    container_name: daln-rabbitmq-init
+    restart: "no"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment: *rabbitmq-credentials
+    volumes:
+      - ./docker/rabbitmq-init.sh:/rabbitmq-init.sh:ro
+    networks:
+      - backend
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        sh /rabbitmq-init.sh ||
+        echo "[dev] ===== CẢNH BÁO: rabbitmq-init LỖI (xem log phía trên). Chưa có dead-letter: message bị nack sẽ mất. =====" >&2
 
   redis:
     image: redis:7-alpine
@@ -242,6 +302,36 @@ services:
       - notification
       - realtime-gateway
       - recommendation
+
+  # ==========================================================================
+  # SCHEMA + MIGRATION (one-shot, xem x-dev-oneshot) — lỗi không chặn app
+  # ==========================================================================
+  # Đồng bộ collection + unique index (docker/db-push.sh).
+  db-push:
+    <<: *dev-oneshot
+    container_name: daln-db-push
+    command: ["bash", "docker/db-push.sh"]
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+
+  # Migration dữ liệu (libs/migrations, file ở migrations/<service>/).
+  migrate:
+    <<: *dev-oneshot
+    container_name: daln-migrate
+    command: ["bash", "docker/migrate.sh", "up"]
+    depends_on:
+      db-push:
+        condition: service_completed_successfully
+
+  # Backfill dài, chạy tiếp được từ chỗ dừng — app không chờ.
+  migrate-background:
+    <<: *dev-oneshot
+    container_name: daln-migrate-background
+    command: ["bash", "docker/migrate.sh", "background"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   # ==========================================================================
   # APP SERVICES (NestJS) - cùng 1 image dev, khác nhau ở biến SERVICE + PORT
