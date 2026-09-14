@@ -25,7 +25,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
             : {}),
         },
         defaults: {
-          from: '"Chat App" <no-reply@chat.com>',
+          from: '"DALN Chat" <no-reply@chat.com>',
         },
       }),
       inject: [ConfigService],
