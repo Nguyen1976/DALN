@@ -143,13 +143,27 @@ const FriendRequestModal = ({
     }
   };
 
+  // Mở từ link "Xem lời mời" trong email: lời mời có thể đã được trả lời trong
+  // app từ trước, hoặc link mở bằng một tài khoản khác.
+  const status = friendRequestData?.status;
+  const answered = Boolean(status) && status !== "PENDING";
+  const description = loadError
+    ? "Lời mời không còn, hoặc không gửi tới tài khoản đang đăng nhập."
+    : !answered
+      ? "Bạn vừa nhận được một lời mời kết bạn mới."
+      : status === "ACCEPTED"
+        ? "Bạn đã chấp nhận lời mời này."
+        : status === "REJECTED"
+          ? "Bạn đã từ chối lời mời này."
+          : "Lời mời này không còn hiệu lực.";
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-center">Lời mời kết bạn</DialogTitle>
           <DialogDescription className="text-center">
-            Bạn vừa nhận được một lời mời kết bạn mới.
+            {description}
           </DialogDescription>
         </DialogHeader>
         {loadError ? (
@@ -199,29 +213,37 @@ const FriendRequestModal = ({
           </div>
         )}
         <DialogFooter className="gap-2 sm:flex-row">
-          {/* Both buttons lock while either request is in flight: a second
-              click used to fire a second accept before the first returned. */}
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={onReject}
-            disabled={Boolean(pending) || isLoading || Boolean(loadError)}
-          >
-            {pending === "reject" && (
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            )}
-            {pending === "reject" ? "Đang xử lý..." : "Từ chối"}
-          </Button>
-          <Button
-            className="flex-1"
-            onClick={onAccept}
-            disabled={Boolean(pending) || isLoading || Boolean(loadError)}
-          >
-            {pending === "accept" && (
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            )}
-            {pending === "accept" ? "Đang xử lý..." : "Chấp nhận"}
-          </Button>
+          {answered || loadError ? (
+            <Button variant="outline" className="flex-1" onClick={onClose}>
+              Đóng
+            </Button>
+          ) : (
+            <>
+              {/* Both buttons lock while either request is in flight: a second
+                  click used to fire a second accept before the first returned. */}
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={onReject}
+                disabled={Boolean(pending) || isLoading}
+              >
+                {pending === "reject" && (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                )}
+                {pending === "reject" ? "Đang xử lý..." : "Từ chối"}
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={onAccept}
+                disabled={Boolean(pending) || isLoading}
+              >
+                {pending === "accept" && (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                )}
+                {pending === "accept" ? "Đang xử lý..." : "Chấp nhận"}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

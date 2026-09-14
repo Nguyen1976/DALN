@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { ModeToggle } from "@/components/ModeToggle";
@@ -66,6 +66,11 @@ export default function InterestOnboardingPage() {
   const navigate = useNavigate();
   const dispatch = useDispatch<AppDispatch>();
   const user = useSelector(selectUser);
+  // ProtectedRoute chuyển tới đây từ một trang khác (vd link "Xem lời mời"
+  // trong email) thì xong bước này quay lại đúng trang đó.
+  const location = useLocation();
+  const from = (location.state as { from?: Location } | null)?.from;
+  const returnTo = from ? `${from.pathname}${from.search}${from.hash}` : "/";
 
   const [tags, setTags] = useState<InterestTagItem[]>([]);
   const [loadingTags, setLoadingTags] = useState(true);
@@ -74,9 +79,9 @@ export default function InterestOnboardingPage() {
 
   useEffect(() => {
     if (user.hasCompletedInterestOnboarding) {
-      navigate("/", { replace: true });
+      navigate(returnTo, { replace: true });
     }
-  }, [user.hasCompletedInterestOnboarding, navigate]);
+  }, [user.hasCompletedInterestOnboarding, navigate, returnTo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,7 +136,7 @@ export default function InterestOnboardingPage() {
           ? "Bạn có thể chọn sở thích sau trong phần hồ sơ"
           : "Đã lưu sở thích của bạn",
       );
-      navigate("/", { replace: true });
+      navigate(returnTo, { replace: true });
     } catch (e) {
       const message = typeof e === "string" ? e : "Không thể lưu, vui lòng thử lại";
       toast.error(message);
