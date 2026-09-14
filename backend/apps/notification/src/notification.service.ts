@@ -109,13 +109,16 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     })
 
     if (!inviteeStatus) {
-      //nếu offline thì gửi mail
-      await this.mailerService.sendMakeFriendNotification({
-        senderName: data.inviterName,
-        friendEmail: data.inviteeEmail,
-        receiverName: data.inviteeName,
-        friendRequestId: data.friendRequestId,
-      })
+      // Offline thì báo qua email, trừ khi người nhận đã tắt kênh Email: link
+      // "Tắt email thông báo" trong mail dẫn tới đúng các công tắc này.
+      if (await this.acceptsEmail(data.inviteeId, 'FRIEND_REQUEST_SENT')) {
+        await this.mailerService.sendMakeFriendNotification({
+          senderName: data.inviterName,
+          friendEmail: data.inviteeEmail,
+          receiverName: data.inviteeName,
+          friendRequestId: data.friendRequestId,
+        })
+      }
     } else {
       this.notificationEventsPublisher.emitToUsers(
         [notificationCreated?.userId],
@@ -166,6 +169,16 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
       ...res,
       createdAt: res.createdAt.toString(),
     }
+  }
+
+  /** Công tắc chung, kênh Email và công tắc riêng của loại thông báo đều phải bật. */
+  private async acceptsEmail(userId: string, type: string) {
+    const { global, overrides } = await this.ensureUserPreference(userId)
+    return (
+      global.enabled &&
+      global.channels.EMAIL &&
+      overrides[type]?.EMAIL !== false
+    )
   }
 
   private async runDigestSweep() {

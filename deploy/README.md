@@ -199,10 +199,14 @@ docker exec daln-prod-rabbitmq rabbitmqctl purge_queue daln.dead-letters
   này ở mỗi lần deploy: `nginx -t` **trước** khi đụng tới container (lỗi thì trả lại file cũ và
   dừng, app cũ vẫn chạy), reload sau `up -d`. Muốn đổi cấu hình nginx thì sửa file trong repo.
 - Chứng chỉ Let's Encrypt, đăng ký không kèm email. certbot tự gia hạn (systemd
-  `certbot.timer`) qua webroot `/var/www/certbot` rồi reload nginx.
+  `certbot.timer`) qua webroot `/var/www/certbot`; hook
+  `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx` reload nginx sau khi gia hạn.
 - Chứng chỉ hiện mới có `nguyen1976.xyz`: Let's Encrypt chưa tra được CAA của `www` vì
-  nameserver Mắt Bão lúc được lúc trả SERVFAIL. `http://www…` vẫn chuyển về domain gốc; riêng
-  `https://www…` báo sai chứng chỉ. DNS ổn thì thêm `www` (không phải dừng gì):
+  registry `.xyz` còn trỏ domain tới 4 nameserver AWS cũ và `ns3`/`ns4.matbao.com` (cần đúng
+  `ns1`/`ns2.matbao.com`), nên lúc được lúc SERVFAIL. Cũng vì vậy `certbot renew --dry-run`
+  đang lỗi, và lần gia hạn thật (từ khoảng 12/11, chứng chỉ hết hạn 12/12/2026) sẽ lỗi nếu
+  chưa sửa nameserver. `http://www…` vẫn chuyển về domain gốc; riêng `https://www…` báo sai
+  chứng chỉ. DNS ổn thì thêm `www` (không phải dừng gì):
   `certbot certonly --webroot -w /var/www/certbot --cert-name nguyen1976.xyz -d nguyen1976.xyz -d www.nguyen1976.xyz --expand --deploy-hook 'systemctl reload nginx'`
 - `http://` và truy cập bằng IP đều chuyển sang `https://nguyen1976.xyz`.
 
@@ -261,16 +265,24 @@ install -m 755 /root/workspace/DALN/deploy/remote-entry.sh /usr/local/bin/daln-d
 
 # 6. HTTPS — nginx + certbot. Chặn nginx tự khởi động lúc cài: chứng chỉ chưa có thì
 #    cấu hình SSL chưa chạy được; deploy kế tiếp sẽ cài cấu hình và bật nginx.
+#    policy-rc.d chặn luôn cả certbot.timer, nên phải tự bật timer sau khi cài.
 printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d
 apt-get install -y nginx certbot; rm -f /usr/sbin/policy-rc.d
+systemctl enable --now certbot.timer
 rm -f /etc/nginx/sites-enabled/default && install -d -m 755 /var/www/certbot
 #    Lấy chứng chỉ bằng standalone (cần cổng 80 trống: nếu container web của bản cũ
 #    còn giữ cổng 80 thì `docker stop daln-prod-web` trước, `docker start` lại sau).
 certbot certonly --standalone -d nguyen1976.xyz -d www.nguyen1976.xyz \
   --non-interactive --agree-tos --register-unsafely-without-email
 #    Sau khi deploy xong (nginx đã chạy): gia hạn qua webroot, xong thì reload nginx.
-certbot reconfigure --cert-name nguyen1976.xyz --webroot -w /var/www/certbot \
-  --deploy-hook 'systemctl reload nginx'
+#    reconfigure chạy thử gia hạn trước và không lưu gì nếu lần thử lỗi (vd DNS SERVFAIL).
+#    Khi đó sửa tay /etc/letsencrypt/renewal/nguyen1976.xyz.conf: đổi dòng authenticator
+#    thành `authenticator = webroot` + `webroot_path = /var/www/certbot,`, cuối file thêm
+#    `[[webroot_map]]` và `nguyen1976.xyz = /var/www/certbot`.
+certbot reconfigure --cert-name nguyen1976.xyz --webroot -w /var/www/certbot
+install -d /etc/letsencrypt/renewal-hooks/deploy
+printf '#!/bin/sh\nsystemctl reload nginx\n' > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
 ```
 
 Docker publish cổng đi vòng qua ufw, nên compose chỉ publish lên `127.0.0.1` (web 8081,
