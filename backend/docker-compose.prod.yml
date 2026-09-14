@@ -189,8 +189,9 @@ services:
       - backend
     logging: *logging
 
-  # Kho ảnh/tệp (thay S3). Cổng 9000 mở cho trình duyệt: GET ảnh công khai và
-  # PUT bằng URL ký sẵn. Console 9001 không mở ra ngoài.
+  # Kho ảnh/tệp (thay S3). Trình duyệt vào qua nginx trên host (/daln-media/ ->
+  # 127.0.0.1:9000): GET ảnh công khai và PUT bằng URL ký sẵn. Cổng 9000 chỉ nghe
+  # localhost; console 9001 không mở ra ngoài.
   # MinIO đã ngừng đẩy image lên Docker Hub; quay.io vẫn còn đúng bản đang dùng ở dev.
   minio:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
@@ -201,7 +202,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?thiếu trong .env.production}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?thiếu trong .env.production}
     ports:
-      - "9000:9000"
+      - "127.0.0.1:9000:9000"
     volumes:
       - minio_data:/data
     networks:
@@ -425,8 +426,9 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       # Admin API chỉ nghe bên trong container, không bao giờ ra ngoài.
       KONG_ADMIN_LISTEN: 127.0.0.1:8001
+    # Chỉ nghe localhost: công khai qua nginx trên host (/api/, /socket.io/).
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
     networks:
@@ -450,8 +452,10 @@ services:
     image: daln/web:latest
     container_name: daln-prod-web
     restart: unless-stopped
+    # Chỉ nghe localhost: nginx trên host giữ cổng 80/443 và chuyển vào đây
+    # (deploy/nginx/daln.conf).
     ports:
-      - "80:80"
+      - "127.0.0.1:8081:80"
     networks:
       - backend
     logging: *logging

@@ -18,6 +18,9 @@
 #   - migrate-background cũ còn chạy thì dừng êm trước (nó giữ lock migrate),
 #     `up -d` chạy lại nó sau migrate, làm tiếp từ checkpoint;
 #   - `up -d` luôn chạy db-push + migrate trước app (depends_on).
+#
+# nginx trên host (HTTPS, deploy/nginx/daln.conf): cài lại file cấu hình và `nginx -t`
+# TRƯỚC khi đụng tới container, reload (lần đầu: khởi động) sau `up -d`.
 # ============================================================================
 set -euo pipefail
 
@@ -42,6 +45,9 @@ export KONG_CONFIG_SHA
 BACKUP_DIR="${DALN_BACKUP_DIR:-/root/backups/mongo}"
 BACKUP_KEEP=7
 
+# Domain công khai: nginx trên host + chứng chỉ Let's Encrypt (deploy/README.md, HTTPS).
+DOMAIN="${DALN_DOMAIN:-nguyen1976.xyz}"
+
 # Dấu vân tay NỘI DUNG của image (layer + config), không phải .Id: với containerd
 # image store (server đang dùng), .Id là digest của index và đổi sau mỗi lần build,
 # kể cả khi build ăn cache hoàn toàn.
@@ -62,6 +68,7 @@ recreated=""
 kong="giữ nguyên"
 migration="không rõ"
 backup="bỏ qua"
+nginx_state="chưa tới bước này"
 
 # Số message đang nằm trong daln.dead-letters (tạo bởi docker/rabbitmq-init.sh).
 dead_letters() {
@@ -80,6 +87,7 @@ summary() {
   echo "[deploy] Image mới   :${built:- không có}"
   echo "[deploy] Tạo lại     : ${recreated:-không có}"
   echo "[deploy] Kong        : ${kong}"
+  echo "[deploy] nginx       : ${nginx_state}"
   echo "[deploy] Migration   : ${migration}"
   echo "[deploy] Backup      : ${backup}"
   echo "[deploy] Dead-letter : $(dead_letters)"
@@ -171,6 +179,27 @@ else
   backup_mongo
 fi
 
+# ---- nginx trên host (HTTPS): kiểm cấu hình TRƯỚC khi đụng tới container ----
+# Host đã cài nginx (deploy/README.md, mục HTTPS) thì cài lại site từ repo ở mỗi lần
+# deploy. `nginx -t` (cú pháp + đọc được chứng chỉ) lỗi thì trả lại file cũ và dừng ở
+# đây, app cũ vẫn chạy nguyên. nginx đang chạy chỉ đọc file mới khi reload sau `up -d`.
+if command -v nginx >/dev/null 2>&1; then
+  site=/etc/nginx/sites-available/daln.conf
+  if [ -f "${site}" ]; then cp -p "${site}" "${site}.prev"; fi
+  install -m 644 "${ROOT}/deploy/nginx/daln.conf" "${site}"
+  ln -sf "${site}" /etc/nginx/sites-enabled/daln.conf
+  rm -f /etc/nginx/sites-enabled/default
+  if ! nginx -t; then
+    if [ -f "${site}.prev" ]; then mv -f "${site}.prev" "${site}"; else rm -f /etc/nginx/sites-enabled/daln.conf; fi
+    nginx_state="LỖI cấu hình (nginx -t) — giữ cấu hình cũ"
+    fail "nginx -t thất bại (deploy/nginx/daln.conf hoặc chứng chỉ /etc/letsencrypt) — chưa đụng tới container" web
+  fi
+  rm -f "${site}.prev"
+  nginx_state="cấu hình OK"
+else
+  nginx_state="không cài"
+fi
+
 # ---- Dừng backfill cũ còn chạy ----
 # migrate-background của lần deploy trước (backfill dài) còn chạy thì đang giữ
 # lock migrate của DB đó: migrate bên dưới sẽ chờ 30s rồi lỗi. Dừng êm (SIGTERM ->
@@ -226,12 +255,26 @@ else
   done
 fi
 
+# ---- nginx trên host: nạp cấu hình đã kiểm ở trên ----
+# Lần đầu (web vừa rời cổng 80 sang 127.0.0.1:8081) thì đây là lúc nginx khởi động.
+if [ "${nginx_state}" = "cấu hình OK" ]; then
+  systemctl enable --quiet nginx
+  if systemctl is-active --quiet nginx; then
+    systemctl reload nginx || fail "nginx reload thất bại" web
+    nginx_state="reload"
+  else
+    systemctl restart nginx || fail "nginx không khởi động được" web
+    nginx_state="khởi động"
+  fi
+fi
+
 # ---- Smoke check ----
 # "<500": Kong đã chạm tới service (401/404 là service trả lời); 502/503 là không tới.
 check() {
   local name="$1" url="$2" want="$3" code=""
   for _ in $(seq 1 30); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "${url}" || true)"
+    # --resolve: gọi domain thẳng vào nginx trên máy này, không phụ thuộc DNS.
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --resolve "${DOMAIN}:443:127.0.0.1" "${url}" || true)"
     if { [ "${want}" = "2xx" ] && [[ "${code}" =~ ^2 ]]; } ||
        { [ "${want}" = "<500" ] && [[ "${code}" =~ ^[1-4] ]]; }; then
       echo "[smoke] OK   ${name} (${code})"
@@ -244,13 +287,21 @@ check() {
 }
 
 failed=0
-check web            "http://127.0.0.1/"                                        2xx    || failed=1
+check web            "http://127.0.0.1:8081/"                                   2xx    || failed=1
 check user           "http://127.0.0.1:8000/user/me"                            "<500" || failed=1
 check chat           "http://127.0.0.1:8000/chat/"                              "<500" || failed=1
 check notification   "http://127.0.0.1:8000/notification/"                      "<500" || failed=1
 check recommendation "http://127.0.0.1:8000/recommendation/"                    "<500" || failed=1
 check realtime       "http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling" 2xx    || failed=1
 check minio          "http://127.0.0.1:9000/minio/health/live"                  2xx    || failed=1
+# Đúng đường trình duyệt đi: nginx + HTTPS (chỉ khi host đã cài nginx).
+if [ "${nginx_state}" != "không cài" ]; then
+  check https-web      "https://${DOMAIN}/"                                     2xx    || failed=1
+  check https-api      "https://${DOMAIN}/api/user/me"                          "<500" || failed=1
+  check https-socket   "https://${DOMAIN}/socket.io/?EIO=4&transport=polling"   2xx    || failed=1
+  check https-media    "https://${DOMAIN}/daln-media/"                          "<500" || failed=1
+  check http-redirect  "http://127.0.0.1/"                                      "<500" || failed=1
+fi
 
 if [ "${failed}" -ne 0 ]; then
   fail "smoke check thất bại"
