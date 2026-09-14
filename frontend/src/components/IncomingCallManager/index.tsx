@@ -11,6 +11,8 @@ import type { RootState } from "@/redux/store";
 
 type IncomingCallState = {
   mode: VoiceCallMode;
+  /** ID phiên do gateway cấp; dùng để accept/reject/ice/ended. */
+  callId: string;
   callerId: string;
   incomingOffer: RTCSessionDescriptionInit;
   conversationId?: string;
@@ -47,14 +49,19 @@ export default function IncomingCallManager() {
 
   useEffect(() => {
     const handleIncomingCall = ({
+      callId,
       callerId,
       offer,
       conversationId,
     }: {
+      callId: string;
       callerId: string;
       offer: RTCSessionDescriptionInit;
       conversationId?: string;
     }) => {
+      // Không có callId thì không thể accept/reject đúng phiên → bỏ qua.
+      if (!callId) return;
+
       const conversation = findConversationByCaller(
         conversations,
         callerId,
@@ -64,6 +71,7 @@ export default function IncomingCallManager() {
 
       setIncomingCall({
         mode: "incoming",
+        callId,
         callerId,
         incomingOffer: offer,
         conversationId: conversation?.id ?? conversationId,
@@ -93,6 +101,7 @@ export default function IncomingCallManager() {
       callerDisplayAvatar={incomingCall.callerDisplayAvatar}
       mode={incomingCall.mode}
       callerId={incomingCall.callerId}
+      callId={incomingCall.callId}
       incomingOffer={incomingCall.incomingOffer}
       onClose={() => setIncomingCall(null)}
     />
