@@ -69,6 +69,7 @@ kong="giữ nguyên"
 migration="không rõ"
 backup="bỏ qua"
 nginx_state="chưa tới bước này"
+coturn_state="chưa tới bước này"
 
 # Số message đang nằm trong daln.dead-letters (tạo bởi docker/rabbitmq-init.sh).
 dead_letters() {
@@ -88,6 +89,7 @@ summary() {
   echo "[deploy] Tạo lại     : ${recreated:-không có}"
   echo "[deploy] Kong        : ${kong}"
   echo "[deploy] nginx       : ${nginx_state}"
+  echo "[deploy] coturn      : ${coturn_state}"
   echo "[deploy] Migration   : ${migration}"
   echo "[deploy] Backup      : ${backup}"
   echo "[deploy] Dead-letter : $(dead_letters)"
@@ -198,6 +200,67 @@ if command -v nginx >/dev/null 2>&1; then
   nginx_state="cấu hình OK"
 else
   nginx_state="không cài"
+fi
+
+# ---- coturn trên host (TURN cho gọi thoại): render config + restart ----
+# Giống nginx nhưng KHÔNG chặn deploy: coturn hỏng thì gọi thoại lùi về STUN, app
+# vẫn phải lên. Host đã cài coturn (apt) thì render /etc/turnserver.conf từ template
+# trong repo, thay TURN_SECRET/TURN_REALM/TURN_HOST bằng giá trị .env.production
+# (coturn không tự đọc env). TURN_SECRET phải trùng giá trị gateway dùng để ký mật
+# khẩu ngắn hạn. Chưa cài coturn -> coturn_state="không cài", bỏ qua.
+if command -v turnserver >/dev/null 2>&1; then
+  turn_tpl="${ROOT}/deploy/coturn/turnserver.conf"
+  turn_conf=/etc/turnserver.conf
+  # Lấy 3 biến cần cho config từ .env.production (tail -n1: dòng cuối thắng). Cả
+  # pipeline có `|| true` nên grep không khớp (thiếu biến) không làm dừng deploy.
+  env_val() { grep -E "^$1=" .env.production | tail -n1 | cut -d= -f2- || true; }
+  TURN_SECRET="$(env_val TURN_SECRET)"
+  TURN_REALM="$(env_val TURN_REALM)"
+  TURN_HOST="$(env_val TURN_HOST)"
+  export TURN_SECRET TURN_REALM TURN_HOST
+  if [ -z "${TURN_SECRET}" ]; then
+    # Không có secret: gateway trả CHỈ STUN, khỏi cấu hình lại coturn.
+    coturn_state="bỏ qua (thiếu TURN_SECRET — gọi thoại chỉ STUN)"
+    echo "[deploy] coturn: thiếu TURN_SECRET trong .env.production -> bỏ qua"
+  else
+    if [ -f "${turn_conf}" ]; then cp -p "${turn_conf}" "${turn_conf}.prev"; fi
+    if command -v envsubst >/dev/null 2>&1; then
+      envsubst '${TURN_SECRET} ${TURN_REALM} ${TURN_HOST}' \
+        <"${turn_tpl}" >"${turn_conf}.tmp"
+    else
+      # Fallback không cần gettext: giá trị là hex/domain/IP nên an toàn với sed.
+      sed -e "s|\${TURN_SECRET}|${TURN_SECRET}|g" \
+        -e "s|\${TURN_REALM}|${TURN_REALM}|g" \
+        -e "s|\${TURN_HOST}|${TURN_HOST}|g" \
+        "${turn_tpl}" >"${turn_conf}.tmp"
+    fi
+    # coturn không có lệnh "test config"; kiểm tối thiểu: static-auth-secret đã có
+    # giá trị (placeholder đã được thay).
+    if grep -q '\${TURN_SECRET}' "${turn_conf}.tmp" ||
+      ! grep -Eq '^static-auth-secret=.+' "${turn_conf}.tmp"; then
+      rm -f "${turn_conf}.tmp"
+      coturn_state="LỖI render (static-auth-secret rỗng) — giữ cấu hình cũ"
+      echo "[deploy] coturn: render ${turn_conf} thất bại -> giữ cấu hình cũ" >&2
+    else
+      install -m 640 "${turn_conf}.tmp" "${turn_conf}"
+      rm -f "${turn_conf}.tmp"
+      systemctl enable --quiet coturn 2>/dev/null || true
+      if systemctl restart coturn; then
+        rm -f "${turn_conf}.prev"
+        coturn_state="restart"
+      elif [ -f "${turn_conf}.prev" ]; then
+        mv -f "${turn_conf}.prev" "${turn_conf}"
+        systemctl restart coturn || true
+        coturn_state="LỖI restart — đã trả lại cấu hình cũ"
+        echo "[deploy] coturn: restart thất bại -> trả lại cấu hình cũ" >&2
+      else
+        coturn_state="LỖI restart"
+        echo "[deploy] coturn: restart thất bại" >&2
+      fi
+    fi
+  fi
+else
+  coturn_state="không cài"
 fi
 
 # ---- Dừng backfill cũ còn chạy ----

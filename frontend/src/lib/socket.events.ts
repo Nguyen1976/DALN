@@ -46,6 +46,7 @@ export const SOCKET_EVENTS = {
   },
 
   CALL: {
+    ICE_CONFIG: "call.ice_config",
     INCOMING_CALL: "call.incoming_call",
     CALL_ACCEPTED: "call.accepted",
     CALL_REJECTED: "call.rejected",

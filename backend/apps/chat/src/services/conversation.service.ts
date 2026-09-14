@@ -31,6 +31,20 @@ export interface DeleteConversationRequest {
   userId: string
 }
 
+export interface CallPeerRequest {
+  conversationId: string
+  userId: string
+}
+
+/**
+ * Id đến từ query string của gateway. Prisma/Mongo ném lỗi hạ tầng (-> 500) khi
+ * gặp ObjectId sai định dạng, nên chặn ngay tại cửa và trả 403 như mọi lý do từ
+ * chối khác.
+ */
+function isObjectId(value: string): boolean {
+  return /^[a-f\d]{24}$/.test(value.toLowerCase())
+}
+
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name)
@@ -243,6 +257,52 @@ export class ConversationService {
     return {
       conversation,
     }
+  }
+
+  /**
+   * Xác thực quyền gọi thoại 1-1 cho gateway realtime: trả về đối phương của
+   * `userId` trong cuộc trò chuyện DIRECT.
+   *
+   * Dùng findById + findByConversationId thay cho findByIdWithMembers: chỉ cần
+   * `type` và danh sách thành viên, trong khi findByIdWithMembers kéo thêm tin
+   * nhắn cuối cùng kèm media/poll. findByConversationId lại có cache Redis mà
+   * đường gửi tin nhắn đã hâm sẵn, nên gần như không chạm Mongo.
+   */
+  async getCallPeer(dto: CallPeerRequest): Promise<{ peerId: string }> {
+    const conversationId = dto?.conversationId?.trim()
+    const userId = dto?.userId?.trim()
+
+    if (!conversationId || !userId) {
+      ChatErrors.invalidCallPeerQuery()
+    }
+
+    if (!isObjectId(conversationId)) {
+      ChatErrors.callPeerNotAllowed()
+    }
+
+    const conversation = await this.conversationRepo.findById(conversationId)
+
+    // Không tồn tại và "là nhóm" dùng chung một lỗi: gateway không cần phân
+    // biệt, còn người gọi thì không dò được id nào có thật.
+    if (!conversation || conversation.type !== conversationType.DIRECT) {
+      ChatErrors.callPeerNotAllowed()
+    }
+
+    const members = await this.memberRepo.findByConversationId(conversationId)
+
+    if (!members.some((member) => member.userId === userId)) {
+      ChatErrors.callPeerNotAllowed()
+    }
+
+    // DIRECT chỉ có hai người; nếu đối phương đã rời (isActive=false) thì không
+    // còn ai để gọi.
+    const peer = members.find((member) => member.userId !== userId)
+
+    if (!peer) {
+      ChatErrors.callPeerNotAllowed()
+    }
+
+    return { peerId: peer.userId }
   }
 
   async handleUserUpdated(data: UserUpdatedPayload) {

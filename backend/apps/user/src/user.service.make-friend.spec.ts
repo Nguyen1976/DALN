@@ -102,3 +102,65 @@ describe('UserService.makeFriend', () => {
     expect(friendRequestRepo.create).not.toHaveBeenCalled()
   })
 })
+
+describe('UserService.detailMakeFriend', () => {
+  const request = {
+    id: 'fr1',
+    fromUserId: inviter.id,
+    toUserId: invitee.id,
+    status: 'PENDING',
+  }
+
+  function setupDetail(found: typeof request | null = request) {
+    const friendRequestRepo = { findById: jest.fn().mockResolvedValue(found) }
+    const userRepo = {
+      findByIdWithSelect: jest
+        .fn()
+        .mockResolvedValue({ ...inviter, email: 'alice@example.test' }),
+    }
+    const service = new UserService(
+      userRepo as any,
+      friendRequestRepo as any,
+      {} as any, // friendShipRepo
+      {} as any, // jwtService
+      {} as any, // utilService
+      {} as any, // eventsPublisher
+      {} as any, // s3StorageService
+      {} as any, // redisService
+      {} as any, // logger
+      {} as any, // prisma
+    )
+    return { service, userRepo }
+  }
+
+  it('người nhận xem được lời mời kèm người gửi', async () => {
+    const { service } = setupDetail()
+
+    const detail = await service.detailMakeFriend('fr1', invitee.id)
+
+    expect(detail).toEqual(
+      expect.objectContaining({
+        id: 'fr1',
+        status: 'PENDING',
+        fromUser: expect.objectContaining({ id: inviter.id }),
+      }),
+    )
+  })
+
+  it('tài khoản khác (kể cả người gửi) nhận "không tìm thấy", không lộ người gửi', async () => {
+    const { service, userRepo } = setupDetail()
+
+    await expect(service.detailMakeFriend('fr1', inviter.id)).rejects.toThrow(
+      'Không tìm thấy lời mời kết bạn',
+    )
+    expect(userRepo.findByIdWithSelect).not.toHaveBeenCalled()
+  })
+
+  it('id không tồn tại -> không tìm thấy', async () => {
+    const { service } = setupDetail(null)
+
+    await expect(service.detailMakeFriend('nope', invitee.id)).rejects.toThrow(
+      'Không tìm thấy lời mời kết bạn',
+    )
+  })
+})

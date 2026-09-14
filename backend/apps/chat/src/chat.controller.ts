@@ -10,7 +10,11 @@ import {
 } from '@nestjs/common'
 import { ChatService } from './chat.service'
 import { FileInterceptor } from '@nestjs/platform-express/multer/interceptors/file.interceptor'
-import { RequireLogin, UserInfo } from '@app/common/common.decorator'
+import {
+  InternalOnly,
+  RequireLogin,
+  UserInfo,
+} from '@app/common/common.decorator'
 import {
   CreateConversationDTO,
   AddMemberToConversationDTO,
@@ -358,5 +362,17 @@ export class ChatController {
     return {
       conversation: ConversationMapper.toDetail(res, userInfo.userId),
     }
+  }
+
+  // Gateway realtime gọi liên dịch vụ để duyệt quyền gọi thoại 1-1: lời gọi
+  // không có phiên JWT của người dùng nên xác thực bằng shared secret
+  // `x-internal-token` (@InternalOnly), không mở ra ngoài qua Kong.
+  @Get('internal/call-peer')
+  @InternalOnly()
+  async getCallPeer(
+    @Query('conversationId') conversationId: string,
+    @Query('userId') userId: string,
+  ) {
+    return await this.chatService.getCallPeer({ conversationId, userId })
   }
 }

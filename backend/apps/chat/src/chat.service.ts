@@ -23,6 +23,7 @@ import {
   type LeaveConversationRequest,
   type CreateConversationData,
   type DeleteConversationRequest,
+  type CallPeerRequest,
 } from './services'
 
 @Injectable()
@@ -46,7 +47,9 @@ export class ChatService {
     return this.messageService.sendMessage(data)
   }
 
-  createMessageUploadUrl(data: Parameters<MessageService['createMessageUploadUrl']>[0]) {
+  createMessageUploadUrl(
+    data: Parameters<MessageService['createMessageUploadUrl']>[0],
+  ) {
     return this.messageService.createMessageUploadUrl(data)
   }
 
@@ -142,5 +145,9 @@ export class ChatService {
 
   getConversationById(conversationId: string, userId: string) {
     return this.conversationService.getConversationById(conversationId, userId)
+  }
+
+  getCallPeer(dto: CallPeerRequest) {
+    return this.conversationService.getCallPeer(dto)
   }
 }

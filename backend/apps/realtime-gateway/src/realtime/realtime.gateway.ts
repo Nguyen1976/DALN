@@ -20,6 +20,23 @@ import { UserStatusStore } from './user-status.store'
 import type { EmitToUserPayload } from 'libs/constant/rmq/payload'
 import * as cookie from 'cookie'
 import { resolveTokens } from '@app/common'
+import { randomUUID } from 'crypto'
+import { buildIceConfig } from './turn-credentials'
+import {
+  CallSession,
+  CallSessionStore,
+  isCallId,
+} from './call-session.store'
+import { fetchCallPeer } from './chat-call-peer.client'
+
+/** Ack trả về cho client ở các sự kiện `call.*`. */
+type CallAck =
+  | ({ ok: true } & Record<string, unknown>)
+  | { ok: false; code: string; message: string }
+
+function callError(code: string, message: string): CallAck {
+  return { ok: false, code, message }
+}
 
 //nếu k đặt tên cổng thì nó sẽ trùng với cổng của http
 @Injectable()
@@ -39,6 +56,7 @@ export class RealtimeGateway
   server!: Server
 
   private userStatusStore: UserStatusStore
+  private callSessionStore: CallSessionStore
   // Không còn timer 25s cho mỗi socket: `pong` của Socket.IO (pingInterval
   // 40s, pingTimeout 10s -> tối đa 50s giữa hai lần) đã gia hạn TTL 90s của
   // key socket, dư 1,8 lần biên an toàn. Timer server-side còn có hại: nó gia
@@ -132,6 +150,7 @@ export class RealtimeGateway
     private readonly amqpConnection: AmqpConnection,
   ) {
     this.userStatusStore = new UserStatusStore(this.redisClient)
+    this.callSessionStore = new CallSessionStore(this.redisClient)
   }
 
   //default function
@@ -479,130 +498,261 @@ export class RealtimeGateway
     }
   }
 
+  /**
+   * Cấp STUN/TURN cho trình duyệt ngay trước khi gọi.
+   *
+   * Trả qua ack chứ không broadcast: mật khẩu TURN gắn với một người dùng và
+   * chỉ sống một giờ, không có lý do gì để nó đi tới socket khác.
+   */
+  @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CONFIG)
+  async handleIceConfig(@ConnectedSocket() client: Socket): Promise<CallAck> {
+    const userId = client.data.userId
+    if (!userId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
+    }
+
+    return { ok: true, ...buildIceConfig(userId) }
+  }
+
+  /**
+   * Nạp phiên cuộc gọi và kiểm người gửi có thuộc phiên không.
+   *
+   * Mọi sự kiện `call.*` sau lúc đổ chuông đều đi qua đây: không có chốt này
+   * thì chỉ cần đoán đúng một callId là chen được vào cuộc gọi của người khác.
+   */
+  private async loadCallSession(
+    callId: unknown,
+    userId: string,
+  ): Promise<
+    { ok: true; session: CallSession } | { ok: false; ack: CallAck }
+  > {
+    if (!isCallId(callId)) {
+      return { ok: false, ack: callError('INVALID_PAYLOAD', 'callId is required') }
+    }
+
+    const session = await this.callSessionStore.get(callId)
+    if (!session) {
+      // Hết TTL, hoặc bên kia đã đóng trước — không còn gì để chuyển tiếp.
+      return {
+        ok: false,
+        ack: callError('CALL_NOT_FOUND', 'Call session no longer exists'),
+      }
+    }
+
+    if (!CallSessionStore.isParticipant(session, userId)) {
+      return {
+        ok: false,
+        ack: callError('CALL_FORBIDDEN', 'Not a participant of this call'),
+      }
+    }
+
+    return { ok: true, session }
+  }
+
+  /**
+   * Bắt đầu cuộc gọi: gateway tự tìm người nhận rồi mới đổ chuông.
+   *
+   * `targetUserId` của client bị bỏ qua hoàn toàn. Trước đây nó được tin tưởng,
+   * nên một người lạ chỉ cần biết userId là làm người khác đổ chuông được. Giờ
+   * chat service mới là bên quyết định ai nhận, và chỉ trả lời khi hội thoại là
+   * DIRECT và người gọi thật sự là thành viên.
+   */
   @SubscribeMessage(SOCKET_EVENTS.CALL.INCOMING_CALL)
   async handleIncomingCall(
     @MessageBody() data: any,
     @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<CallAck> {
     const callerId = client.data.userId
-    const offer = data?.offer
-    const targetUserId = data?.targetUserId
-    const conversationId = data?.conversationId
-
-    if (!callerId || !offer || !targetUserId) {
-      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
-        code: 'INVALID_PAYLOAD',
-        message: 'callerId, offer, and targetUserId are required',
-        retryable: false,
-      })
-      return
+    if (!callerId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
-    this.emitToUserSockets([targetUserId], SOCKET_EVENTS.CALL.INCOMING_CALL, {
+    const offer = data?.offer
+    const conversationId =
+      typeof data?.conversationId === 'string' ? data.conversationId.trim() : ''
+
+    if (!offer || !conversationId) {
+      return callError(
+        'INVALID_PAYLOAD',
+        'offer and conversationId are required',
+      )
+    }
+
+    const peer = await fetchCallPeer(conversationId, callerId)
+    if (!peer.ok) {
+      return callError(
+        peer.code,
+        peer.code === 'CALL_FORBIDDEN'
+          ? 'Not allowed to call in this conversation'
+          : 'Could not verify the call peer',
+      )
+    }
+
+    const session: CallSession = {
+      callId: randomUUID(),
       callerId,
-      offer,
+      calleeId: peer.peerId,
       conversationId,
-    })
+      status: 'ringing',
+      startedAt: Date.now(),
+    }
+
+    await this.callSessionStore.create(session)
+
+    this.emitToUserSockets(
+      [session.calleeId],
+      SOCKET_EVENTS.CALL.INCOMING_CALL,
+      {
+        callId: session.callId,
+        callerId,
+        conversationId,
+        offer,
+      },
+    )
+
+    return { ok: true, callId: session.callId, calleeId: session.calleeId }
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_ACCEPTED)
   async handleCallAccepted(
     @MessageBody() data: any,
     @ConnectedSocket() client: Socket,
-  ) {
-    const targetUserId = client.data.userId
-    const answer = data?.answer
-    const callerId = data?.callerId
-
-    if (!targetUserId || !answer || !callerId) {
-      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
-        code: 'INVALID_PAYLOAD',
-        message: 'targetUserId, answer, and callerId are required',
-        retryable: false,
-      })
-      return
+  ): Promise<CallAck> {
+    const userId = client.data.userId
+    if (!userId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
-    // Gửi answer tới callerId
-    this.emitToUserSockets([callerId], SOCKET_EVENTS.CALL.CALL_ACCEPTED, {
-      answer: data.answer,
-      answererId: client.data.userId,
-    })
+    if (!data?.answer) {
+      return callError('INVALID_PAYLOAD', 'answer is required')
+    }
+
+    const loaded = await this.loadCallSession(data?.callId, userId)
+    if (!loaded.ok) return loaded.ack
+
+    const { session } = loaded
+    // Chỉ người được gọi mới nghe máy được; người gọi tự "chấp nhận" cuộc gọi
+    // của chính mình là vô nghĩa và sẽ làm sai mốc tính thời lượng.
+    if (session.calleeId !== userId) {
+      return callError('CALL_FORBIDDEN', 'Only the callee can accept a call')
+    }
+
+    await this.callSessionStore.markConnected(session)
+
+    this.emitToUserSockets(
+      [session.callerId],
+      SOCKET_EVENTS.CALL.CALL_ACCEPTED,
+      {
+        callId: session.callId,
+        answer: data.answer,
+        answererId: userId,
+      },
+    )
+
+    return { ok: true, callId: session.callId }
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_REJECTED)
   async handleCallRejected(
     @MessageBody() data: any,
     @ConnectedSocket() client: Socket,
-  ) {
-    const targetUserId = client.data.userId
-    const callerId = data?.callerId
-
-    if (!targetUserId || !callerId) {
-      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
-        code: 'INVALID_PAYLOAD',
-        message: 'targetUserId and callerId are required',
-        retryable: false,
-      })
-      return
+  ): Promise<CallAck> {
+    const userId = client.data.userId
+    if (!userId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
-    // Gửi thông báo từ chối tới callerId
-    this.emitToUserSockets([callerId], SOCKET_EVENTS.CALL.CALL_REJECTED, {
-      rejecterId: client.data.userId,
-    })
+    const loaded = await this.loadCallSession(data?.callId, userId)
+    if (!loaded.ok) return loaded.ack
 
-    this.recordCallOutcome({
-      conversationId: data?.conversationId,
-      callerId,
-      calleeId: targetUserId,
-      actorId: targetUserId,
-      outcome: 'REJECTED',
-    })
+    const { session } = loaded
+    if (session.calleeId !== userId) {
+      return callError('CALL_FORBIDDEN', 'Only the callee can reject a call')
+    }
+
+    this.emitToUserSockets(
+      [session.callerId],
+      SOCKET_EVENTS.CALL.CALL_REJECTED,
+      {
+        callId: session.callId,
+        rejecterId: userId,
+      },
+    )
+
+    if (await this.callSessionStore.end(session.callId)) {
+      this.recordCallOutcome({
+        conversationId: session.conversationId,
+        callerId: session.callerId,
+        calleeId: session.calleeId,
+        actorId: userId,
+        outcome: 'REJECTED',
+      })
+    }
+
+    return { ok: true, callId: session.callId }
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_ENDED)
   async handleCallEnded(
     @MessageBody() data: any,
     @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<CallAck> {
     const enderId = client.data.userId
-    const peerUserId = data?.targetUserId ?? data?.callerId
-
-    if (!enderId || !peerUserId) {
-      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
-        code: 'INVALID_PAYLOAD',
-        message: 'targetUserId is required',
-        retryable: false,
-      })
-      return
+    if (!enderId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
-    this.emitToUserSockets([peerUserId], SOCKET_EVENTS.CALL.CALL_ENDED, {
-      enderId,
-      reason: data?.reason,
+    const loaded = await this.loadCallSession(data?.callId, enderId)
+    if (!loaded.ok) return loaded.ack
+
+    const { session } = loaded
+    const reason = String(data?.reason || '')
+
+    this.emitToUserSockets(
+      [CallSessionStore.peerOf(session, enderId)],
+      SOCKET_EVENTS.CALL.CALL_ENDED,
+      {
+        callId: session.callId,
+        enderId,
+        reason: data?.reason,
+      },
+    )
+
+    // Cả hai bên đều phát `call.ended` khi cúp máy. Trước đây việc chống trùng
+    // dựa vào "chỉ bên gọi mới ghi", kéo theo phải tin `callerId` từ client.
+    // Giờ chốt là DEL của Redis: đúng một lời gọi nhận được true.
+    if (!(await this.callSessionStore.end(session.callId))) {
+      return { ok: true, callId: session.callId }
+    }
+
+    this.recordCallOutcome({
+      conversationId: session.conversationId,
+      callerId: session.callerId,
+      calleeId: session.calleeId,
+      actorId: enderId,
+      outcome: this.resolveCallOutcome(session, reason),
+      // Thời lượng tính từ mốc nghe máy của server, không lấy con số client gửi
+      // lên: đồng hồ ở frontend có thể chạy trước cả khi ICE thông.
+      durationSeconds: session.connectedAt
+        ? Math.max(0, Math.round((Date.now() - session.connectedAt) / 1000))
+        : 0,
     })
 
-    // Chỉ bên GỌI mới ghi nhận, nếu không mỗi lần kết thúc sẽ có hai tin nhắn
-    // hệ thống — cả hai phía đều phát sự kiện này.
-    const callerId = data?.callerId ?? enderId
-    const isCaller = !data?.callerId || data.callerId === enderId
-    if (isCaller) {
-      const reason = String(data?.reason || '')
-      this.recordCallOutcome({
-        conversationId: data?.conversationId,
-        callerId,
-        calleeId: peerUserId,
-        actorId: enderId,
-        outcome:
-          reason === 'no_answer'
-            ? 'MISSED'
-            : reason === 'unreachable'
-              ? 'UNREACHABLE'
-              : 'COMPLETED',
-        durationSeconds: Number(data?.durationSeconds) || 0,
-      })
-    }
+    return { ok: true, callId: session.callId }
+  }
+
+  private resolveCallOutcome(
+    session: CallSession,
+    reason: string,
+  ): 'COMPLETED' | 'REJECTED' | 'MISSED' | 'UNREACHABLE' {
+    if (reason === 'no_answer') return 'MISSED'
+    // Frontend gửi lý do này khi ICE hỏng hoặc quá 15 giây ở trạng thái
+    // "đang kết nối" — cuộc gọi có tín hiệu nhưng không bao giờ có tiếng.
+    if (reason === 'unreachable') return 'UNREACHABLE'
+    // Chưa từng nghe máy mà đã kết thúc (người gọi tự huỷ lúc đang đổ chuông)
+    // là cuộc gọi nhỡ, không phải cuộc gọi hoàn tất dài 0 giây.
+    if (!session.connectedAt) return 'MISSED'
+    return 'COMPLETED'
   }
 
   /**
@@ -629,23 +779,37 @@ export class RealtimeGateway
       payload,
     )
   }
+
   @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CANDIDATE)
   async handleIceCandidate(
     @MessageBody() data: any,
     @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<CallAck> {
     const senderId = client.data.userId
-    const targetUserId = data?.targetUserId
-    const candidate = data?.candidate
-
-    if (!senderId || !targetUserId || !candidate) {
-      return // Có thể emit lỗi tương tự như trên
+    if (!senderId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
-    // Chuyển tiếp ICE candidate cho đối phương
-    this.emitToUserSockets([targetUserId], SOCKET_EVENTS.CALL.ICE_CANDIDATE, {
-      senderId,
-      candidate,
-    })
+    if (!data?.candidate) {
+      return callError('INVALID_PAYLOAD', 'candidate is required')
+    }
+
+    const loaded = await this.loadCallSession(data?.callId, senderId)
+    if (!loaded.ok) return loaded.ack
+
+    const { session } = loaded
+
+    // Chuyển tiếp ICE candidate cho đối phương của đúng phiên này.
+    this.emitToUserSockets(
+      [CallSessionStore.peerOf(session, senderId)],
+      SOCKET_EVENTS.CALL.ICE_CANDIDATE,
+      {
+        callId: session.callId,
+        senderId,
+        candidate: data.candidate,
+      },
+    )
+
+    return { ok: true, callId: session.callId }
   }
 }

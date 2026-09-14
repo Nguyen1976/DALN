@@ -42,6 +42,7 @@ export const SOCKET_EVENTS = {
   },
 
   CALL: {
+    ICE_CONFIG: 'call.ice_config', //emit + ack: xin danh sách STUN/TURN kèm mật khẩu ngắn hạn
     INCOMING_CALL: 'call.incoming_call', //listen
     CALL_ACCEPTED: 'call.accepted', //listen
     CALL_REJECTED: 'call.rejected', //listen

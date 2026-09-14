@@ -217,6 +217,76 @@ nginx -t && systemctl reload nginx   # nạp lại tay
 tail -f /var/log/nginx/error.log
 ```
 
+## TURN (coturn) — gọi thoại
+
+Gọi thoại 1-1 (WebRTC) cần một máy chủ TURN để nối được khi hai máy ở sau CGNAT/tường
+lửa (bản thiết kế: `docs/diagrams/voice-call-turn.html`). coturn cài **thẳng trên host**
+bằng apt, **cạnh nginx** (không trong Docker: relay cần hàng trăm cổng UDP, publish qua
+Docker đi vòng ufw và chậm với dải lớn). Chứng chỉ Let's Encrypt dùng chung với nginx.
+
+Gateway (`realtime-gateway`) ký mật khẩu TURN ngắn hạn bằng `TURN_SECRET`; coturn tự kiểm
+lại bằng **chính** `TURN_SECRET` đó (`use-auth-secret`) — nên **`TURN_SECRET` trong
+`backend/.env.production` phải TRÙNG với `static-auth-secret` trong `/etc/turnserver.conf`**.
+Không cần đồng bộ tay: `deploy.sh` render `/etc/turnserver.conf` từ
+`deploy/coturn/turnserver.conf` (template), thay `TURN_SECRET`/`TURN_REALM`/`TURN_HOST`
+bằng giá trị `.env.production` (envsubst) ở **mỗi** lần deploy — sửa cấu hình thì sửa file
+template trong repo, đừng sửa `/etc/turnserver.conf` (deploy sau ghi đè).
+
+| Cổng | Giao thức | Để làm gì |
+|---|---|---|
+| `3478` | UDP, TCP | STUN + TURN, đường chính. URL dùng thẳng IP `TURN_HOST` -> không phụ thuộc DNS |
+| `5349` | TCP + TLS | TURN qua TLS (`turns:`) cho mạng chỉ cho ra cổng web; cần domain khớp chứng chỉ |
+| `49152–49999` | UDP | Cổng relay: mỗi phiên giữ một cổng (khớp `min-port`/`max-port`) |
+
+### Cài lần đầu
+
+```bash
+# 1. Cài coturn
+apt-get install -y coturn
+# 2. Cho phép systemd chạy service (gói Debian mặc định để TURNSERVER_ENABLED=1;
+#    kiểm cho chắc, nếu không có/khác thì đặt lại).
+grep -q '^TURNSERVER_ENABLED=1' /etc/default/coturn || \
+  sed -i 's/^#\?TURNSERVER_ENABLED=.*/TURNSERVER_ENABLED=1/' /etc/default/coturn
+# 3. ufw mở cổng TURN + dải relay
+ufw allow 3478/udp && ufw allow 3478/tcp && ufw allow 5349/tcp
+ufw allow 49152:49999/udp
+# 4. certbot deploy-hook: gia hạn chứng chỉ xong thì RESTART coturn (coturn không
+#    nạp lại cert khi đang chạy). Hook nằm cùng chỗ hook reload-nginx.
+printf '#!/bin/sh\nsystemctl restart coturn\n' \
+  > /etc/letsencrypt/renewal-hooks/deploy/reload-coturn
+chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-coturn
+# 5. Deploy: deploy.sh render /etc/turnserver.conf từ template + restart coturn.
+#    (Cần TURN_SECRET/TURN_HOST/TURN_REALM/TURN_TLS_HOST trong .env.production trước.)
+bash /root/workspace/DALN/deploy/deploy.sh
+```
+
+`deploy.sh` bỏ qua bước coturn nếu host chưa cài `turnserver` (`coturn : không cài` trong
+tóm tắt), nên cứ deploy code như thường; cài coturn khi nào cần bật gọi thoại. Thiếu
+`TURN_SECRET` trong `.env.production` thì cũng bỏ qua và gateway trả **chỉ STUN** (gọi
+cùng mạng vẫn chạy). Dòng tóm tắt: `coturn : <restart | không cài | bỏ qua (...) | LỖI ...>`
+— coturn hỏng **không** làm dừng deploy (gọi thoại lùi về STUN, app vẫn lên).
+
+### Kiểm tra
+
+```bash
+systemctl status coturn                       # service đang chạy?
+journalctl -u coturn -n 50                    # log (turnserver.conf đặt `syslog`)
+grep static-auth-secret /etc/turnserver.conf  # secret đã render (khớp .env.production)?
+ss -lunp | grep 3478                          # đang nghe UDP 3478
+# Thử allocate qua TURN (secret là REST secret, coturn tự ký username/credential):
+turnutils_uclient -v -y -u anyuser -w "$(grep '^TURN_SECRET=' \
+  /root/workspace/DALN/backend/.env.production | cut -d= -f2-)" 109.199.115.126
+```
+
+Từ trình duyệt: trang **trickle-ice** (`https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/`)
+— nhập `turn:109.199.115.126:3478` + username/credential lấy từ `call.ice_config`, phải
+thấy candidate loại `relay`. Trong app: hai điện thoại 4G khác nhà mạng, mở
+`chrome://webrtc-internals` sẽ thấy cặp candidate `relay` khi đường thẳng hỏng.
+
+> **Đổi `TURN_SECRET`:** đổi ở `backend/.env.production` rồi deploy lại (config render
+> lại + coturn restart). Mật khẩu cũ trình duyệt đang giữ tự hết hạn trong `TURN_TTL`
+> giây (mặc định 1 giờ).
+
 ## Env
 
 - File thật: `/root/workspace/DALN/backend/.env.production` — chỉ nằm trên server (quyền 600),

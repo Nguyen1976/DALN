@@ -36,7 +36,11 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     user.hasCompletedInterestOnboarding === false &&
     !location.pathname.startsWith("/onboarding/interests")
   ) {
-    return <Navigate to="/onboarding/interests" replace />;
+    // Giữ trang đang mở (vd link "Xem lời mời" trong email) để onboarding xong
+    // quay lại đúng chỗ, thay vì về trang chủ.
+    return (
+      <Navigate to="/onboarding/interests" replace state={{ from: location }} />
+    );
   }
 
   return children;

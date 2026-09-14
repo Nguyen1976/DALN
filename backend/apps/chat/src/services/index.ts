@@ -21,6 +21,7 @@ export {
   ConversationService,
   type CreateConversationData,
   type DeleteConversationRequest,
+  type CallPeerRequest,
 } from './conversation.service'
 export {
   MessageBatchWriter,

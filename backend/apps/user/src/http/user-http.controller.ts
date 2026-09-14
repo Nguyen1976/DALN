@@ -312,8 +312,14 @@ export class UserHttpController {
 
   @Get('detail-friend-request')
   @RequireLogin()
-  async detailMakeFriend(@Query('friendRequestId') friendRequestId: string) {
-    const request = await this.userService.detailMakeFriend(friendRequestId)
+  async detailMakeFriend(
+    @UserInfo() user: any,
+    @Query('friendRequestId') friendRequestId: string,
+  ) {
+    const request = await this.userService.detailMakeFriend(
+      friendRequestId,
+      user.userId,
+    )
     return {
       id: request.id,
       toUserId: request.toUserId,

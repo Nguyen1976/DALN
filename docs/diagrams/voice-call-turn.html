@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gọi thoại qua TURN</title>
+  <!-- Instrument Serif không có bộ chữ tiếng Việt -> Newsreader (serif editorial, có dấu) cho tiêu đề và chú thích nghiêng. -->
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --color-paper:       #f5f5f5;
+      --color-paper-2:     #ececec;
+      --color-ink:         #2d3142;
+      --color-muted:       #4f5d75;
+      --color-soft:        #7a8399;
+      --color-rule:        rgba(45,49,66,0.12);
+      --color-accent:      #eb6c36;
+      --color-accent-tint: rgba(235,108,54,0.08);
+      --color-link:        #2e5aa8;
+      --font-sans:  'Geist', system-ui, sans-serif;
+      --font-serif: 'Newsreader', 'Times New Roman', serif;
+      --font-mono:  'Geist Mono', ui-monospace, Menlo, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      padding: 3rem 2rem 4rem;
+    }
+    @media (max-width: 600px) { body { padding: 2rem 1rem 3rem; } }
+
+    .container { max-width: 1120px; margin: 0 auto; }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    .header { margin-bottom: 3rem; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.75rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.9rem, 3vw + 1rem, 2.75rem);
+      font-weight: 400;
+      letter-spacing: -0.015em;
+      line-height: 1.1;
+      margin-bottom: 0.75rem;
+      text-wrap: balance;
+    }
+    .subtitle {
+      font-size: 1rem;
+      line-height: 1.6;
+      color: var(--color-muted);
+      max-width: 68ch;
+    }
+
+    /* ── Sections ───────────────────────────────────────────── */
+    section { margin-top: 3.5rem; }
+    section:first-of-type { margin-top: 0; }
+    h2 {
+      font-family: var(--font-sans);
+      font-size: 1.3rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      line-height: 1.3;
+      margin-bottom: 0.75rem;
+      text-wrap: balance;
+    }
+    .lead {
+      font-size: 0.95rem;
+      line-height: 1.65;
+      max-width: 76ch;
+      margin-bottom: 1.5rem;
+    }
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.82em;
+      background: rgba(45,49,66,0.06);
+      padding: 0.05em 0.35em;
+      border-radius: 3px;
+    }
+
+    .diagram-container { overflow-x: auto; margin: 0 -0.25rem; }
+    .diagram-container svg { width: 100%; min-width: 900px; display: block; }
+
+    .notes {
+      list-style: none;
+      margin-top: 1.5rem;
+      display: grid;
+      gap: 0.6rem;
+      max-width: 88ch;
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+    .notes li { padding-left: 1rem; position: relative; }
+    .notes li::before { content: '—'; position: absolute; left: 0; color: rgba(45,49,66,0.3); }
+    .notes strong { font-weight: 600; }
+
+    /* ── Cards ──────────────────────────────────────────────── */
+    .cards { display: grid; gap: 1rem; margin-top: 1.5rem; }
+    .cards.facts  { grid-template-columns: 0.9fr 0.9fr 1.2fr; }
+    .cards.pair   { grid-template-columns: 1.15fr 0.85fr; }
+    .cards.pair-r { grid-template-columns: 0.85fr 1.15fr; }
+    @media (max-width: 760px) {
+      .cards.facts, .cards.pair, .cards.pair-r { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid var(--color-rule);
+      border-radius: 6px;
+      padding: 1.25rem;
+      min-width: 0;
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 0.875rem;
+      padding-bottom: 0.875rem;
+      border-bottom: 1px solid rgba(45,49,66,0.08);
+    }
+    .card-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .card-dot.ink   { background: var(--color-ink); }
+    .card-dot.muted { background: var(--color-muted); }
+    .card-dot.coral { background: var(--color-accent); }
+    .card-dot.link  { background: var(--color-link); }
+    .card-dot.soft  { background: var(--color-soft); }
+    .card h3 { font-size: 0.875rem; font-weight: 600; letter-spacing: -0.005em; }
+    .card .tag {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--color-soft);
+    }
+    .card p { font-size: 0.85rem; line-height: 1.55; color: var(--color-muted); }
+    .card ul { list-style: none; color: var(--color-muted); font-size: 0.8125rem; line-height: 1.55; }
+    .card li { margin-bottom: 0.35rem; padding-left: 0.875rem; position: relative; }
+    .card li::before { content: '—'; position: absolute; left: 0; color: rgba(45,49,66,0.25); font-size: 0.75rem; }
+
+    /* ── Ports table ───────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; margin-top: 1.5rem; }
+    table.ports { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 0.85rem; line-height: 1.5; }
+    .ports th {
+      font-family: var(--font-mono);
+      font-size: 0.64rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--color-soft);
+      text-align: left;
+      padding: 0 1rem 0.5rem 0;
+      border-bottom: 1px solid var(--color-rule);
+    }
+    .ports td { padding: 0.6rem 1rem 0.6rem 0; border-bottom: 1px solid rgba(45,49,66,0.07); vertical-align: top; color: var(--color-muted); }
+    .ports td:first-child { font-family: var(--font-mono); color: var(--color-ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .ports td:nth-child(2) { white-space: nowrap; }
+
+    /* ── Footer ────────────────────────────────────────────── */
+    .footer {
+      margin-top: 3.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(45,49,66,0.10);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      color: var(--color-soft);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="header">
+      <p class="eyebrow">DALN Chat · Bản thiết kế · 14/09/2026</p>
+      <h1>Gọi thoại 1-1 ổn định với TURN</h1>
+      <p class="subtitle">Âm thanh hiện chỉ đi thẳng giữa hai máy, nên người dùng 4G hay mạng công ty thường gọi không thông, trong khi giao diện vẫn báo “đang trong cuộc gọi”. Bản này thêm máy chủ TURN trên server prod, để gateway cấp mật khẩu TURN ngắn hạn, chặn người lạ gọi, và chỉ báo đang gọi khi tiếng thật sự thông.</p>
+    </header>
+
+    <!-- ═════════════════════════ VẤN ĐỀ ═════════════════════════ -->
+    <section>
+      <p class="eyebrow">Vấn đề</p>
+      <h2>Đường thẳng giữa hai máy bị CGNAT chặn</h2>
+      <p class="lead">Gateway chỉ chuyển lời mời (offer/answer) và địa chỉ (ICE candidate); âm thanh đi thẳng giữa hai trình duyệt. STUN cho mỗi máy biết địa chỉ công khai của mình, nhưng CGNAT của nhà mạng di động cấp một cửa khác cho mỗi nơi nhận, còn tường lửa công ty thường chặn UDP, nên gói tin của bên kia bị vứt. TURN là đường vòng qua máy chủ của mình; trình duyệt chỉ dùng nó khi đường thẳng thất bại.</p>
+
+      <div class="diagram-container">
+        <svg viewBox="0 0 1040 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="turn-paths-title turn-paths-desc">
+          <title id="turn-paths-title">Đường đi của âm thanh: nối thẳng bị chặn, vòng qua TURN</title>
+          <desc id="turn-paths-desc">Tín hiệu cuộc gọi đi qua realtime gateway; âm thanh nối thẳng từ B về điện thoại 4G của A bị CGNAT chặn, còn đường vòng qua máy chủ TURN coturn trên server thì đi được.</desc>
+          <defs>
+            <marker id="d1-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+            <marker id="d1-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+            <marker id="d1-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- Zones: ranh giới NAT / mạng -->
+          <rect x="24" y="120" width="232" height="272" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="32" y="124" width="72" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="38" y="133" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">4G · CGNAT</text>
+
+          <rect x="344" y="120" width="352" height="272" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="352" y="124" width="196" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="358" y="133" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">SERVER DALN · 109.199.115.126</text>
+
+          <rect x="784" y="120" width="232" height="272" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="792" y="124" width="108" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="798" y="133" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">WI-FI NHÀ · NAT</text>
+
+          <!-- Arrows (trước nodes) -->
+          <path d="M 112 208 V 60 Q 112 52 120 52 H 424" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d1-arrow)"/>
+          <path d="M 168 208 V 196 Q 168 188 176 188 H 400" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#d1-arrow-link)"/>
+          <path d="M 640 188 H 892 Q 900 188 900 196 V 208" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#d1-arrow-link)"/>
+          <!-- Nối thẳng B -> A: dừng ở ranh giới CGNAT -->
+          <path d="M 820 244 H 272" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4"/>
+          <path d="M 256 238 L 268 250 M 256 250 L 268 238" fill="none" stroke="#2d3142" stroke-width="1.6" stroke-linecap="round"/>
+          <!-- Đường vòng qua TURN -->
+          <path d="M 140 280 V 324 Q 140 332 148 332 H 400" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d1-arrow-accent)"/>
+          <path d="M 640 332 H 892 Q 900 332 900 324 V 280" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d1-arrow-accent)"/>
+
+          <!-- Arrow labels -->
+          <rect x="232" y="32" width="72" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="268" y="41" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">HỎI ĐỊA CHỈ</text>
+          <rect x="252" y="168" width="72" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="288" y="177" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TÍN HIỆU WSS</text>
+          <rect x="712" y="168" width="64" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="744" y="177" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CHUYỂN TIẾP</text>
+          <rect x="276" y="224" width="76" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="314" y="233" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">P2P · BỊ CHẶN</text>
+          <rect x="268" y="312" width="64" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="300" y="321" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RELAY :3478</text>
+          <rect x="712" y="312" width="56" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="740" y="321" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RELAY UDP</text>
+
+          <!-- Nodes -->
+          <!-- STUN của Google (external) -->
+          <rect x="424" y="24" width="192" height="56" rx="6" fill="#f5f5f5"/>
+          <rect x="424" y="24" width="192" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+          <rect x="432" y="30" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.22)" stroke-width="0.8"/>
+          <text x="445" y="39" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">EXT</text>
+          <text x="520" y="54" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">STUN của Google</text>
+          <text x="520" y="70" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">stun.l.google.com:19302</text>
+
+          <!-- Điện thoại A -->
+          <rect x="60" y="208" width="160" height="72" rx="6" fill="#f5f5f5"/>
+          <rect x="60" y="208" width="160" height="72" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+          <rect x="68" y="214" width="30" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.4)" stroke-width="0.8"/>
+          <text x="83" y="223" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">USER</text>
+          <text x="140" y="250" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Điện thoại A</text>
+          <text x="140" y="266" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">4G · IP riêng 10.x.x.x</text>
+
+          <!-- Realtime gateway -->
+          <rect x="400" y="156" width="240" height="64" rx="6" fill="#f5f5f5"/>
+          <rect x="400" y="156" width="240" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="408" y="162" width="22" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="419" y="171" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">WS</text>
+          <text x="520" y="190" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Realtime gateway</text>
+          <text x="520" y="206" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">chỉ chuyển tín hiệu</text>
+
+          <!-- coturn -->
+          <rect x="400" y="300" width="240" height="64" rx="6" fill="#f5f5f5"/>
+          <rect x="400" y="300" width="240" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="408" y="306" width="30" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="423" y="315" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TURN</text>
+          <rect x="444" y="306" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="456" y="315" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">MỚI</text>
+          <text x="520" y="334" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">coturn · máy chủ TURN</text>
+          <text x="520" y="350" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">3478 udp/tcp · 5349 tls</text>
+
+          <!-- Trình duyệt B -->
+          <rect x="820" y="208" width="160" height="72" rx="6" fill="#f5f5f5"/>
+          <rect x="820" y="208" width="160" height="72" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+          <rect x="828" y="214" width="30" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.4)" stroke-width="0.8"/>
+          <text x="843" y="223" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">USER</text>
+          <text x="900" y="250" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Trình duyệt B</text>
+          <text x="900" y="266" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Wi-Fi · 192.168.1.5</text>
+
+          <!-- Editorial asides -->
+          <text x="24" y="428" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">CGNAT cấp cửa mới cho mỗi nơi nhận, nên</text>
+          <text x="24" y="448" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">địa chỉ STUN thấy không dùng được cho B.</text>
+          <text x="400" y="428" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">TURN chỉ vào cuộc khi đường thẳng thất bại;</text>
+          <text x="400" y="448" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">trình duyệt vẫn thử nối thẳng trước.</text>
+
+          <!-- Legend -->
+          <line x1="24" y1="476" x2="1016" y2="476" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <text x="24" y="504" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">CHÚ THÍCH</text>
+          <line x1="112" y1="500" x2="136" y2="500" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#d1-arrow-link)"/>
+          <text x="144" y="504" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Tín hiệu qua socket</text>
+          <line x1="296" y1="500" x2="320" y2="500" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d1-arrow-accent)"/>
+          <text x="328" y="504" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Âm thanh qua TURN</text>
+          <line x1="472" y1="500" x2="492" y2="500" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4"/>
+          <path d="M 496 496 L 504 504 M 496 504 L 504 496" fill="none" stroke="#2d3142" stroke-width="1.4" stroke-linecap="round"/>
+          <text x="512" y="504" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Nối thẳng bị chặn</text>
+          <line x1="648" y1="500" x2="672" y2="500" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d1-arrow)"/>
+          <text x="680" y="504" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Hỏi địa chỉ qua STUN</text>
+          <rect x="836" y="495" width="14" height="10" rx="2" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8" stroke-dasharray="3,3"/>
+          <text x="858" y="504" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Ranh giới NAT / mạng</text>
+        </svg>
+      </div>
+
+      <div class="cards facts">
+        <div class="card">
+          <div class="card-header"><span class="card-dot ink"></span><h3>Đang có</h3></div>
+          <p>Gọi thoại 1-1 chạy khi hai máy tìm được đường thẳng. QC dev ngày 14/09: WebRTC connected, âm thanh hai chiều, ghi kết quả vào hội thoại.</p>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot muted"></span><h3>Thiếu</h3></div>
+          <p>Chỉ có STUN của Google trong <code>useWebRTC.ts</code>. Không có TURN, nên khi đường thẳng hỏng thì không còn đường nào khác.</p>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot coral"></span><h3>Báo sai</h3></div>
+          <p>Giao diện báo “Đang trong cuộc gọi” và chạy đồng hồ ngay khi trao đổi xong offer/answer. Không chỗ nào đọc <code>connectionState</code>, nên kết nối hỏng vẫn đếm giờ, không có tiếng và không tự kết thúc; lý do <code>unreachable</code> chưa bao giờ được gửi.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════════════════════ TRIỂN KHAI ═════════════════════════ -->
+    <section>
+      <p class="eyebrow">Triển khai</p>
+      <h2>coturn chạy trên chính server prod</h2>
+      <p class="lead">Cài coturn bằng apt ngay trên host, cạnh nginx, thay vì trong Docker: relay cần hàng trăm cổng UDP, mà Docker publish cổng thì đi vòng qua ufw và chậm với dải lớn. Cấu hình nằm trong repo (<code>deploy/coturn/turnserver.conf</code>); <code>deploy.sh</code> cài và kiểm tra giống cách đang làm với nginx. Chứng chỉ Let’s Encrypt dùng chung với nginx.</p>
+
+      <div class="diagram-container">
+        <svg viewBox="0 0 1040 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="turn-deploy-title turn-deploy-desc">
+          <title id="turn-deploy-title">coturn trên server prod 109.199.115.126</title>
+          <desc id="turn-deploy-desc">Trên host prod, coturn cài bằng apt cạnh nginx và nhận TURN ở cổng 3478 và 5349 qua ufw; nginx chuyển HTTPS và WebSocket vào Kong và realtime gateway trong Docker; certbot gia hạn chứng chỉ dùng chung và reload cả nginx lẫn coturn.</desc>
+          <defs>
+            <marker id="d2-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+            <marker id="d2-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+            <marker id="d2-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- Zones -->
+          <rect x="24" y="40" width="200" height="368" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="32" y="44" width="64" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="38" y="53" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">INTERNET</text>
+
+          <rect x="264" y="40" width="752" height="368" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="272" y="44" width="188" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="278" y="53" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">HOST 109.199.115.126 · UFW</text>
+
+          <rect x="576" y="64" width="424" height="152" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="584" y="68" width="196" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="590" y="77" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">DOCKER · daln-prod · 127.0.0.1</text>
+
+          <!-- Network paths -->
+          <path d="M 204 208 H 296 Q 304 208 304 200 V 152 Q 304 144 312 144 H 352" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#d2-arrow-link)"/>
+          <path d="M 204 232 H 308 Q 316 232 316 240 V 308 Q 316 316 324 316 H 352" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d2-arrow-accent)"/>
+          <path d="M 528 144 H 600" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#d2-arrow-link)"/>
+          <path d="M 760 144 H 816" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d2-arrow)"/>
+          <path d="M 600 316 H 528" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#d2-arrow)"/>
+          <path d="M 680 268 V 256 Q 680 248 672 248 H 448 Q 440 248 440 240 V 192" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#d2-arrow)"/>
+
+          <!-- Path labels -->
+          <rect x="212" y="188" width="80" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="252" y="197" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">HTTPS·WSS :443</text>
+          <rect x="228" y="268" width="80" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="268" y="277" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">UDP·TCP :3478</text>
+          <rect x="532" y="124" width="64" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="564" y="133" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">HTTP :8000</text>
+          <rect x="764" y="124" width="48" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="788" y="133" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">WS :3001</text>
+          <rect x="540" y="296" width="48" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="564" y="305" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RELOAD</text>
+          <rect x="536" y="228" width="48" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="560" y="237" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RELOAD</text>
+
+          <!-- Người dùng -->
+          <rect x="44" y="188" width="160" height="64" rx="6" fill="#f5f5f5"/>
+          <rect x="44" y="188" width="160" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+          <rect x="52" y="194" width="30" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.4)" stroke-width="0.8"/>
+          <text x="67" y="203" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">USER</text>
+          <text x="124" y="228" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Người dùng</text>
+          <text x="124" y="244" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">4G · Wi-Fi · công ty</text>
+
+          <!-- nginx -->
+          <rect x="352" y="96" width="176" height="96" rx="6" fill="#f5f5f5"/>
+          <rect x="352" y="96" width="176" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="360" y="102" width="30" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="375" y="111" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HOST</text>
+          <text x="440" y="130" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">nginx</text>
+          <text x="440" y="146" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">80 · 443 TLS</text>
+          <rect x="364" y="156" width="152" height="24" rx="4" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
+          <text x="372" y="172" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">nginx</text>
+          <text x="508" y="172" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">1.24.0</text>
+
+          <!-- coturn (mới, focal) -->
+          <rect x="352" y="264" width="176" height="104" rx="6" fill="#f5f5f5"/>
+          <rect x="352" y="264" width="176" height="104" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+          <rect x="360" y="270" width="30" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+          <text x="375" y="279" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HOST</text>
+          <rect x="396" y="270" width="24" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+          <text x="408" y="279" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">MỚI</text>
+          <text x="440" y="302" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">coturn</text>
+          <text x="440" y="318" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">3478 udp/tcp · 5349 tls</text>
+          <rect x="364" y="328" width="152" height="24" rx="4" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
+          <text x="372" y="344" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">coturn</text>
+          <text x="508" y="344" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">4.6.1 · apt</text>
+
+          <!-- Kong -->
+          <rect x="600" y="96" width="160" height="96" rx="6" fill="#f5f5f5"/>
+          <rect x="600" y="96" width="160" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="608" y="102" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="621" y="111" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">POD</text>
+          <text x="680" y="130" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Kong</text>
+          <text x="680" y="146" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">127.0.0.1:8000</text>
+          <rect x="612" y="156" width="136" height="24" rx="4" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
+          <text x="620" y="172" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">kong</text>
+          <text x="740" y="172" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">3.7</text>
+
+          <!-- Realtime gateway -->
+          <rect x="816" y="96" width="160" height="96" rx="6" fill="#f5f5f5"/>
+          <rect x="816" y="96" width="160" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="824" y="102" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="837" y="111" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">POD</text>
+          <text x="896" y="130" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Realtime gateway</text>
+          <text x="896" y="146" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">:3001 · /realtime</text>
+          <rect x="828" y="156" width="136" height="24" rx="4" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
+          <text x="836" y="172" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">nestjs</text>
+          <text x="956" y="172" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">node 20</text>
+
+          <!-- certbot -->
+          <rect x="600" y="268" width="160" height="96" rx="6" fill="#f5f5f5"/>
+          <rect x="600" y="268" width="160" height="96" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <rect x="608" y="274" width="34" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+          <text x="625" y="283" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TIMER</text>
+          <text x="680" y="302" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">certbot</text>
+          <text x="680" y="318" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">gia hạn chứng chỉ</text>
+          <rect x="612" y="328" width="136" height="24" rx="4" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
+          <text x="620" y="344" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">certbot</text>
+          <text x="740" y="344" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">2.9.0</text>
+
+          <!-- Ghi chú trong zone host -->
+          <text x="280" y="396" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.08em">UFW MỞ THÊM 3478/UDP·TCP · 5349/TCP · 49152–49999/UDP</text>
+
+          <!-- Editorial aside -->
+          <text x="796" y="288" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">Gateway ký mật khẩu TURN,</text>
+          <text x="796" y="308" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">coturn tự kiểm bằng cùng</text>
+          <text x="796" y="328" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">TURN_SECRET — hai bên không</text>
+          <text x="796" y="348" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">cần gọi nhau qua mạng.</text>
+
+          <!-- Legend -->
+          <line x1="24" y1="432" x2="1016" y2="432" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <text x="24" y="460" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">CHÚ THÍCH</text>
+          <line x1="112" y1="456" x2="136" y2="456" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#d2-arrow-link)"/>
+          <text x="144" y="460" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Qua ranh giới mạng</text>
+          <line x1="300" y1="456" x2="324" y2="456" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d2-arrow)"/>
+          <text x="332" y="460" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Trong một mạng</text>
+          <line x1="460" y1="456" x2="484" y2="456" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d2-arrow-accent)"/>
+          <text x="492" y="460" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Đường TURN mới</text>
+          <line x1="620" y1="456" x2="644" y2="456" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#d2-arrow)"/>
+          <text x="652" y="460" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Hook gia hạn chứng chỉ</text>
+          <rect x="828" y="451" width="14" height="10" rx="2" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8" stroke-dasharray="3,3"/>
+          <text x="850" y="460" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Ranh giới mạng / ufw</text>
+        </svg>
+      </div>
+
+      <div class="table-wrap">
+        <table class="ports">
+          <thead><tr><th>Cổng</th><th>Giao thức</th><th>Để làm gì</th></tr></thead>
+          <tbody>
+            <tr><td>3478</td><td>UDP, TCP</td><td>STUN và TURN — đường chính. URL dùng thẳng IP <code>109.199.115.126</code>, nên không phụ thuộc DNS.</td></tr>
+            <tr><td>5349</td><td>TCP + TLS</td><td>TURN qua TLS cho mạng chỉ cho ra cổng web. Cần tên miền <code>nguyen1976.xyz</code> khớp chứng chỉ.</td></tr>
+            <tr><td>49152–49999</td><td>UDP</td><td>Cổng relay: mỗi phiên TURN giữ một cổng. 848 cổng — đủ vài trăm cuộc gọi đi qua relay cùng lúc.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <ul class="notes">
+        <li><strong>Xác thực:</strong> <code>use-auth-secret</code> với <code>static-auth-secret</code> = <code>TURN_SECRET</code> trong <code>.env.production</code>; <code>realm=nguyen1976.xyz</code>, <code>external-ip=109.199.115.126</code>, <code>min-port</code>/<code>max-port</code> như bảng.</li>
+        <li><strong>Chặn lạm dụng:</strong> <code>denied-peer-ip</code> cho <code>10.0.0.0/8</code>, <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code>, <code>127.0.0.0/8</code>, <code>100.64.0.0/10</code> để TURN không thành cửa vào mạng Docker hay localhost; thêm <code>no-cli</code>, <code>fingerprint</code>, <code>user-quota</code>, <code>total-quota</code>.</li>
+        <li><strong>Chứng chỉ:</strong> <code>cert</code>/<code>pkey</code> trỏ tới <code>/etc/letsencrypt/live/nguyen1976.xyz</code>; hook trong <code>/etc/letsencrypt/renewal-hooks/deploy/</code> reload cả nginx và coturn.</li>
+      </ul>
+    </section>
+
+    <!-- ═════════════════════════ LUỒNG GỌI ═════════════════════════ -->
+    <section>
+      <p class="eyebrow">Luồng gọi</p>
+      <h2>Gateway kiểm quyền rồi mới đổ chuông</h2>
+      <p class="lead">Hiện gateway chuyển mọi sự kiện <code>call.*</code> tới bất kỳ <code>targetUserId</code> nào client gửi lên — QC dev đã tái hiện một người lạ làm người khác đổ chuông. Thiết kế mới: gateway tự tìm người nhận từ hội thoại 1-1, gắn mỗi cuộc gọi một <code>callId</code>, và mọi sự kiện sau đó chỉ đi giữa đúng hai người.</p>
+
+      <div class="diagram-container">
+        <svg viewBox="0 0 1040 728" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="call-sequence-title call-sequence-desc">
+          <title id="call-sequence-title">Luồng gọi thoại có kiểm quyền và TURN</title>
+          <desc id="call-sequence-desc">Trình duyệt A lấy cấu hình TURN từ gateway; gateway hỏi chat service để chắc A và B cùng một hội thoại 1-1 rồi mới đổ chuông B với một callId; sau khi B nghe máy, âm thanh đi thẳng nếu được, còn không thì vòng qua coturn.</desc>
+          <defs>
+            <marker id="d3-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+            <marker id="d3-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+            <marker id="d3-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+            <marker id="d3-arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- Lifelines -->
+          <line x1="112" y1="80" x2="112" y2="668" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+          <line x1="328" y1="80" x2="328" y2="668" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+          <line x1="544" y1="80" x2="544" y2="668" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+          <line x1="752" y1="80" x2="752" y2="668" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+          <line x1="944" y1="80" x2="944" y2="668" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+
+          <!-- ALT fragment (vẽ trước các thông điệp bên trong) -->
+          <rect x="96" y="476" width="864" height="176" rx="4" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+          <rect x="96" y="476" width="40" height="16" rx="2" fill="#f5f5f5" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+          <text x="116" y="488" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">ALT</text>
+          <text x="108" y="508" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">[nối thẳng được · host / srflx]</text>
+          <line x1="104" y1="556" x2="952" y2="556" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+          <text x="108" y="576" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">[else · CGNAT / tường lửa chặn]</text>
+
+          <!-- Messages -->
+          <line x1="112" y1="120" x2="328" y2="120" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d3-arrow)"/>
+          <line x1="328" y1="152" x2="112" y2="152" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#d3-arrow)"/>
+          <line x1="112" y1="200" x2="328" y2="200" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d3-arrow)"/>
+          <line x1="328" y1="240" x2="544" y2="240" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#d3-arrow-link)"/>
+          <line x1="544" y1="272" x2="328" y2="272" stroke="#2e5aa8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#d3-arrow-link)"/>
+          <path d="M 328 304 H 356 Q 364 304 364 312 V 320 Q 364 328 356 328 H 332" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d3-arrow)"/>
+          <line x1="328" y1="368" x2="944" y2="368" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#d3-arrow-open)"/>
+          <line x1="944" y1="408" x2="328" y2="408" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d3-arrow)"/>
+          <line x1="328" y1="448" x2="112" y2="448" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#d3-arrow-open)"/>
+          <line x1="112" y1="536" x2="944" y2="536" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d3-arrow)"/>
+          <line x1="112" y1="604" x2="752" y2="604" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d3-arrow)"/>
+          <line x1="752" y1="632" x2="944" y2="632" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d3-arrow-accent)"/>
+
+          <!-- Message labels -->
+          <rect x="172" y="100" width="96" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="220" y="109" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">CALL.ICE_CONFIG</text>
+          <rect x="160" y="132" width="120" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="220" y="141" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">ICE SERVERS · HẠN 1 GIỜ</text>
+          <rect x="164" y="180" width="112" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="220" y="189" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">INCOMING_CALL + OFFER</text>
+          <rect x="372" y="220" width="128" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="436" y="229" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">GET /INTERNAL/CALL-PEER</text>
+          <rect x="384" y="252" width="104" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="436" y="261" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">PEER = B · CÙNG 1-1</text>
+          <rect x="372" y="310" width="112" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="376" y="319" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">LƯU CALLID · TTL 60S</text>
+          <rect x="588" y="348" width="120" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="648" y="357" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">INCOMING_CALL · CALLID</text>
+          <rect x="800" y="388" width="96" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="848" y="397" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">ACCEPTED + ANSWER</text>
+          <rect x="176" y="428" width="88" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="220" y="437" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">ANSWER · CALLID</text>
+          <rect x="404" y="516" width="64" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="436" y="525" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">ÂM THANH P2P</text>
+          <rect x="596" y="584" width="104" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="648" y="593" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">ALLOCATE · ÂM THANH</text>
+          <rect x="792" y="612" width="112" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="848" y="621" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">CHUYỂN TIẾP ÂM THANH</text>
+
+          <!-- Actors -->
+          <rect x="32" y="24" width="160" height="56" rx="6" fill="#f5f5f5"/>
+          <rect x="32" y="24" width="160" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+          <rect x="40" y="30" width="30" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.4)" stroke-width="0.8"/>
+          <text x="55" y="39" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">USER</text>
+          <text x="112" y="56" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Trình duyệt A</text>
+          <text x="112" y="72" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">người gọi</text>
+
+          <rect x="248" y="24" width="160" height="56" rx="6" fill="#f5f5f5"/>
+          <rect x="248" y="24" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="256" y="30" width="22" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="267" y="39" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">WS</text>
+          <text x="328" y="56" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Realtime gateway</text>
+          <text x="328" y="72" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">socket /realtime</text>
+
+          <rect x="464" y="24" width="160" height="56" rx="6" fill="#f5f5f5"/>
+          <rect x="464" y="24" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="472" y="30" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="485" y="39" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SVC</text>
+          <text x="544" y="56" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Chat service</text>
+          <text x="544" y="72" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">endpoint nội bộ</text>
+
+          <rect x="672" y="24" width="160" height="56" rx="6" fill="#f5f5f5"/>
+          <rect x="672" y="24" width="160" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+          <rect x="680" y="30" width="30" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+          <text x="695" y="39" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TURN</text>
+          <rect x="716" y="30" width="24" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+          <text x="728" y="39" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">MỚI</text>
+          <text x="752" y="56" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">coturn</text>
+          <text x="752" y="72" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">:3478 · :5349</text>
+
+          <rect x="864" y="24" width="160" height="56" rx="6" fill="#f5f5f5"/>
+          <rect x="864" y="24" width="160" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+          <rect x="872" y="30" width="30" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.4)" stroke-width="0.8"/>
+          <text x="887" y="39" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">USER</text>
+          <text x="944" y="56" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Trình duyệt B</text>
+          <text x="944" y="72" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">người nhận</text>
+
+          <!-- Legend -->
+          <line x1="24" y1="684" x2="1016" y2="684" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <text x="24" y="712" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">CHÚ THÍCH</text>
+          <line x1="112" y1="708" x2="136" y2="708" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d3-arrow)"/>
+          <text x="144" y="712" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Sự kiện socket / gọi</text>
+          <line x1="292" y1="708" x2="316" y2="708" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#d3-arrow-link)"/>
+          <text x="324" y="712" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">HTTP nội bộ</text>
+          <line x1="440" y1="708" x2="464" y2="708" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#d3-arrow)"/>
+          <text x="472" y="712" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Trả lời</text>
+          <line x1="560" y1="708" x2="584" y2="708" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#d3-arrow-open)"/>
+          <text x="592" y="712" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Sự kiện một chiều</text>
+          <line x1="744" y1="708" x2="768" y2="708" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d3-arrow-accent)"/>
+          <text x="776" y="712" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Âm thanh qua TURN</text>
+        </svg>
+      </div>
+
+      <ul class="notes">
+        <li><strong><code>call.ice_config</code> (ack):</strong> trả <code>iceServers</code> gồm <code>turn:109.199.115.126:3478</code> (udp và tcp) và <code>turns:nguyen1976.xyz:5349</code>. Username là <code>&lt;hạn unix&gt;:&lt;userId&gt;</code>, credential là <code>base64(HMAC-SHA1(TURN_SECRET, username))</code>, hạn 1 giờ — secret không bao giờ xuống trình duyệt.</li>
+        <li><strong><code>call.incoming_call</code>:</strong> gateway bỏ qua <code>targetUserId</code> của client và gọi <code>GET /chat/internal/call-peer?conversationId=…&amp;userId=…</code> với header <code>x-internal-token</code> (cùng cách user service đang gọi recommendation). Chat service chỉ trả <code>peerId</code> khi hội thoại là <code>DIRECT</code> và người gọi là thành viên; sai thì ack <code>CALL_FORBIDDEN</code> và không ai đổ chuông.</li>
+        <li><strong>Phiên cuộc gọi:</strong> Redis <code>call:&lt;callId&gt;</code> = người gọi, người nhận, hội thoại; TTL 60 giây lúc đổ chuông, gia hạn khi nghe máy. <code>call.accepted</code>, <code>call.ice_candidate</code>, <code>call.rejected</code>, <code>call.ended</code> phải mang <code>callId</code> của một phiên mà người gửi thuộc về.</li>
+        <li><strong>Ghi vào hội thoại:</strong> <code>conversationId</code> lấy từ phiên chứ không từ client; thêm lý do <code>unreachable</code> để chat service ghi “Cuộc gọi thoại không kết nối được” — phần ghi này đã có sẵn.</li>
+      </ul>
+    </section>
+
+    <!-- ═════════════════════════ TRẠNG THÁI ═════════════════════════ -->
+    <section>
+      <p class="eyebrow">Trạng thái ở frontend</p>
+      <h2>Chỉ báo “đang trong cuộc gọi” khi tiếng thật sự thông</h2>
+      <p class="lead">Thêm trạng thái “Đang kết nối” nằm giữa lúc trao đổi xong offer/answer và lúc ICE thông. Dòng “Đang trong cuộc gọi” và đồng hồ chỉ bắt đầu khi <code>pc.connectionState</code> là <code>connected</code>, không phải khi <code>ontrack</code> bắn như hiện nay.</p>
+
+      <div class="diagram-container">
+        <svg viewBox="0 0 1040 564" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="call-states-title call-states-desc">
+          <title id="call-states-title">Trạng thái cuộc gọi ở frontend</title>
+          <desc id="call-states-desc">Máy trạng thái của cửa sổ cuộc gọi: từ Rảnh sang Đang gọi hoặc Đổ chuông, qua Đang kết nối, chỉ vào Đang trong cuộc gọi khi ICE thông; ICE hỏng, quá 15 giây hoặc rớt mạng quá 5 giây thì thành Không kết nối được.</desc>
+          <defs>
+            <marker id="d4-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+            <marker id="d4-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- Transitions -->
+          <line x1="30" y1="248" x2="48" y2="248" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <path d="M 116 216 V 112 Q 116 104 124 104 H 248" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <path d="M 116 280 V 384 Q 116 392 124 392 H 248" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <path d="M 288 136 V 228 Q 288 236 296 236 H 448" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <path d="M 344 360 V 268 Q 344 260 352 260 H 448" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <line x1="384" y1="104" x2="448" y2="104" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <path d="M 316 72 V 56 Q 316 48 324 48 H 740 Q 748 48 748 56 V 72" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <line x1="584" y1="248" x2="680" y2="248" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d4-arrow-accent)"/>
+          <line x1="516" y1="280" x2="516" y2="360" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <path d="M 748 280 V 384 Q 748 392 740 392 H 584" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <line x1="816" y1="248" x2="880" y2="248" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <line x1="948" y1="216" x2="948" y2="188" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+
+          <!-- Transition labels -->
+          <rect x="164" y="84" width="48" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="188" y="93" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">BẤM GỌI</text>
+          <rect x="152" y="372" width="72" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="188" y="381" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CUỘC GỌI ĐẾN</text>
+          <rect x="344" y="216" width="56" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="372" y="225" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CÓ ANSWER</text>
+          <rect x="352" y="300" width="52" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="378" y="309" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">BẤM NGHE</text>
+          <rect x="396" y="84" width="40" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="416" y="93" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TỪ CHỐI</text>
+          <rect x="500" y="28" width="64" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="532" y="37" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">HẾT 30 GIÂY</text>
+          <rect x="596" y="228" width="72" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="632" y="237" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ICE CONNECTED</text>
+          <rect x="524" y="312" width="68" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="558" y="321" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">FAILED · 15S</text>
+          <rect x="628" y="372" width="72" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="664" y="381" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RỚT MẠNG &gt; 5S</text>
+          <rect x="824" y="228" width="48" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="848" y="237" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">KẾT THÚC</text>
+
+          <!-- Start / end -->
+          <circle cx="24" cy="248" r="6" fill="#2d3142"/>
+          <circle cx="948" cy="176" r="8" fill="none" stroke="#2d3142" stroke-width="1"/>
+          <circle cx="948" cy="176" r="5" fill="#2d3142"/>
+
+          <!-- States -->
+          <!-- Rảnh -->
+          <rect x="48" y="216" width="136" height="64" rx="8" fill="#f5f5f5"/>
+          <rect x="48" y="216" width="136" height="64" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <text x="116" y="248" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Rảnh</text>
+          <text x="116" y="264" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">idle</text>
+          <!-- Đang gọi -->
+          <rect x="248" y="72" width="136" height="64" rx="8" fill="#f5f5f5"/>
+          <rect x="248" y="72" width="136" height="64" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <text x="316" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Đang gọi</text>
+          <text x="316" y="120" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">calling</text>
+          <!-- Đổ chuông -->
+          <rect x="248" y="360" width="136" height="64" rx="8" fill="#f5f5f5"/>
+          <rect x="248" y="360" width="136" height="64" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <text x="316" y="392" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Đổ chuông</text>
+          <text x="316" y="408" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ringing · bên nhận</text>
+          <!-- Bị từ chối -->
+          <rect x="448" y="72" width="136" height="64" rx="8" fill="#f5f5f5"/>
+          <rect x="448" y="72" width="136" height="64" rx="8" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text x="516" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Bị từ chối</text>
+          <text x="516" y="120" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">rejected</text>
+          <!-- Đang kết nối (mới) -->
+          <rect x="448" y="216" width="136" height="64" rx="8" fill="#f5f5f5"/>
+          <rect x="448" y="216" width="136" height="64" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="456" y="222" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="468" y="231" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">MỚI</text>
+          <text x="516" y="250" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Đang kết nối</text>
+          <text x="516" y="266" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">connecting</text>
+          <!-- Không kết nối được (mới, lỗi) -->
+          <rect x="448" y="360" width="136" height="64" rx="8" fill="#f5f5f5"/>
+          <rect x="448" y="360" width="136" height="64" rx="8" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+          <rect x="456" y="366" width="24" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+          <text x="468" y="375" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">MỚI</text>
+          <text x="516" y="394" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Không kết nối được</text>
+          <text x="516" y="410" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">unreachable</text>
+          <!-- Không nghe máy -->
+          <rect x="680" y="72" width="136" height="64" rx="8" fill="#f5f5f5"/>
+          <rect x="680" y="72" width="136" height="64" rx="8" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text x="748" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Không nghe máy</text>
+          <text x="748" y="120" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">no_answer</text>
+          <!-- Đang trong cuộc gọi -->
+          <rect x="680" y="216" width="136" height="64" rx="8" fill="#f5f5f5"/>
+          <rect x="680" y="216" width="136" height="64" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <text x="748" y="248" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Đang trong cuộc gọi</text>
+          <text x="748" y="264" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">connected · đếm giờ</text>
+          <!-- Kết thúc -->
+          <rect x="880" y="216" width="136" height="64" rx="8" fill="#f5f5f5"/>
+          <rect x="880" y="216" width="136" height="64" rx="8" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text x="948" y="248" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Kết thúc</text>
+          <text x="948" y="264" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ended</text>
+
+          <!-- Editorial asides -->
+          <text x="48" y="468" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">Không kết nối được: báo cho người dùng, gửi call.ended lý do unreachable rồi đóng. Bị từ chối, Không nghe máy giữ cách hiện tại.</text>
+          <text x="48" y="490" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Newsreader', serif">Bên nhận đang đổ chuông mà người gọi huỷ hoặc hết 30 giây thì đóng cửa sổ, về Rảnh.</text>
+
+          <!-- Legend -->
+          <line x1="24" y1="516" x2="1016" y2="516" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <text x="24" y="544" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">CHÚ THÍCH</text>
+          <circle cx="116" cy="540" r="5" fill="#2d3142"/>
+          <text x="128" y="544" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Bắt đầu</text>
+          <circle cx="200" cy="540" r="7" fill="none" stroke="#2d3142" stroke-width="1"/>
+          <circle cx="200" cy="540" r="4" fill="#2d3142"/>
+          <text x="212" y="544" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Đóng cửa sổ</text>
+          <line x1="312" y1="540" x2="336" y2="540" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d4-arrow)"/>
+          <text x="344" y="544" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Chuyển trạng thái</text>
+          <line x1="468" y1="540" x2="492" y2="540" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d4-arrow-accent)"/>
+          <text x="500" y="544" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Điều kiện mới: ICE thông</text>
+          <rect x="660" y="535" width="14" height="10" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+          <text x="682" y="544" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Trạng thái lỗi mới</text>
+          <rect x="812" y="535" width="14" height="10" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text x="834" y="544" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Kết quả cuối</text>
+        </svg>
+      </div>
+
+      <ul class="notes">
+        <li><strong>ICE hỏng hoặc quá 15 giây</strong> ở Đang kết nối → Không kết nối được. Frontend gửi <code>call.ended</code> với <code>reason: 'unreachable'</code>.</li>
+        <li><strong>Rớt mạng giữa chừng:</strong> đang gọi mà <code>connectionState</code> về <code>disconnected</code> quá 5 giây cũng thành Không kết nối được. Thử <code>restartIce()</code> trước khi bỏ là việc của đợt sau.</li>
+        <li><strong>Đồng hồ và thời lượng</strong> tính từ lúc <code>connected</code>, nên thời lượng ghi vào hội thoại là thời gian nghe được nhau thật.</li>
+      </ul>
+    </section>
+
+    <!-- ═════════════════════════ THAY ĐỔI ═════════════════════════ -->
+    <section>
+      <p class="eyebrow">Thay đổi</p>
+      <h2>Việc của từng phần</h2>
+
+      <div class="cards pair">
+        <div class="card">
+          <div class="card-header"><span class="card-dot coral"></span><h3>Server prod</h3><span class="tag">mới</span></div>
+          <ul>
+            <li>Cài <code>coturn</code> 4.6.1 bằng apt trên host</li>
+            <li><code>deploy/coturn/turnserver.conf</code> trong repo; <code>deploy.sh</code> cài, kiểm tra và restart như với nginx</li>
+            <li><code>TURN_SECRET</code> trong <code>.env.production</code>, dùng chung cho gateway và coturn</li>
+            <li>ufw mở <code>3478/udp</code>, <code>3478/tcp</code>, <code>5349/tcp</code>, <code>49152–49999/udp</code></li>
+            <li>Hook certbot reload coturn khi gia hạn chứng chỉ</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot ink"></span><h3>Realtime gateway</h3></div>
+          <ul>
+            <li>Sự kiện <code>call.ice_config</code> trả <code>iceServers</code> và mật khẩu TURN 1 giờ</li>
+            <li>Hỏi chat service trước khi đổ chuông; bỏ <code>targetUserId</code> từ client</li>
+            <li>Phiên <code>callId</code> trong Redis; mọi <code>call.*</code> phải khớp phiên</li>
+            <li>Ghi kết quả bằng <code>conversationId</code> của phiên, thêm <code>unreachable</code></li>
+          </ul>
+        </div>
+      </div>
+      <div class="cards pair-r">
+        <div class="card">
+          <div class="card-header"><span class="card-dot muted"></span><h3>Chat service</h3></div>
+          <ul>
+            <li><code>GET /chat/internal/call-peer</code>, chỉ nhận <code>x-internal-token</code></li>
+            <li>Trả <code>peerId</code> khi hội thoại là <code>DIRECT</code> và user là thành viên; ngược lại 403</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot link"></span><h3>Frontend</h3></div>
+          <ul>
+            <li>Lấy <code>iceServers</code> qua <code>call.ice_config</code> thay cho hằng số STUN trong <code>useWebRTC.ts</code></li>
+            <li>Thêm trạng thái <code>connecting</code>; đồng hồ chạy khi <code>connectionState</code> là <code>connected</code></li>
+            <li><code>failed</code>, quá 15 giây hoặc <code>disconnected</code> quá 5 giây → <code>unreachable</code></li>
+            <li>Gửi <code>callId</code> trong <code>accepted</code>, <code>ice_candidate</code>, <code>rejected</code>, <code>ended</code></li>
+            <li>Dev: thêm coturn vào <code>docker-compose.yml</code> để thử được đường relay</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════════════════════ KIỂM CHỨNG ═════════════════════════ -->
+    <section>
+      <p class="eyebrow">Kiểm chứng và rủi ro</p>
+      <h2>Làm sao biết là chạy, và cái gì có thể hỏng</h2>
+
+      <div class="cards pair">
+        <div class="card">
+          <div class="card-header"><span class="card-dot ink"></span><h3>Kiểm chứng</h3></div>
+          <ul>
+            <li>Unit test: HMAC username/credential; gateway từ chối khi chat service trả 403; sự kiện sai <code>callId</code> bị bỏ</li>
+            <li>QC dev bằng Puppeteer như lần 14/09, thêm một lượt ép <code>iceTransportPolicy: 'relay'</code> để chắc âm thanh đi qua coturn</li>
+            <li>Người lạ (không chung hội thoại) gọi → không ai đổ chuông, nhận <code>CALL_FORBIDDEN</code></li>
+            <li>Prod: hai điện thoại 4G khác nhà mạng; <code>chrome://webrtc-internals</code> thấy cặp candidate <code>relay</code> khi đường thẳng hỏng</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot coral"></span><h3>Rủi ro</h3></div>
+          <ul>
+            <li>DNS: <code>turns:</code> dùng tên miền, mà nameserver Mắt Bão đang lúc được lúc SERVFAIL — <code>turn:</code> theo IP vẫn chạy</li>
+            <li>Băng thông: khoảng 40–50 MB mỗi giờ cho một cuộc gọi đi qua relay; cuộc nối thẳng được thì không tốn</li>
+            <li>Lộ <code>TURN_SECRET</code>: đổi ở <code>.env.production</code> và <code>turnserver.conf</code> cùng lúc; mật khẩu cũ tự hết hạn trong 1 giờ</li>
+            <li>TURN thành cửa vào mạng nội bộ: chặn bằng <code>denied-peer-ip</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <ul class="notes">
+        <li><strong>Ngoài phạm vi đợt này:</strong> gọi video, gọi nhóm, báo bận khi người nhận đang trong cuộc gọi khác, chuông ở nhiều tab, hiện “Cuộc gọi bị từ chối” cho bên gọi và sửa chữ “Người dùng bận”.</li>
+      </ul>
+    </section>
+
+    <footer class="footer">
+      <span>DALN Chat · Gọi thoại qua TURN</span>
+      <span>Bản nháp · 14/09/2026</span>
+    </footer>
+
+  </div>
+</body>
+</html>

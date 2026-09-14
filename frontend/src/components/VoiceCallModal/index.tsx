@@ -5,9 +5,17 @@ import {
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import { selectUser } from "@/redux/slices/userSlice";
-import { Phone, PhoneOff, Mic, MicOff, Volume2, UserX } from "lucide-react";
+import {
+  Phone,
+  PhoneOff,
+  Mic,
+  MicOff,
+  Volume2,
+  UserX,
+  WifiOff,
+} from "lucide-react";
 import { useSelector } from "react-redux";
-import { describeMicrophoneError, useWebRTC } from "@/hooks/useWebRTC";
+import { describeCallError, useWebRTC } from "@/hooks/useWebRTC";
 import { toast } from "sonner";
 import { useCallRingTimeout } from "@/hooks/useCallRingTimeout";
 import { useIncomingCallRingtone } from "@/hooks/useIncomingCallRingtone";
@@ -28,6 +36,8 @@ interface VoiceCallModalProps {
   callerDisplayAvatar?: string;
   mode?: VoiceCallMode;
   callerId?: string;
+  /** ID phiên cuộc gọi (chế độ incoming lấy từ sự kiện incoming_call). */
+  callId?: string;
   incomingOffer?: RTCSessionDescriptionInit;
   onClose: () => void;
 }
@@ -47,6 +57,7 @@ export default function VoiceCallModal({
   callerDisplayAvatar,
   mode = "outgoing",
   callerId,
+  callId,
   incomingOffer,
   onClose,
 }: VoiceCallModalProps) {
@@ -84,6 +95,7 @@ export default function VoiceCallModal({
     toggleMute,
     cleanup,
     connectedAt,
+    callIdRef,
   } = useWebRTC(socket);
 
   /**
@@ -147,14 +159,9 @@ export default function VoiceCallModal({
 
   const handleRingTimeout = useCallback(() => {
     if (mode === "outgoing" && callStatusRef.current === "calling") {
-      if (peerUserId) {
-        endCall(peerUserId, "no_answer", {
-          conversationId,
-          callerId: user.id,
-        });
-      } else {
-        cleanup();
-      }
+      // callId đã có từ ack incoming_call; endCall tự dùng nó (gateway suy ra
+      // đối phương + conversationId từ phiên).
+      endCall("no_answer");
       setShowBusyResult(true);
       scheduleClose(BUSY_DISMISS_MS);
       return;
@@ -164,7 +171,7 @@ export default function VoiceCallModal({
       cleanup();
       onClose();
     }
-  }, [cleanup, endCall, mode, onClose, peerUserId, scheduleClose]);
+  }, [cleanup, endCall, mode, onClose, scheduleClose]);
 
   useCallRingTimeout({
     active: isRinging,
@@ -173,6 +180,7 @@ export default function VoiceCallModal({
   });
 
   const statusLabel = useMemo(() => {
+    if (callStatus === "unreachable") return "Không kết nối được";
     if (showBusyResult || callStatus === "no_answer") {
       return "Người dùng bận";
     }
@@ -180,6 +188,7 @@ export default function VoiceCallModal({
       return "Cuộc gọi đến...";
     }
     if (callStatus === "calling") return "Đang gọi...";
+    if (callStatus === "connecting") return "Đang kết nối...";
     if (callStatus === "connected") return "Đang trong cuộc gọi";
     if (callStatus === "rejected") return "Cuộc gọi bị từ chối";
     if (callStatus === "ended") return "Cuộc gọi đã kết thúc";
@@ -187,53 +196,86 @@ export default function VoiceCallModal({
   }, [callStatus, mode, showBusyResult]);
 
   useEffect(() => {
-    if (mode !== "outgoing" || !peerUserId || startedOutgoingRef.current) {
+    if (
+      mode !== "outgoing" ||
+      !peerUserId ||
+      !conversationId ||
+      startedOutgoingRef.current
+    ) {
       return;
     }
 
     startedOutgoingRef.current = true;
-    void startCall(peerUserId, conversationId).catch((error) => {
+    // Theo hợp đồng: chỉ gửi conversationId + offer; gateway tự suy ra người
+    // nhận và trả callId qua ack (được startCall lưu lại).
+    void startCall(conversationId).catch((error) => {
       // Closing silently left the user with no idea why the call vanished.
-      toast.error(describeMicrophoneError(error));
+      toast.error(describeCallError(error));
       onClose();
     });
   }, [conversationId, mode, onClose, peerUserId, startCall]);
 
   useEffect(() => {
+    // Chỉ xử lý sự kiện đúng phiên của mình. Trước khi biết callId (người gọi
+    // chưa nhận ack, người nhận chưa bấm nghe) thì không loại trừ.
+    const isSameCall = (eventCallId?: string) =>
+      !eventCallId || !callIdRef.current || eventCallId === callIdRef.current;
+
     const handleCallAccepted = async ({
+      callId: eventCallId,
       answer,
     }: {
+      callId?: string;
       answer: RTCSessionDescriptionInit;
     }) => {
+      if (!isSameCall(eventCallId)) return;
       await handleReceiveAnswer(answer);
     };
 
     const handleIceCandidate = async ({
+      callId: eventCallId,
       candidate,
     }: {
+      callId?: string;
       candidate: RTCIceCandidateInit;
     }) => {
+      if (!isSameCall(eventCallId)) return;
       await handleReceiveIceCandidate(candidate);
     };
 
-    const handleCallRejected = () => {
+    const handleCallRejected = ({
+      callId: eventCallId,
+    }: { callId?: string } = {}) => {
+      if (!isSameCall(eventCallId)) return;
       cleanup();
       onClose();
     };
 
     const handleCallEnded = ({
+      callId: eventCallId,
       reason,
     }: {
-      reason?: "no_answer";
+      callId?: string;
+      reason?: "no_answer" | "unreachable";
     } = {}) => {
+      if (!isSameCall(eventCallId)) return;
+
       if (
         mode === "outgoing" &&
         callStatusRef.current === "calling" &&
         reason === "no_answer"
       ) {
         setShowBusyResult(true);
-        cleanup();
+        // emit=false: đối phương đã kết thúc, ta chỉ dọn dẹp + hiển thị.
+        endCall("no_answer", { emit: false });
         scheduleClose(BUSY_DISMISS_MS);
+        return;
+      }
+
+      if (reason === "unreachable") {
+        // Đối phương báo không kết nối được → hiển thị rồi tự đóng (effect
+        // theo dõi callStatus 'unreachable').
+        endCall("unreachable", { emit: false });
         return;
       }
 
@@ -253,13 +295,23 @@ export default function VoiceCallModal({
       socket.off(SOCKET_EVENTS.CALL.CALL_ENDED, handleCallEnded);
     };
   }, [
+    callIdRef,
     cleanup,
+    endCall,
     handleReceiveAnswer,
     handleReceiveIceCandidate,
     mode,
     onClose,
     scheduleClose,
   ]);
+
+  // Không kết nối được: giữ màn hình một nhịp để người dùng đọc được thông báo
+  // rồi tự đóng, thay vì biến mất không rõ lý do.
+  useEffect(() => {
+    if (callStatus === "unreachable") {
+      scheduleClose(BUSY_DISMISS_MS);
+    }
+  }, [callStatus, scheduleClose]);
 
   useEffect(() => {
     const audio = remoteAudioRef.current;
@@ -279,34 +331,28 @@ export default function VoiceCallModal({
   }, [cleanup, clearDismissTimer]);
 
   const handleAccept = async () => {
-    if (!callerId || !incomingOffer) return;
+    if (!callId || !incomingOffer) return;
 
     try {
-      await acceptCall(callerId, incomingOffer);
+      await acceptCall(callId, incomingOffer);
     } catch (error) {
-      toast.error(describeMicrophoneError(error));
+      toast.error(describeCallError(error));
       onClose();
     }
   };
 
   const handleReject = () => {
-    if (callerId) {
-      rejectCall(callerId, conversationId);
+    if (callId) {
+      rejectCall(callId);
     }
     cleanup();
     onClose();
   };
 
   const handleEndCall = () => {
-    if (peerUserId) {
-      endCall(peerUserId, undefined, {
-        conversationId,
-        // Người gọi là bên ghi nhận; ở chế độ incoming thì đó là callerId.
-        callerId: mode === "incoming" ? callerId : user.id,
-      });
-    } else {
-      cleanup();
-    }
+    // endCall tự dùng callId của phiên (từ ack hoặc từ incoming_call); gateway
+    // suy ra đối phương + conversationId nên client không khai lại.
+    endCall();
     onClose();
   };
 
@@ -344,7 +390,9 @@ export default function VoiceCallModal({
             aria-live="polite"
             className={cn(
               "mb-8 text-sm",
-              showBusyResult || callStatus === "no_answer"
+              showBusyResult ||
+                callStatus === "no_answer" ||
+                callStatus === "unreachable"
                 ? "font-medium text-warning-text"
                 : "text-muted-foreground",
             )}
@@ -362,7 +410,11 @@ export default function VoiceCallModal({
             </p>
           )}
 
-          {showBusyResult || callStatus === "no_answer" ? (
+          {callStatus === "unreachable" ? (
+            <div className="flex size-14 items-center justify-center rounded-full bg-warning/15 text-warning-text">
+              <WifiOff className="size-7" aria-hidden="true" />
+            </div>
+          ) : showBusyResult || callStatus === "no_answer" ? (
             <div className="flex size-14 items-center justify-center rounded-full bg-warning/15 text-warning-text">
               <UserX className="size-7" aria-hidden="true" />
             </div>

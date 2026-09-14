@@ -14,7 +14,9 @@ export class ChatErrors {
   }
 
   static senderNotMember(): never {
-    throw new BadRequestException('Bạn không còn là thành viên của cuộc trò chuyện này')
+    throw new BadRequestException(
+      'Bạn không còn là thành viên của cuộc trò chuyện này',
+    )
   }
 
   static conversationNotFound(): never {
@@ -22,7 +24,9 @@ export class ChatErrors {
   }
 
   static userNotMember(): never {
-    throw new BadRequestException('Bạn không phải thành viên của cuộc trò chuyện này')
+    throw new BadRequestException(
+      'Bạn không phải thành viên của cuộc trò chuyện này',
+    )
   }
 
   static invalidMessagePayload(): never {
@@ -42,15 +46,21 @@ export class ChatErrors {
   }
 
   static memberNotFoundInConversation(): never {
-    throw new NotFoundException('Người này không phải thành viên của cuộc trò chuyện')
+    throw new NotFoundException(
+      'Người này không phải thành viên của cuộc trò chuyện',
+    )
   }
 
-  static invalidMemberAction(message = 'Thao tác với thành viên không hợp lệ'): never {
+  static invalidMemberAction(
+    message = 'Thao tác với thành viên không hợp lệ',
+  ): never {
     throw new BadRequestException(message)
   }
 
   static adminCannotLeaveGroup(): never {
-    throw new BadRequestException('Admin không thể rời nhóm. Hãy chuyển quyền admin trước.')
+    throw new BadRequestException(
+      'Admin không thể rời nhóm. Hãy chuyển quyền admin trước.',
+    )
   }
 
   static messageNotFound(): never {
@@ -58,10 +68,14 @@ export class ChatErrors {
   }
 
   static notMessageOwner(): never {
-    throw new ForbiddenException('Bạn chỉ có thể thao tác trên tin nhắn của chính mình')
+    throw new ForbiddenException(
+      'Bạn chỉ có thể thao tác trên tin nhắn của chính mình',
+    )
   }
 
-  static invalidPollPayload(message = 'Nội dung bình chọn không hợp lệ'): never {
+  static invalidPollPayload(
+    message = 'Nội dung bình chọn không hợp lệ',
+  ): never {
     throw new BadRequestException(message)
   }
 
@@ -80,6 +94,23 @@ export class ChatErrors {
   }
 
   static pollCreatorOnly(): never {
-    throw new ForbiddenException('Chỉ người tạo bình chọn mới đóng được bình chọn')
+    throw new ForbiddenException(
+      'Chỉ người tạo bình chọn mới đóng được bình chọn',
+    )
+  }
+
+  static invalidCallPeerQuery(): never {
+    throw new BadRequestException('Thiếu conversationId hoặc userId')
+  }
+
+  /**
+   * Một lỗi duy nhất cho mọi lý do từ chối gọi thoại (không tồn tại, không phải
+   * DIRECT, không phải thành viên, id hỏng) để bên gọi không suy ra được cuộc
+   * trò chuyện nào có thật.
+   */
+  static callPeerNotAllowed(): never {
+    throw new ForbiddenException(
+      'Không được phép gọi trong cuộc trò chuyện này',
+    )
   }
 }

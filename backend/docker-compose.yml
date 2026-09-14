@@ -275,6 +275,31 @@ services:
     networks:
       - backend
 
+  # coturn cho DEV — máy chủ TURN để QC thử đường relay (ép iceTransportPolicy:
+  # 'relay' và thấy âm thanh đi qua coturn). Trình duyệt trên host gọi tới
+  # localhost:3478 (TURN_HOST=localhost trong .env.docker); static-auth-secret
+  # trong turnserver.dev.conf phải KHỚP TURN_SECRET ở .env.docker.
+  # Production KHÔNG chạy coturn trong Docker: cài apt trên host (deploy/deploy.sh).
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: daln-coturn
+    restart: unless-stopped
+    # CMD mặc định của image thêm `--external-ip=$(detect-external-ip)`, trùng với
+    # external-ip=127.0.0.1 trong file config -> coturn báo lỗi "defined more than
+    # once". Ghi đè command để chỉ đọc config: relay quảng bá 127.0.0.1 nên trình
+    # duyệt trên host tới được cổng relay đã publish.
+    command: ["-c", "/etc/coturn/turnserver.conf", "--log-file=stdout"]
+    volumes:
+      # Config nằm ở deploy/ (dùng chung repo); compose ở backend/ nên đi ../.
+      - ../deploy/coturn/turnserver.dev.conf:/etc/coturn/turnserver.conf:ro
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      # Dải relay nhỏ (khớp min-port/max-port trong turnserver.dev.conf).
+      - "49160-49200:49160-49200/udp"
+    networks:
+      - backend
+
   kong:
     image: kong:3.7
     container_name: daln-kong

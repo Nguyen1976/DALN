@@ -779,9 +779,12 @@ export class UserService {
 
   async detailMakeFriend(
     friendRequestId: string,
+    userId: string,
   ): Promise<FriendRequestDetail> {
     const friendRequest = await this.friendRequestRepo.findById(friendRequestId)
-    if (!friendRequest) {
+    // Chỉ người nhận xem được: link "Xem lời mời" trong email mang sẵn id, và
+    // phản hồi có email người gửi. Người khác nhận "không tìm thấy" như id sai.
+    if (!friendRequest || friendRequest.toUserId !== userId) {
       UserErrors.friendRequestNotFound()
     }
 
