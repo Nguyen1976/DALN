@@ -244,6 +244,13 @@ if command -v turnserver >/dev/null 2>&1; then
     else
       install -m 640 "${turn_conf}.tmp" "${turn_conf}"
       rm -f "${turn_conf}.tmp"
+      # File chứa static-auth-secret (640). coturn (gói apt) chạy dưới user
+      # 'turnserver' -> phải cho nó đọc, nếu không nó bỏ qua config (kể cả dòng
+      # cert=) và listener TLS 5349 không mở.
+      turn_user="$(systemctl show coturn -p User --value 2>/dev/null)"
+      if [ -n "${turn_user}" ] && [ "${turn_user}" != "root" ]; then
+        chgrp "${turn_user}" "${turn_conf}" 2>/dev/null || true
+      fi
       systemctl enable --quiet coturn 2>/dev/null || true
       if systemctl restart coturn; then
         rm -f "${turn_conf}.prev"
