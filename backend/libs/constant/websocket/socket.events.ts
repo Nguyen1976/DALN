@@ -49,6 +49,7 @@ export const SOCKET_EVENTS = {
     CALL_ENDED: 'call.ended', //listen
     CLAIMED: 'call.claimed', //listen: một tab khác của mình đã bắt máy -> đóng chuông
     ICE_CANDIDATE: 'call.ice_candidate', //listen
+    MEDIA_STATE: 'call.media_state', //emit + listen: báo bật/tắt camera+micro cho đối phương (nguồn sự thật, không dựa vào RTP mute)
   },
 
   // Gọi nhóm (hội thoại GROUP) qua SFU LiveKit. 1-1 (DIRECT) vẫn dùng CALL ở trên.

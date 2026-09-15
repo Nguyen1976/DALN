@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
-import { Phone, PhoneOff } from "lucide-react";
+import { Phone, PhoneOff, Video } from "lucide-react";
 import { toast } from "sonner";
 import VoiceCallModal, {
   type VoiceCallMode,
@@ -50,6 +50,7 @@ type ActiveGroupCallState = {
   url: string;
   token: string;
   callType: CallType;
+  startWithCamera: boolean;
   iceServers?: RTCIceServer[];
 };
 
@@ -90,6 +91,9 @@ export default function IncomingCallManager() {
     useState<IncomingGroupCallState | null>(null);
   const [activeGroupCall, setActiveGroupCall] =
     useState<ActiveGroupCallState | null>(null);
+  // Thu nhỏ cho cuộc gọi ĐẾN đã bắt máy (giữ cuộc gọi sống, vẫn nhắn tin được).
+  const [voiceMinimized, setVoiceMinimized] = useState(false);
+  const [groupMinimized, setGroupMinimized] = useState(false);
   const conversations = useSelector(
     (state: RootState) => state.conversations ?? [],
   );
@@ -210,7 +214,7 @@ export default function IncomingCallManager() {
     };
   }, [conversations, friends]);
 
-  const handleAcceptGroup = () => {
+  const handleAcceptGroup = (withCamera = true) => {
     const call = incomingGroupCall;
     if (!call) return;
 
@@ -219,13 +223,16 @@ export default function IncomingCallManager() {
       { callId: call.callId },
       (ack?: GroupCallAcceptAck) => {
         if (ack?.ok) {
+          const callType = ack.callType ?? call.callType;
           setActiveGroupCall({
             callId: call.callId,
             conversationId: call.conversationId,
             roomName: call.roomName,
             url: ack.url,
             token: ack.token,
-            callType: ack.callType ?? call.callType,
+            callType,
+            // Chỉ bật camera khi là cuộc gọi video VÀ người nhận chọn "kèm camera".
+            startWithCamera: callType === "video" && withCamera,
             iceServers: ack.iceServers,
           });
         } else {
@@ -257,7 +264,12 @@ export default function IncomingCallManager() {
           callerId={incomingCall.callerId}
           callId={incomingCall.callId}
           incomingOffer={incomingCall.incomingOffer}
-          onClose={() => setIncomingCall(null)}
+          minimized={voiceMinimized}
+          onToggleMinimize={() => setVoiceMinimized((v) => !v)}
+          onClose={() => {
+            setIncomingCall(null);
+            setVoiceMinimized(false);
+          }}
         />
       )}
 
@@ -289,26 +301,59 @@ export default function IncomingCallManager() {
                 {incomingGroupCall.callType === "video" ? "video " : ""}nhóm...
               </p>
 
-              <div className="flex gap-6">
-                <Button
-                  variant="success"
-                  size="icon"
-                  onClick={handleAcceptGroup}
-                  aria-label="Tham gia cuộc gọi nhóm"
-                  className="size-14 rounded-full"
-                >
-                  <Phone className="size-6" aria-hidden="true" />
-                </Button>
+              <div className="flex flex-col items-center gap-3">
+                <div className="flex items-center gap-6">
+                  {incomingGroupCall.callType === "video" && (
+                    <Button
+                      variant="success"
+                      size="icon"
+                      onClick={() => handleAcceptGroup(true)}
+                      aria-label="Tham gia cuộc gọi nhóm"
+                      title="Tham gia kèm camera"
+                      className="size-14 rounded-full"
+                    >
+                      <Video className="size-6" aria-hidden="true" />
+                    </Button>
+                  )}
 
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  onClick={handleDeclineGroup}
-                  aria-label="Từ chối cuộc gọi nhóm"
-                  className="size-14 rounded-full"
-                >
-                  <PhoneOff className="size-6" />
-                </Button>
+                  <Button
+                    variant={
+                      incomingGroupCall.callType === "video"
+                        ? "secondary"
+                        : "success"
+                    }
+                    size="icon"
+                    onClick={() => handleAcceptGroup(false)}
+                    aria-label={
+                      incomingGroupCall.callType === "video"
+                        ? "Tham gia chỉ âm thanh"
+                        : "Tham gia cuộc gọi nhóm"
+                    }
+                    title={
+                      incomingGroupCall.callType === "video"
+                        ? "Tham gia chỉ âm thanh"
+                        : "Tham gia"
+                    }
+                    className="size-14 rounded-full"
+                  >
+                    <Phone className="size-6" aria-hidden="true" />
+                  </Button>
+
+                  <Button
+                    variant="destructive"
+                    size="icon"
+                    onClick={handleDeclineGroup}
+                    aria-label="Từ chối cuộc gọi nhóm"
+                    className="size-14 rounded-full"
+                  >
+                    <PhoneOff className="size-6" />
+                  </Button>
+                </div>
+                {incomingGroupCall.callType === "video" && (
+                  <p className="text-xs text-muted-foreground">
+                    Tham gia kèm camera hoặc chỉ âm thanh
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -323,8 +368,14 @@ export default function IncomingCallManager() {
           token={activeGroupCall.token}
           conversationId={activeGroupCall.conversationId}
           callType={activeGroupCall.callType}
+          startWithCamera={activeGroupCall.startWithCamera}
           iceServers={activeGroupCall.iceServers}
-          onClose={() => setActiveGroupCall(null)}
+          minimized={groupMinimized}
+          onToggleMinimize={() => setGroupMinimized((v) => !v)}
+          onClose={() => {
+            setActiveGroupCall(null);
+            setGroupMinimized(false);
+          }}
         />
       )}
     </>

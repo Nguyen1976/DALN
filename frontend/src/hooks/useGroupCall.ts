@@ -48,6 +48,12 @@ interface UseGroupCallOptions {
    */
   callType?: "audio" | "video";
   /**
+   * Cuộc gọi video có tự bật camera khi vào phòng không. Mặc định true (giữ hành
+   * vi cũ). Người nhận chọn "Tham gia chỉ âm thanh" thì truyền false — vào phòng
+   * với camera tắt, vẫn xem được video người khác và bật camera sau bằng nút.
+   */
+  startWithCamera?: boolean;
+  /**
    * STUN/TURN (coturn) từ ack để LiveKit vượt NAT chặt/UDP bị chặn. Additive:
    * bổ sung vào ICE do LiveKit tự cấp, KHÔNG ép relay nên đường trực tiếp vẫn ưu
    * tiên. Rỗng/không truyền thì giữ nguyên hành vi cũ.
@@ -69,6 +75,7 @@ export function useGroupCall({
   url,
   token,
   callType = "audio",
+  startWithCamera = true,
   iceServers,
   onDisconnected,
 }: UseGroupCallOptions) {
@@ -90,7 +97,14 @@ export function useGroupCall({
     // adaptiveStream tự tạm dừng video mà thẻ `<video>` của nó không hiển thị
     // (đây là điểm tiết kiệm băng thông — luôn bật); dynacast tắt encode layer
     // không ai xem.
-    const room = new Room({ adaptiveStream: true, dynacast: true });
+    // adaptiveStream: chỉ tải video của tile đang hiện (tiết kiệm băng thông tải
+    // về). dynacast: ngừng gửi layer không ai xem. simulcast: publish nhiều lớp
+    // độ phân giải để mỗi người nhận lấy lớp hợp kích thước tile (thiết kế mục 04).
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      publishDefaults: { simulcast: true },
+    });
     roomRef.current = room;
 
     // Container ẩn giữ các <audio> của remote để nghe được tiếng; SDK tự phát.
@@ -177,7 +191,7 @@ export function useGroupCall({
         refresh();
         // Cuộc gọi video: bật camera ở nền. Lỗi/chậm camera KHÔNG làm rớt cuộc
         // gọi — audio vẫn sống; publish xong thì cập nhật cờ + roster.
-        if (callType === "video") {
+        if (callType === "video" && startWithCamera) {
           void room.localParticipant
             .setCameraEnabled(true)
             .then(() => {
@@ -204,7 +218,7 @@ export function useGroupCall({
     };
     // iceServers đến cùng ack (cùng lúc với url/token) và được cha giữ trong
     // state nên tham chiếu ổn định — không gây nối lại phòng ngoài ý muốn.
-  }, [url, token, callType, iceServers]);
+  }, [url, token, callType, startWithCamera, iceServers]);
 
   const toggleMic = useCallback(async () => {
     const room = roomRef.current;
@@ -246,13 +260,23 @@ export function useGroupCall({
     }
   }, []);
 
-  // Đổi camera đang dùng (ví dụ trước/sau trên điện thoại). Optional-safe: một số
-  // trình duyệt không hỗ trợ switchActiveDevice.
-  const switchCamera = useCallback(async (deviceId: string) => {
+  // Đổi sang camera kế tiếp (trước/sau trên điện thoại, webcam khác trên máy tính).
+  // Chỉ có tác dụng khi có ≥2 thiết bị video. Optional-safe.
+  const switchCamera = useCallback(async () => {
     const room = roomRef.current;
     if (!room) return;
     try {
-      await room.switchActiveDevice("videoinput", deviceId);
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+        (d) => d.kind === "videoinput",
+      );
+      if (devices.length < 2) return;
+      const currentId = room.localParticipant
+        .getTrackPublication(Track.Source.Camera)
+        ?.track?.mediaStreamTrack?.getSettings().deviceId;
+      const idx = devices.findIndex((d) => d.deviceId === currentId);
+      const next = devices[(idx + 1) % devices.length];
+      if (!next) return;
+      await room.switchActiveDevice("videoinput", next.deviceId);
     } catch {
       // Không hỗ trợ / bị từ chối — giữ nguyên camera hiện tại.
     }

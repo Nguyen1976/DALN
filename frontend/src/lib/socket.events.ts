@@ -53,6 +53,7 @@ export const SOCKET_EVENTS = {
     CALL_ENDED: "call.ended",
     CLAIMED: "call.claimed",
     ICE_CANDIDATE: "call.ice_candidate",
+    MEDIA_STATE: "call.media_state",
   },
 
   // Gọi nhóm (hội thoại GROUP) qua SFU LiveKit. 1-1 (DIRECT) vẫn dùng CALL.

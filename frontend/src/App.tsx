@@ -31,6 +31,7 @@ import {
 } from "./redux/slices/friendSlice";
 import { useChatSocketEvents } from "./hooks/useChatSocketEvents";
 import IncomingCallManager from "./components/IncomingCallManager";
+import { CallProvider } from "./contexts/CallProvider";
 import { Spinner } from "@/components/ui/feedback";
 import VerifyOtpPage from "./pages/VerifyOtp";
 
@@ -219,10 +220,12 @@ function App() {
   }, [dispatch]);
 
   return (
-    <>
+    // CallProvider ở cấp app (ngoài router): cuộc gọi ra ngoài sống xuyên trang,
+    // "thu nhỏ để tiếp tục nhắn tin" hoạt động. Cuộc gọi đến do IncomingCallManager.
+    <CallProvider>
       <RouterProvider router={router} />
       {user?.id ? <IncomingCallManager /> : null}
-    </>
+    </CallProvider>
   );
 }
 
