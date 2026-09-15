@@ -23,6 +23,7 @@ import { resolveTokens } from '@app/common'
 import { randomUUID } from 'crypto'
 import { buildIceConfig } from './turn-credentials'
 import { CallSession, CallSessionStore, isCallId } from './call-session.store'
+import { CallBusyStore } from './call-busy.store'
 import { fetchCallPeer } from './chat-call-peer.client'
 import {
   conversationIdFromRoom,
@@ -67,6 +68,10 @@ export class RealtimeGateway
   private userStatusStore: UserStatusStore
   private callSessionStore: CallSessionStore
   private groupCallStore: GroupCallStore
+  private callBusyStore: CallBusyStore
+  /** Hẹn huỷ phòng nhóm chưa ai vào (theo callId). Chỉ sống trong process này. */
+  private readonly groupPendingTimers = new Map<string, NodeJS.Timeout>()
+  private readonly groupPendingMs = 35000
   // Không còn timer 25s cho mỗi socket: `pong` của Socket.IO (pingInterval
   // 40s, pingTimeout 10s -> tối đa 50s giữa hai lần) đã gia hạn TTL 90s của
   // key socket, dư 1,8 lần biên an toàn. Timer server-side còn có hại: nó gia
@@ -162,6 +167,7 @@ export class RealtimeGateway
     this.userStatusStore = new UserStatusStore(this.redisClient)
     this.callSessionStore = new CallSessionStore(this.redisClient)
     this.groupCallStore = new GroupCallStore(this.redisClient)
+    this.callBusyStore = new CallBusyStore(this.redisClient)
   }
 
   //default function
@@ -617,6 +623,16 @@ export class RealtimeGateway
       startedAt: Date.now(),
     }
 
+    // Busy: người gọi phải đang rảnh, và người nhận không kẹt cuộc gọi khác.
+    // Chốt ở server để nhiều tab / cuộc gọi chồng chéo không tranh phiên.
+    if (!(await this.callBusyStore.acquire(callerId, session.callId))) {
+      return callError('BUSY', 'You are already in a call')
+    }
+    if (await this.callBusyStore.isBusy(session.calleeId, session.callId)) {
+      await this.callBusyStore.release(callerId, session.callId)
+      return callError('CALLEE_BUSY', 'The other person is in another call')
+    }
+
     await this.callSessionStore.create(session)
 
     this.emitToUserSockets(
@@ -663,7 +679,26 @@ export class RealtimeGateway
       return callError('CALL_FORBIDDEN', 'Only the callee can accept a call')
     }
 
+    // Chống hai tab của người nhận cùng bắt máy: chỉ socket thắng claim mới relay
+    // answer về người gọi. Tab thua đóng chuông, không tạo phiên WebRTC thứ hai.
+    if (!(await this.callSessionStore.claimAccept(session.callId, client.id))) {
+      return callError('CALL_CLAIMED', 'Call already answered on another device')
+    }
+
+    // Người nhận phải rảnh (có thể vừa vào cuộc gọi khác giữa lúc đổ chuông).
+    if (!(await this.callBusyStore.acquire(userId, session.callId))) {
+      return callError('BUSY', 'You are already in a call')
+    }
+    // Đã kết nối: gia hạn khoá bận của cả hai lên TTL dài.
+    await this.callBusyStore.refresh(userId, session.callId)
+    await this.callBusyStore.refresh(session.callerId, session.callId)
+
     await this.callSessionStore.markConnected(session)
+
+    // Báo các tab khác của chính người nhận đóng màn hình chuông.
+    this.emitToUserSockets([userId], SOCKET_EVENTS.CALL.CLAIMED, {
+      callId: session.callId,
+    })
 
     this.emitToUserSockets(
       [session.callerId],
@@ -716,6 +751,8 @@ export class RealtimeGateway
       })
     }
 
+    await this.releaseDirectBusy(session)
+
     return { ok: true, callId: session.callId }
   }
 
@@ -744,6 +781,9 @@ export class RealtimeGateway
         reason: data?.reason,
       },
     )
+
+    // Mở khoá bận cho cả hai bên (idempotent, an toàn kể cả bên kia đã kết thúc).
+    await this.releaseDirectBusy(session)
 
     // Cả hai bên đều phát `call.ended` khi cúp máy. Trước đây việc chống trùng
     // dựa vào "chỉ bên gọi mới ghi", kéo theo phải tin `callerId` từ client.
@@ -807,6 +847,12 @@ export class RealtimeGateway
       ROUTING_RMQ.CALL_ENDED,
       payload,
     )
+  }
+
+  /** Mở khoá bận cho cả người gọi lẫn người nhận của một phiên 1-1. */
+  private async releaseDirectBusy(session: CallSession): Promise<void> {
+    await this.callBusyStore.release(session.callerId, session.callId)
+    await this.callBusyStore.release(session.calleeId, session.callId)
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CANDIDATE)
@@ -938,6 +984,17 @@ export class RealtimeGateway
       )
     }
 
+    // Hẹn huỷ nếu không ai vào phòng: phòng nhóm tạo TRƯỚC khi có ai connect
+    // LiveKit, nên nếu tất cả bỏ chuông sẽ không có room_finished — timer này dọn
+    // phiên treo (và chuông) sau ~35s. participant_joined sẽ huỷ timer.
+    this.scheduleGroupPendingCancel(session)
+
+    // Người gọi phải rảnh; đang kẹt cuộc khác thì không đổ chuông (phòng vừa mở
+    // sẽ tự huỷ theo timer trên). Idempotent khi mở lại chính phòng này.
+    if (!(await this.callBusyStore.acquire(callerId, session.callId, 4 * 60 * 60))) {
+      return callError('BUSY', 'You are already in a call')
+    }
+
     // Đổ chuông các thành viên khác. Ai offline thì room `user:<id>` rỗng nên
     // emit là no-op — không cần lọc trước.
     this.emitToUserSockets(
@@ -991,6 +1048,18 @@ export class RealtimeGateway
 
     if (!GroupCallStore.isMember(session, userId)) {
       return callError('NOT_MEMBER', 'Not a member of this conversation')
+    }
+
+    // Revalidate quyền HIỆN TẠI thay vì tin snapshot lúc mở phòng: người đã bị
+    // loại khỏi nhóm sau khi phòng mở không được dùng token của phiên cũ để vào.
+    const current = await fetchCallMembers(session.conversationId, userId)
+    if (!current.ok || !current.members.some((member) => member.id === userId)) {
+      return callError('NOT_MEMBER', 'No longer a member of this conversation')
+    }
+
+    // Người nhận phải rảnh (không kẹt cuộc gọi khác).
+    if (!(await this.callBusyStore.acquire(userId, session.callId, 4 * 60 * 60))) {
+      return callError('BUSY', 'You are already in a call')
     }
 
     const username =
@@ -1073,6 +1142,8 @@ export class RealtimeGateway
     )
     if (updated) this.emitGroupCallState(updated)
 
+    await this.callBusyStore.release(userId, session.callId)
+
     return { ok: true }
   }
 
@@ -1127,7 +1198,11 @@ export class RealtimeGateway
       conversationId,
       member,
     )
-    if (session) this.emitGroupCallState(session)
+    if (session) {
+      // Có người vào thật -> phòng không còn "treo chưa ai vào", huỷ timer huỷ-phiên.
+      this.clearGroupPending(session.callId)
+      this.emitGroupCallState(session)
+    }
   }
 
   private async handleGroupParticipantLeft(
@@ -1157,6 +1232,8 @@ export class RealtimeGateway
     const session = await this.groupCallStore.finish(conversationId)
     if (!session) return
 
+    this.clearGroupPending(session.callId)
+
     const durationSeconds = Math.max(
       0,
       Math.round((Date.now() - session.startedAt) / 1000),
@@ -1170,10 +1247,63 @@ export class RealtimeGateway
       callType: session.callType,
     })
 
+    // Mở khoá bận cho mọi người từng vào phòng.
+    for (const uid of session.seen) {
+      await this.callBusyStore.release(uid, session.callId)
+    }
+
     this.emitToUserSockets(
       session.members.map((member) => member.id),
       SOCKET_EVENTS.GROUP_CALL.ENDED,
       { callId: session.callId, conversationId },
+    )
+  }
+
+  // ── Hẹn huỷ phòng nhóm chưa ai vào ───────────────────────────────────────
+
+  private scheduleGroupPendingCancel(session: GroupCallSession): void {
+    const existing = this.groupPendingTimers.get(session.callId)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      this.cancelGroupIfEmpty(session.conversationId, session.callId).catch(
+        () => undefined,
+      )
+    }, this.groupPendingMs)
+    // Không giữ process sống chỉ vì timer này.
+    if (typeof timer.unref === 'function') timer.unref()
+    this.groupPendingTimers.set(session.callId, timer)
+  }
+
+  private clearGroupPending(callId: string): void {
+    const timer = this.groupPendingTimers.get(callId)
+    if (timer) clearTimeout(timer)
+    this.groupPendingTimers.delete(callId)
+  }
+
+  /**
+   * Sau deadline: nếu vẫn chưa ai thực sự vào phòng (không có participant từ
+   * webhook), huỷ phiên và báo `ended` để tắt chuông. Không ghi log (0 người =
+   * không phải một cuộc gọi đã diễn ra).
+   */
+  private async cancelGroupIfEmpty(
+    conversationId: string,
+    callId: string,
+  ): Promise<void> {
+    this.groupPendingTimers.delete(callId)
+    const session = await this.groupCallStore.getByCallId(callId)
+    if (!session) return
+    if (GroupCallStore.participantList(session).length > 0) return
+
+    await this.groupCallStore.delete(conversationId)
+    await this.callBusyStore.release(session.startedBy, session.callId)
+    for (const uid of session.seen) {
+      await this.callBusyStore.release(uid, session.callId)
+    }
+
+    this.emitToUserSockets(
+      session.members.map((member) => member.id),
+      SOCKET_EVENTS.GROUP_CALL.ENDED,
+      { callId: session.callId, conversationId, reason: 'no_answer' },
     )
   }
 }
