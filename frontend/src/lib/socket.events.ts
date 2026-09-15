@@ -51,6 +51,7 @@ export const SOCKET_EVENTS = {
     CALL_ACCEPTED: "call.accepted",
     CALL_REJECTED: "call.rejected",
     CALL_ENDED: "call.ended",
+    CLAIMED: "call.claimed",
     ICE_CANDIDATE: "call.ice_candidate",
   },
 

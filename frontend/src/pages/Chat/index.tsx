@@ -18,9 +18,12 @@ import { selectConversationById } from "@/redux/slices/conversationSlice";
 import type { RootState } from "@/redux/store";
 import { describeGroupCallError } from "@/utils/groupCallError";
 
+type CallType = "audio" | "video";
+
 type ActiveVoiceCall = {
   conversationId: string;
   mode: VoiceCallMode;
+  callType: CallType;
 };
 
 type ActiveGroupCall = {
@@ -29,11 +32,19 @@ type ActiveGroupCall = {
   roomName: string;
   url: string;
   token: string;
+  callType: CallType;
 };
 
 /** Hình dạng ack của `group_call.start`. */
 type GroupCallStartAck =
-  | { ok: true; callId: string; roomName: string; url: string; token: string }
+  | {
+      ok: true;
+      callId: string;
+      roomName: string;
+      url: string;
+      token: string;
+      callType?: CallType;
+    }
   | { ok: false; code?: string };
 
 export default function ChatPage() {
@@ -50,15 +61,16 @@ export default function ChatPage() {
     selectedChatId ? selectConversationById(state, selectedChatId) : undefined,
   );
 
-  // DIRECT → gọi 1-1 P2P (VoiceCallModal, giữ nguyên). GROUP → gọi nhóm SFU:
-  // emit group_call.start, mở GroupCallModal với ack {callId, roomName, url, token}.
-  const handleVoiceCall = () => {
+  // DIRECT → gọi 1-1 P2P (VoiceCallModal). GROUP → gọi nhóm SFU: emit
+  // group_call.start, mở GroupCallModal với ack {callId, roomName, url, token,
+  // callType}. `callType` quyết định audio hay video cho cả hai nhánh.
+  const handleCall = (callType: CallType) => {
     if (!selectedChatId) return;
 
     if (selectedConversation?.type === "GROUP") {
       socket.emit(
         SOCKET_EVENTS.GROUP_CALL.START,
-        { conversationId: selectedChatId },
+        { conversationId: selectedChatId, callType },
         (ack?: GroupCallStartAck) => {
           if (ack?.ok) {
             setActiveGroupCall({
@@ -67,6 +79,8 @@ export default function ChatPage() {
               roomName: ack.roomName,
               url: ack.url,
               token: ack.token,
+              // Phòng đã mở giữ nguyên callType của nó — tin theo ack của server.
+              callType: ack.callType ?? callType,
             });
           } else {
             toast.error(describeGroupCallError(ack?.code));
@@ -76,7 +90,11 @@ export default function ChatPage() {
       return;
     }
 
-    setActiveVoiceCall({ conversationId: selectedChatId, mode: "outgoing" });
+    setActiveVoiceCall({
+      conversationId: selectedChatId,
+      mode: "outgoing",
+      callType,
+    });
   };
 
   return (
@@ -87,7 +105,8 @@ export default function ChatPage() {
         <ChatWindow
           conversationId={selectedChatId || undefined}
           onToggleProfile={() => setShowProfile(!showProfile)}
-          onVoiceCall={handleVoiceCall}
+          onVoiceCall={() => handleCall("audio")}
+          onVideoCall={() => handleCall("video")}
           onBack={() => navigate("/")}
           focusMessageId={focusMessageId}
           onFocusHandled={() => setFocusMessageId(null)}
@@ -116,6 +135,7 @@ export default function ChatPage() {
         <VoiceCallModal
           conversationId={activeVoiceCall.conversationId}
           mode={activeVoiceCall.mode}
+          callType={activeVoiceCall.callType}
           onClose={() => setActiveVoiceCall(null)}
         />
       )}
@@ -127,6 +147,7 @@ export default function ChatPage() {
           url={activeGroupCall.url}
           token={activeGroupCall.token}
           conversationId={activeGroupCall.conversationId}
+          callType={activeGroupCall.callType}
           onClose={() => setActiveGroupCall(null)}
         />
       )}

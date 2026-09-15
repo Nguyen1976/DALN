@@ -20,6 +20,15 @@ export interface GroupCallParticipant {
   isSpeaking: boolean;
   /** micro đang tắt (không có audio track đang mở). */
   isMuted: boolean;
+  /** camera đang bật (`participant.isCameraEnabled`). */
+  isCameraEnabled: boolean;
+  /**
+   * Track camera của người này để modal tự `attach()` vào thẻ `<video>`; null
+   * khi chưa có (audio-only, camera tắt, hoặc remote chưa subscribe về). Hook
+   * chỉ phơi ra `Track`; việc attach/detach do MODAL làm để adaptiveStream nhìn
+   * thấy phần tử thật mà tự tạm dừng video ngoài màn hình.
+   */
+  videoTrack?: Track | null;
 }
 
 export type GroupCallConnectionState =
@@ -33,13 +42,19 @@ interface UseGroupCallOptions {
   url: string;
   /** Access token lấy từ ack (`ack.token`). */
   token: string;
+  /**
+   * Loại cuộc gọi: `'audio'` (mặc định) chỉ bật micro; `'video'` bật thêm camera
+   * sau khi kết nối. Tuỳ chọn để giữ tương thích với caller cũ.
+   */
+  callType?: "audio" | "video";
   /** Gọi khi phòng đóng/rớt kết nối (RoomEvent.Disconnected) để đóng modal. */
   onDisconnected?: () => void;
 }
 
 /**
- * Quản lý một phiên gọi nhóm audio qua SFU LiveKit: kết nối phòng, bật micro,
- * theo dõi danh sách người + trạng thái nói/mute, và dọn dẹp khi rời.
+ * Quản lý một phiên gọi nhóm (audio hoặc video) qua SFU LiveKit: kết nối phòng,
+ * bật micro/camera, theo dõi danh sách người + trạng thái nói/mute/camera, và
+ * dọn dẹp khi rời.
  *
  * Tách khỏi cuộc gọi 1-1 (WebRTC P2P trong useWebRTC) — đây là SFU nên chỉ cần
  * một `Room`, không tự dựng RTCPeerConnection.
@@ -47,6 +62,7 @@ interface UseGroupCallOptions {
 export function useGroupCall({
   url,
   token,
+  callType = "audio",
   onDisconnected,
 }: UseGroupCallOptions) {
   const roomRef = useRef<Room | null>(null);
@@ -54,6 +70,7 @@ export function useGroupCall({
   const onDisconnectedRef = useRef(onDisconnected);
   const [participants, setParticipants] = useState<GroupCallParticipant[]>([]);
   const [isMicEnabled, setIsMicEnabled] = useState(true);
+  const [isCameraEnabled, setIsCameraEnabled] = useState(false);
   const [connectionState, setConnectionState] =
     useState<GroupCallConnectionState>("connecting");
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
@@ -63,10 +80,14 @@ export function useGroupCall({
   }, [onDisconnected]);
 
   useEffect(() => {
-    const room = new Room();
+    // adaptiveStream tự tạm dừng video mà thẻ `<video>` của nó không hiển thị
+    // (đây là điểm tiết kiệm băng thông — luôn bật); dynacast tắt encode layer
+    // không ai xem.
+    const room = new Room({ adaptiveStream: true, dynacast: true });
     roomRef.current = room;
 
     // Container ẩn giữ các <audio> của remote để nghe được tiếng; SDK tự phát.
+    // Video KHÔNG attach ở đây — modal tự attach để adaptiveStream hoạt động.
     const audioContainer = document.createElement("div");
     audioContainer.style.display = "none";
     document.body.append(audioContainer);
@@ -80,6 +101,9 @@ export function useGroupCall({
       isLocal,
       isSpeaking: participant.isSpeaking,
       isMuted: !participant.isMicrophoneEnabled,
+      isCameraEnabled: participant.isCameraEnabled,
+      videoTrack:
+        participant.getTrackPublication(Track.Source.Camera)?.track ?? null,
     });
 
     const refresh = () => {
@@ -91,6 +115,7 @@ export function useGroupCall({
     };
 
     const handleTrackSubscribed = (track: RemoteTrack) => {
+      // Chỉ audio được gắn vào container ẩn để phát tiếng; video để modal attach.
       if (track.kind === Track.Kind.Audio) {
         const element = track.attach();
         element.style.display = "none";
@@ -129,9 +154,25 @@ export function useGroupCall({
         await room.localParticipant.setMicrophoneEnabled(true);
         if (cancelled) return;
         setIsMicEnabled(true);
+        // Vào phòng + có micro là coi như đã kết nối: KHÔNG chờ camera, vì bật
+        // camera có thể chậm/kẹt và không được giữ UI mãi ở "đang kết nối".
         setConnectionState("connected");
         setConnectedAt(Date.now());
         refresh();
+        // Cuộc gọi video: bật camera ở nền. Lỗi/chậm camera KHÔNG làm rớt cuộc
+        // gọi — audio vẫn sống; publish xong thì cập nhật cờ + roster.
+        if (callType === "video") {
+          void room.localParticipant
+            .setCameraEnabled(true)
+            .then(() => {
+              if (cancelled) return;
+              setIsCameraEnabled(true);
+              refresh();
+            })
+            .catch(() => {
+              // Giữ camera tắt, cuộc gọi vẫn tiếp tục ở dạng audio.
+            });
+        }
       } catch {
         if (cancelled) return;
         setConnectionState("error");
@@ -145,7 +186,7 @@ export function useGroupCall({
       audioContainer.remove();
       roomRef.current = null;
     };
-  }, [url, token]);
+  }, [url, token, callType]);
 
   const toggleMic = useCallback(async () => {
     const room = roomRef.current;
@@ -161,6 +202,44 @@ export function useGroupCall({
     );
   }, []);
 
+  const toggleCamera = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    const next = !room.localParticipant.isCameraEnabled;
+    try {
+      await room.localParticipant.setCameraEnabled(next);
+      setIsCameraEnabled(next);
+      // Cập nhật ngay track/cờ camera của chính mình, không đợi vòng refresh.
+      setParticipants((prev) =>
+        prev.map((participant) =>
+          participant.isLocal
+            ? {
+                ...participant,
+                isCameraEnabled: next,
+                videoTrack:
+                  room.localParticipant.getTrackPublication(Track.Source.Camera)
+                    ?.track ?? null,
+              }
+            : participant,
+        ),
+      );
+    } catch {
+      // Bỏ qua lỗi bật/tắt camera — không làm rớt cuộc gọi.
+    }
+  }, []);
+
+  // Đổi camera đang dùng (ví dụ trước/sau trên điện thoại). Optional-safe: một số
+  // trình duyệt không hỗ trợ switchActiveDevice.
+  const switchCamera = useCallback(async (deviceId: string) => {
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      await room.switchActiveDevice("videoinput", deviceId);
+    } catch {
+      // Không hỗ trợ / bị từ chối — giữ nguyên camera hiện tại.
+    }
+  }, []);
+
   const leave = useCallback(() => {
     void roomRef.current?.disconnect();
   }, []);
@@ -168,9 +247,12 @@ export function useGroupCall({
   return {
     participants,
     isMicEnabled,
+    isCameraEnabled,
     connectionState,
     connectedAt,
     toggleMic,
+    toggleCamera,
+    switchCamera,
     leave,
   };
 }

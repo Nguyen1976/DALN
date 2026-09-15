@@ -682,7 +682,10 @@ export class RealtimeGateway
     // Chống hai tab của người nhận cùng bắt máy: chỉ socket thắng claim mới relay
     // answer về người gọi. Tab thua đóng chuông, không tạo phiên WebRTC thứ hai.
     if (!(await this.callSessionStore.claimAccept(session.callId, client.id))) {
-      return callError('CALL_CLAIMED', 'Call already answered on another device')
+      return callError(
+        'CALL_CLAIMED',
+        'Call already answered on another device',
+      )
     }
 
     // Người nhận phải rảnh (có thể vừa vào cuộc gọi khác giữa lúc đổ chuông).
@@ -695,8 +698,10 @@ export class RealtimeGateway
 
     await this.callSessionStore.markConnected(session)
 
-    // Báo các tab khác của chính người nhận đóng màn hình chuông.
-    this.emitToUserSockets([userId], SOCKET_EVENTS.CALL.CLAIMED, {
+    // Báo các tab KHÁC của người nhận đóng màn hình chuông. Dùng broadcast để
+    // LOẠI TRỪ chính socket vừa bắt máy — nếu không, tab đang nghe cũng nhận
+    // claimed rồi tự đóng modal và huỷ luôn cuộc gọi vừa chấp nhận.
+    client.broadcast.to(`user:${userId}`).emit(SOCKET_EVENTS.CALL.CLAIMED, {
       callId: session.callId,
     })
 
@@ -991,7 +996,9 @@ export class RealtimeGateway
 
     // Người gọi phải rảnh; đang kẹt cuộc khác thì không đổ chuông (phòng vừa mở
     // sẽ tự huỷ theo timer trên). Idempotent khi mở lại chính phòng này.
-    if (!(await this.callBusyStore.acquire(callerId, session.callId, 4 * 60 * 60))) {
+    if (
+      !(await this.callBusyStore.acquire(callerId, session.callId, 4 * 60 * 60))
+    ) {
       return callError('BUSY', 'You are already in a call')
     }
 
@@ -1053,12 +1060,17 @@ export class RealtimeGateway
     // Revalidate quyền HIỆN TẠI thay vì tin snapshot lúc mở phòng: người đã bị
     // loại khỏi nhóm sau khi phòng mở không được dùng token của phiên cũ để vào.
     const current = await fetchCallMembers(session.conversationId, userId)
-    if (!current.ok || !current.members.some((member) => member.id === userId)) {
+    if (
+      !current.ok ||
+      !current.members.some((member) => member.id === userId)
+    ) {
       return callError('NOT_MEMBER', 'No longer a member of this conversation')
     }
 
     // Người nhận phải rảnh (không kẹt cuộc gọi khác).
-    if (!(await this.callBusyStore.acquire(userId, session.callId, 4 * 60 * 60))) {
+    if (
+      !(await this.callBusyStore.acquire(userId, session.callId, 4 * 60 * 60))
+    ) {
       return callError('BUSY', 'You are already in a call')
     }
 

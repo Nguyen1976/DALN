@@ -74,6 +74,7 @@ interface ChatWindowProps {
   conversationId?: string;
   onToggleProfile: () => void;
   onVoiceCall: () => void;
+  onVideoCall?: () => void;
   onBack?: () => void;
   focusMessageId?: string | null;
   onFocusHandled?: () => void;
@@ -83,6 +84,7 @@ export default function ChatWindow({
   conversationId,
   onToggleProfile,
   onVoiceCall,
+  onVideoCall,
   onBack,
   focusMessageId,
   onFocusHandled,
@@ -300,8 +302,10 @@ export default function ChatWindow({
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Gọi video"
-            className="hidden text-muted-foreground hover:text-foreground sm:inline-flex"
+            onClick={onVideoCall}
+            title={isGroupConversation ? "Gọi video nhóm" : "Gọi video"}
+            aria-label={isGroupConversation ? "Gọi video nhóm" : "Gọi video"}
+            className="text-muted-foreground hover:text-foreground"
           >
             <Video className="size-5" />
           </Button>
