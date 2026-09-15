@@ -25,8 +25,8 @@ rtc:
   # Dải cổng UDP cho media (mỗi participant giữ vài cổng). Dev để NHỎ (20 cổng)
   # khớp publish 50000-50019:50000-50019/udp trong docker-compose.yml — đỡ tạo
   # hàng trăm userland proxy trên Docker Desktop.
-  port_range_start: 50000
-  port_range_end: 50019
+  # UDP mux: một cổng duy nhất (khuyến nghị khi chạy trong Docker) thay cho dải cổng.
+  udp_port: 50000
   # Dev: không dò IP ngoài. Docker Desktop publish cổng qua 127.0.0.1 nên quảng bá
   # 127.0.0.1 để trình duyệt trên host tới được candidate media (giống coturn dev).
   use_external_ip: false

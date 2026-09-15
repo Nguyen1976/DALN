@@ -318,7 +318,7 @@ services:
       - "7880:7880"   # WebSocket + HTTP API (client connect)
       - "7881:7881"   # RTC qua TCP (dự phòng khi UDP bị chặn)
       # Dải cổng UDP cho media (khớp port_range trong livekit.dev.yaml).
-      - "50000-50019:50000-50019/udp"
+      - "50000:50000/udp"   # UDP mux (1 cổng)
     networks:
       - backend
 

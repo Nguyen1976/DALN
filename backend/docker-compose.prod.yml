@@ -488,7 +488,7 @@ services:
     ports:
       - "127.0.0.1:7880:7880"          # WS + HTTP API: chỉ localhost -> nginx /livekit/
       - "7881:7881"                    # RTC qua TCP (dự phòng khi UDP bị chặn) — ra ngoài
-      - "50000-50199:50000-50199/udp"  # media UDP — ra ngoài (KHÔNG bind 127.0.0.1)
+      - "50000:50000/udp"              # media UDP mux (1 cổng) — ra ngoài (KHÔNG bind 127.0.0.1)
     networks:
       - backend
     logging: *logging
