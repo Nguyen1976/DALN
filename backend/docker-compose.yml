@@ -300,6 +300,28 @@ services:
     networks:
       - backend
 
+  # LiveKit (SFU) cho DEV — máy chủ gọi NHÓM audio (bản thiết kế:
+  # docs/diagrams/group-call-sfu-flow.html). Gateway ký token (livekit-server-sdk),
+  # trình duyệt trên host connect ws://localhost:7880 rồi publish/subscribe audio.
+  # Config + keys ở deploy/livekit/livekit.dev.yaml; secret trong đó phải KHỚP
+  # LIVEKIT_API_SECRET ở .env.docker. Production chạy livekit TRONG compose luôn:
+  # xem docker-compose.prod.yml.
+  livekit:
+    image: livekit/livekit-server:v1.7
+    container_name: daln-livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      # Config nằm ở deploy/ (dùng chung repo); compose ở backend/ nên đi ../.
+      - ../deploy/livekit/livekit.dev.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"   # WebSocket + HTTP API (client connect)
+      - "7881:7881"   # RTC qua TCP (dự phòng khi UDP bị chặn)
+      # Dải cổng UDP cho media (khớp port_range trong livekit.dev.yaml).
+      - "50000-50019:50000-50019/udp"
+    networks:
+      - backend
+
   kong:
     image: kong:3.7
     container_name: daln-kong

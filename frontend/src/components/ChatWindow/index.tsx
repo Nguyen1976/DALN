@@ -289,15 +289,10 @@ export default function ChatWindow({
             variant="ghost"
             size="icon"
             onClick={onVoiceCall}
-            /* Voice call is 1:1 only — the button used to be live in group
-               threads too, where pressing it could only fail. */
-            disabled={isGroupConversation}
-            title={
-              isGroupConversation
-                ? "Chưa hỗ trợ gọi thoại trong nhóm"
-                : "Gọi thoại"
-            }
-            aria-label="Gọi thoại"
+            /* DIRECT → gọi 1-1 P2P; GROUP → gọi nhóm audio qua SFU. Nhóm từng
+               bị disable vì chưa hỗ trợ, nay bật lên. */
+            title={isGroupConversation ? "Gọi nhóm" : "Gọi thoại"}
+            aria-label={isGroupConversation ? "Gọi nhóm" : "Gọi thoại"}
             className="text-muted-foreground hover:text-foreground"
           >
             <Phone className="size-5" />

@@ -113,4 +113,23 @@ export class ChatErrors {
       'Không được phép gọi trong cuộc trò chuyện này',
     )
   }
+
+  static invalidCallMembersQuery(): never {
+    throw new BadRequestException('conversationId hoặc userId không hợp lệ')
+  }
+
+  /**
+   * Từ chối lấy danh sách thành viên để gọi nhóm (hội thoại không tồn tại hoặc
+   * người gọi không phải thành viên) — một lỗi duy nhất để không lộ id nào có
+   * thật, giống callPeerNotAllowed.
+   */
+  static callMembersNotAllowed(): never {
+    throw new ForbiddenException(
+      'Không được phép gọi trong cuộc trò chuyện này',
+    )
+  }
+
+  static invalidGroupCallLog(): never {
+    throw new BadRequestException('conversationId không hợp lệ')
+  }
 }

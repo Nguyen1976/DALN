@@ -1,10 +1,18 @@
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
+import { Phone, PhoneOff } from "lucide-react";
+import { toast } from "sonner";
 import VoiceCallModal, {
   type VoiceCallMode,
 } from "@/components/VoiceCallModal";
+import GroupCallModal from "@/components/GroupCallModal";
+import CallRingAvatar from "@/components/VoiceCallModal/CallRingAvatar";
+import { Button } from "@/components/ui/button";
 import { socket } from "@/lib/socket";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
+import { CALL_RING_TIMEOUT_MS } from "@/constants/call";
+import { useIncomingCallRingtone } from "@/hooks/useIncomingCallRingtone";
+import { describeGroupCallError } from "@/utils/groupCallError";
 import { selectFriend } from "@/redux/slices/friendSlice";
 import type { Conversation } from "@/redux/slices/conversationSlice";
 import type { RootState } from "@/redux/store";
@@ -19,6 +27,30 @@ type IncomingCallState = {
   callerDisplayName: string;
   callerDisplayAvatar: string;
 };
+
+/** Chuông gọi nhóm đang đổ (chưa chấp nhận). */
+type IncomingGroupCallState = {
+  callId: string;
+  conversationId: string;
+  roomName: string;
+  title: string;
+  callerName: string;
+  callerAvatar: string;
+};
+
+/** Cuộc gọi nhóm đã chấp nhận và đã có url/token để join. */
+type ActiveGroupCallState = {
+  callId: string;
+  conversationId: string;
+  roomName: string;
+  url: string;
+  token: string;
+};
+
+/** Hình dạng ack của `group_call.accept`. */
+type GroupCallAcceptAck =
+  | { ok: true; url: string; token: string }
+  | { ok: false; code?: string };
 
 function findConversationByCaller(
   conversations: Conversation[],
@@ -42,10 +74,17 @@ export default function IncomingCallManager() {
   const [incomingCall, setIncomingCall] = useState<IncomingCallState | null>(
     null,
   );
+  const [incomingGroupCall, setIncomingGroupCall] =
+    useState<IncomingGroupCallState | null>(null);
+  const [activeGroupCall, setActiveGroupCall] =
+    useState<ActiveGroupCallState | null>(null);
   const conversations = useSelector(
     (state: RootState) => state.conversations ?? [],
   );
   const friends = useSelector(selectFriend);
+
+  // Đổ chuông cho gọi nhóm khi đang có lời mời chưa xử lý.
+  useIncomingCallRingtone(incomingGroupCall !== null);
 
   useEffect(() => {
     const handleIncomingCall = ({
@@ -92,18 +131,169 @@ export default function IncomingCallManager() {
     };
   }, [conversations, friends]);
 
-  if (!incomingCall) return null;
+  useEffect(() => {
+    const handleGroupIncoming = ({
+      callId,
+      conversationId,
+      roomName,
+      from,
+    }: {
+      callId: string;
+      conversationId: string;
+      roomName: string;
+      from?: { id: string; username: string };
+    }) => {
+      if (!callId) return;
+
+      const conversation = conversations.find(
+        (item) => item.id === conversationId,
+      );
+      const friend = from ? friends.find((item) => item.id === from.id) : undefined;
+      const callerName =
+        from?.username || friend?.fullName || friend?.username || "Ai đó";
+
+      setIncomingGroupCall({
+        callId,
+        conversationId,
+        roomName,
+        title: conversation?.displayName || "Cuộc gọi nhóm",
+        callerName,
+        callerAvatar: conversation?.displayAvatar || "",
+      });
+    };
+
+    // Nếu cuộc gọi kết thúc trước khi kịp bắt máy, tắt chuông đang đổ.
+    const handleGroupEnded = ({
+      callId,
+      conversationId,
+    }: { callId?: string; conversationId?: string } = {}) => {
+      setIncomingGroupCall((prev) =>
+        prev && (prev.callId === callId || prev.conversationId === conversationId)
+          ? null
+          : prev,
+      );
+    };
+
+    socket.on(SOCKET_EVENTS.GROUP_CALL.INCOMING, handleGroupIncoming);
+    socket.on(SOCKET_EVENTS.GROUP_CALL.ENDED, handleGroupEnded);
+
+    return () => {
+      socket.off(SOCKET_EVENTS.GROUP_CALL.INCOMING, handleGroupIncoming);
+      socket.off(SOCKET_EVENTS.GROUP_CALL.ENDED, handleGroupEnded);
+    };
+  }, [conversations, friends]);
+
+  const handleAcceptGroup = () => {
+    const call = incomingGroupCall;
+    if (!call) return;
+
+    socket.emit(
+      SOCKET_EVENTS.GROUP_CALL.ACCEPT,
+      { callId: call.callId },
+      (ack?: GroupCallAcceptAck) => {
+        if (ack?.ok) {
+          setActiveGroupCall({
+            callId: call.callId,
+            conversationId: call.conversationId,
+            roomName: call.roomName,
+            url: ack.url,
+            token: ack.token,
+          });
+        } else {
+          toast.error(describeGroupCallError(ack?.code));
+        }
+        setIncomingGroupCall(null);
+      },
+    );
+  };
+
+  const handleDeclineGroup = () => {
+    if (incomingGroupCall) {
+      socket.emit(SOCKET_EVENTS.GROUP_CALL.DECLINE, {
+        callId: incomingGroupCall.callId,
+      });
+    }
+    setIncomingGroupCall(null);
+  };
 
   return (
-    <VoiceCallModal
-      conversationId={incomingCall.conversationId}
-      callerDisplayName={incomingCall.callerDisplayName}
-      callerDisplayAvatar={incomingCall.callerDisplayAvatar}
-      mode={incomingCall.mode}
-      callerId={incomingCall.callerId}
-      callId={incomingCall.callId}
-      incomingOffer={incomingCall.incomingOffer}
-      onClose={() => setIncomingCall(null)}
-    />
+    <>
+      {incomingCall && (
+        <VoiceCallModal
+          conversationId={incomingCall.conversationId}
+          callerDisplayName={incomingCall.callerDisplayName}
+          callerDisplayAvatar={incomingCall.callerDisplayAvatar}
+          mode={incomingCall.mode}
+          callerId={incomingCall.callerId}
+          callId={incomingCall.callId}
+          incomingOffer={incomingCall.incomingOffer}
+          onClose={() => setIncomingCall(null)}
+        />
+      )}
+
+      {incomingGroupCall && !activeGroupCall && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cuộc gọi nhóm đến"
+          className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
+        >
+          <div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-lg">
+            <div className="flex flex-col items-center text-center">
+              <CallRingAvatar
+                displayName={incomingGroupCall.title}
+                displayAvatar={incomingGroupCall.callerAvatar}
+                active
+                durationMs={CALL_RING_TIMEOUT_MS}
+              />
+
+              <h3 className="mb-1 text-xl font-semibold tracking-[-0.01em] text-foreground">
+                {incomingGroupCall.title}
+              </h3>
+              <p
+                role="status"
+                aria-live="polite"
+                className="mb-8 text-sm text-muted-foreground"
+              >
+                {incomingGroupCall.callerName} đang mời bạn vào cuộc gọi nhóm...
+              </p>
+
+              <div className="flex gap-6">
+                <Button
+                  variant="success"
+                  size="icon"
+                  onClick={handleAcceptGroup}
+                  aria-label="Tham gia cuộc gọi nhóm"
+                  className="size-14 rounded-full"
+                >
+                  <Phone className="size-6" aria-hidden="true" />
+                </Button>
+
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  onClick={handleDeclineGroup}
+                  aria-label="Từ chối cuộc gọi nhóm"
+                  className="size-14 rounded-full"
+                >
+                  <PhoneOff className="size-6" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeGroupCall && (
+        <GroupCallModal
+          callId={activeGroupCall.callId}
+          roomName={activeGroupCall.roomName}
+          url={activeGroupCall.url}
+          token={activeGroupCall.token}
+          conversationId={activeGroupCall.conversationId}
+          onClose={() => setActiveGroupCall(null)}
+        />
+      )}
+    </>
   );
 }

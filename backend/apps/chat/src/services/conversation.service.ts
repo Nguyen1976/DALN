@@ -36,6 +36,11 @@ export interface CallPeerRequest {
   userId: string
 }
 
+export interface CallMembersRequest {
+  conversationId: string
+  userId: string
+}
+
 /**
  * Id đến từ query string của gateway. Prisma/Mongo ném lỗi hạ tầng (-> 500) khi
  * gặp ObjectId sai định dạng, nên chặn ngay tại cửa và trả 403 như mọi lý do từ
@@ -303,6 +308,54 @@ export class ConversationService {
     }
 
     return { peerId: peer.userId }
+  }
+
+  /**
+   * Danh sách thành viên ACTIVE của một hội thoại cho gateway realtime dựng
+   * phiên gọi nhóm audio. Không giới hạn `type` như getCallPeer: gọi nhóm chạy
+   * trên hội thoại GROUP, còn việc chặn gọi nhóm trong DIRECT là chuyện của
+   * gateway.
+   *
+   * Trả `{ id, username }` cho mỗi thành viên; username lấy từ bản phi chuẩn hoá
+   * trên membership (như findByConversationId phục vụ mọi API tên thành viên
+   * khác), lùi về fullName rồi userId để gateway luôn có tên đặt cho LiveKit.
+   */
+  async getCallMembers(
+    dto: CallMembersRequest,
+  ): Promise<{ members: { id: string; username: string }[] }> {
+    const conversationId = dto?.conversationId?.trim()
+    const userId = dto?.userId?.trim()
+
+    if (!conversationId || !userId) {
+      ChatErrors.invalidCallMembersQuery()
+    }
+
+    // Chặn ObjectId hỏng ngay tại cửa: Prisma/Mongo ném lỗi hạ tầng (-> 500) khi
+    // gặp id sai định dạng.
+    if (!isObjectId(conversationId)) {
+      ChatErrors.invalidCallMembersQuery()
+    }
+
+    const conversation = await this.conversationRepo.findById(conversationId)
+
+    // Không tồn tại và "không phải thành viên" dùng chung một lỗi 403 để bên gọi
+    // không dò được id nào có thật.
+    if (!conversation) {
+      ChatErrors.callMembersNotAllowed()
+    }
+
+    const members = await this.memberRepo.findByConversationId(conversationId)
+
+    if (!members.some((member) => member.userId === userId)) {
+      ChatErrors.callMembersNotAllowed()
+    }
+
+    return {
+      members: members.map((member) => ({
+        id: member.userId,
+        username: member.username || member.fullName || member.userId,
+      })),
+    }
   }
 
   async handleUserUpdated(data: UserUpdatedPayload) {

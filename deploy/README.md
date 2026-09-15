@@ -287,6 +287,78 @@ thấy candidate loại `relay`. Trong app: hai điện thoại 4G khác nhà m�
 > lại + coturn restart). Mật khẩu cũ trình duyệt đang giữ tự hết hạn trong `TURN_TTL`
 > giây (mặc định 1 giờ).
 
+## LiveKit (gọi nhóm)
+
+Gọi **nhóm** audio (n-n) đi qua một máy chủ **SFU LiveKit** (bản thiết kế:
+`docs/diagrams/group-call-sfu-flow.html`) — mỗi người gửi 1 luồng audio lên server, server
+phát lại cho những người còn lại (khác gọi 1-1 P2P dùng coturn). Khác coturn (cài apt trên
+host), **LiveKit chạy TRONG Docker Compose** (service `livekit`, `docker-compose.prod.yml`) vì
+prod đã dùng compose và dải cổng UDP vừa phải (200 cổng). `deploy.sh` không cần bước riêng cho
+LiveKit: `up -d` tự dựng.
+
+Gateway (`realtime-gateway`) ký token cho client bằng `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET`
+(`livekit-server-sdk`) và verify webhook bằng chính cặp đó. **Cách nạp key vào livekit-server:**
+file config `deploy/livekit/livekit.prod.yaml` **KHÔNG** chứa key (bind-mount read-only, không
+render); compose truyền env **`LIVEKIT_KEYS="${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"`** cho
+container (livekit-server nạp keys map từ env này). Ràng buộc: `LIVEKIT_API_KEY` trong
+`.env.production` **phải TRÙNG** `webhook.api_key` (`daln`) trong `livekit.prod.yaml` — LiveKit
+ký webhook bằng key đó rồi tra secret trong keys map.
+
+| Cổng | Giao thức | Publish | Để làm gì |
+|---|---|---|---|
+| `7880` | TCP (HTTP/WS) | `127.0.0.1:7880` | Tín hiệu WS + HTTP API. Ra ngoài qua **nginx** `/livekit/` (client: `wss://nguyen1976.xyz/livekit`) |
+| `7881` | TCP | `0.0.0.0:7881` | RTC qua TCP — dự phòng khi UDP bị chặn (client nối thẳng IP:7881) |
+| `50000–50199` | UDP | `0.0.0.0:50000-50199` | Media: mỗi participant giữ vài cổng (khớp `port_range_start/end` trong `livekit.prod.yaml`) |
+
+nginx: `location /livekit/ { proxy_pass http://127.0.0.1:7880/; }` — trailing slash BỎ tiền tố
+`/livekit`; header `Upgrade`/`Connection` + `proxy_http_version 1.1` kế thừa từ cấp server (đã có
+sẵn cho socket.io). Webhook `POST /livekit/webhook` là NỘI BỘ trong mạng docker
+(`http://realtime-gateway:3001/livekit/webhook`), không ra ngoài.
+
+### ufw
+
+Media UDP và RTC/TCP ra thẳng ngoài (WS đã đi qua nginx 443):
+
+```bash
+ufw allow 50000:50199/udp   # media
+ufw allow 7881/tcp          # RTC qua TCP (dự phòng UDP)
+```
+
+> **Lưu ý:** Docker publish cổng chèn iptables riêng, **đi vòng qua ufw** (xem cuối README) —
+> nên các cổng livekit publish (`7881`, `50000-50199/udp`) đã ra ngoài ngay khi container chạy.
+> Vẫn nên khai báo ufw ở trên cho nhất quán/tài liệu. Cổng `7880` chỉ nghe `127.0.0.1` (qua
+> nginx), không cần mở.
+
+### Đổi key/secret
+
+Sinh secret: `openssl rand -hex 32`. Đổi `LIVEKIT_API_SECRET` (và giữ `LIVEKIT_API_KEY=daln`)
+trong `backend/.env.production` rồi deploy lại — compose tạo lại cả `livekit` (env `LIVEKIT_KEYS`
+đổi) và `realtime-gateway` (đọc cùng biến), hai bên luôn khớp. Token client đang giữ tự hết hạn
+(~10 phút).
+
+### Dùng lại coturn làm TURN cho LiveKit (tùy chọn)
+
+Client sau NAT chặt có thể cần TURN để đẩy media lên SFU. Hiện chưa cấu hình (media qua UDP
+50000-50199 / TCP 7881 là đủ cho phần lớn mạng). Nếu cần, thêm khối `turn:` vào
+`livekit.prod.yaml` trỏ về coturn đang chạy trên host (dùng chung `TURN_SECRET`) — xem tài liệu
+LiveKit `rtc.turn_servers`.
+
+### Kiểm tra
+
+```bash
+cd /root/workspace/DALN/backend
+dc logs -f livekit                              # log server (mục logging: level info)
+curl -s http://127.0.0.1:7880/                  # health: trả "OK"
+curl -s --resolve nguyen1976.xyz:443:127.0.0.1 \
+  https://nguyen1976.xyz/livekit/               # qua nginx (strip /livekit) -> "OK"
+ss -lunp | grep -E '5000[0-9]|500[0-9][0-9]'    # đang nghe dải UDP media
+```
+
+Từ trình duyệt: mở hội thoại NHÓM, bấm gọi; `chrome://webrtc-internals` phải thấy kết nối tới
+`nguyen1976.xyz` (ICE) và candidate `srflx`/`host` của server. Có `livekit-cli` thì
+`livekit-cli list-rooms --url wss://nguyen1976.xyz/livekit --api-key daln --api-secret <secret>`
+liệt kê phòng đang mở.
+
 ## Env
 
 - File thật: `/root/workspace/DALN/backend/.env.production` — chỉ nằm trên server (quyền 600),

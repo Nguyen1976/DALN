@@ -48,5 +48,16 @@ export const SOCKET_EVENTS = {
     CALL_REJECTED: 'call.rejected', //listen
     CALL_ENDED: 'call.ended', //listen
     ICE_CANDIDATE: 'call.ice_candidate', //listen
-  }
+  },
+
+  // Gọi nhóm (hội thoại GROUP) qua SFU LiveKit. 1-1 (DIRECT) vẫn dùng CALL ở trên.
+  GROUP_CALL: {
+    START: 'group_call.start', //emit + ack: mở phòng, trả {callId, roomName, url, token}
+    INCOMING: 'group_call.incoming', //listen: có cuộc gọi nhóm, đổ chuông
+    ACCEPT: 'group_call.accept', //emit + ack: xin token vào phòng
+    DECLINE: 'group_call.decline', //emit: từ chối
+    LEAVE: 'group_call.leave', //emit: rời phòng
+    STATE: 'group_call.state', //listen: danh sách người đang trong cuộc
+    ENDED: 'group_call.ended', //listen: phòng đã đóng
+  },
 }

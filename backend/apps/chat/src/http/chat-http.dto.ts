@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
@@ -149,4 +150,20 @@ export class ClosePollDTO {
   @IsNotEmpty()
   @IsString()
   pollId: string
+}
+
+export class GroupCallLogDTO {
+  @IsNotEmpty()
+  @IsString()
+  conversationId: string
+
+  // Không @IsNotEmpty: participantCount/durationSeconds có thể là 0 hợp lệ. Cần
+  // @IsNumber để whitelist:true không loại bỏ field khỏi body.
+  @IsOptional()
+  @IsNumber()
+  participantCount?: number
+
+  @IsOptional()
+  @IsNumber()
+  durationSeconds?: number
 }

@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Luồng gọi nhóm qua SFU</title>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+    :root {
+      --color-paper:#f5f5f5; --color-ink:#2d3142; --color-muted:#4f5d75; --color-soft:#7a8399;
+      --color-rule:rgba(45,49,66,0.12); --color-accent:#eb6c36; --color-accent-tint:rgba(235,108,54,0.08);
+      --color-link:#2e5aa8; --color-good:#3f7d5a;
+      --font-sans:'Geist',system-ui,sans-serif; --font-serif:'Newsreader','Times New Roman',serif; --font-mono:'Geist Mono',ui-monospace,Menlo,monospace;
+    }
+    body { font-family:var(--font-sans); background:var(--color-paper); color:var(--color-ink); padding:3rem 2rem 4rem; }
+    @media (max-width:600px){ body{ padding:2rem 1rem 3rem; } }
+    .container { max-width:1120px; margin:0 auto; }
+    .header { margin-bottom:3rem; }
+    .eyebrow { font-family:var(--font-mono); font-size:0.66rem; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; color:var(--color-muted); margin-bottom:0.75rem; }
+    h1 { font-family:var(--font-serif); font-size:clamp(1.9rem,3vw + 1rem,2.75rem); font-weight:400; letter-spacing:-0.015em; line-height:1.1; margin-bottom:0.75rem; text-wrap:balance; }
+    .subtitle { font-size:1rem; line-height:1.6; color:var(--color-muted); max-width:72ch; }
+    section { margin-top:3.5rem; } section:first-of-type { margin-top:0; }
+    h2 { font-size:1.3rem; font-weight:600; letter-spacing:-0.01em; line-height:1.3; margin-bottom:0.75rem; text-wrap:balance; }
+    .lead { font-size:0.95rem; line-height:1.65; max-width:76ch; margin-bottom:1.5rem; }
+    code { font-family:var(--font-mono); font-size:0.82em; background:rgba(45,49,66,0.06); padding:0.05em 0.35em; border-radius:3px; }
+    .diagram-container { overflow-x:auto; margin:0 -0.25rem; }
+    .diagram-container svg { width:100%; min-width:900px; display:block; }
+    .notes { list-style:none; margin-top:1.5rem; display:grid; gap:0.6rem; max-width:88ch; font-size:0.9rem; line-height:1.6; }
+    .notes li { padding-left:1rem; position:relative; }
+    .notes li::before { content:'—'; position:absolute; left:0; color:rgba(45,49,66,0.3); }
+    .notes strong { font-weight:600; }
+    .table-wrap { overflow-x:auto; margin-top:1.5rem; }
+    table.evt { width:100%; min-width:760px; border-collapse:collapse; font-size:0.83rem; line-height:1.45; }
+    .evt th { font-family:var(--font-mono); font-size:0.62rem; font-weight:500; letter-spacing:0.1em; text-transform:uppercase; color:var(--color-soft); text-align:left; padding:0 0.9rem 0.6rem 0; border-bottom:1px solid var(--color-rule); }
+    .evt td { padding:0.55rem 0.9rem 0.55rem 0; border-bottom:1px solid rgba(45,49,66,0.07); vertical-align:top; color:var(--color-muted); }
+    .evt td:first-child { white-space:nowrap; }
+    .evt code { background:none; padding:0; color:var(--color-ink); font-size:0.82rem; }
+    .evt .dir { font-family:var(--font-mono); font-size:0.7rem; color:var(--color-soft); white-space:nowrap; }
+    .cards { display:grid; gap:1rem; margin-top:1.5rem; }
+    .cards.two { grid-template-columns:1fr 1fr; }
+    .cards.three { grid-template-columns:1fr 1fr 1fr; }
+    @media (max-width:760px){ .cards.two,.cards.three{ grid-template-columns:1fr; } }
+    .card { background:#fff; border:1px solid var(--color-rule); border-radius:6px; padding:1.25rem; min-width:0; }
+    .card-header { display:flex; align-items:center; gap:0.6rem; margin-bottom:0.875rem; padding-bottom:0.875rem; border-bottom:1px solid rgba(45,49,66,0.08); }
+    .card-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+    .card-dot.ink{background:var(--color-ink);} .card-dot.muted{background:var(--color-muted);}
+    .card-dot.coral{background:var(--color-accent);} .card-dot.link{background:var(--color-link);} .card-dot.good{background:var(--color-good);}
+    .card h3 { font-size:0.9rem; font-weight:600; letter-spacing:-0.005em; }
+    .card .tag { margin-left:auto; font-family:var(--font-mono); font-size:0.6rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--color-soft); }
+    .card ul { list-style:none; color:var(--color-muted); font-size:0.8rem; line-height:1.5; }
+    .card li { margin-bottom:0.35rem; padding-left:0.85rem; position:relative; }
+    .card li::before { content:'—'; position:absolute; left:0; color:rgba(45,49,66,0.25); font-size:0.72rem; }
+    .card code { font-size:0.76rem; }
+    .footer { margin-top:3.5rem; padding-top:1.5rem; border-top:1px solid rgba(45,49,66,0.10); font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.06em; color:var(--color-soft); display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="header">
+      <p class="eyebrow">DALN Chat · Bản thiết kế · 15/09/2026</p>
+      <h1>Luồng gọi nhóm audio qua SFU</h1>
+      <p class="subtitle">Gọi 1-1 giữ nguyên P2P. Gọi nhóm (từ 3 người) đi qua một SFU: mỗi máy chỉ gửi 1 luồng lên, SFU chuyển tiếp cho những người còn lại. Thiết kế này dùng <strong>LiveKit self-host</strong> làm SFU — realtime-gateway lo mời/đổ chuông và ký token, còn media đi thẳng giữa máy và LiveKit.</p>
+    </header>
+
+    <!-- ══════════ 1. KIẾN TRÚC ══════════ -->
+    <section>
+      <p class="eyebrow">Kiến trúc</p>
+      <h2>Ai lo phần gì</h2>
+      <p class="lead">Tách bạch hai mặt phẳng: <strong>điều phối</strong> (mời, đổ chuông, phân quyền, ghi lịch sử) đi qua realtime-gateway sẵn có; <strong>media</strong> (âm thanh) đi thẳng giữa máy và LiveKit. Gateway ký token bằng API secret ngay tại chỗ — không đẩy secret xuống trình duyệt, không phải gọi LiveKit qua mạng để lấy quyền vào phòng.</p>
+
+      <div class="diagram-container">
+        <svg viewBox="0 0 1040 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="arch-title arch-desc">
+          <title id="arch-title">Kiến trúc gọi nhóm qua SFU LiveKit</title>
+          <desc id="arch-desc">Trình duyệt nói chuyện với realtime-gateway qua socket để điều phối cuộc gọi, và nối thẳng tới LiveKit SFU qua wss cùng RTC để truyền âm thanh; gateway kiểm tra thành viên ở chat service, ký token vào phòng bằng API secret, nhận webhook vào/ra phòng từ LiveKit; LiveKit dùng coturn làm TURN khi cần.</desc>
+          <defs>
+            <marker id="a-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+            <marker id="a-arr-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+            <marker id="a-arr-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- zones -->
+          <rect x="24" y="88" width="216" height="300" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="32" y="92" width="72" height="12" rx="2" fill="#f5f5f5"/><text x="38" y="101" fill="#7a8399" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.12em">TRÌNH DUYỆT</text>
+          <rect x="272" y="88" width="744" height="300" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="280" y="92" width="120" height="12" rx="2" fill="#f5f5f5"/><text x="286" y="101" fill="#7a8399" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.12em">SERVER DALN</text>
+
+          <!-- connectors (trước nodes) -->
+          <!-- Client -> Gateway (signaling) -->
+          <path d="M 200 168 H 300 Q 308 168 308 160 V 156" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#a-arr-link)"/>
+          <!-- Client -> LiveKit (media, accent) -->
+          <path d="M 200 300 H 452" fill="none" stroke="#eb6c36" stroke-width="1.6" marker-end="url(#a-arr-accent)"/>
+          <!-- Gateway -> Chat (membership) -->
+          <line x1="470" y1="140" x2="560" y2="140" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#a-arr)"/>
+          <!-- LiveKit -> Gateway (webhook, dashed async) -->
+          <path d="M 512 288 V 200 Q 512 192 504 192 H 470" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#a-arr)"/>
+          <!-- LiveKit -> coturn (TURN) -->
+          <line x1="632" y1="316" x2="760" y2="316" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#a-arr)"/>
+
+          <!-- labels -->
+          <rect x="212" y="150" width="96" height="12" rx="2" fill="#f5f5f5"/><text x="260" y="159" fill="#2e5aa8" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.03em">SOCKET · ĐIỀU PHỐI</text>
+          <rect x="252" y="282" width="120" height="12" rx="2" fill="#f5f5f5"/><text x="312" y="291" fill="#eb6c36" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.03em">WSS + RTC · ÂM THANH</text>
+          <rect x="478" y="122" width="76" height="12" rx="2" fill="#f5f5f5"/><text x="516" y="131" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.03em">THÀNH VIÊN?</text>
+          <rect x="360" y="176" width="120" height="12" rx="2" fill="#f5f5f5"/><text x="420" y="185" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.03em">WEBHOOK VÀO/RA PHÒNG</text>
+          <rect x="664" y="298" width="64" height="12" rx="2" fill="#f5f5f5"/><text x="696" y="307" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.03em">TURN</text>
+
+          <!-- nodes -->
+          <!-- Client -->
+          <rect x="64" y="240" width="140" height="80" rx="6" fill="#f5f5f5"/><rect x="64" y="240" width="140" height="80" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+          <rect x="72" y="246" width="34" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.4)" stroke-width="0.8"/><text x="89" y="255" fill="#7a8399" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">USER</text>
+          <text x="134" y="282" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Trình duyệt</text>
+          <text x="134" y="298" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">livekit-client SDK</text>
+          <text x="134" y="311" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">socket-client</text>
+
+          <!-- Gateway -->
+          <rect x="320" y="112" width="150" height="64" rx="6" fill="#f5f5f5"/><rect x="320" y="112" width="150" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="328" y="118" width="22" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/><text x="339" y="127" fill="#2d3142" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle">WS</text>
+          <text x="395" y="146" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Realtime gateway</text>
+          <text x="395" y="162" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">mời · đổ chuông · ký token</text>
+
+          <!-- Chat -->
+          <rect x="560" y="112" width="150" height="64" rx="6" fill="#f5f5f5"/><rect x="560" y="112" width="150" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="568" y="118" width="26" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/><text x="581" y="127" fill="#2d3142" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle">SVC</text>
+          <text x="635" y="146" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Chat service</text>
+          <text x="635" y="162" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">call-members (nội bộ)</text>
+
+          <!-- LiveKit SFU (focal) -->
+          <rect x="452" y="288" width="180" height="72" rx="6" fill="#f5f5f5"/><rect x="452" y="288" width="180" height="72" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+          <rect x="460" y="294" width="30" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/><text x="475" y="303" fill="#eb6c36" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle">SFU</text>
+          <rect x="494" y="294" width="24" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/><text x="506" y="303" fill="#eb6c36" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle">MỚI</text>
+          <text x="542" y="326" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">LiveKit</text>
+          <text x="542" y="342" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">phòng = hội thoại · chuyển tiếp audio</text>
+
+          <!-- coturn -->
+          <rect x="760" y="288" width="150" height="64" rx="6" fill="#f5f5f5"/><rect x="760" y="288" width="150" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <rect x="768" y="294" width="30" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/><text x="783" y="303" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle">TURN</text>
+          <text x="835" y="322" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">coturn</text>
+          <text x="835" y="338" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">dùng lại (đã có)</text>
+
+          <text x="740" y="146" fill="#4f5d75" font-size="13" font-style="italic" font-family="'Newsreader',serif">Gateway ký JWT bằng API secret</text>
+          <text x="740" y="164" fill="#4f5d75" font-size="13" font-style="italic" font-family="'Newsreader',serif">tại chỗ — secret không xuống máy.</text>
+
+          <!-- legend -->
+          <line x1="24" y1="412" x2="1016" y2="412" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <text x="24" y="438" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.14em">CHÚ THÍCH</text>
+          <line x1="120" y1="434" x2="144" y2="434" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#a-arr-link)"/><text x="152" y="438" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Điều phối (socket)</text>
+          <line x1="320" y1="434" x2="344" y2="434" stroke="#eb6c36" stroke-width="1.6" marker-end="url(#a-arr-accent)"/><text x="352" y="438" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Media âm thanh (SFU)</text>
+          <line x1="536" y1="434" x2="560" y2="434" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#a-arr)"/><text x="568" y="438" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Nội bộ server</text>
+          <line x1="712" y1="434" x2="736" y2="434" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#a-arr)"/><text x="744" y="438" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Webhook (bất đồng bộ)</text>
+          <text x="24" y="470" fill="#4f5d75" font-size="13" font-style="italic" font-family="'Newsreader',serif">1-1 vẫn P2P qua coturn như cũ. Chỉ nhóm (≥3) mới vào phòng LiveKit; ranh giới chuyển đổi do gateway quyết.</text>
+        </svg>
+      </div>
+    </section>
+
+    <!-- ══════════ 2. LUỒNG ══════════ -->
+    <section>
+      <p class="eyebrow">Luồng gọi</p>
+      <h2>Từ lúc bấm gọi tới khi kết thúc</h2>
+      <p class="lead">Người gọi mở phòng và vào trước; gateway đổ chuông những thành viên còn lại; ai đồng ý thì xin token và vào phòng. Khác 1-1: nhóm là <strong>vào bất cứ lúc nào</strong> khi phòng còn mở, không chờ tất cả cùng bắt máy.</p>
+
+      <div class="diagram-container">
+        <svg viewBox="0 0 1000 740" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="seq-title seq-desc">
+          <title id="seq-title">Trình tự một cuộc gọi nhóm audio qua LiveKit</title>
+          <desc id="seq-desc">Người gọi A gửi group_call.start tới gateway; gateway kiểm tra thành viên, tạo phiên và trả token; A vào phòng LiveKit và phát mic; gateway đổ chuông thành viên B; B đồng ý, xin token, vào phòng, phát mic và nhận âm thanh; LiveKit chuyển tiếp âm thanh giữa A và B; khi B rời, LiveKit gửi webhook cho gateway để cập nhật và ghi lịch sử vào hội thoại.</desc>
+          <defs>
+            <marker id="s-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+            <marker id="s-arr-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+            <marker id="s-arr-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+            <marker id="s-arr-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- lifelines -->
+          <line x1="130" y1="92" x2="130" y2="684" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+          <line x1="400" y1="92" x2="400" y2="684" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+          <line x1="650" y1="92" x2="650" y2="684" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+          <line x1="880" y1="92" x2="880" y2="684" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+
+          <!-- messages -->
+          <!-- 1 A -> Gateway start -->
+          <line x1="130" y1="130" x2="400" y2="130" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#s-arr)"/>
+          <rect x="180" y="110" width="170" height="12" rx="2" fill="#f5f5f5"/><text x="265" y="119" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.03em">GROUP_CALL.START {convId}</text>
+          <!-- 2 Gateway self: check + session + room -->
+          <path d="M 400 158 H 452 Q 460 158 460 166 V 176 Q 460 184 452 184 H 404" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#s-arr)"/>
+          <rect x="404" y="150" width="230" height="12" rx="2" fill="#f5f5f5"/><text x="408" y="159" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.02em">kiểm tra thành viên · tạo phiên · phòng</text>
+          <!-- 3 Gateway -> A ack (return dashed) -->
+          <line x1="400" y1="210" x2="130" y2="210" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#s-arr)"/>
+          <rect x="168" y="190" width="196" height="12" rx="2" fill="#f5f5f5"/><text x="266" y="199" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.02em">{callId, roomName, url, token}</text>
+          <!-- 4 A -> LiveKit connect+publish (link) -->
+          <line x1="130" y1="250" x2="650" y2="250" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#s-arr-link)"/>
+          <rect x="270" y="230" width="180" height="12" rx="2" fill="#f5f5f5"/><text x="360" y="239" fill="#2e5aa8" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.02em">connect(token) + phát mic</text>
+          <!-- 5 Gateway -> B incoming (async open) -->
+          <line x1="400" y1="292" x2="880" y2="292" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#s-arr-open)"/>
+          <rect x="520" y="272" width="196" height="12" rx="2" fill="#f5f5f5"/><text x="618" y="281" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.02em">GROUP_CALL.INCOMING {từ A}</text>
+          <!-- 6 B -> Gateway accept -->
+          <line x1="880" y1="332" x2="400" y2="332" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#s-arr)"/>
+          <rect x="560" y="312" width="176" height="12" rx="2" fill="#f5f5f5"/><text x="648" y="321" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.02em">GROUP_CALL.ACCEPT {callId}</text>
+          <!-- 7 Gateway -> B token (return dashed) -->
+          <line x1="400" y1="372" x2="880" y2="372" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#s-arr)"/>
+          <rect x="590" y="352" width="120" height="12" rx="2" fill="#f5f5f5"/><text x="650" y="361" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.02em">{url, token}</text>
+          <!-- 8 B -> LiveKit connect+publish+subscribe -->
+          <line x1="880" y1="412" x2="650" y2="412" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#s-arr-link)"/>
+          <rect x="640" y="392" width="230" height="12" rx="2" fill="#f5f5f5"/><text x="755" y="401" fill="#2e5aa8" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.02em">connect(token) + phát + nhận</text>
+          <!-- 9 LiveKit -> A audio (accent) -->
+          <line x1="650" y1="456" x2="130" y2="456" stroke="#eb6c36" stroke-width="1.6" marker-end="url(#s-arr-accent)"/>
+          <rect x="300" y="436" width="200" height="12" rx="2" fill="#f5f5f5"/><text x="400" y="445" fill="#eb6c36" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.02em">ÂM THANH · SFU CHUYỂN TIẾP</text>
+          <!-- 10 LiveKit -> B audio (accent) -->
+          <line x1="650" y1="484" x2="880" y2="484" stroke="#eb6c36" stroke-width="1.6" marker-end="url(#s-arr-accent)"/>
+          <!-- note: người khác tham gia bất cứ lúc nào -->
+          <rect x="150" y="512" width="700" height="30" rx="4" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+          <text x="164" y="531" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.02em">Thành viên khác lặp lại bước 6–10 · vào bất cứ lúc nào khi phòng còn mở</text>
+          <!-- 11 B -> LiveKit leave -->
+          <line x1="880" y1="574" x2="650" y2="574" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#s-arr-link)"/>
+          <rect x="656" y="554" width="150" height="12" rx="2" fill="#f5f5f5"/><text x="731" y="563" fill="#2e5aa8" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.02em">rời phòng (disconnect)</text>
+          <!-- 12 LiveKit -> Gateway webhook (async open) -->
+          <line x1="650" y1="614" x2="400" y2="614" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#s-arr-open)"/>
+          <rect x="410" y="594" width="230" height="12" rx="2" fill="#f5f5f5"/><text x="525" y="603" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.02em">webhook participant_left / finished</text>
+          <!-- 13 Gateway self: ghi lịch sử -->
+          <path d="M 400 642 H 452 Q 460 642 460 650 V 660 Q 460 668 452 668 H 404" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#s-arr)"/>
+          <rect x="404" y="634" width="250" height="12" rx="2" fill="#f5f5f5"/><text x="408" y="643" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.02em">ghi "Cuộc gọi nhóm — N người, M phút"</text>
+
+          <!-- actors -->
+          <g font-family="'Geist',sans-serif">
+            <rect x="60" y="24" width="140" height="56" rx="6" fill="#f5f5f5"/><rect x="60" y="24" width="140" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+            <text x="130" y="50" font-size="12" font-weight="600" fill="#2d3142" text-anchor="middle">A · người gọi</text>
+            <text x="130" y="67" font-size="9" fill="#4f5d75" font-family="'Geist Mono',monospace" text-anchor="middle">livekit-client</text>
+
+            <rect x="330" y="24" width="140" height="56" rx="6" fill="#f5f5f5"/><rect x="330" y="24" width="140" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <text x="400" y="50" font-size="12" font-weight="600" fill="#2d3142" text-anchor="middle">Realtime gateway</text>
+            <text x="400" y="67" font-size="9" fill="#4f5d75" font-family="'Geist Mono',monospace" text-anchor="middle">socket + ký token</text>
+
+            <rect x="580" y="24" width="140" height="56" rx="6" fill="#f5f5f5"/><rect x="580" y="24" width="140" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+            <text x="650" y="50" font-size="12" font-weight="600" fill="#2d3142" text-anchor="middle">LiveKit SFU</text>
+            <text x="650" y="67" font-size="9" fill="#4f5d75" font-family="'Geist Mono',monospace" text-anchor="middle">phòng = hội thoại</text>
+
+            <rect x="810" y="24" width="140" height="56" rx="6" fill="#f5f5f5"/><rect x="810" y="24" width="140" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+            <text x="880" y="50" font-size="12" font-weight="600" fill="#2d3142" text-anchor="middle">B · thành viên</text>
+            <text x="880" y="67" font-size="9" fill="#4f5d75" font-family="'Geist Mono',monospace" text-anchor="middle">livekit-client</text>
+          </g>
+
+          <!-- legend -->
+          <line x1="60" y1="700" x2="950" y2="700" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <text x="60" y="724" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.14em">CHÚ THÍCH</text>
+          <line x1="150" y1="720" x2="174" y2="720" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#s-arr)"/><text x="182" y="724" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Điều phối</text>
+          <line x1="286" y1="720" x2="310" y2="720" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#s-arr-link)"/><text x="318" y="724" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Máy ↔ LiveKit</text>
+          <line x1="440" y1="720" x2="464" y2="720" stroke="#eb6c36" stroke-width="1.6" marker-end="url(#s-arr-accent)"/><text x="472" y="724" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Âm thanh</text>
+          <line x1="590" y1="720" x2="614" y2="720" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#s-arr-open)"/><text x="622" y="724" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Bất đồng bộ / trả về</text>
+        </svg>
+      </div>
+
+      <div class="table-wrap">
+        <table class="evt">
+          <thead><tr><th>Sự kiện (socket)</th><th>Hướng</th><th>Dữ liệu / việc</th></tr></thead>
+          <tbody>
+            <tr><td><code>group_call.start</code></td><td class="dir">máy → gateway</td><td><code>{ conversationId }</code>. Gateway kiểm tra người gọi là thành viên, tạo phiên <code>groupcall:&lt;convId&gt;</code>, đặt roomName, ký token; ack <code>{ callId, roomName, url, token }</code>.</td></tr>
+            <tr><td><code>group_call.incoming</code></td><td class="dir">gateway → thành viên</td><td><code>{ callId, conversationId, from, roomName }</code>. Đẩy tới các thành viên đang online để đổ chuông.</td></tr>
+            <tr><td><code>group_call.accept</code></td><td class="dir">máy → gateway</td><td><code>{ callId }</code>. Gateway xác minh còn phiên + là thành viên, ký token, trả <code>{ url, token }</code>.</td></tr>
+            <tr><td><code>group_call.decline</code></td><td class="dir">máy → gateway</td><td><code>{ callId }</code>. Báo cho phòng biết đã từ chối (không bắt buộc để bắt đầu — nhóm không chờ đủ người).</td></tr>
+            <tr><td><code>group_call.leave</code></td><td class="dir">máy → gateway</td><td><code>{ callId }</code>. Kèm việc SDK rời phòng LiveKit. Nguồn sự thật cuối cùng là <em>webhook</em> của LiveKit.</td></tr>
+            <tr><td><code>group_call.state</code></td><td class="dir">gateway → phòng</td><td><code>{ callId, participants[] }</code>. Cập nhật danh sách ai đang trong cuộc để UI hiển thị.</td></tr>
+            <tr><td>webhook LiveKit</td><td class="dir">LiveKit → gateway</td><td><code>participant_joined/left</code>, <code>room_finished</code>. Gateway đối chiếu phiên, và khi phòng trống thì ghi lịch sử vào hội thoại.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══════════ 3. VÒNG ĐỜI ══════════ -->
+    <section>
+      <p class="eyebrow">Vòng đời</p>
+      <h2>Trạng thái của một phiên gọi nhóm</h2>
+      <div class="diagram-container">
+        <svg viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="st-title st-desc">
+          <title id="st-title">Vòng đời phiên gọi nhóm</title>
+          <desc id="st-desc">Phiên bắt đầu khi người gọi mở phòng và chuyển sang Đổ chuông; khi có người thứ hai vào thì thành Đang gọi, cho phép người khác vào hoặc rời bất cứ lúc nào; khi phòng trống hoặc quá thời gian chờ thì Kết thúc và ghi lịch sử. Nếu đổ chuông mà không ai vào trong 60 giây hoặc người gọi huỷ thì cũng Kết thúc.</desc>
+          <defs>
+            <marker id="st-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+            <marker id="st-arr-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- transitions -->
+          <line x1="60" y1="180" x2="112" y2="180" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#st-arr)"/>
+          <line x1="280" y1="180" x2="360" y2="180" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#st-arr)"/>
+          <line x1="560" y1="180" x2="700" y2="180" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#st-arr)"/>
+          <line x1="908" y1="180" x2="936" y2="180" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#st-arr)"/>
+          <!-- Đổ chuông -> Kết thúc (huỷ/timeout), xuống rồi phải -->
+          <path d="M 220 216 V 300 Q 220 308 228 308 H 796 Q 804 308 804 300 V 216" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#st-arr)"/>
+          <!-- self-loop Đang gọi -->
+          <path d="M 430 148 C 430 96, 530 96, 530 148" fill="none" stroke="#eb6c36" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#st-arr-a)"/>
+
+          <!-- labels -->
+          <rect x="294" y="160" width="56" height="12" rx="2" fill="#f5f5f5"/><text x="322" y="169" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">≥ 2 NGƯỜI</text>
+          <rect x="596" y="160" width="72" height="12" rx="2" fill="#f5f5f5"/><text x="632" y="169" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">PHÒNG TRỐNG</text>
+          <rect x="470" y="112" width="120" height="12" rx="2" fill="#f5f5f5"/><text x="530" y="121" fill="#eb6c36" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">THÊM/RỜI NGƯỜI</text>
+          <rect x="470" y="290" width="150" height="12" rx="2" fill="#f5f5f5"/><text x="545" y="299" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">KHÔNG AI VÀO 60S / A HUỶ</text>
+
+          <!-- start / end dots -->
+          <circle cx="52" cy="180" r="6" fill="#2d3142"/>
+          <text x="52" y="208" fill="#4f5d75" font-size="8" font-family="'Geist',sans-serif" text-anchor="middle">bấm gọi</text>
+          <circle cx="948" cy="180" r="8" fill="none" stroke="#2d3142" stroke-width="1"/><circle cx="948" cy="180" r="5" fill="#2d3142"/>
+
+          <!-- states -->
+          <rect x="112" y="152" width="168" height="56" rx="8" fill="#f5f5f5"/><rect x="112" y="152" width="168" height="56" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <text x="196" y="177" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Đổ chuông</text>
+          <text x="196" y="193" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">A trong phòng, chờ</text>
+
+          <rect x="360" y="152" width="200" height="56" rx="8" fill="#f5f5f5"/><rect x="360" y="152" width="200" height="56" rx="8" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+          <text x="460" y="177" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Đang gọi</text>
+          <text x="460" y="193" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">≥ 2 người · vào/rời tự do</text>
+
+          <rect x="700" y="152" width="208" height="56" rx="8" fill="#f5f5f5"/><rect x="700" y="152" width="208" height="56" rx="8" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text x="804" y="177" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Kết thúc</text>
+          <text x="804" y="193" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">đóng phòng · ghi lịch sử</text>
+
+          <!-- legend -->
+          <line x1="52" y1="344" x2="948" y2="344" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <text x="52" y="368" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.14em">CHÚ THÍCH</text>
+          <circle cx="150" cy="364" r="5" fill="#2d3142"/><text x="162" y="368" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Bắt đầu</text>
+          <circle cx="250" cy="364" r="7" fill="none" stroke="#2d3142" stroke-width="1"/><circle cx="250" cy="364" r="4" fill="#2d3142"/><text x="262" y="368" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Đóng phiên</text>
+          <line x1="360" y1="364" x2="384" y2="364" stroke="#eb6c36" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#st-arr-a)"/><text x="392" y="368" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Vào/rời trong lúc đang gọi</text>
+        </svg>
+      </div>
+      <ul class="notes">
+        <li><strong>Nhóm ≠ 1-1:</strong> không chờ tất cả bắt máy. Người gọi vào phòng ngay; ai đồng ý thì vào, ai bận thì thôi; vào muộn/vào lại đều được khi phòng còn mở.</li>
+        <li><strong>Nguồn sự thật là phòng LiveKit,</strong> không phải client. Ai đang trong cuộc lấy từ webhook <code>participant_joined/left</code>; phiên Redis chỉ là bản sao để đổ chuông và hiển thị.</li>
+        <li><strong>Kết thúc</strong> khi phòng trống (webhook <code>room_finished</code>) hoặc đổ chuông quá 60s không ai vào. Lúc đó ghi một tin hệ thống vào hội thoại như cuộc gọi 1-1 đang làm.</li>
+      </ul>
+    </section>
+
+    <!-- ══════════ 4. TOKEN + SERVER ══════════ -->
+    <section>
+      <p class="eyebrow">Token, phân quyền &amp; server</p>
+      <h2>Vào phòng bằng token ký tại gateway</h2>
+      <div class="cards two">
+        <div class="card">
+          <div class="card-header"><span class="card-dot coral"></span><h3>Token &amp; phân quyền</h3></div>
+          <ul>
+            <li>Gateway giữ <code>LIVEKIT_API_KEY</code> + <code>LIVEKIT_API_SECRET</code> trong <code>.env.production</code>; ký JWT bằng <code>livekit-server-sdk</code> — secret không bao giờ xuống máy.</li>
+            <li>Grant tối thiểu: <code>roomJoin</code>, <code>room=&lt;roomName&gt;</code>, <code>canPublish</code> (audio), <code>canSubscribe</code>, <code>identity=userId</code>, TTL ngắn (vài phút, đủ để vào).</li>
+            <li>Chỉ ký token <strong>sau khi</strong> xác minh người dùng là thành viên hội thoại — cùng nguyên tắc như <code>call-peer</code> của 1-1, nhưng cho hội thoại bất kỳ (thêm <code>GET /chat/internal/call-members</code>).</li>
+            <li>Rớt mạng: SDK tự nối lại; nếu token hết hạn thì xin lại qua <code>group_call.accept</code>.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot ink"></span><h3>LiveKit trên server</h3></div>
+          <ul>
+            <li>Chạy <code>livekit-server</code> trên host (như coturn) hoặc container; cổng signaling <code>7880</code> (wss) sau nginx, dải UDP RTC mở qua ufw <em>hoặc</em> đi qua coturn.</li>
+            <li>Dùng lại <strong>coturn đã có</strong> làm TURN cho LiveKit — không dựng TURN thứ hai.</li>
+            <li>Cấu hình webhook trỏ về gateway (có chữ ký) để cập nhật phiên và ghi lịch sử đáng tin, không phụ thuộc client.</li>
+            <li>Một box 8 GB đủ cho vài phòng audio nhỏ; audio rất nhẹ so với video.</li>
+          </ul>
+        </div>
+      </div>
+      <ul class="notes">
+        <li><strong>Chỗ rẽ nhánh nếu chọn mediasoup thay LiveKit:</strong> bỏ token JWT + phòng của LiveKit; toàn bộ signaling media (<code>getRtpCapabilities → createTransport → produce → consume</code>) chạy qua chính realtime-gateway, gateway ôm luôn mediasoup worker/router. Ghép sâu vào NestJS, không thêm service, nhưng nhiều code hơn và tự lo mở rộng. Ba diagram trên vẫn đúng ở mức kiến trúc; chỉ khối "máy ↔ LiveKit" đổi thành "máy ↔ gateway (mediasoup)".</li>
+      </ul>
+    </section>
+
+    <!-- ══════════ 5. VIỆC CẦN LÀM ══════════ -->
+    <section>
+      <p class="eyebrow">Việc cần làm</p>
+      <h2>Chia theo thành phần</h2>
+      <div class="cards three">
+        <div class="card">
+          <div class="card-header"><span class="card-dot ink"></span><h3>Realtime gateway</h3></div>
+          <ul>
+            <li>Nhóm sự kiện <code>group_call.*</code> (start/accept/decline/leave/state)</li>
+            <li>Phiên <code>groupcall:&lt;convId&gt;</code> trong Redis</li>
+            <li>Ký token LiveKit sau khi kiểm thành viên</li>
+            <li>Nhận webhook LiveKit, ghi lịch sử vào chat</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot muted"></span><h3>Chat service</h3></div>
+          <ul>
+            <li><code>GET /chat/internal/call-members</code> — trả danh sách thành viên hội thoại bất kỳ (mở rộng từ <code>call-peer</code>)</li>
+            <li>Ghi tin hệ thống "Cuộc gọi nhóm — N người, M phút"</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot link"></span><h3>Frontend</h3></div>
+          <ul>
+            <li>Tách UI gọi nhóm: danh sách người trong cuộc, nút mời/rời, mute</li>
+            <li><code>livekit-client</code>: join phòng bằng token, phát mic, subscribe audio</li>
+            <li>1-1 giữ nguyên P2P; chỉ ≥3 người mới vào phòng LiveKit</li>
+          </ul>
+        </div>
+      </div>
+      <div class="cards two" style="margin-top:1.25rem;">
+        <div class="card">
+          <div class="card-header"><span class="card-dot ink"></span><h3>Hạ tầng</h3></div>
+          <ul>
+            <li>Thêm <code>livekit-server</code> (host/container) + config API key/secret, webhook, TURN trỏ coturn</li>
+            <li>nginx: route wss signaling; ufw mở dải UDP RTC nếu không đi hết qua TURN</li>
+            <li><code>deploy.sh</code>: cài/khởi động + kiểm tra như coturn (không chặn deploy nếu lỗi)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot coral"></span><h3>Rủi ro &amp; đánh đổi</h3></div>
+          <ul>
+            <li>Thêm một service media = thêm thứ vận hành, giám sát, cập nhật</li>
+            <li>Hai stack gọi (1-1 P2P + nhóm SFU) — cân nhắc sau này gộp 1-1 vào SFU cho đồng nhất</li>
+            <li>Đồng bộ trạng thái phiên: ưu tiên webhook làm nguồn sự thật, tránh tin client</li>
+            <li>Người dùng đang trong cuộc này lại được mời cuộc khác — cần quy tắc "rời trước khi vào"</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>DALN Chat · Luồng gọi nhóm SFU</span>
+      <span>Bản nháp · 15/09/2026</span>
+    </footer>
+
+  </div>
+</body>
+</html>
