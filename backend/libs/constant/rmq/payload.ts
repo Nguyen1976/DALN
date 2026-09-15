@@ -190,4 +190,6 @@ export interface CallEndedPayload {
   outcome: 'COMPLETED' | 'REJECTED' | 'MISSED' | 'UNREACHABLE'
   /** Thời lượng tính bằng giây, chỉ có với cuộc gọi đã kết nối. */
   durationSeconds?: number
+  /** Loại cuộc gọi; bỏ trống thì coi như 'audio'. */
+  callType?: 'audio' | 'video'
 }

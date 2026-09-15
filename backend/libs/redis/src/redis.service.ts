@@ -198,6 +198,18 @@ export class RedisService {
     return ttl > 0 ? ttl : cooldownSeconds
   }
 
+  /**
+   * Giành quyền xử lý một lần cho `key` bằng SET NX EX nguyên tử.
+   *
+   * Trả `true` khi caller là người đầu tiên đặt được key (chưa từng tồn tại), và
+   * `false` khi key đã có — dùng làm chốt idempotency: hai lần gọi trùng (webhook
+   * gửi lại) chỉ một lần thắng. Key tự hết hạn sau `ttlSeconds` giây.
+   */
+  async claimOnce(key: string, ttlSeconds: number): Promise<boolean> {
+    const won = await this.redisClient.set(key, '1', 'EX', ttlSeconds, 'NX')
+    return Boolean(won)
+  }
+
   async get(key: string): Promise<string | null> {
     return await this.redisClient.get(key)
   }

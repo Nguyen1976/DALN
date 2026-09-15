@@ -7,18 +7,57 @@ import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { RealtimeGateway } from './realtime.gateway'
 import { GroupCallStore, isGroupCallId } from './group-call.store'
 
-/** Redis giả trong bộ nhớ, đủ cho GroupCallStore trong test gọi nhóm. */
+/**
+ * Redis giả trong bộ nhớ, đủ cho GroupCallStore trong test gọi nhóm: string
+ * (get/set với NX), hash (hset/hdel/hgetall), set (sadd/smembers), expire.
+ */
 class FakeRedis {
-  private store = new Map<string, string>()
+  private strings = new Map<string, string>()
+  private hashes = new Map<string, Map<string, string>>()
+  private sets = new Map<string, Set<string>>()
+
   async get(key: string) {
-    return this.store.has(key) ? this.store.get(key)! : null
+    return this.strings.has(key) ? this.strings.get(key)! : null
   }
-  async set(key: string, value: string) {
-    this.store.set(key, value)
+  async set(key: string, value: string, ...args: unknown[]) {
+    const nx = args.some((a) => String(a).toUpperCase() === 'NX')
+    if (nx && this.strings.has(key)) return null
+    this.strings.set(key, value)
     return 'OK'
   }
-  async del(key: string) {
-    return this.store.delete(key) ? 1 : 0
+  async del(...keys: string[]) {
+    let removed = 0
+    for (const key of keys) {
+      if (this.strings.delete(key)) removed++
+      this.hashes.delete(key)
+      this.sets.delete(key)
+    }
+    return removed
+  }
+  async expire() {
+    return 1
+  }
+  async hset(key: string, field: string, value: string) {
+    const hash = this.hashes.get(key) ?? new Map<string, string>()
+    hash.set(field, value)
+    this.hashes.set(key, hash)
+    return 1
+  }
+  async hdel(key: string, field: string) {
+    return this.hashes.get(key)?.delete(field) ? 1 : 0
+  }
+  async hgetall(key: string) {
+    return Object.fromEntries(this.hashes.get(key) ?? new Map())
+  }
+  async sadd(key: string, member: string) {
+    const set = this.sets.get(key) ?? new Set<string>()
+    const had = set.has(member)
+    set.add(member)
+    this.sets.set(key, set)
+    return had ? 0 : 1
+  }
+  async smembers(key: string) {
+    return Array.from(this.sets.get(key) ?? [])
   }
 }
 
@@ -75,6 +114,7 @@ describe('RealtimeGateway', () => {
         calleeId: 'callee',
         conversationId: 'conv-1',
         status: 'ringing',
+        callType: 'audio',
         startedAt: Date.now(),
         ...overrides,
       })
@@ -285,6 +325,51 @@ describe('RealtimeGateway', () => {
         expect.objectContaining({ ok: false, code: 'NOT_MEMBER' }),
       )
       expect(emitted).not.toHaveBeenCalled()
+    })
+
+    it('fail-closed: chat trả thành viên nhưng type khác GROUP -> NOT_GROUP', async () => {
+      // Client tự gửi group_call.start cho hội thoại DIRECT: dù có thành viên
+      // hợp lệ, thiếu type=GROUP thì không được cấp phòng nữa.
+      ;(global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { members, type: 'DIRECT' } }),
+      })
+
+      const ack = await gateway.handleGroupCallStart(
+        { conversationId: 'conv-1' },
+        { data: { userId: 'alice' } } as any,
+      )
+
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'NOT_GROUP' }),
+      )
+      expect(emitted).not.toHaveBeenCalled()
+    })
+
+    it('callType video: lưu vào phiên, đi kèm chuông và ack', async () => {
+      ;(global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { members, type: 'GROUP' } }),
+      })
+
+      const ack: any = await gateway.handleGroupCallStart(
+        { conversationId: 'conv-1', callType: 'video' },
+        { data: { userId: 'alice' } } as any,
+      )
+
+      expect(ack.callType).toBe('video')
+      expect(emitted).toHaveBeenCalledWith(
+        'group_call.incoming',
+        expect.objectContaining({ callType: 'video' }),
+      )
+      // Phòng đã mở giữ callType: bấm audio sau đó vẫn vào phòng video.
+      const audioAck: any = await gateway.handleGroupCallStart(
+        { conversationId: 'conv-1', callType: 'audio' },
+        { data: { userId: 'bob' } } as any,
+      )
+      expect(audioAck.callType).toBe('video')
     })
 
     it('được phép -> tạo phiên, đổ chuông thành viên khác, ack có token/room/url', async () => {

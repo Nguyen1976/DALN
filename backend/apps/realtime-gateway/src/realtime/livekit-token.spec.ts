@@ -52,12 +52,31 @@ describe('livekit-token', () => {
         canPublishData: false,
       }),
     )
+    // Mặc định audio: chỉ microphone được publish (chặn camera/screen-share ở token).
+    expect(payload.video.canPublishSources).toEqual(['microphone'])
     // identity = userId (webhook khớp lại đúng người), name = username hiển thị.
     expect(payload.sub).toBe('user-1')
     expect(payload.name).toBe('Alice')
     expect(payload.iss).toBe('devkey')
     // TTL ~10 phút.
     expect(payload.exp - payload.nbf).toBe(600)
+  })
+
+  it('callType video: cho publish cả microphone lẫn camera', async () => {
+    configure()
+
+    const jwt = await buildGroupCallToken({
+      userId: 'user-1',
+      username: 'Alice',
+      roomName: 'conv_c1',
+      callType: 'video',
+    })
+
+    const payload = decode(jwt as string)
+    expect(payload.video.canPublishSources).toEqual(
+      expect.arrayContaining(['microphone', 'camera']),
+    )
+    expect(payload.video.canPublishSources).toHaveLength(2)
   })
 
   it('thiếu API_KEY/SECRET/URL -> trả null (handler trả LIVEKIT_UNCONFIGURED)', async () => {

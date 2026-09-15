@@ -44,6 +44,8 @@ export interface GroupCallLogRequest {
   conversationId: string
   participantCount: number
   durationSeconds: number
+  callId?: string
+  callType?: 'audio' | 'video'
 }
 
 type ConversationSyncMember = {
@@ -490,7 +492,7 @@ export class MessageService {
     if (!isMember(callerId) || (calleeId && !isMember(calleeId))) return
 
     const seconds = Math.max(0, Math.floor(Number(data.durationSeconds) || 0))
-    const text = this.describeCallOutcome(outcome, seconds)
+    const text = this.describeCallOutcome(outcome, seconds, data.callType ?? 'audio')
 
     await this.createSystemMessageAndSync(conversationId, callerId, text)
   }
@@ -517,6 +519,20 @@ export class MessageService {
       return { ok: false }
     }
 
+    // Chốt idempotency: webhook LiveKit có thể gửi lại cùng một callId. Ai giành
+    // được key trước mới ghi tin; lần trùng thấy claimOnce trả false thì coi như
+    // đã ghi rồi và trả ok:true mà không tạo tin thứ hai. Bỏ trống callId ->
+    // giữ nguyên hành vi cũ (payload cũ vẫn chạy).
+    if (data.callId) {
+      const won = await this.redisService.claimOnce(
+        'chat:groupcalllog:' + data.callId,
+        86400,
+      )
+      if (!won) {
+        return { ok: true }
+      }
+    }
+
     const durationSeconds = Math.max(
       0,
       Math.floor(Number(data.durationSeconds) || 0),
@@ -525,7 +541,11 @@ export class MessageService {
       0,
       Math.floor(Number(data.participantCount) || 0),
     )
-    const text = this.describeGroupCall(participantCount, durationSeconds)
+    const text = this.describeGroupCall(
+      participantCount,
+      durationSeconds,
+      data.callType ?? 'audio',
+    )
 
     // Tin hệ thống hiển thị dưới tên "System" (createSystemMessageAndSync gán
     // sẵn), nên actor chỉ cần là một thành viên hợp lệ để bản ghi có senderId
@@ -536,26 +556,38 @@ export class MessageService {
     return { ok: true }
   }
 
-  private describeGroupCall(participantCount: number, seconds: number): string {
+  private describeGroupCall(
+    participantCount: number,
+    seconds: number,
+    callType: 'audio' | 'video' = 'audio',
+  ): string {
     const minutes = Math.floor(seconds / 60)
     const rest = seconds % 60
     const duration =
       minutes > 0 ? `${minutes} phút ${rest} giây` : `${rest} giây`
-    return `Cuộc gọi nhóm — ${participantCount} người · ${duration}`
+    const label = callType === 'video' ? 'Cuộc gọi video nhóm' : 'Cuộc gọi nhóm'
+    return `${label} — ${participantCount} người · ${duration}`
   }
 
-  private describeCallOutcome(outcome: string, seconds: number): string {
-    if (outcome === 'REJECTED') return 'Cuộc gọi thoại bị từ chối'
-    if (outcome === 'MISSED') return 'Cuộc gọi thoại nhỡ'
-    if (outcome === 'UNREACHABLE') return 'Cuộc gọi thoại không kết nối được'
+  private describeCallOutcome(
+    outcome: string,
+    seconds: number,
+    callType: 'audio' | 'video' = 'audio',
+  ): string {
+    // Audio giữ nguyên "Cuộc gọi thoại"; video đổi thành "Cuộc gọi video".
+    const label = callType === 'video' ? 'Cuộc gọi video' : 'Cuộc gọi thoại'
 
-    if (seconds <= 0) return 'Cuộc gọi thoại đã kết thúc'
+    if (outcome === 'REJECTED') return `${label} bị từ chối`
+    if (outcome === 'MISSED') return `${label} nhỡ`
+    if (outcome === 'UNREACHABLE') return `${label} không kết nối được`
+
+    if (seconds <= 0) return `${label} đã kết thúc`
 
     const minutes = Math.floor(seconds / 60)
     const rest = seconds % 60
     const duration =
       minutes > 0 ? `${minutes} phút ${rest} giây` : `${rest} giây`
-    return `Cuộc gọi thoại đã kết thúc — ${duration}`
+    return `${label} đã kết thúc — ${duration}`
   }
 
   async createSystemMessageAndSync(

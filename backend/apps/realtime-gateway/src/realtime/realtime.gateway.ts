@@ -30,10 +30,13 @@ import {
   GroupCallSession,
   GroupCallStore,
   isGroupCallId,
-  roomNameFor,
 } from './group-call.store'
 import { fetchCallMembers, postGroupCallLog } from './chat-call-members.client'
-import { buildGroupCallToken, getLivekitUrl } from './livekit-token'
+import {
+  buildGroupCallToken,
+  getLivekitUrl,
+  isLivekitConfigured,
+} from './livekit-token'
 
 /** Ack trả về cho client ở các sự kiện `call.*`. */
 type CallAck =
@@ -600,12 +603,17 @@ export class RealtimeGateway
       )
     }
 
+    // Mặc định audio để tương thích client cũ chưa gửi callType. cameraEnabled là
+    // trạng thái từng người, không đổi callType (một người tắt camera ≠ audio call).
+    const callType = data?.callType === 'video' ? 'video' : 'audio'
+
     const session: CallSession = {
       callId: randomUUID(),
       callerId,
       calleeId: peer.peerId,
       conversationId,
       status: 'ringing',
+      callType,
       startedAt: Date.now(),
     }
 
@@ -618,11 +626,17 @@ export class RealtimeGateway
         callId: session.callId,
         callerId,
         conversationId,
+        callType,
         offer,
       },
     )
 
-    return { ok: true, callId: session.callId, calleeId: session.calleeId }
+    return {
+      ok: true,
+      callId: session.callId,
+      calleeId: session.calleeId,
+      callType,
+    }
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_ACCEPTED)
@@ -698,6 +712,7 @@ export class RealtimeGateway
         calleeId: session.calleeId,
         actorId: userId,
         outcome: 'REJECTED',
+        callType: session.callType,
       })
     }
 
@@ -743,6 +758,7 @@ export class RealtimeGateway
       calleeId: session.calleeId,
       actorId: enderId,
       outcome: this.resolveCallOutcome(session, reason),
+      callType: session.callType,
       // Thời lượng tính từ mốc nghe máy của server, không lấy con số client gửi
       // lên: đồng hồ ở frontend có thể chạy trước cả khi ICE thông.
       durationSeconds: session.connectedAt
@@ -780,6 +796,7 @@ export class RealtimeGateway
     calleeId: string
     actorId?: string
     outcome: 'COMPLETED' | 'REJECTED' | 'MISSED' | 'UNREACHABLE'
+    callType?: 'audio' | 'video'
     durationSeconds?: number
   }) {
     if (!payload.conversationId) return
@@ -874,24 +891,45 @@ export class RealtimeGateway
         : callError('INTERNAL', 'Could not verify conversation members')
     }
 
-    // Chat trả `type` thì tin nó; vắng thì để frontend chịu trách nhiệm chỉ mở
-    // gọi nhóm cho hội thoại GROUP (kiểm thành viên đã đủ để phân quyền).
-    if (lookup.type && lookup.type !== 'GROUP') {
+    // Fail-closed: chỉ mở gọi nhóm cho hội thoại GROUP. Chat luôn trả `type`;
+    // thiếu type (cấu hình sai/không khớp) cũng bị chặn thay vì cho qua như trước
+    // — client tự gửi group_call.start cho DIRECT không còn được cấp phòng.
+    if (lookup.type !== 'GROUP') {
       return callError(
         'NOT_GROUP',
         'Group call is only for group conversations',
       )
     }
 
-    const roomName = roomNameFor(conversationId)
+    // Kiểm cấu hình LiveKit trước khi tạo phiên, để không để lại phòng mồ côi khi
+    // chưa dựng LiveKit (buildGroupCallToken sẽ không null nếu đã cấu hình).
+    if (!isLivekitConfigured()) {
+      return callError(
+        'LIVEKIT_UNCONFIGURED',
+        'Group calling is not configured',
+      )
+    }
+
+    const callType: 'audio' | 'video' =
+      data?.callType === 'video' ? 'video' : 'audio'
     const callerName =
       lookup.members.find((member) => member.id === callerId)?.username ||
       callerId
 
+    // Phòng đã mở giữ nguyên callType của nó: bấm "video" khi đang có phòng audio
+    // sẽ vào phòng audio (không tự nâng cấp) — token cấp theo session.callType.
+    const session = await this.groupCallStore.getOrCreate({
+      conversationId,
+      startedBy: callerId,
+      members: lookup.members,
+      callType,
+    })
+
     const token = await buildGroupCallToken({
       userId: callerId,
       username: callerName,
-      roomName,
+      roomName: session.roomName,
+      callType: session.callType,
     })
     if (!token) {
       return callError(
@@ -899,12 +937,6 @@ export class RealtimeGateway
         'Group calling is not configured',
       )
     }
-
-    const session = await this.groupCallStore.getOrCreate({
-      conversationId,
-      startedBy: callerId,
-      members: lookup.members,
-    })
 
     // Đổ chuông các thành viên khác. Ai offline thì room `user:<id>` rỗng nên
     // emit là no-op — không cần lọc trước.
@@ -917,6 +949,7 @@ export class RealtimeGateway
         callId: session.callId,
         conversationId,
         roomName: session.roomName,
+        callType: session.callType,
         from: { id: callerId, username: callerName },
       },
     )
@@ -925,6 +958,7 @@ export class RealtimeGateway
       ok: true,
       callId: session.callId,
       roomName: session.roomName,
+      callType: session.callType,
       url: getLivekitUrl(),
       token,
     }
@@ -966,6 +1000,7 @@ export class RealtimeGateway
       userId,
       username,
       roomName: session.roomName,
+      callType: session.callType,
     })
     if (!token) {
       return callError(
@@ -974,7 +1009,12 @@ export class RealtimeGateway
       )
     }
 
-    return { ok: true, url: getLivekitUrl(), token }
+    return {
+      ok: true,
+      url: getLivekitUrl(),
+      token,
+      callType: session.callType,
+    }
   }
 
   /**
@@ -1112,8 +1152,9 @@ export class RealtimeGateway
     const conversationId = conversationIdFromRoom(roomName)
     if (!conversationId) return
 
-    const session =
-      await this.groupCallStore.getByConversationId(conversationId)
+    // finish() đóng phiên đúng MỘT lần và dọn sạch key: webhook room_finished tới
+    // trùng/đảo thứ tự thì lần sau trả null -> không ghi log nhóm hai lần.
+    const session = await this.groupCallStore.finish(conversationId)
     if (!session) return
 
     const durationSeconds = Math.max(
@@ -1125,6 +1166,8 @@ export class RealtimeGateway
       conversationId,
       participantCount: session.seen.length,
       durationSeconds,
+      callId: session.callId,
+      callType: session.callType,
     })
 
     this.emitToUserSockets(
@@ -1132,7 +1175,5 @@ export class RealtimeGateway
       SOCKET_EVENTS.GROUP_CALL.ENDED,
       { callId: session.callId, conversationId },
     )
-
-    await this.groupCallStore.delete(conversationId)
   }
 }

@@ -322,7 +322,10 @@ export class ConversationService {
    */
   async getCallMembers(
     dto: CallMembersRequest,
-  ): Promise<{ members: { id: string; username: string }[] }> {
+  ): Promise<{
+    members: { id: string; username: string }[]
+    type: conversationType
+  }> {
     const conversationId = dto?.conversationId?.trim()
     const userId = dto?.userId?.trim()
 
@@ -355,6 +358,7 @@ export class ConversationService {
         id: member.userId,
         username: member.username || member.fullName || member.userId,
       })),
+      type: conversation.type,
     }
   }
 

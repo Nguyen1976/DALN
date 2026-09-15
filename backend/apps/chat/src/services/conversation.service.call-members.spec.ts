@@ -45,6 +45,7 @@ describe('ConversationService.getCallMembers', () => {
         { id: OTHER, username: 'Người kia' },
         { id: NAMELESS, username: NAMELESS },
       ],
+      type: 'GROUP',
     })
   })
 
@@ -63,6 +64,7 @@ describe('ConversationService.getCallMembers', () => {
         { id: ME, username: 'me' },
         { id: OTHER, username: 'other' },
       ],
+      type: 'DIRECT',
     })
   })
 
