@@ -1,61 +1,23 @@
 import { useState } from "react";
 import { useSelector } from "react-redux";
-import { toast } from "sonner";
 import { MessageSquareText } from "lucide-react";
 import { EmptyState } from "@/components/ui/feedback";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import ProfilePanel from "@/components/ProfilePanel";
-import VoiceCallModal, {
-  type VoiceCallMode,
-} from "@/components/VoiceCallModal";
-import GroupCallModal from "@/components/GroupCallModal";
 import MainLayout from "@/layouts/MainLayout";
 import { useNavigate, useParams } from "react-router";
-import { socket } from "@/lib/socket";
-import { SOCKET_EVENTS } from "@/lib/socket.events";
 import { selectConversationById } from "@/redux/slices/conversationSlice";
 import type { RootState } from "@/redux/store";
-import { describeGroupCallError } from "@/utils/groupCallError";
+import { useCall } from "@/contexts/callContext";
 
 type CallType = "audio" | "video";
 
-type ActiveVoiceCall = {
-  conversationId: string;
-  mode: VoiceCallMode;
-  callType: CallType;
-};
-
-type ActiveGroupCall = {
-  callId: string;
-  conversationId: string;
-  roomName: string;
-  url: string;
-  token: string;
-  callType: CallType;
-  iceServers?: RTCIceServer[];
-};
-
-/** Hình dạng ack của `group_call.start`. */
-type GroupCallStartAck =
-  | {
-      ok: true;
-      callId: string;
-      roomName: string;
-      url: string;
-      token: string;
-      callType?: CallType;
-      iceServers?: RTCIceServer[];
-    }
-  | { ok: false; code?: string };
-
 export default function ChatPage() {
   const [showProfile, setShowProfile] = useState(false);
-  const [activeVoiceCall, setActiveVoiceCall] =
-    useState<ActiveVoiceCall | null>(null);
-  const [activeGroupCall, setActiveGroupCall] =
-    useState<ActiveGroupCall | null>(null);
   const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
+  // Cuộc gọi ra ngoài do CallProvider (cấp app) giữ → thu nhỏ + sống xuyên trang.
+  const { startDirectCall, startGroupCall } = useCall();
 
   const navigate = useNavigate();
   const selectedChatId = useParams().conversationId || "";
@@ -63,41 +25,15 @@ export default function ChatPage() {
     selectedChatId ? selectConversationById(state, selectedChatId) : undefined,
   );
 
-  // DIRECT → gọi 1-1 P2P (VoiceCallModal). GROUP → gọi nhóm SFU: emit
-  // group_call.start, mở GroupCallModal với ack {callId, roomName, url, token,
-  // callType}. `callType` quyết định audio hay video cho cả hai nhánh.
+  // DIRECT → gọi 1-1 P2P; GROUP → gọi nhóm SFU. Cả hai do CallProvider giữ ở cấp
+  // app nên mở hội thoại khác / đổi trang không cúp máy (có thể thu nhỏ để chat).
   const handleCall = (callType: CallType) => {
     if (!selectedChatId) return;
-
     if (selectedConversation?.type === "GROUP") {
-      socket.emit(
-        SOCKET_EVENTS.GROUP_CALL.START,
-        { conversationId: selectedChatId, callType },
-        (ack?: GroupCallStartAck) => {
-          if (ack?.ok) {
-            setActiveGroupCall({
-              callId: ack.callId,
-              conversationId: selectedChatId,
-              roomName: ack.roomName,
-              url: ack.url,
-              token: ack.token,
-              // Phòng đã mở giữ nguyên callType của nó — tin theo ack của server.
-              callType: ack.callType ?? callType,
-              iceServers: ack.iceServers,
-            });
-          } else {
-            toast.error(describeGroupCallError(ack?.code));
-          }
-        },
-      );
-      return;
+      startGroupCall(selectedChatId, callType);
+    } else {
+      startDirectCall(selectedChatId, callType);
     }
-
-    setActiveVoiceCall({
-      conversationId: selectedChatId,
-      mode: "outgoing",
-      callType,
-    });
   };
 
   return (
@@ -131,28 +67,6 @@ export default function ChatPage() {
           onJumpToMessage={(messageId) => {
             setFocusMessageId(messageId);
           }}
-        />
-      )}
-
-      {activeVoiceCall && (
-        <VoiceCallModal
-          conversationId={activeVoiceCall.conversationId}
-          mode={activeVoiceCall.mode}
-          callType={activeVoiceCall.callType}
-          onClose={() => setActiveVoiceCall(null)}
-        />
-      )}
-
-      {activeGroupCall && (
-        <GroupCallModal
-          callId={activeGroupCall.callId}
-          roomName={activeGroupCall.roomName}
-          url={activeGroupCall.url}
-          token={activeGroupCall.token}
-          conversationId={activeGroupCall.conversationId}
-          callType={activeGroupCall.callType}
-          iceServers={activeGroupCall.iceServers}
-          onClose={() => setActiveGroupCall(null)}
         />
       )}
     </MainLayout>

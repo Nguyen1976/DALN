@@ -688,6 +688,54 @@ export const useWebRTC = (socket: Socket) => {
     return true;
   }, [setStream]);
 
+  /**
+   * Đổi sang camera kế tiếp (trước/sau trên điện thoại, hoặc webcam khác trên máy
+   * tính). Chỉ có tác dụng khi camera đang bật và có ≥2 thiết bị video. Dùng
+   * replaceTrack trên sender sẵn có nên KHÔNG phải đàm phán lại.
+   */
+  const switchCamera = useCallback(async () => {
+    const sender = videoSenderRef.current;
+    const currentTrack = cameraTrackRef.current;
+    if (!sender || !currentTrack) return; // camera đang tắt → không làm gì
+
+    let devices: MediaDeviceInfo[] = [];
+    try {
+      devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+        (d) => d.kind === "videoinput",
+      );
+    } catch {
+      return;
+    }
+    if (devices.length < 2) return; // chỉ có 1 camera → không có gì để đổi
+
+    const currentId = currentTrack.getSettings().deviceId;
+    const idx = devices.findIndex((d) => d.deviceId === currentId);
+    const next = devices[(idx + 1) % devices.length];
+    if (!next || next.deviceId === currentId) return;
+
+    try {
+      const camStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: { exact: next.deviceId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
+      const newTrack = camStream.getVideoTracks()[0];
+      await sender.replaceTrack(newTrack);
+      currentTrack.stop();
+      cameraTrackRef.current = newTrack;
+
+      const current = localStreamRef.current;
+      const nextTracks = current
+        ? [...current.getTracks().filter((t) => t !== currentTrack), newTrack]
+        : [newTrack];
+      setStream(new MediaStream(nextTracks));
+    } catch {
+      // Không đổi được (thiết bị bận / bị từ chối) → giữ nguyên camera hiện tại.
+    }
+  }, [setStream]);
+
   return {
     localStream,
     remoteStream,
@@ -704,6 +752,7 @@ export const useWebRTC = (socket: Socket) => {
     handleReceiveIceCandidate,
     toggleMute,
     toggleCamera,
+    switchCamera,
     cleanup,
     peerConnection,
     callIdRef,

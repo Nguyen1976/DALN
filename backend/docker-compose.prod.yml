@@ -492,6 +492,14 @@ services:
       - "127.0.0.1:7880:7880"          # WS + HTTP API: chỉ localhost -> nginx /livekit/
       - "7881:7881"                    # RTC qua TCP (dự phòng khi UDP bị chặn) — ra ngoài
       - "50000:50000/udp"              # media UDP mux (1 cổng) — ra ngoài (KHÔNG bind 127.0.0.1)
+    # Cách ly tài nguyên (thiết kế mục 04 ③): 4 core dùng chung với Mongo/Redis/
+    # RabbitMQ/Kong/6 service Node — một cuộc gọi video nặng không được bóp nghẹt
+    # chat/DB. Compose v2 honor deploy.resources.limits khi `docker compose up`.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
     networks:
       - backend
     logging: *logging

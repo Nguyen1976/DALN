@@ -893,6 +893,41 @@ export class RealtimeGateway
     return { ok: true, callId: session.callId }
   }
 
+  /**
+   * Chuyển tiếp trạng thái camera/micro của một bên cho bên kia (1-1). Đây là
+   * NGUỒN SỰ THẬT để hiển thị avatar/khung video, thay vì dựa vào sự kiện `mute`
+   * của RTP track (replaceTrack(null) không phát `mute` đáng tin) — khiến bên kia
+   * thấy khung hình đứng hình khi tắt camera.
+   */
+  @SubscribeMessage(SOCKET_EVENTS.CALL.MEDIA_STATE)
+  async handleCallMediaState(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ): Promise<CallAck> {
+    const senderId = client.data.userId
+    if (!senderId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
+    }
+
+    const loaded = await this.loadCallSession(data?.callId, senderId)
+    if (!loaded.ok) return loaded.ack
+
+    const { session } = loaded
+
+    this.emitToUserSockets(
+      [CallSessionStore.peerOf(session, senderId)],
+      SOCKET_EVENTS.CALL.MEDIA_STATE,
+      {
+        callId: session.callId,
+        senderId,
+        cameraEnabled: data?.cameraEnabled === true,
+        micEnabled: data?.micEnabled !== false,
+      },
+    )
+
+    return { ok: true, callId: session.callId }
+  }
+
   // ── Gọi nhóm (GROUP) qua SFU LiveKit ────────────────────────────────────
   //
   // Song song với cụm CALL.* 1-1 ở trên nhưng khác bản chất: LiveKit làm SFU nên
