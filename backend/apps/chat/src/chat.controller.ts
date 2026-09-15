@@ -398,6 +398,8 @@ export class ChatController {
       conversationId: body.conversationId,
       participantCount: Number(body.participantCount) || 0,
       durationSeconds: Number(body.durationSeconds) || 0,
+      callId: body.callId,
+      callType: body.callType as 'audio' | 'video' | undefined,
     })
   }
 }

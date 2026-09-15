@@ -166,4 +166,12 @@ export class GroupCallLogDTO {
   @IsOptional()
   @IsNumber()
   durationSeconds?: number
+
+  @IsOptional()
+  @IsString()
+  callId?: string
+
+  @IsOptional()
+  @IsString()
+  callType?: string
 }

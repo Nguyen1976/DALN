@@ -12,17 +12,20 @@ const M2 = '6a35000000000000000a0002'
  */
 function setup() {
   const memberRepo = { findByConversationId: jest.fn() }
+  // claimOnce mặc định thắng (true) để nhánh idempotency không chặn tin; test
+  // nào cần mô phỏng webhook gửi lại thì override cho trả false.
+  const redisService = { claimOnce: jest.fn().mockResolvedValue(true) }
   const service = new MessageService(
     memberRepo as never,
     {} as never, // messageRepo
     {} as never, // eventsPublisher
     {} as never, // messageMediaService
-    {} as never, // redisService
+    redisService as never,
   )
   const sync = jest
     .spyOn(service, 'createSystemMessageAndSync')
     .mockResolvedValue(undefined as never)
-  return { service, memberRepo, sync }
+  return { service, memberRepo, redisService, sync }
 }
 
 describe('MessageService.logGroupCall', () => {
@@ -119,5 +122,62 @@ describe('MessageService.logGroupCall', () => {
         durationSeconds: 10,
       }),
     ).rejects.toThrow(BadRequestException)
+  })
+
+  it('callType video -> ghi "Cuộc gọi video nhóm — N người · phút giây"', async () => {
+    const { service, memberRepo, sync } = setup()
+    memberRepo.findByConversationId.mockResolvedValue([
+      { userId: M1 },
+      { userId: M2 },
+    ])
+
+    await expect(
+      service.logGroupCall({
+        conversationId: CONV,
+        participantCount: 3,
+        durationSeconds: 125,
+        callType: 'video',
+      }),
+    ).resolves.toEqual({ ok: true })
+
+    expect(sync).toHaveBeenCalledWith(
+      CONV,
+      M1,
+      'Cuộc gọi video nhóm — 3 người · 2 phút 5 giây',
+    )
+  })
+
+  it('cùng callId gọi lần hai -> idempotent: claimOnce trả false, không ghi gì, vẫn ok:true', async () => {
+    const { service, memberRepo, redisService, sync } = setup()
+    memberRepo.findByConversationId.mockResolvedValue([{ userId: M1 }])
+    // Lần đầu thắng claim, lần hai (webhook gửi lại) thua.
+    redisService.claimOnce
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+
+    await expect(
+      service.logGroupCall({
+        conversationId: CONV,
+        participantCount: 2,
+        durationSeconds: 30,
+        callId: 'call-abc',
+      }),
+    ).resolves.toEqual({ ok: true })
+
+    await expect(
+      service.logGroupCall({
+        conversationId: CONV,
+        participantCount: 2,
+        durationSeconds: 30,
+        callId: 'call-abc',
+      }),
+    ).resolves.toEqual({ ok: true })
+
+    expect(redisService.claimOnce).toHaveBeenCalledWith(
+      'chat:groupcalllog:call-abc',
+      86400,
+    )
+    // Chỉ tin đầu tiên được ghi; lần trùng không tạo tin thứ hai.
+    expect(sync).toHaveBeenCalledTimes(1)
   })
 })

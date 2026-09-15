@@ -1,4 +1,4 @@
-import { AccessToken } from 'livekit-server-sdk'
+import { AccessToken, TrackSource } from 'livekit-server-sdk'
 
 /**
  * Ký token vào phòng gọi nhóm LiveKit.
@@ -8,17 +8,24 @@ import { AccessToken } from 'livekit-server-sdk'
  * trình duyệt — hệt như mật khẩu TURN ở `turn-credentials.ts`: client chỉ nhận
  * JWT ngắn hạn, còn khoá ký nằm lại server.
  *
- * Chỉ AUDIO đợt này: grant cho publish/subscribe nhưng chặn `canPublishData` để
- * không mở kênh dữ liệu ngoài luồng.
+ * `canPublishSources` khoá cứng nguồn được publish theo loại cuộc gọi: audio chỉ
+ * cho microphone, video thêm camera. Không có nó, `canPublish: true` cho phép
+ * client publish cả camera lẫn screen-share dù UI không hỗ trợ — quyền phải nằm ở
+ * token, không phụ thuộc client tự giác. `canPublishData` luôn tắt (không mở kênh
+ * dữ liệu ngoài luồng).
  */
 
 /** TTL token ~10 phút: đủ để join, hết hạn thì client xin lại qua accept. */
 const TOKEN_TTL_SECONDS = 10 * 60
 
+export type GroupCallType = 'audio' | 'video'
+
 export interface GroupCallTokenInput {
   userId: string
   username: string
   roomName: string
+  /** Mặc định audio để tương thích payload cũ chưa mang callType. */
+  callType?: GroupCallType
 }
 
 /** `url` client dùng để `room.connect(url, token)`; `null` khi chưa cấu hình. */
@@ -54,6 +61,7 @@ export async function buildGroupCallToken({
   userId,
   username,
   roomName,
+  callType = 'audio',
 }: GroupCallTokenInput): Promise<string | null> {
   const creds = getCredentials()
   if (!creds) return null
@@ -64,10 +72,18 @@ export async function buildGroupCallToken({
     ttl: TOKEN_TTL_SECONDS,
   })
 
+  // audio: chỉ microphone. video: microphone + camera. Không bao giờ có
+  // screen_share ở v1. SDK tự đổi enum -> chuỗi ("microphone"/"camera") khi ký.
+  const canPublishSources =
+    callType === 'video'
+      ? [TrackSource.MICROPHONE, TrackSource.CAMERA]
+      : [TrackSource.MICROPHONE]
+
   token.addGrant({
     roomJoin: true,
     room: roomName,
     canPublish: true,
+    canPublishSources,
     canSubscribe: true,
     canPublishData: false,
   })

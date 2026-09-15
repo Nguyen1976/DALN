@@ -12,12 +12,16 @@
 
 export type CallSessionStatus = 'ringing' | 'connected'
 
+export type CallType = 'audio' | 'video'
+
 export interface CallSession {
   callId: string
   callerId: string
   calleeId: string
   conversationId: string
   status: CallSessionStatus
+  /** Loại cuộc gọi được khởi tạo; mặc định audio để tương thích payload cũ. */
+  callType: CallType
   /** Unix ms — lúc bắt đầu đổ chuông. */
   startedAt: number
   /** Unix ms — lúc người nhận bấm nghe; chưa nghe thì không có. */

@@ -108,6 +108,10 @@ export async function postGroupCallLog(input: {
   conversationId: string
   participantCount: number
   durationSeconds: number
+  /** callId để chat khử trùng khi webhook room_finished tới lặp/đảo thứ tự. */
+  callId?: string
+  /** Loại cuộc gọi để chat chọn văn bản "nhóm" vs "video nhóm". */
+  callType?: 'audio' | 'video'
 }): Promise<boolean> {
   const url = `${chatServiceBaseUrl()}/chat/internal/group-call-log`
 
