@@ -50,11 +50,18 @@ type ActiveGroupCallState = {
   url: string;
   token: string;
   callType: CallType;
+  iceServers?: RTCIceServer[];
 };
 
 /** Hình dạng ack của `group_call.accept`. */
 type GroupCallAcceptAck =
-  | { ok: true; url: string; token: string; callType?: CallType }
+  | {
+      ok: true;
+      url: string;
+      token: string;
+      callType?: CallType;
+      iceServers?: RTCIceServer[];
+    }
   | { ok: false; code?: string };
 
 function findConversationByCaller(
@@ -219,6 +226,7 @@ export default function IncomingCallManager() {
             url: ack.url,
             token: ack.token,
             callType: ack.callType ?? call.callType,
+            iceServers: ack.iceServers,
           });
         } else {
           toast.error(describeGroupCallError(ack?.code));
@@ -315,6 +323,7 @@ export default function IncomingCallManager() {
           token={activeGroupCall.token}
           conversationId={activeGroupCall.conversationId}
           callType={activeGroupCall.callType}
+          iceServers={activeGroupCall.iceServers}
           onClose={() => setActiveGroupCall(null)}
         />
       )}

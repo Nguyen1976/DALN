@@ -1025,6 +1025,8 @@ export class RealtimeGateway
       callType: session.callType,
       url: getLivekitUrl(),
       token,
+      // coturn làm TURN cho LiveKit (thiết kế mục 04 ①) — xem group_call.accept.
+      iceServers: buildIceConfig(callerId).iceServers,
     }
   }
 
@@ -1095,6 +1097,10 @@ export class RealtimeGateway
       url: getLivekitUrl(),
       token,
       callType: session.callType,
+      // coturn làm TURN cho LiveKit (thiết kế mục 04 ①): client sau NAT chặt/UDP
+      // bị chặn vẫn tới được SFU qua relay. Additive — không ép relay, đường trực
+      // tiếp vẫn ưu tiên.
+      iceServers: buildIceConfig(userId).iceServers,
     }
   }
 

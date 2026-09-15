@@ -474,7 +474,10 @@ services:
   # env LIVEKIT_KEYS = "<key>: <secret>" từ .env.production. LIVEKIT_API_KEY phải
   # TRÙNG webhook.api_key (daln) trong deploy/livekit/livekit.prod.yaml.
   livekit:
-    image: livekit/livekit-server:v1.7
+    # v1.9 (protocol 16+): bắt buộc cho livekit-client 2.22.3 publish camera nhóm
+    # (server v1.7/protocol 14 không gửi LocalTrackSubscribed -> video treo). Xem
+    # docker-compose.yml (dev) — đã QC dev 20/20 sau khi lên v1.9.
+    image: livekit/livekit-server:v1.9
     container_name: daln-prod-livekit
     restart: unless-stopped
     command: ["--config", "/etc/livekit.yaml"]
