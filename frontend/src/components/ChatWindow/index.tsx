@@ -299,16 +299,22 @@ export default function ChatWindow({
           >
             <Phone className="size-5" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onVideoCall}
-            title={isGroupConversation ? "Gọi video nhóm" : "Gọi video"}
-            aria-label={isGroupConversation ? "Gọi video nhóm" : "Gọi video"}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <Video className="size-5" />
-          </Button>
+          {/* Video 1-1 (WebRTC P2P) đã chạy. Video NHÓM (LiveKit SFU) tạm ẩn:
+              publish camera qua setCameraEnabled đang lỗi với client 2.22.3 ↔
+              server 1.7.2 (đã kiểm cả dev lẫn prod) — bật lại khi vá phiên LiveKit.
+              Nhóm vẫn gọi audio bình thường bằng nút bên cạnh. */}
+          {!isGroupConversation && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onVideoCall}
+              title="Gọi video"
+              aria-label="Gọi video"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Video className="size-5" />
+            </Button>
+          )}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
