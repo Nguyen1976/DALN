@@ -307,7 +307,10 @@ services:
   # LIVEKIT_API_SECRET ở .env.docker. Production chạy livekit TRONG compose luôn:
   # xem docker-compose.prod.yml.
   livekit:
-    image: livekit/livekit-server:v1.7
+    # v1.9 (protocol 16+): livekit-client 2.22.3 publish camera qua renegotiation
+    # cần LocalTrackSubscribed — server cũ v1.7 (protocol 14) không gửi nên video
+    # nhóm publish treo rồi reconnect vòng lặp. v1.9 vá triệt để (QC dev 20/20).
+    image: livekit/livekit-server:v1.9
     container_name: daln-livekit
     restart: unless-stopped
     command: ["--config", "/etc/livekit.yaml"]

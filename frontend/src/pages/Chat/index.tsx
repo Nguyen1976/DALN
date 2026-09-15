@@ -33,6 +33,7 @@ type ActiveGroupCall = {
   url: string;
   token: string;
   callType: CallType;
+  iceServers?: RTCIceServer[];
 };
 
 /** Hình dạng ack của `group_call.start`. */
@@ -44,6 +45,7 @@ type GroupCallStartAck =
       url: string;
       token: string;
       callType?: CallType;
+      iceServers?: RTCIceServer[];
     }
   | { ok: false; code?: string };
 
@@ -81,6 +83,7 @@ export default function ChatPage() {
               token: ack.token,
               // Phòng đã mở giữ nguyên callType của nó — tin theo ack của server.
               callType: ack.callType ?? callType,
+              iceServers: ack.iceServers,
             });
           } else {
             toast.error(describeGroupCallError(ack?.code));
@@ -148,6 +151,7 @@ export default function ChatPage() {
           token={activeGroupCall.token}
           conversationId={activeGroupCall.conversationId}
           callType={activeGroupCall.callType}
+          iceServers={activeGroupCall.iceServers}
           onClose={() => setActiveGroupCall(null)}
         />
       )}

@@ -36,6 +36,8 @@ interface GroupCallModalProps {
    * hiển thị lưới video. Tuỳ chọn để caller cũ không phải đổi gì.
    */
   callType?: "audio" | "video";
+  /** STUN/TURN (coturn) từ ack để LiveKit vượt NAT chặt; additive. */
+  iceServers?: RTCIceServer[];
   onClose: () => void;
 }
 
@@ -118,6 +120,7 @@ export default function GroupCallModal({
   token,
   conversationId,
   callType = "audio",
+  iceServers,
   onClose,
 }: GroupCallModalProps) {
   const conversation = useSelector((state: RootState) =>
@@ -135,7 +138,7 @@ export default function GroupCallModal({
     toggleMic,
     toggleCamera,
     leave,
-  } = useGroupCall({ url, token, callType, onDisconnected: onClose });
+  } = useGroupCall({ url, token, callType, iceServers, onDisconnected: onClose });
 
   // Danh sách người theo gateway (bổ trợ cho room: biết ai đã tham gia dù audio
   // track chưa subscribe về phía mình).

@@ -47,6 +47,12 @@ interface UseGroupCallOptions {
    * sau khi kết nối. Tuỳ chọn để giữ tương thích với caller cũ.
    */
   callType?: "audio" | "video";
+  /**
+   * STUN/TURN (coturn) từ ack để LiveKit vượt NAT chặt/UDP bị chặn. Additive:
+   * bổ sung vào ICE do LiveKit tự cấp, KHÔNG ép relay nên đường trực tiếp vẫn ưu
+   * tiên. Rỗng/không truyền thì giữ nguyên hành vi cũ.
+   */
+  iceServers?: RTCIceServer[];
   /** Gọi khi phòng đóng/rớt kết nối (RoomEvent.Disconnected) để đóng modal. */
   onDisconnected?: () => void;
 }
@@ -63,6 +69,7 @@ export function useGroupCall({
   url,
   token,
   callType = "audio",
+  iceServers,
   onDisconnected,
 }: UseGroupCallOptions) {
   const roomRef = useRef<Room | null>(null);
@@ -149,7 +156,16 @@ export function useGroupCall({
     let cancelled = false;
     void (async () => {
       try {
-        await room.connect(url, token);
+        // rtcConfig.iceServers bổ sung STUN/TURN (coturn) vào ICE mà LiveKit tự
+        // cấp — giúp client sau NAT chặt vẫn tới được SFU. Không truyền thì kết
+        // nối như cũ.
+        await room.connect(
+          url,
+          token,
+          iceServers && iceServers.length
+            ? { rtcConfig: { iceServers } }
+            : undefined,
+        );
         if (cancelled) return;
         await room.localParticipant.setMicrophoneEnabled(true);
         if (cancelled) return;
@@ -186,7 +202,9 @@ export function useGroupCall({
       audioContainer.remove();
       roomRef.current = null;
     };
-  }, [url, token, callType]);
+    // iceServers đến cùng ack (cùng lúc với url/token) và được cha giữ trong
+    // state nên tham chiếu ổn định — không gây nối lại phòng ngoài ý muốn.
+  }, [url, token, callType, iceServers]);
 
   const toggleMic = useCallback(async () => {
     const room = roomRef.current;
