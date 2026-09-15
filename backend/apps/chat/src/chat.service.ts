@@ -24,6 +24,8 @@ import {
   type CreateConversationData,
   type DeleteConversationRequest,
   type CallPeerRequest,
+  type CallMembersRequest,
+  type GroupCallLogRequest,
 } from './services'
 
 @Injectable()
@@ -149,5 +151,13 @@ export class ChatService {
 
   getCallPeer(dto: CallPeerRequest) {
     return this.conversationService.getCallPeer(dto)
+  }
+
+  getCallMembers(dto: CallMembersRequest) {
+    return this.conversationService.getCallMembers(dto)
+  }
+
+  logGroupCall(data: GroupCallLogRequest) {
+    return this.messageService.logGroupCall(data)
   }
 }

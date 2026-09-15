@@ -40,6 +40,12 @@ export interface ClearConversationHistoryRequest {
   userId: string
 }
 
+export interface GroupCallLogRequest {
+  conversationId: string
+  participantCount: number
+  durationSeconds: number
+}
+
 type ConversationSyncMember = {
   userId: string
   fullName?: string | null
@@ -487,6 +493,55 @@ export class MessageService {
     const text = this.describeCallOutcome(outcome, seconds)
 
     await this.createSystemMessageAndSync(conversationId, callerId, text)
+  }
+
+  /**
+   * Ghi một tin hệ thống tổng kết cuộc gọi nhóm khi phòng LiveKit đóng
+   * (webhook room_finished do gateway chuyển tiếp).
+   *
+   * Không tự ném 500: id hỏng -> 400; hội thoại đã biến mất / không còn thành
+   * viên -> `{ ok: false }` để webhook LiveKit không phải retry vô ích.
+   */
+  async logGroupCall(data: GroupCallLogRequest): Promise<{ ok: boolean }> {
+    const conversationId = data?.conversationId?.trim()
+
+    if (!conversationId || !this.isObjectId(conversationId)) {
+      ChatErrors.invalidGroupCallLog()
+    }
+
+    // Không có ConversationRepository ở service này; danh sách thành viên ACTIVE
+    // rỗng đồng nghĩa không còn hội thoại để ghi vào (hoặc chưa từng có), nên
+    // trả ok:false thay vì cố tạo tin mồ côi.
+    const members = await this.memberRepo.findByConversationId(conversationId)
+    if (!members.length) {
+      return { ok: false }
+    }
+
+    const durationSeconds = Math.max(
+      0,
+      Math.floor(Number(data.durationSeconds) || 0),
+    )
+    const participantCount = Math.max(
+      0,
+      Math.floor(Number(data.participantCount) || 0),
+    )
+    const text = this.describeGroupCall(participantCount, durationSeconds)
+
+    // Tin hệ thống hiển thị dưới tên "System" (createSystemMessageAndSync gán
+    // sẵn), nên actor chỉ cần là một thành viên hợp lệ để bản ghi có senderId
+    // thuộc hội thoại — lấy người đầu danh sách.
+    const actorUserId = members[0].userId
+    await this.createSystemMessageAndSync(conversationId, actorUserId, text)
+
+    return { ok: true }
+  }
+
+  private describeGroupCall(participantCount: number, seconds: number): string {
+    const minutes = Math.floor(seconds / 60)
+    const rest = seconds % 60
+    const duration =
+      minutes > 0 ? `${minutes} phút ${rest} giây` : `${rest} giây`
+    return `Cuộc gọi nhóm — ${participantCount} người · ${duration}`
   }
 
   private describeCallOutcome(outcome: string, seconds: number): string {

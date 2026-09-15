@@ -1,0 +1,49 @@
+# ============================================================================
+# LiveKit (SFU) cho DEV — gọi NHÓM audio (bản thiết kế:
+# docs/diagrams/group-call-sfu-flow.html). Mount vào service `livekit` trong
+# backend/docker-compose.yml (livekit/livekit-server:v1.7, --config /etc/livekit.yaml).
+# Production KHÔNG dùng file này: xem deploy/livekit/livekit.prod.yaml.
+#
+# Ở DEV keys nằm THẲNG trong file này (không nhạy cảm). Secret dưới đây PHẢI KHỚP
+# LIVEKIT_API_SECRET trong backend/.env.docker, và tên key `devkey` phải khớp
+# LIVEKIT_API_KEY. Gateway ký token bằng cặp key/secret đó (livekit-server-sdk);
+# LiveKit tự kiểm lại bằng chính keys map này.
+# ============================================================================
+
+# WebSocket + HTTP API (client connect ws://localhost:7880). Publish 7880:7880.
+port: 7880
+
+# Phòng tự đóng nhanh sau khi người cuối rời -> webhook room_finished bắn sớm để
+# gateway ghi lịch sử "Cuộc gọi nhóm". Dev để 5s cho QC; prod dùng giá trị lớn hơn.
+room:
+  empty_timeout: 5
+  departure_timeout: 5
+
+rtc:
+  # Cổng TCP dự phòng khi UDP bị chặn (client nối thẳng, publish 7881:7881).
+  tcp_port: 7881
+  # Dải cổng UDP cho media (mỗi participant giữ vài cổng). Dev để NHỎ (20 cổng)
+  # khớp publish 50000-50019:50000-50019/udp trong docker-compose.yml — đỡ tạo
+  # hàng trăm userland proxy trên Docker Desktop.
+  port_range_start: 50000
+  port_range_end: 50019
+  # Dev: không dò IP ngoài. Docker Desktop publish cổng qua 127.0.0.1 nên quảng bá
+  # 127.0.0.1 để trình duyệt trên host tới được candidate media (giống coturn dev).
+  use_external_ip: false
+  node_ip: "127.0.0.1"
+
+# Key ký/kiểm token. Tên key = LIVEKIT_API_KEY (devkey); giá trị = LIVEKIT_API_SECRET.
+keys:
+  devkey: "daln-dev-livekit-secret-do-not-use-in-prod"
+
+# LiveKit gọi webhook (participant_joined/left, room_finished) về gateway để cập
+# nhật phiên + phát STATE/ENDED. Ký bằng key `devkey`; gateway verify bằng
+# WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET). Dùng tên service docker.
+webhook:
+  api_key: devkey
+  urls:
+    - http://realtime-gateway:3001/livekit/webhook
+
+logging:
+  level: info
+  json: false

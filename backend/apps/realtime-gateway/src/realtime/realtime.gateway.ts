@@ -22,12 +22,18 @@ import * as cookie from 'cookie'
 import { resolveTokens } from '@app/common'
 import { randomUUID } from 'crypto'
 import { buildIceConfig } from './turn-credentials'
-import {
-  CallSession,
-  CallSessionStore,
-  isCallId,
-} from './call-session.store'
+import { CallSession, CallSessionStore, isCallId } from './call-session.store'
 import { fetchCallPeer } from './chat-call-peer.client'
+import {
+  conversationIdFromRoom,
+  GroupCallMember,
+  GroupCallSession,
+  GroupCallStore,
+  isGroupCallId,
+  roomNameFor,
+} from './group-call.store'
+import { fetchCallMembers, postGroupCallLog } from './chat-call-members.client'
+import { buildGroupCallToken, getLivekitUrl } from './livekit-token'
 
 /** Ack trả về cho client ở các sự kiện `call.*`. */
 type CallAck =
@@ -57,6 +63,7 @@ export class RealtimeGateway
 
   private userStatusStore: UserStatusStore
   private callSessionStore: CallSessionStore
+  private groupCallStore: GroupCallStore
   // Không còn timer 25s cho mỗi socket: `pong` của Socket.IO (pingInterval
   // 40s, pingTimeout 10s -> tối đa 50s giữa hai lần) đã gia hạn TTL 90s của
   // key socket, dư 1,8 lần biên an toàn. Timer server-side còn có hại: nó gia
@@ -151,6 +158,7 @@ export class RealtimeGateway
   ) {
     this.userStatusStore = new UserStatusStore(this.redisClient)
     this.callSessionStore = new CallSessionStore(this.redisClient)
+    this.groupCallStore = new GroupCallStore(this.redisClient)
   }
 
   //default function
@@ -175,7 +183,10 @@ export class RealtimeGateway
       )
 
       if (!resolved.ok || !resolved.payload?.userId) {
-        this.rejectConnection(client, resolved.ok ? 'TOKEN_INVALID' : resolved.code)
+        this.rejectConnection(
+          client,
+          resolved.ok ? 'TOKEN_INVALID' : resolved.code,
+        )
         return
       }
 
@@ -523,11 +534,12 @@ export class RealtimeGateway
   private async loadCallSession(
     callId: unknown,
     userId: string,
-  ): Promise<
-    { ok: true; session: CallSession } | { ok: false; ack: CallAck }
-  > {
+  ): Promise<{ ok: true; session: CallSession } | { ok: false; ack: CallAck }> {
     if (!isCallId(callId)) {
-      return { ok: false, ack: callError('INVALID_PAYLOAD', 'callId is required') }
+      return {
+        ok: false,
+        ack: callError('INVALID_PAYLOAD', 'callId is required'),
+      }
     }
 
     const session = await this.callSessionStore.get(callId)
@@ -811,5 +823,316 @@ export class RealtimeGateway
     )
 
     return { ok: true, callId: session.callId }
+  }
+
+  // ── Gọi nhóm (GROUP) qua SFU LiveKit ────────────────────────────────────
+  //
+  // Song song với cụm CALL.* 1-1 ở trên nhưng khác bản chất: LiveKit làm SFU nên
+  // gateway không chuyển tiếp SDP/ICE — nó chỉ phân quyền, ký token vào phòng, và
+  // giữ trạng thái "ai đang trong cuộc" (nguồn sự thật cuối là webhook LiveKit).
+
+  /** Phát `group_call.state` tới mọi thành viên hội thoại đã lưu trong phiên. */
+  private emitGroupCallState(session: GroupCallSession) {
+    this.emitToUserSockets(
+      session.members.map((member) => member.id),
+      SOCKET_EVENTS.GROUP_CALL.STATE,
+      {
+        callId: session.callId,
+        conversationId: session.conversationId,
+        participants: GroupCallStore.participantList(session),
+      },
+    )
+  }
+
+  /**
+   * Mở (hoặc vào lại) phòng gọi nhóm.
+   *
+   * Chat service chốt quyền: chỉ trả thành viên khi người gọi thuộc hội thoại.
+   * Gateway tự tìm người nhận từ danh sách đó rồi đổ chuông — client không tự
+   * chỉ định ai nhận được, hệt như đã siết ở cuộc gọi 1-1.
+   */
+  @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.START)
+  async handleGroupCallStart(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ): Promise<CallAck> {
+    const callerId = client.data.userId
+    if (!callerId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
+    }
+
+    const conversationId =
+      typeof data?.conversationId === 'string' ? data.conversationId.trim() : ''
+    if (!conversationId) {
+      return callError('INVALID_PAYLOAD', 'conversationId is required')
+    }
+
+    const lookup = await fetchCallMembers(conversationId, callerId)
+    if (!lookup.ok) {
+      return lookup.code === 'FORBIDDEN'
+        ? callError('NOT_MEMBER', 'Not a member of this conversation')
+        : callError('INTERNAL', 'Could not verify conversation members')
+    }
+
+    // Chat trả `type` thì tin nó; vắng thì để frontend chịu trách nhiệm chỉ mở
+    // gọi nhóm cho hội thoại GROUP (kiểm thành viên đã đủ để phân quyền).
+    if (lookup.type && lookup.type !== 'GROUP') {
+      return callError(
+        'NOT_GROUP',
+        'Group call is only for group conversations',
+      )
+    }
+
+    const roomName = roomNameFor(conversationId)
+    const callerName =
+      lookup.members.find((member) => member.id === callerId)?.username ||
+      callerId
+
+    const token = await buildGroupCallToken({
+      userId: callerId,
+      username: callerName,
+      roomName,
+    })
+    if (!token) {
+      return callError(
+        'LIVEKIT_UNCONFIGURED',
+        'Group calling is not configured',
+      )
+    }
+
+    const session = await this.groupCallStore.getOrCreate({
+      conversationId,
+      startedBy: callerId,
+      members: lookup.members,
+    })
+
+    // Đổ chuông các thành viên khác. Ai offline thì room `user:<id>` rỗng nên
+    // emit là no-op — không cần lọc trước.
+    this.emitToUserSockets(
+      lookup.members
+        .filter((member) => member.id !== callerId)
+        .map((member) => member.id),
+      SOCKET_EVENTS.GROUP_CALL.INCOMING,
+      {
+        callId: session.callId,
+        conversationId,
+        roomName: session.roomName,
+        from: { id: callerId, username: callerName },
+      },
+    )
+
+    return {
+      ok: true,
+      callId: session.callId,
+      roomName: session.roomName,
+      url: getLivekitUrl(),
+      token,
+    }
+  }
+
+  /**
+   * Chấp nhận cuộc gọi nhóm: cấp token vào phòng.
+   *
+   * Phân quyền dựa vào danh sách thành viên đã lưu lúc mở phòng — người gửi phải
+   * thuộc phiên, đúng nguyên tắc "mọi sự kiện sau đổ chuông chỉ mang callId".
+   */
+  @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.ACCEPT)
+  async handleGroupCallAccept(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ): Promise<CallAck> {
+    const userId = client.data.userId
+    if (!userId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
+    }
+
+    if (!isGroupCallId(data?.callId)) {
+      return callError('INVALID_PAYLOAD', 'callId is required')
+    }
+
+    const session = await this.groupCallStore.getByCallId(data.callId)
+    if (!session) {
+      return callError('CALL_NOT_FOUND', 'Group call no longer exists')
+    }
+
+    if (!GroupCallStore.isMember(session, userId)) {
+      return callError('NOT_MEMBER', 'Not a member of this conversation')
+    }
+
+    const username =
+      session.members.find((member) => member.id === userId)?.username || userId
+
+    const token = await buildGroupCallToken({
+      userId,
+      username,
+      roomName: session.roomName,
+    })
+    if (!token) {
+      return callError(
+        'LIVEKIT_UNCONFIGURED',
+        'Group calling is not configured',
+      )
+    }
+
+    return { ok: true, url: getLivekitUrl(), token }
+  }
+
+  /**
+   * Từ chối cuộc gọi nhóm. Không kết thúc phòng (người khác vẫn có thể nói) —
+   * chỉ phát lại state để các client đồng bộ danh sách người đang trong cuộc.
+   */
+  @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.DECLINE)
+  async handleGroupCallDecline(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ): Promise<CallAck> {
+    const userId = client.data.userId
+    if (!userId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
+    }
+
+    if (!isGroupCallId(data?.callId)) {
+      return callError('INVALID_PAYLOAD', 'callId is required')
+    }
+
+    const session = await this.groupCallStore.getByCallId(data.callId)
+    if (!session || !GroupCallStore.isMember(session, userId)) {
+      return { ok: true }
+    }
+
+    this.emitGroupCallState(session)
+    return { ok: true }
+  }
+
+  /**
+   * Rời phòng gọi nhóm. Client tự ngắt khỏi LiveKit; đây chỉ là cập nhật lạc
+   * quan — webhook `participant_left` mới là nguồn sự thật cuối và cũng idempotent.
+   */
+  @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.LEAVE)
+  async handleGroupCallLeave(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ): Promise<CallAck> {
+    const userId = client.data.userId
+    if (!userId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
+    }
+
+    if (!isGroupCallId(data?.callId)) {
+      return callError('INVALID_PAYLOAD', 'callId is required')
+    }
+
+    const session = await this.groupCallStore.getByCallId(data.callId)
+    if (!session || !GroupCallStore.isMember(session, userId)) {
+      return { ok: true }
+    }
+
+    const updated = await this.groupCallStore.removeParticipant(
+      session.conversationId,
+      userId,
+    )
+    if (updated) this.emitGroupCallState(updated)
+
+    return { ok: true }
+  }
+
+  // ── Webhook LiveKit (gọi từ controller sau khi verify chữ ký) ────────────
+
+  /**
+   * Áp một sự kiện webhook LiveKit vào phiên. Controller đã verify chữ ký; ở đây
+   * chỉ còn xử lý nghiệp vụ. Nhận dạng cấu trúc (không phụ thuộc kiểu của SDK) để
+   * gateway không phải import livekit-server-sdk.
+   */
+  async applyLivekitWebhook(event: {
+    event?: string
+    room?: { name?: string; numParticipants?: number }
+    participant?: { identity?: string; name?: string }
+  }): Promise<void> {
+    const roomName = event?.room?.name
+    if (!roomName) return
+
+    switch (event.event) {
+      case 'participant_joined': {
+        const identity = event.participant?.identity
+        if (!identity) return
+        await this.handleGroupParticipantJoined(roomName, {
+          id: identity,
+          username: event.participant?.name || identity,
+        })
+        return
+      }
+      case 'participant_left': {
+        const identity = event.participant?.identity
+        if (!identity) return
+        await this.handleGroupParticipantLeft(roomName, identity)
+        return
+      }
+      case 'room_finished': {
+        await this.handleGroupRoomFinished(roomName)
+        return
+      }
+      default:
+        return
+    }
+  }
+
+  private async handleGroupParticipantJoined(
+    roomName: string,
+    member: GroupCallMember,
+  ): Promise<void> {
+    const conversationId = conversationIdFromRoom(roomName)
+    if (!conversationId) return
+
+    const session = await this.groupCallStore.addParticipant(
+      conversationId,
+      member,
+    )
+    if (session) this.emitGroupCallState(session)
+  }
+
+  private async handleGroupParticipantLeft(
+    roomName: string,
+    userId: string,
+  ): Promise<void> {
+    const conversationId = conversationIdFromRoom(roomName)
+    if (!conversationId) return
+
+    const session = await this.groupCallStore.removeParticipant(
+      conversationId,
+      userId,
+    )
+    if (session) this.emitGroupCallState(session)
+  }
+
+  /**
+   * Phòng đóng: ghi tin hệ thống tổng kết, báo `group_call.ended`, dọn phiên.
+   * `participantCount` = số người từng vào (không phải số còn lại lúc đóng, vốn 0).
+   */
+  private async handleGroupRoomFinished(roomName: string): Promise<void> {
+    const conversationId = conversationIdFromRoom(roomName)
+    if (!conversationId) return
+
+    const session =
+      await this.groupCallStore.getByConversationId(conversationId)
+    if (!session) return
+
+    const durationSeconds = Math.max(
+      0,
+      Math.round((Date.now() - session.startedAt) / 1000),
+    )
+
+    await postGroupCallLog({
+      conversationId,
+      participantCount: session.seen.length,
+      durationSeconds,
+    })
+
+    this.emitToUserSockets(
+      session.members.map((member) => member.id),
+      SOCKET_EVENTS.GROUP_CALL.ENDED,
+      { callId: session.callId, conversationId },
+    )
+
+    await this.groupCallStore.delete(conversationId)
   }
 }

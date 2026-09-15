@@ -1,0 +1,52 @@
+# ============================================================================
+# LiveKit (SFU) cho PRODUCTION — gọi NHÓM audio (bản thiết kế:
+# docs/diagrams/group-call-sfu-flow.html). Chạy TRONG docker compose
+# (backend/docker-compose.prod.yml, service `livekit`, project daln-prod), khác
+# coturn (coturn cài apt trên host vì cần hàng trăm cổng UDP). WS đi qua nginx
+# 443 (/livekit/), media UDP publish thẳng ra ngoài.
+#
+# KEY/SECRET KHÔNG nằm trong file này. File được bind-mount read-only và KHÔNG
+# render (không có bước envsubst như coturn), nên placeholder trong YAML sẽ KHÔNG
+# được thay. Thay vào đó compose truyền env LIVEKIT_KEYS="<key>: <secret>" cho
+# container (livekit-server nạp keys từ env này). Xem docker-compose.prod.yml.
+#
+# RÀNG BUỘC: `webhook.api_key` dưới đây (daln) PHẢI TRÙNG với LIVEKIT_API_KEY
+# trong .env.production — LiveKit ký webhook bằng key này và tra secret tương ứng
+# trong keys map (do LIVEKIT_KEYS nạp). Đổi tên key thì đổi cả hai chỗ.
+# ============================================================================
+
+# WebSocket + HTTP API. Compose publish 127.0.0.1:7880:7880 -> nginx /livekit/
+# proxy vào đây (client dùng wss://nguyen1976.xyz/livekit).
+port: 7880
+
+# Phòng đóng ~20s sau khi người cuối rời: đủ để rớt mạng vào lại, và để webhook
+# room_finished bắn cho gateway ghi lịch sử "Cuộc gọi nhóm".
+room:
+  empty_timeout: 20
+  departure_timeout: 20
+
+rtc:
+  # Cổng TCP dự phòng khi UDP bị chặn (client nối thẳng IP:7881). Publish 7881:7881.
+  tcp_port: 7881
+  # Dải cổng UDP cho media — rộng hơn dev để chịu nhiều phiên đồng thời. Khớp
+  # publish 50000-50199:50000-50199/udp và ufw allow 50000:50199/udp.
+  port_range_start: 50000
+  port_range_end: 50199
+  # Một server, một IP tĩnh đã biết: quảng bá THẲNG IP công khai (không phụ thuộc
+  # STUN/DNS, giống cách TURN dùng thẳng IP vì nameserver .xyz chập chờn). Media
+  # đi client -> IP:cổng UDP -> Docker NAT -> container. Nếu đổi server/IP: sửa
+  # node_ip, hoặc đặt use_external_ip: true để LiveKit tự dò IP ngoài qua STUN.
+  use_external_ip: false
+  node_ip: "109.199.115.126"
+
+# LiveKit gọi webhook về gateway (cùng mạng docker `backend`) để cập nhật phiên +
+# phát STATE/ENDED. Ký bằng key `daln`; gateway verify bằng
+# WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET).
+webhook:
+  api_key: daln
+  urls:
+    - http://realtime-gateway:3001/livekit/webhook
+
+logging:
+  level: info
+  json: false

@@ -460,6 +460,39 @@ services:
       - backend
     logging: *logging
 
+  # ==========================================================================
+  # LIVEKIT (SFU) — gọi NHÓM audio
+  # ==========================================================================
+  # Máy chủ SFU cho gọi nhóm (bản thiết kế: docs/diagrams/group-call-sfu-flow.html).
+  # Khác coturn (cài apt TRÊN HOST vì cần hàng trăm cổng UDP): LiveKit chạy TRONG
+  # compose vì prod đã dùng compose và dải cổng UDP vừa phải (200 cổng).
+  #   - WS + HTTP API: publish 127.0.0.1:7880 -> nginx /livekit/ chuyển vào
+  #     (client dùng wss://nguyen1976.xyz/livekit).
+  #   - media UDP 50000-50199 và RTC/TCP 7881: publish THẲNG ra ngoài (không bind
+  #     127.0.0.1) — trình duyệt gửi/nhận media trực tiếp tới IP:cổng của server.
+  # Keys KHÔNG nằm trong file config (file bind-mount ro, KHÔNG render): nạp qua
+  # env LIVEKIT_KEYS = "<key>: <secret>" từ .env.production. LIVEKIT_API_KEY phải
+  # TRÙNG webhook.api_key (daln) trong deploy/livekit/livekit.prod.yaml.
+  livekit:
+    image: livekit/livekit-server:v1.7
+    container_name: daln-prod-livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    environment:
+      # livekit-server nạp keys map từ env này (định dạng "<key>: <secret>").
+      # Thiếu key/secret -> compose dừng (giống các secret bắt buộc khác).
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?thiếu trong .env.production}: ${LIVEKIT_API_SECRET:?thiếu trong .env.production}"
+    volumes:
+      # Config nằm ở deploy/ (dùng chung repo); compose ở backend/ nên đi ../.
+      - ../deploy/livekit/livekit.prod.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "127.0.0.1:7880:7880"          # WS + HTTP API: chỉ localhost -> nginx /livekit/
+      - "7881:7881"                    # RTC qua TCP (dự phòng khi UDP bị chặn) — ra ngoài
+      - "50000-50199:50000-50199/udp"  # media UDP — ra ngoài (KHÔNG bind 127.0.0.1)
+    networks:
+      - backend
+    logging: *logging
+
 networks:
   backend:
     driver: bridge

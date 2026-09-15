@@ -30,6 +30,7 @@ import {
   CreatePollDTO,
   SubmitPollVoteDTO,
   ClosePollDTO,
+  GroupCallLogDTO,
 } from './http/chat-http.dto'
 import { ConversationMapper } from './domain/conversation.mapper'
 import { MessageMapper } from './domain/message.mapper'
@@ -374,5 +375,29 @@ export class ChatController {
     @Query('userId') userId: string,
   ) {
     return await this.chatService.getCallPeer({ conversationId, userId })
+  }
+
+  // Gateway realtime duyệt quyền gọi NHÓM: trả danh sách thành viên ACTIVE để
+  // gateway phát chuông và ký token LiveKit. Cùng cơ chế @InternalOnly như
+  // call-peer (không có phiên JWT của người dùng).
+  @Get('internal/call-members')
+  @InternalOnly()
+  async getCallMembers(
+    @Query('conversationId') conversationId: string,
+    @Query('userId') userId: string,
+  ) {
+    return await this.chatService.getCallMembers({ conversationId, userId })
+  }
+
+  // Webhook LiveKit (qua gateway) báo phòng đóng: ghi tin hệ thống tổng kết
+  // cuộc gọi nhóm vào hội thoại.
+  @Post('internal/group-call-log')
+  @InternalOnly()
+  async logGroupCall(@Body() body: GroupCallLogDTO) {
+    return await this.chatService.logGroupCall({
+      conversationId: body.conversationId,
+      participantCount: Number(body.participantCount) || 0,
+      durationSeconds: Number(body.durationSeconds) || 0,
+    })
   }
 }

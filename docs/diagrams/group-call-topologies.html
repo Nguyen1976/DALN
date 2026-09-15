@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gọi nhóm: Mesh, SFU, MCU</title>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:#f5f5f5; --color-paper-2:#ececec; --color-ink:#2d3142;
+      --color-muted:#4f5d75; --color-soft:#7a8399; --color-rule:rgba(45,49,66,0.12);
+      --color-accent:#eb6c36; --color-accent-tint:rgba(235,108,54,0.08); --color-link:#2e5aa8;
+      --color-good:#3f7d5a;
+      --font-sans:'Geist',system-ui,sans-serif; --font-serif:'Newsreader','Times New Roman',serif;
+      --font-mono:'Geist Mono',ui-monospace,Menlo,monospace;
+    }
+    body { font-family:var(--font-sans); background:var(--color-paper); color:var(--color-ink); padding:3rem 2rem 4rem; }
+    @media (max-width:600px){ body{ padding:2rem 1rem 3rem; } }
+    .container { max-width:1120px; margin:0 auto; }
+    .header { margin-bottom:3rem; }
+    .eyebrow { font-family:var(--font-mono); font-size:0.66rem; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; color:var(--color-muted); margin-bottom:0.75rem; }
+    h1 { font-family:var(--font-serif); font-size:clamp(1.9rem,3vw + 1rem,2.75rem); font-weight:400; letter-spacing:-0.015em; line-height:1.1; margin-bottom:0.75rem; text-wrap:balance; }
+    .subtitle { font-size:1rem; line-height:1.6; color:var(--color-muted); max-width:70ch; }
+    section { margin-top:3.5rem; }
+    section:first-of-type { margin-top:0; }
+    h2 { font-size:1.3rem; font-weight:600; letter-spacing:-0.01em; line-height:1.3; margin-bottom:0.75rem; text-wrap:balance; }
+    .lead { font-size:0.95rem; line-height:1.65; max-width:76ch; margin-bottom:1.5rem; }
+    code { font-family:var(--font-mono); font-size:0.82em; background:rgba(45,49,66,0.06); padding:0.05em 0.35em; border-radius:3px; }
+    .diagram-container { overflow-x:auto; margin:0 -0.25rem; }
+    .diagram-container svg { width:100%; min-width:880px; display:block; }
+    .notes { list-style:none; margin-top:1.5rem; display:grid; gap:0.6rem; max-width:88ch; font-size:0.9rem; line-height:1.6; }
+    .notes li { padding-left:1rem; position:relative; }
+    .notes li::before { content:'—'; position:absolute; left:0; color:rgba(45,49,66,0.3); }
+    .notes strong { font-weight:600; }
+    /* table */
+    .table-wrap { overflow-x:auto; margin-top:1.5rem; }
+    table.cmp { width:100%; min-width:720px; border-collapse:collapse; font-size:0.85rem; line-height:1.45; }
+    .cmp th { font-family:var(--font-mono); font-size:0.64rem; font-weight:500; letter-spacing:0.12em; text-transform:uppercase; color:var(--color-soft); text-align:left; padding:0 0.9rem 0.6rem 0; border-bottom:1px solid var(--color-rule); vertical-align:bottom; }
+    .cmp td { padding:0.6rem 0.9rem 0.6rem 0; border-bottom:1px solid rgba(45,49,66,0.07); vertical-align:top; color:var(--color-muted); }
+    .cmp td:first-child { color:var(--color-ink); font-weight:500; white-space:nowrap; }
+    .cmp .g { color:var(--color-good); font-weight:500; }
+    .cmp .b { color:var(--color-accent); font-weight:500; }
+    .cmp tr.focal td { background:var(--color-accent-tint); }
+    /* cards */
+    .cards { display:grid; gap:1rem; margin-top:1.5rem; }
+    .cards.three { grid-template-columns:1fr 1fr 1fr; }
+    .cards.two { grid-template-columns:1.05fr 0.95fr; }
+    @media (max-width:760px){ .cards.three,.cards.two{ grid-template-columns:1fr; } }
+    .card { background:#fff; border:1px solid var(--color-rule); border-radius:6px; padding:1.25rem; min-width:0; }
+    .card-header { display:flex; align-items:center; gap:0.6rem; margin-bottom:0.875rem; padding-bottom:0.875rem; border-bottom:1px solid rgba(45,49,66,0.08); }
+    .card-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+    .card-dot.ink{background:var(--color-ink);} .card-dot.muted{background:var(--color-muted);}
+    .card-dot.coral{background:var(--color-accent);} .card-dot.link{background:var(--color-link);}
+    .card-dot.good{background:var(--color-good);}
+    .card h3 { font-size:0.9rem; font-weight:600; letter-spacing:-0.005em; }
+    .card .tag { margin-left:auto; font-family:var(--font-mono); font-size:0.6rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--color-soft); }
+    .card p { font-size:0.83rem; line-height:1.55; color:var(--color-muted); }
+    .card ul { list-style:none; color:var(--color-muted); font-size:0.8rem; line-height:1.5; }
+    .card li { margin-bottom:0.35rem; padding-left:0.85rem; position:relative; }
+    .card li::before { content:'—'; position:absolute; left:0; color:rgba(45,49,66,0.25); font-size:0.72rem; }
+    /* phased steps */
+    .phase { display:grid; grid-template-columns:auto 1fr; gap:0 1rem; }
+    .phase .num { font-family:var(--font-mono); font-size:0.78rem; color:var(--color-accent); font-weight:600; padding-top:0.15rem; }
+    .phase .body { padding-bottom:1.1rem; border-left:1px solid var(--color-rule); margin-left:0.5rem; padding-left:1.25rem; }
+    .phase .body h4 { font-size:0.92rem; font-weight:600; margin-bottom:0.2rem; }
+    .phase .body p { font-size:0.85rem; line-height:1.55; color:var(--color-muted); }
+    .footer { margin-top:3.5rem; padding-top:1.5rem; border-top:1px solid rgba(45,49,66,0.10); font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.06em; color:var(--color-soft); display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="header">
+      <p class="eyebrow">DALN Chat · Bản thiết kế · 15/09/2026</p>
+      <h1>Gọi nhóm: Mesh, SFU hay MCU</h1>
+      <p class="subtitle">Gọi 1-1 dạng P2P (đang có) rất hiệu quả. Nhưng gọi nhóm N người bằng mesh khiến mỗi máy phải gửi N−1 luồng lên mạng — với nhóm đông trên di động là thảm hoạ. Bản này so sánh ba mô hình, chỉ rõ đánh đổi, và đề xuất lộ trình theo đúng hạ tầng DALN (một server nhỏ, ưu tiên đơn giản).</p>
+    </header>
+
+    <!-- ══════════ 1. VẤN ĐỀ ══════════ -->
+    <section>
+      <p class="eyebrow">Vấn đề</p>
+      <h2>Mesh nhân đôi gánh nặng theo số người</h2>
+      <p class="lead">Trong mesh, mỗi máy nối trực tiếp tới mọi máy khác: gửi lên N−1 luồng, nhận về N−1 luồng, giải mã N−1 luồng. SFU (Selective Forwarding Unit) đặt một server ở giữa nhận 1 luồng của mỗi người rồi chuyển tiếp — máy chỉ gửi 1. MCU còn trộn tất cả thành 1 luồng — máy chỉ gửi 1, nhận 1, nhưng server phải giải mã + trộn + mã hoá lại nên rất nặng.</p>
+
+      <div class="diagram-container">
+        <svg viewBox="0 0 1040 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="topo-title topo-desc">
+          <title id="topo-title">Ba mô hình gọi nhóm: mesh, SFU, MCU</title>
+          <desc id="topo-desc">Mesh nối mọi máy với nhau nên mỗi máy gửi N trừ 1 luồng; SFU đặt server chuyển tiếp nên mỗi máy chỉ gửi 1 luồng và nhận N trừ 1; MCU trộn tất cả ở server nên mỗi máy gửi 1 và nhận 1, đổi lại server phải giải mã và mã hoá lại rất nặng.</desc>
+          <defs>
+            <marker id="t-arr" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#4f5d75"/></marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- panels -->
+          <rect x="24" y="56" width="312" height="352" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="364" y="56" width="312" height="352" rx="8" fill="rgba(235,108,54,0.05)" stroke="rgba(235,108,54,0.40)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <rect x="704" y="56" width="312" height="352" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="0.8" stroke-dasharray="4,4"/>
+          <text x="40" y="44" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist',sans-serif">Mesh (P2P)</text>
+          <text x="380" y="44" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist',sans-serif">SFU · chuyển tiếp</text>
+          <text x="720" y="44" fill="#2d3142" font-size="13" font-weight="600" font-family="'Geist',sans-serif">MCU · trộn</text>
+
+          <!-- ===== MESH: 4 máy nối full ===== -->
+          <!-- edges (peer links, không mũi tên) -->
+          <line x1="112" y1="128" x2="248" y2="128" stroke="#7a8399" stroke-width="1"/>
+          <line x1="112" y1="304" x2="248" y2="304" stroke="#7a8399" stroke-width="1"/>
+          <line x1="112" y1="152" x2="112" y2="280" stroke="#7a8399" stroke-width="1"/>
+          <line x1="248" y1="152" x2="248" y2="280" stroke="#7a8399" stroke-width="1"/>
+          <line x1="128" y1="148" x2="232" y2="284" stroke="#7a8399" stroke-width="1"/>
+          <line x1="232" y1="148" x2="128" y2="284" stroke="#7a8399" stroke-width="1"/>
+          <!-- nodes -->
+          <g font-family="'Geist',sans-serif" font-size="11" font-weight="600" text-anchor="middle" fill="#2d3142">
+            <rect x="82" y="104" width="60" height="48" rx="24" fill="#f5f5f5"/><rect x="82" y="104" width="60" height="48" rx="24" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="112" y="132">máy</text>
+            <rect x="218" y="104" width="60" height="48" rx="24" fill="#f5f5f5"/><rect x="218" y="104" width="60" height="48" rx="24" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="248" y="132">máy</text>
+            <rect x="82" y="280" width="60" height="48" rx="24" fill="#f5f5f5"/><rect x="82" y="280" width="60" height="48" rx="24" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="112" y="308">máy</text>
+            <rect x="218" y="280" width="60" height="48" rx="24" fill="#f5f5f5"/><rect x="218" y="280" width="60" height="48" rx="24" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="248" y="308">máy</text>
+          </g>
+          <text x="180" y="372" fill="#4f5d75" font-size="11" font-family="'Geist',sans-serif" text-anchor="middle">gửi N−1 · nhận N−1</text>
+          <text x="180" y="390" fill="#eb6c36" font-size="10" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.04em">KHÔNG cần server media</text>
+
+          <!-- ===== SFU: server ở giữa (focal) ===== -->
+          <!-- links up (client -> server) muted, down (server -> client) accent -->
+          <line x1="452" y1="140" x2="500" y2="192" stroke="#4f5d75" stroke-width="1" marker-end="url(#t-arr)"/>
+          <line x1="588" y1="140" x2="540" y2="192" stroke="#4f5d75" stroke-width="1" marker-end="url(#t-arr)"/>
+          <line x1="452" y1="292" x2="500" y2="240" stroke="#4f5d75" stroke-width="1" marker-end="url(#t-arr)"/>
+          <line x1="588" y1="292" x2="540" y2="240" stroke="#4f5d75" stroke-width="1" marker-end="url(#t-arr)"/>
+          <g font-family="'Geist',sans-serif" font-size="11" font-weight="600" text-anchor="middle" fill="#2d3142">
+            <rect x="392" y="104" width="56" height="44" rx="22" fill="#f5f5f5"/><rect x="392" y="104" width="56" height="44" rx="22" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="420" y="130">máy</text>
+            <rect x="592" y="104" width="56" height="44" rx="22" fill="#f5f5f5"/><rect x="592" y="104" width="56" height="44" rx="22" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="620" y="130">máy</text>
+            <rect x="392" y="288" width="56" height="44" rx="22" fill="#f5f5f5"/><rect x="392" y="288" width="56" height="44" rx="22" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="420" y="314">máy</text>
+            <rect x="592" y="288" width="56" height="44" rx="22" fill="#f5f5f5"/><rect x="592" y="288" width="56" height="44" rx="22" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="620" y="314">máy</text>
+          </g>
+          <rect x="480" y="188" width="80" height="52" rx="8" fill="#f5f5f5"/>
+          <rect x="480" y="188" width="80" height="52" rx="8" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+          <text x="520" y="210" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">SFU</text>
+          <text x="520" y="226" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">chuyển tiếp</text>
+          <text x="520" y="372" fill="#4f5d75" font-size="11" font-family="'Geist',sans-serif" text-anchor="middle">gửi 1 · nhận N−1</text>
+          <text x="520" y="390" fill="#eb6c36" font-size="10" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.04em">SERVER CPU THẤP</text>
+
+          <!-- ===== MCU: server trộn ===== -->
+          <line x1="792" y1="140" x2="840" y2="192" stroke="#4f5d75" stroke-width="1" marker-end="url(#t-arr)"/>
+          <line x1="928" y1="140" x2="880" y2="192" stroke="#4f5d75" stroke-width="1" marker-end="url(#t-arr)"/>
+          <line x1="792" y1="292" x2="840" y2="240" stroke="#4f5d75" stroke-width="1" marker-end="url(#t-arr)"/>
+          <line x1="928" y1="292" x2="880" y2="240" stroke="#4f5d75" stroke-width="1" marker-end="url(#t-arr)"/>
+          <g font-family="'Geist',sans-serif" font-size="11" font-weight="600" text-anchor="middle" fill="#2d3142">
+            <rect x="732" y="104" width="56" height="44" rx="22" fill="#f5f5f5"/><rect x="732" y="104" width="56" height="44" rx="22" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="760" y="130">máy</text>
+            <rect x="932" y="104" width="56" height="44" rx="22" fill="#f5f5f5"/><rect x="932" y="104" width="56" height="44" rx="22" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="960" y="130">máy</text>
+            <rect x="732" y="288" width="56" height="44" rx="22" fill="#f5f5f5"/><rect x="732" y="288" width="56" height="44" rx="22" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="760" y="314">máy</text>
+            <rect x="932" y="288" width="56" height="44" rx="22" fill="#f5f5f5"/><rect x="932" y="288" width="56" height="44" rx="22" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/><text x="960" y="314">máy</text>
+          </g>
+          <rect x="820" y="188" width="80" height="52" rx="8" fill="#f5f5f5"/>
+          <rect x="820" y="188" width="80" height="52" rx="8" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text x="860" y="210" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">MCU</text>
+          <text x="860" y="226" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">giải mã + trộn</text>
+          <text x="860" y="372" fill="#4f5d75" font-size="11" font-family="'Geist',sans-serif" text-anchor="middle">gửi 1 · nhận 1</text>
+          <text x="860" y="390" fill="#2d3142" font-size="10" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.04em">SERVER CPU RẤT CAO</text>
+
+          <!-- legend -->
+          <line x1="24" y1="432" x2="1016" y2="432" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <text x="24" y="458" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.14em">CHÚ THÍCH</text>
+          <line x1="112" y1="454" x2="136" y2="454" stroke="#7a8399" stroke-width="1"/>
+          <text x="144" y="458" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Luồng media P2P (mesh)</text>
+          <line x1="320" y1="454" x2="344" y2="454" stroke="#4f5d75" stroke-width="1" marker-end="url(#t-arr)"/>
+          <text x="352" y="458" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Luồng media qua server</text>
+          <rect x="560" y="449" width="14" height="10" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+          <text x="582" y="458" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Hướng đề xuất cho DALN (SFU)</text>
+          <text x="24" y="484" fill="#4f5d75" font-size="13" font-style="italic" font-family="'Newsreader',serif">TURN hiện có chỉ relay từng luồng P2P — mesh qua TURN vẫn N−1 mỗi máy và server gánh hết. TURN không phải SFU.</text>
+        </svg>
+      </div>
+    </section>
+
+    <!-- ══════════ 2. CON SỐ ══════════ -->
+    <section>
+      <p class="eyebrow">Con số</p>
+      <h2>Băng thông upload của máy khi nhóm đông lên</h2>
+      <p class="lead">Video khoảng 1 Mbps mỗi luồng. Trong mesh, upload của mỗi máy = (N−1)×1 Mbps và vọt qua trần upload thường thấy của di động (~2,5 Mbps) ngay từ ~4 người. SFU và MCU giữ upload gần như phẳng vì mỗi máy chỉ gửi 1 luồng. Với <strong>âm thanh</strong> (~48 kbps/luồng) thì mesh nhẹ hơn nhiều — nhóm nhỏ vẫn ổn — nên nút thắt thật sự là <strong>video nhóm</strong>.</p>
+
+      <div class="diagram-container">
+        <svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="chart-title chart-desc">
+          <title id="chart-title">Upload của máy theo số người trong nhóm</title>
+          <desc id="chart-desc">Với video 1 Mbps mỗi luồng: đường mesh tăng tuyến tính từ 1 Mbps ở 2 người tới 7 Mbps ở 8 người và vượt trần upload di động ~2,5 Mbps từ khoảng 4 người; SFU giữ ~1,5 Mbps và MCU ~1 Mbps, gần như phẳng bất kể số người.</desc>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- gridlines + y labels (0,2,4,6,8 Mbps) -->
+          <g stroke="rgba(45,49,66,0.10)" stroke-width="0.8">
+            <line x1="80" y1="440" x2="920" y2="440"/>
+            <line x1="80" y1="346" x2="920" y2="346"/>
+            <line x1="80" y1="252" x2="920" y2="252"/>
+            <line x1="80" y1="158" x2="920" y2="158"/>
+            <line x1="80" y1="64" x2="920" y2="64"/>
+          </g>
+          <g fill="#7a8399" font-size="9" font-family="'Geist Mono',monospace" text-anchor="end">
+            <text x="72" y="443">0</text><text x="72" y="349">2</text><text x="72" y="255">4</text><text x="72" y="161">6</text><text x="72" y="67">8</text>
+          </g>
+          <text x="30" y="252" fill="#4f5d75" font-size="10" font-family="'Geist Mono',monospace" text-anchor="middle" transform="rotate(-90 30 252)" letter-spacing="0.08em">UPLOAD MỖI MÁY (Mbps)</text>
+
+          <!-- x axis (số người) -->
+          <line x1="80" y1="440" x2="920" y2="440" stroke="#4f5d75" stroke-width="1"/>
+          <g fill="#7a8399" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">
+            <text x="80" y="458">2</text><text x="216" y="458">3</text><text x="352" y="458">4</text><text x="488" y="458">5</text><text x="624" y="458">6</text><text x="760" y="458">7</text><text x="896" y="458">8</text>
+          </g>
+          <text x="500" y="480" fill="#4f5d75" font-size="10" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">SỐ NGƯỜI TRONG NHÓM</text>
+
+          <!-- trần upload di động ~2.5 Mbps -->
+          <line x1="80" y1="322" x2="920" y2="322" stroke="#eb6c36" stroke-width="1" stroke-dasharray="5,4"/>
+          <rect x="600" y="304" width="232" height="14" rx="2" fill="#f5f5f5"/>
+          <text x="600" y="315" fill="#eb6c36" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.04em">TRẦN UPLOAD DI ĐỘNG ~2,5 Mbps</text>
+
+          <!-- MCU flat @1 -->
+          <polyline points="80,393 896,393" fill="none" stroke="#7a8399" stroke-width="1.5"/>
+          <!-- SFU flat @1.5 -->
+          <polyline points="80,369.5 896,369.5" fill="none" stroke="#4f5d75" stroke-width="1.5"/>
+          <!-- MESH (focal) -->
+          <polyline points="80,393 216,346 352,299 488,252 624,205 760,158 896,111" fill="none" stroke="#eb6c36" stroke-width="2"/>
+          <g fill="#eb6c36"><circle cx="352" cy="299" r="3"/><circle cx="488" cy="252" r="3"/><circle cx="624" cy="205" r="3"/><circle cx="896" cy="111" r="3"/></g>
+
+          <!-- điểm vượt trần -->
+          <circle cx="352" cy="299" r="6" fill="none" stroke="#eb6c36" stroke-width="1.2"/>
+          <rect x="300" y="270" width="150" height="14" rx="2" fill="#f5f5f5"/>
+          <text x="300" y="281" fill="#eb6c36" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.03em">mesh vượt trần từ ~4 người</text>
+
+          <!-- end labels -->
+          <rect x="812" y="100" width="96" height="14" rx="2" fill="#f5f5f5"/>
+          <text x="908" y="111" fill="#eb6c36" font-size="9" font-family="'Geist',sans-serif" font-weight="600" text-anchor="end">Mesh · 7 Mbps</text>
+          <rect x="820" y="356" width="88" height="13" rx="2" fill="#f5f5f5"/>
+          <text x="908" y="366" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif" font-weight="600" text-anchor="end">SFU · ~1,5 Mbps</text>
+          <rect x="820" y="396" width="88" height="13" rx="2" fill="#f5f5f5"/>
+          <text x="908" y="406" fill="#7a8399" font-size="9" font-family="'Geist',sans-serif" font-weight="600" text-anchor="end">MCU · ~1 Mbps</text>
+
+          <!-- legend -->
+          <line x1="80" y1="500" x2="920" y2="500" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <text x="80" y="516" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.14em">VIDEO 1 Mbps/LUỒNG · AUDIO ~48 kbps/LUỒNG (MESH NHẸ HƠN ~20 LẦN)</text>
+        </svg>
+      </div>
+    </section>
+
+    <!-- ══════════ 3. ĐÁNH ĐỔI ══════════ -->
+    <section>
+      <p class="eyebrow">Đánh đổi</p>
+      <h2>Ba mô hình cạnh nhau</h2>
+      <div class="table-wrap">
+        <table class="cmp">
+          <thead>
+            <tr><th>Tiêu chí</th><th>Mesh (P2P)</th><th>SFU (chuyển tiếp)</th><th>MCU (trộn)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Máy gửi lên</td><td class="b">N−1 luồng</td><td class="g">1 luồng</td><td class="g">1 luồng</td></tr>
+            <tr><td>Máy nhận về</td><td>N−1</td><td>N−1</td><td class="g">1 (đã trộn)</td></tr>
+            <tr><td>CPU máy</td><td class="b">giải mã N−1</td><td>giải mã N−1</td><td class="g">giải mã 1</td></tr>
+            <tr><td>CPU server</td><td class="g">0</td><td>thấp (định tuyến)</td><td class="b">rất cao (giải mã+trộn+mã hoá)</td></tr>
+            <tr><td>Băng thông server</td><td class="g">0 (nhưng qua TURN: cao)</td><td>N vào · N(N−1) ra</td><td>N vào · N ra</td></tr>
+            <tr><td>Độ trễ</td><td class="g">thấp nhất (thẳng)</td><td>thấp (1 chặng)</td><td>cao hơn (giải mã lại)</td></tr>
+            <tr><td>Chất lượng theo mạng</td><td>kém đồng đều</td><td class="g">tốt (simulcast/SVC)</td><td>1 mức chung</td></tr>
+            <tr><td>Ghi hình / phát lại</td><td class="b">khó</td><td>được (ghi từng luồng)</td><td class="g">dễ (đã có bản trộn)</td></tr>
+            <tr><td>Công sức triển khai</td><td class="g">đã có (1-1)</td><td>vừa (thêm media server)</td><td class="b">cao + tốn máy</td></tr>
+            <tr class="focal"><td>Hợp cho</td><td>1-1, nhóm ≤3</td><td>nhóm 4–50, chuẩn ngành</td><td>máy yếu, ghi hình, cầu PSTN</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="notes">
+        <li><strong>TURN không phải SFU.</strong> coturn hiện có chỉ relay từng kết nối P2P; nhóm chạy mesh-qua-TURN vẫn bắt mỗi máy gửi N−1 luồng, lại còn dồn hết băng thông relay lên server. TURN cứu tính <em>kết nối được</em>, không cứu tính <em>mở rộng</em>.</li>
+        <li><strong>Nút thắt là video, không phải audio.</strong> Gọi nhóm chỉ-âm-thanh nhẹ hơn ~20 lần; nhóm nhỏ vẫn có thể mesh. Gọi nhóm có video mới bắt buộc cần SFU.</li>
+        <li><strong>Mẹo của SFU cho nhóm lớn:</strong> <code>simulcast</code>/<code>SVC</code> (máy gửi vài mức chất lượng, SFU chọn mức phù hợp cho từng người) và <code>active-speaker / last-N</code> (chỉ chuyển video của vài người đang nói) — giảm mạnh tải khi phòng đông.</li>
+      </ul>
+    </section>
+
+    <!-- ══════════ 4. CHỌN GÌ ══════════ -->
+    <section>
+      <p class="eyebrow">Chọn gì</p>
+      <h2>Cây quyết định cho DALN</h2>
+      <div class="diagram-container">
+        <svg viewBox="0 0 1000 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dec-title dec-desc">
+          <title id="dec-title">Cây quyết định chọn mô hình gọi nhóm</title>
+          <desc id="dec-desc">Nhóm từ 3 người trở xuống dùng mesh P2P; đông hơn mà chỉ âm thanh thì dùng SFU audio; có video thì dùng SFU video kèm simulcast, và nếu phòng rất đông hoặc nhiều phòng cùng lúc thì chuyển sang SFU quản lý hoặc VPS media riêng. MCU chỉ dùng cho máy rất yếu, ghi hình hoặc cầu nối điện thoại.</desc>
+          <defs>
+            <marker id="d-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+            <marker id="d-arr-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+          <!-- connectors (trước nodes) -->
+          <!-- start -> Q1 -->
+          <line x1="150" y1="80" x2="150" y2="104" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d-arr)"/>
+          <!-- Q1 -> mesh (yes, xuống) -->
+          <path d="M 150 168 V 220 Q 150 228 158 228 H 232" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d-arr)"/>
+          <!-- Q1 -> Q2 (no, phải) -->
+          <line x1="220" y1="136" x2="360" y2="136" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d-arr)"/>
+          <!-- Q2 -> SFU audio (no video, xuống) -->
+          <path d="M 430 168 V 300 Q 430 308 438 308 H 512" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d-arr-a)"/>
+          <!-- Q2 -> Q3 (có video, phải) -->
+          <line x1="500" y1="136" x2="616" y2="136" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d-arr)"/>
+          <!-- Q3 -> SFU video (điểm ra riêng, không chồng nhánh kia) -->
+          <path d="M 662 160 V 220 Q 662 228 670 228 H 760" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#d-arr-a)"/>
+          <!-- Q3 -> managed (điểm ra riêng bên phải) -->
+          <path d="M 710 160 V 300 Q 710 308 718 308 H 760" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d-arr)"/>
+
+          <!-- labels trên nhánh -->
+          <rect x="120" y="192" width="40" height="13" rx="2" fill="#f5f5f5"/><text x="140" y="202" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">≤ 3 NGƯỜI</text>
+          <rect x="264" y="118" width="76" height="13" rx="2" fill="#f5f5f5"/><text x="302" y="128" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">ĐÔNG HƠN</text>
+          <rect x="392" y="250" width="76" height="13" rx="2" fill="#f5f5f5"/><text x="430" y="260" fill="#eb6c36" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">CHỈ ÂM THANH</text>
+          <rect x="520" y="118" width="60" height="13" rx="2" fill="#f5f5f5"/><text x="550" y="128" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">CÓ VIDEO</text>
+          <rect x="636" y="192" width="120" height="13" rx="2" fill="#f5f5f5"/><text x="696" y="202" fill="#eb6c36" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">≤ ~8 · ÍT PHÒNG</text>
+          <rect x="632" y="286" width="128" height="13" rx="2" fill="#f5f5f5"/><text x="696" y="296" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle">RẤT ĐÔNG / NHIỀU PHÒNG</text>
+
+          <!-- start dot -->
+          <circle cx="150" cy="72" r="6" fill="#2d3142"/>
+          <text x="164" y="76" fill="#4f5d75" font-size="10" font-family="'Geist',sans-serif">Gọi nhóm</text>
+
+          <!-- Q1 -->
+          <rect x="86" y="104" width="128" height="56" rx="8" fill="#f5f5f5"/><rect x="86" y="104" width="128" height="56" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <text x="150" y="128" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Số người</text>
+          <text x="150" y="144" fill="#4f5d75" font-size="10" font-family="'Geist',sans-serif" text-anchor="middle">nhỏ hay đông?</text>
+
+          <!-- Q2 -->
+          <rect x="366" y="104" width="128" height="56" rx="8" fill="#f5f5f5"/><rect x="366" y="104" width="128" height="56" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <text x="430" y="128" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Cần video?</text>
+          <text x="430" y="144" fill="#4f5d75" font-size="10" font-family="'Geist',sans-serif" text-anchor="middle">hay chỉ thoại</text>
+
+          <!-- Q3 -->
+          <rect x="622" y="104" width="128" height="56" rx="8" fill="#f5f5f5"/><rect x="622" y="104" width="128" height="56" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <text x="686" y="128" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Quy mô?</text>
+          <text x="686" y="144" fill="#4f5d75" font-size="10" font-family="'Geist',sans-serif" text-anchor="middle">phòng &amp; số phòng</text>
+
+          <!-- outcomes -->
+          <rect x="232" y="204" width="150" height="48" rx="8" fill="#f5f5f5"/><rect x="232" y="204" width="150" height="48" rx="8" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text x="307" y="224" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">Mesh P2P</text>
+          <text x="307" y="240" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif" text-anchor="middle">dùng lại code 1-1</text>
+
+          <rect x="512" y="284" width="150" height="48" rx="8" fill="#f5f5f5"/><rect x="512" y="284" width="150" height="48" rx="8" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+          <text x="587" y="304" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">SFU âm thanh</text>
+          <text x="587" y="320" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif" text-anchor="middle">nhẹ, tự host 1 box</text>
+
+          <rect x="760" y="204" width="160" height="48" rx="8" fill="#f5f5f5"/><rect x="760" y="204" width="160" height="48" rx="8" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+          <text x="840" y="224" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">SFU video + simulcast</text>
+          <text x="840" y="240" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif" text-anchor="middle">tự host, active-speaker</text>
+
+          <rect x="760" y="284" width="160" height="48" rx="8" fill="#f5f5f5"/><rect x="760" y="284" width="160" height="48" rx="8" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text x="840" y="304" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist',sans-serif" text-anchor="middle">SFU managed / VPS riêng</text>
+          <text x="840" y="320" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif" text-anchor="middle">bớt vận hành, trả theo phút</text>
+
+          <!-- MCU note -->
+          <text x="86" y="392" fill="#4f5d75" font-size="13" font-style="italic" font-family="'Newsreader',serif">MCU chỉ dùng cho trường hợp đặc biệt: máy rất yếu, cần ghi hình một bản, hoặc cầu nối điện thoại (PSTN).</text>
+
+          <!-- legend -->
+          <line x1="86" y1="416" x2="920" y2="416" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+          <rect x="150" y="435" width="14" height="10" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+          <text x="172" y="444" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Cần thêm media server (SFU)</text>
+          <rect x="420" y="435" width="14" height="10" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+          <text x="442" y="444" fill="#4f5d75" font-size="9" font-family="'Geist',sans-serif">Dùng hạ tầng sẵn có / bên thứ ba</text>
+        </svg>
+      </div>
+
+      <div class="cards three">
+        <div class="card">
+          <div class="card-header"><span class="card-dot coral"></span><h3>mediasoup</h3><span class="tag">self-host</span></div>
+          <p>Thư viện SFU cho Node — ghép thẳng vào NestJS hiện có. Mạnh, linh hoạt, nhưng phải tự viết signaling và tự lo mở rộng.</p>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot coral"></span><h3>LiveKit</h3><span class="tag">self-host / cloud</span></div>
+          <p>Một binary Go, có sẵn SDK web/mobile và TURN tích hợp. Dựng nhanh nhất; chạy được trên 1 box, hoặc dùng bản cloud trả theo phút.</p>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot muted"></span><h3>Jitsi / Janus / ion-sfu</h3><span class="tag">self-host</span></div>
+          <p>Các SFU mã nguồn mở đã kiểm chứng. Jitsi trọn gói nhưng nặng; Janus/ion nhẹ hơn nhưng cần ghép nhiều mảnh.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ 5. ĐỀ XUẤT ══════════ -->
+    <section>
+      <p class="eyebrow">Đề xuất cho DALN</p>
+      <h2>Lộ trình theo giai đoạn</h2>
+      <p class="lead">DALN chạy trên một server 4 nhân/8 GB, ưu tiên đơn giản. SFU chuyển tiếp tốn chủ yếu băng thông + CPU nhẹ, hợp với hộp này cho nhóm nhỏ; MCU quá nặng, bỏ qua. Đề xuất đi từng bước để không ôm rủi ro một lần.</p>
+      <div class="phase">
+        <div class="num">01</div>
+        <div class="body">
+          <h4>Giữ 1-1 P2P (đã xong) + chặn nhóm mesh</h4>
+          <p>Gọi 1-1 giữ nguyên qua TURN. Nếu muốn có nhóm ngay, chỉ mở <strong>mesh cho nhóm ≤ 3</strong> và khoá cứng số người — đủ cho phần lớn cuộc gọi mà không phải dựng hạ tầng mới.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="num">02</div>
+        <div class="body">
+          <h4>Nhóm âm thanh qua SFU</h4>
+          <p>Dựng một SFU (khuyến nghị <strong>LiveKit self-host</strong> vì nhanh và có sẵn SDK, hoặc <strong>mediasoup</strong> nếu muốn ghép sâu vào NestJS) chỉ cho <strong>âm thanh nhóm</strong> trước. Tải server nhẹ, lợi ích cho người dùng lớn, ít rủi ro. coturn hiện có vẫn dùng cho phần kết nối.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="num">03</div>
+        <div class="body">
+          <h4>Nhóm video khi thật sự cần</h4>
+          <p>Bật video nhóm trên cùng SFU, kèm <code>simulcast</code> + <code>active-speaker</code> để chịu được phòng đông. Theo dõi CPU/băng thông của box; khi vượt sức, tách <strong>một VPS media riêng</strong> hoặc chuyển sang <strong>SFU managed</strong> (trả theo phút) thay vì cố nhồi vào một máy.</p>
+        </div>
+      </div>
+      <div class="cards two" style="margin-top:1.75rem;">
+        <div class="card">
+          <div class="card-header"><span class="card-dot good"></span><h3>Vì sao SFU, không phải MCU</h3></div>
+          <ul>
+            <li>Server chỉ chuyển tiếp gói, không giải mã/trộn → CPU thấp, hợp box nhỏ</li>
+            <li>Máy chỉ gửi 1 luồng → cứu đúng nút thắt upload di động</li>
+            <li>Chuẩn ngành (Jitsi, LiveKit, Meet, Discord đều SFU)</li>
+            <li>MCU nặng gấp bội, chỉ đáng khi máy quá yếu hoặc cần bản trộn để ghi hình</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-dot coral"></span><h3>Rủi ro &amp; đánh đổi</h3></div>
+          <ul>
+            <li>Thêm một media server = thêm thứ phải vận hành, giám sát, cập nhật bảo mật</li>
+            <li>Một box 8 GB chịu được vài phòng nhỏ; video nhóm đông sẽ cần tách máy</li>
+            <li>SFU managed nhẹ vận hành nhưng tốn tiền theo phút và đưa media qua bên thứ ba</li>
+            <li>Signaling cuộc gọi nhóm phức tạp hơn 1-1: vào/ra phòng, đổi người nói, khôi phục khi rớt</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>DALN Chat · Kiến trúc gọi nhóm</span>
+      <span>Bản nháp · 15/09/2026</span>
+    </footer>
+
+  </div>
+</body>
+</html>

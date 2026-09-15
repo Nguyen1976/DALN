@@ -3,6 +3,7 @@ export {
   type RevokeMessageRequest,
   type DeleteMessageForMeRequest,
   type ClearConversationHistoryRequest,
+  type GroupCallLogRequest,
 } from './message.service'
 export { MessageMediaService } from './message-media.service'
 export {
@@ -22,6 +23,7 @@ export {
   type CreateConversationData,
   type DeleteConversationRequest,
   type CallPeerRequest,
+  type CallMembersRequest,
 } from './conversation.service'
 export {
   MessageBatchWriter,
