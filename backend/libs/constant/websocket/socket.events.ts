@@ -47,6 +47,7 @@ export const SOCKET_EVENTS = {
     CALL_ACCEPTED: 'call.accepted', //listen
     CALL_REJECTED: 'call.rejected', //listen
     CALL_ENDED: 'call.ended', //listen
+    CLAIMED: 'call.claimed', //listen: một tab khác của mình đã bắt máy -> đóng chuông
     ICE_CANDIDATE: 'call.ice_candidate', //listen
   },
 

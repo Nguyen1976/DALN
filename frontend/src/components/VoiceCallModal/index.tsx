@@ -13,6 +13,8 @@ import {
   Volume2,
   UserX,
   WifiOff,
+  Video,
+  VideoOff,
 } from "lucide-react";
 import { useSelector } from "react-redux";
 import { describeCallError, useWebRTC } from "@/hooks/useWebRTC";
@@ -39,6 +41,15 @@ interface VoiceCallModalProps {
   /** ID phiên cuộc gọi (chế độ incoming lấy từ sự kiện incoming_call). */
   callId?: string;
   incomingOffer?: RTCSessionDescriptionInit;
+  /**
+   * Loại cuộc gọi. Mặc định 'audio' để giữ nguyên hành vi cũ (mọi caller hiện
+   * tại không truyền prop này vẫn là cuộc gọi thoại).
+   */
+  callType?: "audio" | "video";
+  /** Ghi đè trạng thái camera (không truyền thì dùng trạng thái nội bộ của hook). */
+  isCameraOn?: boolean;
+  /** Ghi đè hành vi bật/tắt camera (không truyền thì dùng toggleCamera của hook). */
+  onToggleCamera?: () => void;
   onClose: () => void;
 }
 
@@ -59,6 +70,9 @@ export default function VoiceCallModal({
   callerId,
   callId,
   incomingOffer,
+  callType = "audio",
+  isCameraOn,
+  onToggleCamera,
   onClose,
 }: VoiceCallModalProps) {
   const user = useSelector(selectUser);
@@ -72,11 +86,15 @@ export default function VoiceCallModal({
     conversation?.displayAvatar || callerDisplayAvatar || "";
 
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
   const startedOutgoingRef = useRef(false);
   const callStatusRef = useRef<string>("idle");
   const dismissTimerRef = useRef<number | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [showBusyResult, setShowBusyResult] = useState(false);
+  // Camera của đối phương đang bật hay không → chuyển giữa khung video và avatar.
+  const [remoteCameraOn, setRemoteCameraOn] = useState(false);
 
   const peerUserId = useMemo(() => {
     if (mode === "incoming" && callerId) return callerId;
@@ -84,6 +102,7 @@ export default function VoiceCallModal({
   }, [callerId, conversation, mode, user.id]);
 
   const {
+    localStream,
     remoteStream,
     callStatus,
     startCall,
@@ -93,10 +112,27 @@ export default function VoiceCallModal({
     handleReceiveAnswer,
     handleReceiveIceCandidate,
     toggleMute,
+    toggleCamera,
+    isCameraOn: cameraOnFromHook,
     cleanup,
     connectedAt,
     callIdRef,
   } = useWebRTC(socket);
+
+  const isVideoCall = callType === "video";
+  // Prop ghi đè nếu truyền; mặc định dùng trạng thái camera nội bộ của hook.
+  const cameraOn = isCameraOn ?? cameraOnFromHook;
+  // Chỉ đổi sang bố cục video khi cuộc gọi video ĐÃ kết nối; các trạng thái chờ
+  // (đang gọi/đổ chuông/không kết nối được) vẫn dùng bố cục thẻ cũ.
+  const showVideoLayout = isVideoCall && callStatus === "connected";
+
+  const handleToggleCamera = useCallback(() => {
+    if (onToggleCamera) {
+      onToggleCamera();
+      return;
+    }
+    void toggleCamera();
+  }, [onToggleCamera, toggleCamera]);
 
   /**
    * Call duration, ticking from the moment audio actually flows.
@@ -207,13 +243,14 @@ export default function VoiceCallModal({
 
     startedOutgoingRef.current = true;
     // Theo hợp đồng: chỉ gửi conversationId + offer; gateway tự suy ra người
-    // nhận và trả callId qua ack (được startCall lưu lại).
-    void startCall(conversationId).catch((error) => {
+    // nhận và trả callId qua ack (được startCall lưu lại). callType quyết định
+    // có đàm phán video ngay từ offer hay không.
+    void startCall(conversationId, callType).catch((error) => {
       // Closing silently left the user with no idea why the call vanished.
       toast.error(describeCallError(error));
       onClose();
     });
-  }, [conversationId, mode, onClose, peerUserId, startCall]);
+  }, [callType, conversationId, mode, onClose, peerUserId, startCall]);
 
   useEffect(() => {
     // Chỉ xử lý sự kiện đúng phiên của mình. Trước khi biết callId (người gọi
@@ -323,6 +360,64 @@ export default function VoiceCallModal({
     }
   }, [remoteStream]);
 
+  // Gắn luồng đối phương vào thẻ <video> (muted — tiếng đã phát ở thẻ <audio> nên
+  // KHÔNG phát hai lần). Phụ thuộc showVideoLayout để chạy lại khi thẻ vừa mount.
+  useEffect(() => {
+    const video = remoteVideoRef.current;
+    if (!video) return;
+
+    video.srcObject = remoteStream;
+    if (remoteStream) {
+      void video.play().catch(() => undefined);
+    }
+    return () => {
+      video.srcObject = null;
+    };
+  }, [remoteStream, showVideoLayout]);
+
+  // Gắn luồng cục bộ vào preview "tự xem" (muted để không nghe lại tiếng mình).
+  useEffect(() => {
+    const video = localVideoRef.current;
+    if (!video) return;
+
+    video.srcObject = localStream;
+    if (localStream) {
+      void video.play().catch(() => undefined);
+    }
+    return () => {
+      video.srcObject = null;
+    };
+  }, [localStream, showVideoLayout]);
+
+  // Theo dõi track video của đối phương: replaceTrack(null) phía họ làm track
+  // chuyển 'muted' → hiện avatar thay cho khung video.
+  useEffect(() => {
+    if (!remoteStream) {
+      setRemoteCameraOn(false);
+      return;
+    }
+    const videoTrack = remoteStream.getVideoTracks()[0];
+    if (!videoTrack) {
+      setRemoteCameraOn(false);
+      return;
+    }
+    const update = () =>
+      setRemoteCameraOn(
+        videoTrack.readyState === "live" &&
+          !videoTrack.muted &&
+          videoTrack.enabled,
+      );
+    update();
+    videoTrack.addEventListener("mute", update);
+    videoTrack.addEventListener("unmute", update);
+    videoTrack.addEventListener("ended", update);
+    return () => {
+      videoTrack.removeEventListener("mute", update);
+      videoTrack.removeEventListener("unmute", update);
+      videoTrack.removeEventListener("ended", update);
+    };
+  }, [remoteStream]);
+
   useEffect(() => {
     return () => {
       clearDismissTimer();
@@ -334,7 +429,9 @@ export default function VoiceCallModal({
     if (!callId || !incomingOffer) return;
 
     try {
-      await acceptCall(callId, incomingOffer);
+      // Cuộc gọi video → chấp nhận kèm camera (có thể tắt bằng nút camera trong
+      // cuộc gọi). Cuộc gọi thoại giữ nguyên: chỉ micro.
+      await acceptCall(callId, incomingOffer, { withCamera: isVideoCall });
     } catch (error) {
       toast.error(describeCallError(error));
       onClose();
@@ -366,11 +463,108 @@ export default function VoiceCallModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Cuộc gọi thoại"
+      aria-label={isVideoCall ? "Cuộc gọi video" : "Cuộc gọi thoại"}
       className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
     >
+      {/* Tiếng của đối phương LUÔN phát ở thẻ audio này (kể cả cuộc gọi video);
+          thẻ <video> để muted nên tiếng KHÔNG bị phát hai lần. */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
+      {showVideoLayout ? (
+        <div className="relative flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-black shadow-lg">
+          <div className="relative aspect-video w-full bg-black">
+            {/* Video đối phương phủ khung; muted vì tiếng phát ở thẻ audio. */}
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={cn(
+                "absolute inset-0 h-full w-full bg-black object-cover",
+                !remoteCameraOn && "invisible",
+              )}
+            />
+
+            {/* Camera đối phương tắt → hiện avatar thay khung video. */}
+            {!remoteCameraOn && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                <CallRingAvatar
+                  displayName={displayName}
+                  displayAvatar={displayAvatar}
+                  active={false}
+                  durationMs={CALL_RING_TIMEOUT_MS}
+                />
+                <span className="text-sm text-white/80">{displayName}</span>
+              </div>
+            )}
+
+            {/* Tự xem (preview cục bộ), lật gương; ẩn khi camera của ta tắt. */}
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{ transform: "scaleX(-1)" }}
+              className={cn(
+                "absolute bottom-4 right-4 h-40 w-28 rounded-lg border border-white/20 object-cover shadow-lg",
+                !cameraOn && "hidden",
+              )}
+            />
+
+            {/* Tên + thời lượng ở góc trên. */}
+            <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/40 px-3 py-1 text-sm text-white backdrop-blur-sm">
+              <span className="font-medium">{displayName}</span>
+              <span className="tabular-nums text-white/80">
+                <span className="sr-only">Thời lượng cuộc gọi </span>
+                {durationLabel}
+              </span>
+            </div>
+          </div>
+
+          {/* Thanh điều khiển cuộc gọi video: micro, camera, kết thúc. */}
+          <div className="flex items-center justify-center gap-6 bg-card p-6">
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={handleToggleMute}
+              aria-label={isMuted ? "Bật micro" : "Tắt micro"}
+              aria-pressed={isMuted}
+              className="size-14 rounded-full"
+            >
+              {isMuted ? (
+                <MicOff className="size-6" />
+              ) : (
+                <Mic className="size-6" />
+              )}
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={handleToggleCamera}
+              aria-label={cameraOn ? "Tắt camera" : "Bật camera"}
+              aria-pressed={!cameraOn}
+              className="size-14 rounded-full"
+            >
+              {cameraOn ? (
+                <Video className="size-6" />
+              ) : (
+                <VideoOff className="size-6" />
+              )}
+            </Button>
+
+            <Button
+              variant="destructive"
+              size="icon"
+              onClick={handleEndCall}
+              aria-label="Kết thúc cuộc gọi"
+              className="size-14 rounded-full"
+            >
+              <PhoneOff className="size-6" />
+            </Button>
+          </div>
+        </div>
+      ) : (
       <div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-lg">
         <div className="flex flex-col items-center text-center">
           <CallRingAvatar
@@ -492,6 +686,7 @@ export default function VoiceCallModal({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

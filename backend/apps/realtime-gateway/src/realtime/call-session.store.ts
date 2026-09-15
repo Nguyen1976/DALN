@@ -48,6 +48,30 @@ export class CallSessionStore {
     return `call:${callId}`
   }
 
+  /** Khoá "socket nào đã bắt máy" — chống hai tab của người nhận cùng accept. */
+  private acceptKey(callId: string) {
+    return `callaccept:${callId}`
+  }
+
+  /**
+   * Giành quyền bắt máy cho đúng MỘT socket. Trả true cho socket thắng (SET NX),
+   * hoặc true nếu chính socket này đã giành trước đó (idempotent khi client retry);
+   * false khi một tab khác đã bắt máy — tab thua phải đóng chuông, không relay answer.
+   */
+  async claimAccept(callId: string, socketId: string): Promise<boolean> {
+    if (!isCallId(callId)) return false
+    const won = await this.redisClient.set(
+      this.acceptKey(callId),
+      socketId,
+      'EX',
+      this.connectedTtlSeconds,
+      'NX',
+    )
+    if (won) return true
+    const current = await this.redisClient.get(this.acceptKey(callId))
+    return current === socketId
+  }
+
   async create(session: CallSession): Promise<void> {
     await this.redisClient.set(
       this.key(session.callId),
@@ -101,6 +125,9 @@ export class CallSessionStore {
     if (!isCallId(callId)) return false
 
     const removed = await this.redisClient.del(this.key(callId))
+    // Dọn luôn khoá accept; return vẫn dựa trên DEL của session để "ghi kết quả
+    // đúng một lần" không đổi.
+    await this.redisClient.del(this.acceptKey(callId))
     return Number(removed) > 0
   }
 

@@ -37,6 +37,9 @@ export type CallStatus =
   | "no_answer"
   | "unreachable";
 
+/** Loại cuộc gọi 1-1. 'video' đàm phán video ngay từ offer đầu tiên. */
+export type CallType = "audio" | "video";
+
 /** Hình dạng ack của `call.ice_config` (xem hợp đồng TURN). */
 // Gateway ack: { ok, iceServers, expiresAt, ttlSeconds }. Chấp nhận cả `ttl`.
 type IceConfigResponse = {
@@ -48,10 +51,18 @@ type IceConfigResponse = {
 /** Hình dạng ack của `call.incoming_call` (xem hợp đồng TURN). */
 type IncomingCallAck =
   | { ok: true; callId: string }
-  | { ok: false; code: "CALL_FORBIDDEN" | "CALLEE_OFFLINE" }
+  | {
+      ok: false;
+      code: "CALL_FORBIDDEN" | "CALLEE_OFFLINE" | "BUSY" | "CALLEE_BUSY";
+    }
   | null;
 
-export type CallSetupErrorCode = "CALL_FORBIDDEN" | "CALLEE_OFFLINE" | "UNKNOWN";
+export type CallSetupErrorCode =
+  | "CALL_FORBIDDEN"
+  | "CALLEE_OFFLINE"
+  | "BUSY"
+  | "CALLEE_BUSY"
+  | "UNKNOWN";
 
 /** Lỗi thiết lập cuộc gọi từ phía gateway (không phải lỗi micro). */
 export class CallSetupError extends Error {
@@ -104,6 +115,12 @@ export function describeCallError(error: unknown): string {
     if (error.code === "CALLEE_OFFLINE") {
       return "Người nhận hiện không trực tuyến.";
     }
+    if (error.code === "BUSY") {
+      return "Bạn đang trong một cuộc gọi khác.";
+    }
+    if (error.code === "CALLEE_BUSY") {
+      return "Người này đang bận trong cuộc gọi khác.";
+    }
     return "Không thể bắt đầu cuộc gọi. Vui lòng thử lại.";
   }
   return describeMicrophoneError(error);
@@ -117,8 +134,21 @@ export const useWebRTC = (socket: Socket) => {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [callStatus, setCallStatus] = useState<CallStatus>("idle");
 
+  /** Loại cuộc gọi hiện tại; UI dựa vào đây để biết là cuộc gọi video. */
+  const [callType, setCallType] = useState<CallType>("audio");
+  /** Camera cục bộ có đang phát hay không (điều khiển nút bật/tắt camera). */
+  const [isCameraOn, setIsCameraOn] = useState(false);
+
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+
+  /** Track camera đang phát; giữ ref để toggleCamera + cleanup dừng đúng track. */
+  const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
+  /**
+   * Sender video của peer connection. Giữ ref vì replaceTrack(null) làm
+   * `sender.track` = null nên không tìm lại được qua getSenders() sau khi tắt.
+   */
+  const videoSenderRef = useRef<RTCRtpSender | null>(null);
 
   /** ID phiên cuộc gọi do gateway cấp; mọi sự kiện sau incoming_call phải mang nó. */
   const callIdRef = useRef<string | null>(null);
@@ -175,6 +205,15 @@ export const useWebRTC = (socket: Socket) => {
     localStreamRef.current = null;
     setLocalStream(null);
     setRemoteStream(null);
+
+    // Track camera có thể đã tách khỏi localStream khi tắt camera → dừng riêng
+    // (giữ ref chính vì lý do này). Nếu camera đang bật thì nó nằm trong
+    // localStream và đã được dừng ở trên, gọi lại chỉ là vô hại.
+    cameraTrackRef.current?.stop();
+    cameraTrackRef.current = null;
+    videoSenderRef.current = null;
+    setIsCameraOn(false);
+    setCallType("audio");
 
     pendingLocalCandidatesRef.current = [];
     pendingRemoteCandidatesRef.current = [];
@@ -345,6 +384,11 @@ export const useWebRTC = (socket: Socket) => {
     const pc = new RTCPeerConnection({ iceServers });
     addLocalTracks(pc);
 
+    // Ghi nhớ sender video (nếu localStream có track camera) để toggleCamera dùng
+    // lại đúng sender đó — không cần đàm phán lại khi bật/tắt camera.
+    videoSenderRef.current =
+      pc.getSenders().find((s) => s.track?.kind === "video") ?? null;
+
     pc.onicecandidate = (event) => {
       if (!event.candidate) return;
 
@@ -395,44 +439,78 @@ export const useWebRTC = (socket: Socket) => {
   ]);
 
   /**
-   * Get the microphone, but never wait for ever.
+   * Get the microphone (and camera when `withVideo`), but never wait for ever.
    *
    * `getUserMedia` can hang indefinitely — another app holding the device, a
    * permission prompt the user walks away from, a wedged driver. Without a
    * bound the call screen sat on "Đang kết nối..." with no error and no way
    * out, which is exactly what the call flow promises not to do.
    */
-  const acquireLocalAudio = useCallback(async () => {
-    if (localStreamRef.current) return localStreamRef.current;
+  const acquireLocalMedia = useCallback(
+    async (withVideo: boolean) => {
+      if (localStreamRef.current) return localStreamRef.current;
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const stream = await Promise.race([
-        navigator.mediaDevices.getUserMedia({ audio: true }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new MicrophoneTimeoutError()),
-            MIC_ACQUIRE_TIMEOUT_MS,
-          );
-        }),
-      ]);
-      setStream(stream);
-      return stream;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }, [setStream]);
+      const constraints: MediaStreamConstraints = {
+        audio: true,
+        video: withVideo
+          ? { width: { ideal: 1280 }, height: { ideal: 720 } }
+          : false,
+      };
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let timedOut = false;
+      const mediaPromise = navigator.mediaDevices.getUserMedia(constraints);
+      try {
+        const stream = await Promise.race([
+          mediaPromise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              timedOut = true;
+              reject(new MicrophoneTimeoutError());
+            }, MIC_ACQUIRE_TIMEOUT_MS);
+          }),
+        ]);
+        setStream(stream);
+        return stream;
+      } catch (error) {
+        // Luồng về muộn SAU khi đã timeout → dừng track để không rò micro/camera.
+        if (timedOut) {
+          void mediaPromise
+            .then((late) => late.getTracks().forEach((track) => track.stop()))
+            .catch(() => undefined);
+        }
+        throw error;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    },
+    [setStream],
+  );
+
+  /** Chỉ lấy micro — giữ nguyên hành vi cuộc gọi thoại cũ. */
+  const acquireLocalAudio = useCallback(
+    () => acquireLocalMedia(false),
+    [acquireLocalMedia],
+  );
 
   const startCall = useCallback(
-    async (conversationId: string) => {
-      await acquireLocalAudio();
+    async (conversationId: string, callType: CallType = "audio") => {
+      const withVideo = callType === "video";
+      // Cuộc gọi video đàm phán video ngay từ offer: track camera nằm trong
+      // localStream nên được addLocalTracks đưa vào offer.
+      await (withVideo ? acquireLocalMedia(true) : acquireLocalAudio());
+      setCallType(callType);
+      setIsCameraOn(withVideo);
+      cameraTrackRef.current =
+        localStreamRef.current?.getVideoTracks()[0] ?? null;
 
       const pc = await initPeerConnection();
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
       // Theo hợp đồng: người gọi chỉ gửi { conversationId, offer } (KHÔNG khai
-      // targetUserId) và nhận callId từ ack.
+      // targetUserId) và nhận callId từ ack. callType để phía nhận biết đây là
+      // cuộc gọi video (hiển thị đúng bố cục + chấp nhận kèm camera).
       const ack = await new Promise<IncomingCallAck>((resolve) => {
         let settled = false;
         const timer = window.setTimeout(() => {
@@ -443,7 +521,7 @@ export const useWebRTC = (socket: Socket) => {
 
         socket.emit(
           SOCKET_EVENTS.CALL.INCOMING_CALL,
-          { conversationId, offer },
+          { conversationId, offer, callType },
           (res: IncomingCallAck) => {
             if (settled) return;
             settled = true;
@@ -463,15 +541,33 @@ export const useWebRTC = (socket: Socket) => {
       flushLocalCandidates();
       setCallStatus("calling");
     },
-    [acquireLocalAudio, cleanup, flushLocalCandidates, initPeerConnection, socket],
+    [
+      acquireLocalAudio,
+      acquireLocalMedia,
+      cleanup,
+      flushLocalCandidates,
+      initPeerConnection,
+      socket,
+    ],
   );
 
   const acceptCall = useCallback(
-    async (callId: string, offer: RTCSessionDescriptionInit) => {
+    async (
+      callId: string,
+      offer: RTCSessionDescriptionInit,
+      opts?: { withCamera?: boolean },
+    ) => {
       // callId đến từ sự kiện incoming_call của gateway.
       callIdRef.current = callId;
 
-      await acquireLocalAudio();
+      const withCamera = opts?.withCamera === true;
+      // Chấp nhận-kèm-camera thì lấy thêm camera; chấp nhận chỉ-âm-thanh vẫn NHẬN
+      // được video của người gọi vì WebRTC tự trả lời m-line video ở dạng recvonly.
+      await (withCamera ? acquireLocalMedia(true) : acquireLocalAudio());
+      setCallType(withCamera ? "video" : "audio");
+      setIsCameraOn(withCamera);
+      cameraTrackRef.current =
+        localStreamRef.current?.getVideoTracks()[0] ?? null;
 
       const pc = await initPeerConnection();
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -489,6 +585,7 @@ export const useWebRTC = (socket: Socket) => {
     },
     [
       acquireLocalAudio,
+      acquireLocalMedia,
       flushRemoteCandidates,
       initPeerConnection,
       socket,
@@ -543,10 +640,60 @@ export const useWebRTC = (socket: Socket) => {
     return !audioTrack.enabled;
   }, []);
 
+  /**
+   * Bật/tắt camera TRONG cuộc gọi video mà KHÔNG đàm phán lại (renegotiation):
+   * thao tác trên chính sender video sẵn có bằng replaceTrack.
+   *  - Tắt: replaceTrack(null) rồi dừng track camera (đèn camera tắt).
+   *  - Bật: lấy track camera mới rồi replaceTrack(track) vào đúng sender cũ.
+   * Cập nhật localStream để preview cục bộ phản ánh trạng thái. Trả về trạng thái
+   * mới. Chỉ có tác dụng khi có sender video (tức là cuộc gọi video).
+   */
+  const toggleCamera = useCallback(async () => {
+    const sender =
+      videoSenderRef.current ??
+      peerConnection.current
+        ?.getSenders()
+        .find((s) => s.track?.kind === "video") ??
+      null;
+    if (!sender) return false;
+    videoSenderRef.current = sender;
+
+    const current = localStreamRef.current;
+
+    // Đang bật camera → tắt.
+    if (cameraTrackRef.current) {
+      const track = cameraTrackRef.current;
+      await sender.replaceTrack(null);
+      track.stop();
+      cameraTrackRef.current = null;
+
+      // Stream mới (bỏ track camera) để React nhận diện thay đổi và cập nhật preview.
+      const remaining = current?.getTracks().filter((t) => t !== track) ?? [];
+      setStream(new MediaStream(remaining));
+      setIsCameraOn(false);
+      return false;
+    }
+
+    // Đang tắt camera → bật: lấy camera mới, gắn vào sender hiện có.
+    const camStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+    });
+    const newTrack = camStream.getVideoTracks()[0];
+    await sender.replaceTrack(newTrack);
+    cameraTrackRef.current = newTrack;
+
+    const nextTracks = current ? [...current.getTracks(), newTrack] : [newTrack];
+    setStream(new MediaStream(nextTracks));
+    setIsCameraOn(true);
+    return true;
+  }, [setStream]);
+
   return {
     localStream,
     remoteStream,
     callStatus,
+    callType,
+    isCameraOn,
     setStream,
     startCall,
     acceptCall,
@@ -556,6 +703,7 @@ export const useWebRTC = (socket: Socket) => {
     handleReceiveAnswer,
     handleReceiveIceCandidate,
     toggleMute,
+    toggleCamera,
     cleanup,
     peerConnection,
     callIdRef,

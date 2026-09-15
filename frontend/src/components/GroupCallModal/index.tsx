@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSelector } from "react-redux";
-import { Mic, MicOff, PhoneOff, Users, Volume2 } from "lucide-react";
+import {
+  Mic,
+  MicOff,
+  PhoneOff,
+  Users,
+  Video,
+  VideoOff,
+  Volume2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -23,11 +31,85 @@ interface GroupCallModalProps {
   /** Access token (ack.token). */
   token: string;
   conversationId: string;
+  /**
+   * Loại cuộc gọi: `'audio'` (mặc định) giữ nguyên UI danh sách như cũ; `'video'`
+   * hiển thị lưới video. Tuỳ chọn để caller cũ không phải đổi gì.
+   */
+  callType?: "audio" | "video";
   onClose: () => void;
 }
 
 /** Người trong cuộc nhìn từ sự kiện gateway `group_call.state`. */
 type ServerParticipant = { id: string; username: string };
+
+/**
+ * Một ô video trong lưới. Modal (chứ không phải hook) tự `attach`/`detach` track
+ * để adaptiveStream của LiveKit nhìn thấy thẻ `<video>` thật mà tạm dừng video
+ * ngoài màn hình. Cleanup khi đổi track / unmount để không rò element.
+ */
+function GroupCallVideoTile({
+  participant,
+}: {
+  participant: GroupCallParticipant;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const track = participant.videoTrack ?? null;
+  const showVideo = participant.isCameraEnabled && Boolean(track);
+
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element || !track) return;
+    track.attach(element);
+    return () => {
+      track.detach(element);
+    };
+  }, [track]);
+
+  return (
+    <div
+      className={cn(
+        "relative aspect-3/4 overflow-hidden rounded-xl bg-muted ring-2 transition-colors",
+        participant.isSpeaking ? "ring-success" : "ring-transparent",
+      )}
+    >
+      {showVideo ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={participant.isLocal}
+          className="size-full object-cover"
+          // Camera của chính mình soi gương như thói quen người dùng.
+          style={participant.isLocal ? { transform: "scaleX(-1)" } : undefined}
+        />
+      ) : (
+        <div className="flex size-full flex-col items-center justify-center gap-2 p-2 text-center">
+          <Avatar className="size-14">
+            <AvatarFallback className="text-lg">
+              {participant.name?.[0]}
+            </AvatarFallback>
+          </Avatar>
+          <span className="max-w-full truncate text-sm font-medium text-foreground">
+            {participant.name}
+          </span>
+        </div>
+      )}
+
+      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-linear-to-t from-foreground/70 to-transparent px-2 py-1.5">
+        {participant.isMuted && (
+          <MicOff
+            className="size-3.5 shrink-0 text-background"
+            aria-label="Đã tắt micro"
+          />
+        )}
+        <span className="truncate text-xs font-medium text-background">
+          {participant.name}
+          {participant.isLocal && " (Bạn)"}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export default function GroupCallModal({
   callId,
@@ -35,20 +117,25 @@ export default function GroupCallModal({
   url,
   token,
   conversationId,
+  callType = "audio",
   onClose,
 }: GroupCallModalProps) {
   const conversation = useSelector((state: RootState) =>
     selectConversationById(state, conversationId),
   );
 
+  const isVideo = callType === "video";
+
   const {
     participants,
     isMicEnabled,
+    isCameraEnabled,
     connectionState,
     connectedAt,
     toggleMic,
+    toggleCamera,
     leave,
-  } = useGroupCall({ url, token, onDisconnected: onClose });
+  } = useGroupCall({ url, token, callType, onDisconnected: onClose });
 
   // Danh sách người theo gateway (bổ trợ cho room: biết ai đã tham gia dù audio
   // track chưa subscribe về phía mình).
@@ -118,8 +205,8 @@ export default function GroupCallModal({
     };
   }, [callId, conversationId, leave, onClose]);
 
-  // Room là nguồn sự thật cho trạng thái nói/mute; roster gateway lấp chỗ cho
-  // người đã tham gia nhưng track chưa về. Gộp theo identity (= userId).
+  // Room là nguồn sự thật cho trạng thái nói/mute/camera; roster gateway lấp chỗ
+  // cho người đã tham gia nhưng track chưa về. Gộp theo identity (= userId).
   const displayParticipants = useMemo<GroupCallParticipant[]>(() => {
     const byId = new Map<string, GroupCallParticipant>();
     for (const person of serverParticipants) {
@@ -129,6 +216,8 @@ export default function GroupCallModal({
         isLocal: false,
         isSpeaking: false,
         isMuted: false,
+        isCameraEnabled: false,
+        videoTrack: null,
       });
     }
     for (const person of participants) {
@@ -160,10 +249,19 @@ export default function GroupCallModal({
       aria-label="Cuộc gọi nhóm"
       className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
     >
-      <div className="relative flex w-full max-w-sm flex-col rounded-2xl border border-border bg-card p-6 shadow-lg">
+      <div
+        className={cn(
+          "relative flex w-full flex-col rounded-2xl border border-border bg-card p-6 shadow-lg",
+          isVideo ? "max-w-2xl" : "max-w-sm",
+        )}
+      >
         <div className="mb-4 flex flex-col items-center text-center">
           <div className="mb-3 flex size-14 items-center justify-center rounded-full bg-primary/15 text-primary">
-            <Users className="size-7" aria-hidden="true" />
+            {isVideo ? (
+              <Video className="size-7" aria-hidden="true" />
+            ) : (
+              <Users className="size-7" aria-hidden="true" />
+            )}
           </div>
           <h3 className="mb-1 text-xl font-semibold tracking-[-0.01em] text-foreground">
             {title}
@@ -185,53 +283,66 @@ export default function GroupCallModal({
           </p>
         </div>
 
-        <ul
-          className="custom-scrollbar mb-6 max-h-64 space-y-1 overflow-y-auto"
-          aria-label="Người trong cuộc gọi"
-        >
-          {displayParticipants.map((participant) => (
-            <li
-              key={participant.identity}
-              className={cn(
-                "flex items-center gap-3 rounded-xl px-2 py-2 transition-colors",
-                participant.isSpeaking ? "bg-success/10" : "bg-transparent",
-              )}
-            >
-              <Avatar
+        {isVideo ? (
+          <ul
+            className="custom-scrollbar mb-6 grid max-h-[60vh] grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3"
+            aria-label="Người trong cuộc gọi"
+          >
+            {displayParticipants.map((participant) => (
+              <li key={participant.identity}>
+                <GroupCallVideoTile participant={participant} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <ul
+            className="custom-scrollbar mb-6 max-h-64 space-y-1 overflow-y-auto"
+            aria-label="Người trong cuộc gọi"
+          >
+            {displayParticipants.map((participant) => (
+              <li
+                key={participant.identity}
                 className={cn(
-                  "size-10 ring-2 transition-colors",
-                  participant.isSpeaking
-                    ? "ring-success"
-                    : "ring-transparent",
+                  "flex items-center gap-3 rounded-xl px-2 py-2 transition-colors",
+                  participant.isSpeaking ? "bg-success/10" : "bg-transparent",
                 )}
               >
-                <AvatarFallback>{participant.name?.[0]}</AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {participant.name}
-                  {participant.isLocal && (
-                    <span className="text-muted-foreground"> (Bạn)</span>
+                <Avatar
+                  className={cn(
+                    "size-10 ring-2 transition-colors",
+                    participant.isSpeaking
+                      ? "ring-success"
+                      : "ring-transparent",
                   )}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {participant.isSpeaking ? "Đang nói" : "Đang nghe"}
-                </p>
-              </div>
-              {participant.isMuted ? (
-                <MicOff
-                  className="size-4 shrink-0 text-muted-foreground"
-                  aria-label="Đã tắt micro"
-                />
-              ) : (
-                <Volume2
-                  className="size-4 shrink-0 text-muted-foreground"
-                  aria-hidden="true"
-                />
-              )}
-            </li>
-          ))}
-        </ul>
+                >
+                  <AvatarFallback>{participant.name?.[0]}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {participant.name}
+                    {participant.isLocal && (
+                      <span className="text-muted-foreground"> (Bạn)</span>
+                    )}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {participant.isSpeaking ? "Đang nói" : "Đang nghe"}
+                  </p>
+                </div>
+                {participant.isMuted ? (
+                  <MicOff
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-label="Đã tắt micro"
+                  />
+                ) : (
+                  <Volume2
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
 
         <div className="flex items-center justify-center gap-6">
           <Button
@@ -248,6 +359,23 @@ export default function GroupCallModal({
               <MicOff className="size-6" />
             )}
           </Button>
+
+          {isVideo && (
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() => void toggleCamera()}
+              aria-label={isCameraEnabled ? "Tắt camera" : "Bật camera"}
+              aria-pressed={!isCameraEnabled}
+              className="size-14 rounded-full"
+            >
+              {isCameraEnabled ? (
+                <Video className="size-6" />
+              ) : (
+                <VideoOff className="size-6" />
+              )}
+            </Button>
+          )}
 
           <Button
             variant="destructive"

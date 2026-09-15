@@ -79,6 +79,7 @@ describe('RealtimeGateway', () => {
     get: jest.fn().mockResolvedValue(null),
     set: jest.fn().mockResolvedValue('OK'),
     del: jest.fn().mockResolvedValue(1),
+    eval: jest.fn().mockResolvedValue(1),
     pipeline: jest
       .fn()
       .mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }),
@@ -172,6 +173,45 @@ describe('RealtimeGateway', () => {
       )
     })
 
+    it('người nhận đang bận -> CALLEE_BUSY, không đổ chuông', async () => {
+      ;(global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { peerId: 'callee' } }),
+      })
+      // acquire(caller) thắng SET NX; isBusy(callee) đọc thấy cuộc gọi khác.
+      redisStub.get.mockResolvedValueOnce('another-call-id')
+
+      const ack = await gateway.handleIncomingCall(
+        { conversationId: 'conv-1', offer: { sdp: 'x' } },
+        { data: { userId: 'caller' }, emit: jest.fn() } as any,
+      )
+
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'CALLEE_BUSY' }),
+      )
+      expect(emitted).not.toHaveBeenCalled()
+    })
+
+    it('người gọi đang bận -> BUSY, không tạo phiên', async () => {
+      ;(global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { peerId: 'callee' } }),
+      })
+      // acquire(caller): SET NX thất bại rồi GET thấy callId khác -> đang bận.
+      redisStub.set.mockResolvedValueOnce(null)
+      redisStub.get.mockResolvedValueOnce('another-call-id')
+
+      const ack = await gateway.handleIncomingCall(
+        { conversationId: 'conv-1', offer: { sdp: 'x' } },
+        { data: { userId: 'caller' }, emit: jest.fn() } as any,
+      )
+
+      expect(ack).toEqual(expect.objectContaining({ ok: false, code: 'BUSY' }))
+      expect(emitted).not.toHaveBeenCalled()
+    })
+
     it('sự kiện mang callId không có phiên thì bị bỏ', async () => {
       redisStub.get.mockResolvedValueOnce(null)
 
@@ -218,7 +258,13 @@ describe('RealtimeGateway', () => {
       redisStub.get.mockResolvedValue(
         session({ status: 'connected', connectedAt }),
       )
-      redisStub.del.mockResolvedValueOnce(1).mockResolvedValueOnce(0)
+      // end() nay xoá HAI key mỗi lần (call: + callaccept:). Lần kết thúc đầu: cả
+      // hai trả 1 (session còn) -> ghi kết quả; lần thứ hai: 0 -> không ghi lại.
+      redisStub.del
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
 
       await gateway.handleCallEnded(
         { callId: CALL_ID, conversationId: 'conv-KHAC', durationSeconds: 9999 },
@@ -427,6 +473,13 @@ describe('RealtimeGateway', () => {
         conversationId: 'conv-1',
         startedBy: 'alice',
         members,
+      })
+
+      // accept giờ revalidate quyền hiện tại qua chat -> mock trả members.
+      ;(global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { members, type: 'GROUP' } }),
       })
 
       const ok: any = await gateway.handleGroupCallAccept(

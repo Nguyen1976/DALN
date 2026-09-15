@@ -17,6 +17,8 @@ import { selectFriend } from "@/redux/slices/friendSlice";
 import type { Conversation } from "@/redux/slices/conversationSlice";
 import type { RootState } from "@/redux/store";
 
+type CallType = "audio" | "video";
+
 type IncomingCallState = {
   mode: VoiceCallMode;
   /** ID phiên do gateway cấp; dùng để accept/reject/ice/ended. */
@@ -26,6 +28,7 @@ type IncomingCallState = {
   conversationId?: string;
   callerDisplayName: string;
   callerDisplayAvatar: string;
+  callType: CallType;
 };
 
 /** Chuông gọi nhóm đang đổ (chưa chấp nhận). */
@@ -36,6 +39,7 @@ type IncomingGroupCallState = {
   title: string;
   callerName: string;
   callerAvatar: string;
+  callType: CallType;
 };
 
 /** Cuộc gọi nhóm đã chấp nhận và đã có url/token để join. */
@@ -45,11 +49,12 @@ type ActiveGroupCallState = {
   roomName: string;
   url: string;
   token: string;
+  callType: CallType;
 };
 
 /** Hình dạng ack của `group_call.accept`. */
 type GroupCallAcceptAck =
-  | { ok: true; url: string; token: string }
+  | { ok: true; url: string; token: string; callType?: CallType }
   | { ok: false; code?: string };
 
 function findConversationByCaller(
@@ -92,11 +97,13 @@ export default function IncomingCallManager() {
       callerId,
       offer,
       conversationId,
+      callType,
     }: {
       callId: string;
       callerId: string;
       offer: RTCSessionDescriptionInit;
       conversationId?: string;
+      callType?: CallType;
     }) => {
       // Không có callId thì không thể accept/reject đúng phiên → bỏ qua.
       if (!callId) return;
@@ -121,13 +128,23 @@ export default function IncomingCallManager() {
           "Cuộc gọi đến",
         callerDisplayAvatar:
           conversation?.displayAvatar || friend?.avatar || "",
+        callType: callType === "video" ? "video" : "audio",
       });
     };
 
+    // Một tab khác của mình đã bắt máy → tab này đóng màn hình chuông.
+    const handleClaimed = ({ callId }: { callId?: string } = {}) => {
+      setIncomingCall((prev) =>
+        prev && (!callId || prev.callId === callId) ? null : prev,
+      );
+    };
+
     socket.on(SOCKET_EVENTS.CALL.INCOMING_CALL, handleIncomingCall);
+    socket.on(SOCKET_EVENTS.CALL.CLAIMED, handleClaimed);
 
     return () => {
       socket.off(SOCKET_EVENTS.CALL.INCOMING_CALL, handleIncomingCall);
+      socket.off(SOCKET_EVENTS.CALL.CLAIMED, handleClaimed);
     };
   }, [conversations, friends]);
 
@@ -137,11 +154,13 @@ export default function IncomingCallManager() {
       conversationId,
       roomName,
       from,
+      callType,
     }: {
       callId: string;
       conversationId: string;
       roomName: string;
       from?: { id: string; username: string };
+      callType?: CallType;
     }) => {
       if (!callId) return;
 
@@ -159,6 +178,7 @@ export default function IncomingCallManager() {
         title: conversation?.displayName || "Cuộc gọi nhóm",
         callerName,
         callerAvatar: conversation?.displayAvatar || "",
+        callType: callType === "video" ? "video" : "audio",
       });
     };
 
@@ -198,6 +218,7 @@ export default function IncomingCallManager() {
             roomName: call.roomName,
             url: ack.url,
             token: ack.token,
+            callType: ack.callType ?? call.callType,
           });
         } else {
           toast.error(describeGroupCallError(ack?.code));
@@ -224,6 +245,7 @@ export default function IncomingCallManager() {
           callerDisplayName={incomingCall.callerDisplayName}
           callerDisplayAvatar={incomingCall.callerDisplayAvatar}
           mode={incomingCall.mode}
+          callType={incomingCall.callType}
           callerId={incomingCall.callerId}
           callId={incomingCall.callId}
           incomingOffer={incomingCall.incomingOffer}
@@ -255,7 +277,8 @@ export default function IncomingCallManager() {
                 aria-live="polite"
                 className="mb-8 text-sm text-muted-foreground"
               >
-                {incomingGroupCall.callerName} đang mời bạn vào cuộc gọi nhóm...
+                {incomingGroupCall.callerName} đang mời bạn vào cuộc gọi{" "}
+                {incomingGroupCall.callType === "video" ? "video " : ""}nhóm...
               </p>
 
               <div className="flex gap-6">
@@ -291,6 +314,7 @@ export default function IncomingCallManager() {
           url={activeGroupCall.url}
           token={activeGroupCall.token}
           conversationId={activeGroupCall.conversationId}
+          callType={activeGroupCall.callType}
           onClose={() => setActiveGroupCall(null)}
         />
       )}
