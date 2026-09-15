@@ -30,8 +30,8 @@ rtc:
   tcp_port: 7881
   # Dải cổng UDP cho media — rộng hơn dev để chịu nhiều phiên đồng thời. Khớp
   # publish 50000-50199:50000-50199/udp và ufw allow 50000:50199/udp.
-  port_range_start: 50000
-  port_range_end: 50199
+  # UDP mux: một cổng duy nhất (docker-proxy không chịu nổi dải 200 cổng -> media chập chờn).
+  udp_port: 50000
   # Một server, một IP tĩnh đã biết: quảng bá THẲNG IP công khai (không phụ thuộc
   # STUN/DNS, giống cách TURN dùng thẳng IP vì nameserver .xyz chập chờn). Media
   # đi client -> IP:cổng UDP -> Docker NAT -> container. Nếu đổi server/IP: sửa
