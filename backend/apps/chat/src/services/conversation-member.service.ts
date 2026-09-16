@@ -79,6 +79,15 @@ export class ConversationMemberService {
       }
     }
 
+    // conversationMember keeps a denormalized profile snapshot. Refuse an
+    // incomplete snapshot instead of permanently storing null and making the
+    // UI display the ObjectId as the member name.
+    if (newMembers.some((member) => !member.username?.trim())) {
+      ChatErrors.invalidMemberAction(
+        'Không thể thêm thành viên vì hồ sơ người dùng chưa đầy đủ',
+      )
+    }
+
     const addedMemberCount = await this.memberRepo.addMembers(
       dto.conversationId,
       newMembers.map((member) => ({

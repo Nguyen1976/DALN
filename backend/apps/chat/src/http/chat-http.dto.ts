@@ -51,6 +51,10 @@ export class AddMemberToConversationDTO {
   })
   memberIds: string[]
 
+  // ValidationPipe bật whitelist; thiếu decorator khiến toàn bộ profile
+  // snapshot bị loại khỏi body và controller chỉ còn memberIds.
+  @IsOptional()
+  @IsArray()
   members?: Member[]
 }
 

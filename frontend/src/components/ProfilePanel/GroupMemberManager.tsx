@@ -187,15 +187,20 @@ export function GroupMemberManager() {
 
     try {
       setPendingMemberId(friend.id);
+      // The friend list can briefly contain a presence-only entry right after
+      // a friendship is accepted. Always resolve the canonical profile before
+      // persisting the denormalized conversationMember snapshot; otherwise an
+      // undefined username is stored as null and every client falls back to id.
+      const profile = await getUserProfileByIdAPI(friend.id);
       await addMembersToConversationAPI({
         conversationId,
         memberIds: [friend.id],
         members: [
           {
             userId: friend.id,
-            username: friend.username,
-            fullName: friend.fullName,
-            avatar: friend.avatar,
+            username: profile.username,
+            fullName: profile.fullName,
+            avatar: profile.avatar,
           },
         ],
       });
