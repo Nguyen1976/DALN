@@ -30,12 +30,25 @@ export interface PollData {
   options: PollOption[];
 }
 
+/** Dữ liệu tin tổng kết cuộc gọi (type=CALL) để render thẻ + nút gọi lại. */
+export interface CallInfo {
+  scope: "direct" | "group";
+  callType: "audio" | "video";
+  /** COMPLETED | ENDED | MISSED | REJECTED | UNREACHABLE ... */
+  outcome?: string;
+  durationSeconds?: number;
+  participantCount?: number;
+  startedBy?: string;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
   senderId: string;
   text: string;
-  type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL";
+  type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL" | "CALL";
+  /** Với type=CALL: dữ liệu để render thẻ cuộc gọi + nút Gọi lại/Tham gia lại. */
+  callInfo?: CallInfo;
   clientMessageId?: string;
   replyToMessageId?: string;
   /** Tin nhắn được trích dẫn, đã được máy chủ dựng sẵn để hiển thị. */

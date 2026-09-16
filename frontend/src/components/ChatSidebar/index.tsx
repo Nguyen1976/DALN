@@ -19,7 +19,8 @@ import MenuCustome from "./Menu";
 import { NotificationsDropdown } from "../NotificationDropdown";
 import { useNavigate, useParams } from "react-router";
 import { selectUser } from "@/redux/slices/userSlice";
-import { MessagesSquare, SearchX, Search, X } from "lucide-react";
+import { MessagesSquare, SearchX, Search, X, Phone } from "lucide-react";
+import { useCall } from "@/contexts/callContext";
 
 /** Vietnamese-friendly search: strips diacritics so "hoa" matches "Hoà". */
 const normalize = (value: string) =>
@@ -146,12 +147,15 @@ export function ChatSidebar({ className }: { className?: string }) {
     });
   }, [conversations, filter, query]);
 
+  const { activeGroupConversationIds } = useCall();
+
   const renderConversationItem = (conversation: Conversation) => {
     const memberCount =
       conversation.memberCount ?? conversation.members?.length ?? 0;
     const isActive = selectedChatId === conversation.id;
     const unread = unreadCountOf(conversation);
     const isDirect = conversation.type === "DIRECT";
+    const isCalling = activeGroupConversationIds.includes(conversation.id);
 
     // `peerUserId` do backend phi chuẩn hoá; `members` chỉ còn là đường dự
     // phòng cho payload nào vẫn mang nó (chi tiết hội thoại, realtime).
@@ -253,16 +257,23 @@ export function ChatSidebar({ className }: { className?: string }) {
             </span>
           </div>
           <div className="flex items-center justify-between gap-2">
-            <p
-              className={cn(
-                "truncate text-sm",
-                unread
-                  ? "font-medium text-foreground"
-                  : "text-muted-foreground",
-              )}
-            >
-              {preview}
-            </p>
+            {isCalling ? (
+              <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium text-success">
+                <Phone className="size-3.5 shrink-0 animate-pulse" aria-hidden="true" />
+                Đang gọi…
+              </span>
+            ) : (
+              <p
+                className={cn(
+                  "truncate text-sm",
+                  unread
+                    ? "font-medium text-foreground"
+                    : "text-muted-foreground",
+                )}
+              >
+                {preview}
+              </p>
+            )}
             <CountBadge count={unread} />
           </div>
         </div>

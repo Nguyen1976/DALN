@@ -492,9 +492,16 @@ export class MessageService {
     if (!isMember(callerId) || (calleeId && !isMember(calleeId))) return
 
     const seconds = Math.max(0, Math.floor(Number(data.durationSeconds) || 0))
-    const text = this.describeCallOutcome(outcome, seconds, data.callType ?? 'audio')
+    const callType = data.callType ?? 'audio'
+    const text = this.describeCallOutcome(outcome, seconds, callType)
 
-    await this.createSystemMessageAndSync(conversationId, callerId, text)
+    await this.createCallLogAndSync(conversationId, callerId, text, {
+      scope: 'direct',
+      callType,
+      outcome, // COMPLETED | MISSED | REJECTED | UNREACHABLE | ...
+      durationSeconds: seconds,
+      startedBy: callerId,
+    })
   }
 
   /**
@@ -541,17 +548,24 @@ export class MessageService {
       0,
       Math.floor(Number(data.participantCount) || 0),
     )
+    const callType = data.callType ?? 'audio'
     const text = this.describeGroupCall(
       participantCount,
       durationSeconds,
-      data.callType ?? 'audio',
+      callType,
     )
 
-    // Tin hệ thống hiển thị dưới tên "System" (createSystemMessageAndSync gán
-    // sẵn), nên actor chỉ cần là một thành viên hợp lệ để bản ghi có senderId
-    // thuộc hội thoại — lấy người đầu danh sách.
+    // Tin hệ thống hiển thị dưới tên "System" (createCallLogAndSync gán sẵn), nên
+    // actor chỉ cần là một thành viên hợp lệ để bản ghi có senderId thuộc hội
+    // thoại — lấy người đầu danh sách.
     const actorUserId = members[0].userId
-    await this.createSystemMessageAndSync(conversationId, actorUserId, text)
+    await this.createCallLogAndSync(conversationId, actorUserId, text, {
+      scope: 'group',
+      callType,
+      outcome: 'ENDED',
+      durationSeconds,
+      participantCount,
+    })
 
     return { ok: true }
   }
@@ -606,6 +620,50 @@ export class MessageService {
     })
 
     const message = result
+    if (!message) return
+
+    const members = await this.memberRepo.findByConversationId(conversationId)
+    const memberIds = members.map((member) => member.userId)
+
+    this.enqueueConversationSyncJob({
+      conversationId,
+      senderId: actorUserId,
+      message,
+      senderMember: {
+        userId: actorUserId,
+        fullName: 'System',
+        username: 'System',
+        avatar: null,
+      },
+    })
+
+    const normalized = MessageMapper.toResponse(message)
+
+    this.safePublish(() =>
+      this.eventsPublisher.publishSystemMessage(memberIds, normalized),
+    )
+    this.safePublish(() =>
+      this.eventsPublisher.publishMessageSent(normalized, memberIds),
+    )
+  }
+
+  /**
+   * Ghi tin type=CALL kèm `callInfo` rồi đồng bộ/phát như tin hệ thống. Client
+   * dùng `callInfo` để render thẻ cuộc gọi + nút Gọi lại/Tham gia lại; `content`
+   * là văn bản dự phòng cho client cũ.
+   */
+  async createCallLogAndSync(
+    conversationId: string,
+    actorUserId: string,
+    content: string,
+    callInfo: Record<string, unknown>,
+  ) {
+    const message = await this.messageRepo.createCallLog({
+      conversationId,
+      senderId: actorUserId,
+      content,
+      callInfo,
+    })
     if (!message) return
 
     const members = await this.memberRepo.findByConversationId(conversationId)

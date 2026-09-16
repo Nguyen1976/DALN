@@ -23,7 +23,7 @@ function setup() {
     redisService as never,
   )
   const sync = jest
-    .spyOn(service, 'createSystemMessageAndSync')
+    .spyOn(service, 'createCallLogAndSync')
     .mockResolvedValue(undefined as never)
   return { service, memberRepo, redisService, sync }
 }
@@ -48,6 +48,7 @@ describe('MessageService.logGroupCall', () => {
       CONV,
       M1,
       'Cuộc gọi nhóm — 3 người · 2 phút 5 giây',
+      expect.objectContaining({ scope: 'group', callType: 'audio' }),
     )
   })
 
@@ -65,6 +66,7 @@ describe('MessageService.logGroupCall', () => {
       CONV,
       M1,
       'Cuộc gọi nhóm — 2 người · 45 giây',
+      expect.objectContaining({ scope: 'group', callType: 'audio' }),
     )
   })
 
@@ -82,6 +84,7 @@ describe('MessageService.logGroupCall', () => {
       CONV,
       M1,
       'Cuộc gọi nhóm — 0 người · 0 giây',
+      expect.objectContaining({ scope: 'group', callType: 'audio' }),
     )
   })
 
@@ -144,6 +147,7 @@ describe('MessageService.logGroupCall', () => {
       CONV,
       M1,
       'Cuộc gọi video nhóm — 3 người · 2 phút 5 giây',
+      expect.objectContaining({ scope: 'group', callType: 'video' }),
     )
   })
 

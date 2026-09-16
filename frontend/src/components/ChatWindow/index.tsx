@@ -45,6 +45,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useConversationRoom } from "@/hooks/useConversationRoom";
+import { useGroupCallDiscovery } from "@/hooks/useGroupCallDiscovery";
+import { useCall } from "@/contexts/callContext";
 import { useTypingIndicator } from "@/hooks/useTypingIndicator";
 import { useChatConversationContext } from "@/hooks/chat/useChatConversationContext";
 import { useChatMessageActions } from "@/hooks/chat/useChatMessageActions";
@@ -191,6 +193,13 @@ export default function ChatWindow({
 
   const poll = useChatPoll({ conversationId, messages });
   const isGroupConversation = effectiveConversation?.type === "GROUP";
+
+  // Discovery: phòng gọi nhóm đang mở của hội thoại này (banner "Tham gia").
+  const activeGroupRoom = useGroupCallDiscovery(
+    effectiveConversation?.id,
+    isGroupConversation,
+  );
+  const { joinGroupRoom, hasActiveOutgoingCall } = useCall();
 
   useConversationRoom(conversationId);
 
@@ -339,6 +348,33 @@ export default function ChatWindow({
           </DropdownMenu>
         </div>
       </div>
+
+      {/* Discovery: hội thoại đang có phòng gọi nhóm mở → mời tham gia. Ẩn khi
+          mình đã ở trong một cuộc gọi. */}
+      {activeGroupRoom && !hasActiveOutgoingCall && (
+        <div className="flex items-center gap-3 border-b border-border bg-primary/10 px-4 py-2">
+          <span className="relative flex size-2.5 shrink-0" aria-hidden="true">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
+            <span className="relative inline-flex size-2.5 rounded-full bg-success" />
+          </span>
+          {activeGroupRoom.callType === "video" ? (
+            <Video className="size-4 shrink-0 text-primary" aria-hidden="true" />
+          ) : (
+            <Phone className="size-4 shrink-0 text-primary" aria-hidden="true" />
+          )}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            Đang có cuộc gọi{" "}
+            {activeGroupRoom.callType === "video" ? "video " : ""}nhóm
+          </span>
+          <Button
+            size="sm"
+            className="shrink-0 rounded-full"
+            onClick={() => joinGroupRoom(activeGroupRoom)}
+          >
+            Tham gia
+          </Button>
+        </div>
+      )}
 
       <div
         // `relative` makes the list the containing block of absolutely

@@ -64,6 +64,7 @@ export const SOCKET_EVENTS = {
     DECLINE: "group_call.decline",
     LEAVE: "group_call.leave",
     STATE: "group_call.state",
+    QUERY_STATE: "group_call.query_state",
     ENDED: "group_call.ended",
   },
 };
