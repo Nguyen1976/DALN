@@ -1,22 +1,31 @@
-import { Phone, PhoneMissed, Video } from "lucide-react";
+import { Phone, PhoneMissed, User, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useCall } from "@/contexts/callContext";
 import type { CallInfo } from "@/redux/slices/messageSlice";
 
 /**
- * Thẻ tổng kết cuộc gọi (tin type=CALL) — giống Messenger: biểu tượng loại cuộc
- * gọi, kết cục (nhỡ / bị từ chối / thời lượng) và nút Gọi lại (1-1) hoặc Tham gia
- * lại (nhóm). Cuộc gọi nhỡ tô màu cảnh báo để dễ thấy.
+ * Thẻ tổng kết cuộc gọi hiển thị NHƯ MỘT TIN NHẮN (Messenger/Zalo): căn phải nếu
+ * mình là người gọi, căn trái nếu là người kia; có avatar người gọi. Bấm để gọi
+ * lại (1-1) / tham gia lại (nhóm). Cuộc gọi nhỡ tô màu cảnh báo.
  */
 export default function CallLogMessage({
   conversationId,
   callInfo,
   time,
+  isMine,
+  senderName,
+  senderAvatar,
+  showAvatar = true,
 }: {
   conversationId: string;
   callInfo: CallInfo;
   time: React.ReactNode;
+  isMine: boolean;
+  senderName?: string;
+  senderAvatar?: string;
+  showAvatar?: boolean;
 }) {
   const { startDirectCall, startGroupCall } = useCall();
 
@@ -24,8 +33,7 @@ export default function CallLogMessage({
   const isVideo = callInfo.callType === "video";
   const outcome = (callInfo.outcome || "").toUpperCase();
   const missed = outcome === "MISSED";
-  const rejected = outcome === "REJECTED";
-  const unreachable = outcome === "UNREACHABLE";
+  const attention = missed || outcome === "UNREACHABLE";
 
   const title = isVideo
     ? isGroup
@@ -41,18 +49,15 @@ export default function CallLogMessage({
     const s = seconds % 60;
     return m > 0 ? `${m} phút ${s} giây` : `${s} giây`;
   })();
-
   const detail = missed
     ? "Cuộc gọi nhỡ"
-    : rejected
+    : outcome === "REJECTED"
       ? "Bị từ chối"
-      : unreachable
+      : outcome === "UNREACHABLE"
         ? "Không kết nối được"
         : seconds > 0
           ? durationText
           : "Đã kết thúc";
-
-  const attention = missed || unreachable;
 
   const handleCallBack = () => {
     if (isGroup) startGroupCall(conversationId, callInfo.callType);
@@ -62,8 +67,30 @@ export default function CallLogMessage({
   const Icon = missed ? PhoneMissed : isVideo ? Video : Phone;
 
   return (
-    <div className="my-3 flex justify-center">
-      <div className="flex w-full max-w-[85%] items-center gap-3 rounded-2xl border border-border bg-card px-3.5 py-2.5 shadow-sm sm:max-w-xs">
+    <div
+      className={cn(
+        "my-1 flex items-end gap-2",
+        isMine ? "justify-end" : "justify-start",
+      )}
+    >
+      {!isMine &&
+        (showAvatar ? (
+          <Avatar className="size-8 border border-border">
+            <AvatarImage src={senderAvatar} alt="" />
+            <AvatarFallback>
+              {senderName?.[0] || <User className="size-4" />}
+            </AvatarFallback>
+          </Avatar>
+        ) : (
+          <div className="size-8 shrink-0" aria-hidden="true" />
+        ))}
+
+      <div
+        className={cn(
+          "flex max-w-[85%] items-center gap-3 rounded-2xl border px-3 py-2 shadow-sm sm:max-w-sm",
+          isMine ? "border-primary/25 bg-primary/10" : "border-border bg-card",
+        )}
+      >
         <div
           className={cn(
             "flex size-9 shrink-0 items-center justify-center rounded-full",
@@ -76,13 +103,13 @@ export default function CallLogMessage({
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">
-            {title}
-          </p>
+          <p className="truncate text-sm font-medium text-foreground">{title}</p>
           <p
             className={cn(
               "truncate text-xs",
-              attention ? "font-medium text-warning-text" : "text-muted-foreground",
+              attention
+                ? "font-medium text-warning-text"
+                : "text-muted-foreground",
             )}
           >
             {detail}

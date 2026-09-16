@@ -112,6 +112,8 @@ export async function postGroupCallLog(input: {
   callId?: string
   /** Loại cuộc gọi để chat chọn văn bản "nhóm" vs "video nhóm". */
   callType?: 'audio' | 'video'
+  /** Người mở phòng — để tin log gán senderId đúng (căn phải/trái như tin nhắn). */
+  startedBy?: string
 }): Promise<boolean> {
   const url = `${chatServiceBaseUrl()}/chat/internal/group-call-log`
 

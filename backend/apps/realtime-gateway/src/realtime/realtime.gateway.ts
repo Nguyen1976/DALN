@@ -1340,6 +1340,7 @@ export class RealtimeGateway
       durationSeconds,
       callId: session.callId,
       callType: session.callType,
+      startedBy: session.startedBy,
     })
 
     // Mở khoá bận cho mọi người từng vào phòng.

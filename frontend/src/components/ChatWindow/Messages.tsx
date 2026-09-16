@@ -32,6 +32,7 @@ import {
 } from "../ui/dropdown-menu";
 import FileAttachmentPreview from "./FileAttachmentPreview";
 import CallLogMessage from "./CallLogMessage";
+import { parseLegacyCallInfo } from "@/utils/callLog";
 
 /** Nhãn thay cho nội dung khi tin nhắn gốc không phải văn bản. */
 function quotedPlaceholder(type: string): string {
@@ -270,13 +271,17 @@ const MessageComponent = ({
 
         const senderName = message.senderMember?.username;
 
-        // System records — someone joined or left, a call ended — are not
-        // things anyone typed. Rendering them as ordinary outgoing bubbles
-        // (complete with a read receipt) made a missed call look like a
-        // message the user had sent.
-        // Tin tổng kết cuộc gọi → thẻ riêng (biểu tượng, kết cục, nút gọi lại)
-        // thay vì chữ trơn, để có thể gọi lại / tham gia lại như Messenger.
-        if (message.type === "CALL" && message.callInfo) {
+        // Tin tổng kết cuộc gọi → thẻ căn như MỘT TIN NHẮN (Messenger/Zalo):
+        // người gọi bên phải, người kia bên trái + avatar; có nút gọi lại / tham
+        // gia lại. Tin mới dùng callInfo; tin CŨ (chỉ có text) suy từ văn bản để
+        // lịch sử cũ cũng hiển thị đẹp thay vì chữ hệ thống trơn.
+        const callInfo =
+          message.type === "CALL" && message.callInfo
+            ? message.callInfo
+            : message.isSystem
+              ? parseLegacyCallInfo(message.text)
+              : null;
+        if (callInfo) {
           return (
             <div key={message.id}>
               {dayDivider}
@@ -289,7 +294,10 @@ const MessageComponent = ({
               >
                 <CallLogMessage
                   conversationId={message.conversationId}
-                  callInfo={message.callInfo}
+                  callInfo={callInfo}
+                  isMine={isMine}
+                  senderName={senderName}
+                  senderAvatar={message.senderMember?.avatar}
                   time={
                     <time
                       dateTime={message.createdAt}
@@ -304,6 +312,7 @@ const MessageComponent = ({
           );
         }
 
+        // System records — someone joined or left — are not things anyone typed.
         if (message.isSystem) {
           return (
             <div key={message.id}>
