@@ -46,6 +46,8 @@ export interface GroupCallLogRequest {
   durationSeconds: number
   callId?: string
   callType?: 'audio' | 'video'
+  /** Người mở phòng — senderId của tin log để căn phải/trái như tin nhắn. */
+  startedBy?: string
 }
 
 type ConversationSyncMember = {
@@ -555,16 +557,20 @@ export class MessageService {
       callType,
     )
 
-    // Tin hệ thống hiển thị dưới tên "System" (createCallLogAndSync gán sẵn), nên
-    // actor chỉ cần là một thành viên hợp lệ để bản ghi có senderId thuộc hội
-    // thoại — lấy người đầu danh sách.
-    const actorUserId = members[0].userId
+    // senderId = người mở phòng (nếu còn là thành viên) để client căn thẻ về phía
+    // người gọi như một tin nhắn; nếu thiếu/không còn thì lấy người đầu danh sách.
+    const starter = data.startedBy
+    const actorUserId =
+      starter && members.some((m) => m.userId === starter)
+        ? starter
+        : members[0].userId
     await this.createCallLogAndSync(conversationId, actorUserId, text, {
       scope: 'group',
       callType,
       outcome: 'ENDED',
       durationSeconds,
       participantCount,
+      startedBy: actorUserId,
     })
 
     return { ok: true }

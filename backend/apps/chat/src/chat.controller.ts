@@ -400,6 +400,7 @@ export class ChatController {
       durationSeconds: Number(body.durationSeconds) || 0,
       callId: body.callId,
       callType: body.callType as 'audio' | 'video' | undefined,
+      startedBy: body.startedBy,
     })
   }
 }

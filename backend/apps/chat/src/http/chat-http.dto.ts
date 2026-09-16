@@ -174,4 +174,8 @@ export class GroupCallLogDTO {
   @IsOptional()
   @IsString()
   callType?: string
+
+  @IsOptional()
+  @IsString()
+  startedBy?: string
 }
