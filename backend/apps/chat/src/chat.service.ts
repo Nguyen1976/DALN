@@ -50,6 +50,10 @@ export class ChatService {
     return this.messageService.sendMessage(data)
   }
 
+  clearMentions(conversationId: string, userId: string) {
+    return this.messageService.clearMentions(conversationId, userId)
+  }
+
   createMessageUploadUrl(
     data: Parameters<MessageService['createMessageUploadUrl']>[0],
   ) {

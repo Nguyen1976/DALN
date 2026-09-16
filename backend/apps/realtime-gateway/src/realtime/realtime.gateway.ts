@@ -401,6 +401,9 @@ export class RealtimeGateway
         clientMessageId: data.clientMessageId,
         type: data.type,
         medias: data.media || data.medias || [],
+        mentionUserIds: Array.isArray(data.mentionUserIds)
+          ? data.mentionUserIds
+          : [],
       },
     )
   }

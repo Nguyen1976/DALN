@@ -2,6 +2,13 @@ import { normalizeEmail } from "@/utils/email";
 import authorizeAxiosInstance from "@/utils/authorizeAxios";
 import { API_ROOT } from "@/utils/constant";
 
+export async function clearConversationMentionsAPI(conversationId: string) {
+  const response = await authorizeAxiosInstance.post("/chat/mentions/clear", {
+    conversationId,
+  });
+  return response.data;
+}
+
 export interface InterestTagItem {
   id: string;
   slug: string;

@@ -25,8 +25,9 @@ import {
   MessageSquareOff,
   FileText,
   Loader2,
+  AtSign,
 } from "lucide-react";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RootState } from "@/redux/store";
 import {
@@ -71,6 +72,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
+import type { AppDispatch } from "@/redux/store";
+import { clearConversationMentions } from "@/redux/slices/conversationSlice";
+import { clearConversationMentionsAPI } from "@/apis";
 
 interface ChatWindowProps {
   conversationId?: string;
@@ -95,6 +99,9 @@ export default function ChatWindow({
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [showClearHistoryDialog, setShowClearHistoryDialog] = useState(false);
   const [internalJumpId, setInternalJumpId] = useState<string | null>(null);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const dispatch = useDispatch<AppDispatch>();
 
   const {
     user,
@@ -171,6 +178,8 @@ export default function ChatWindow({
     addFiles,
     removeAttachment,
     isUploading,
+    mentionUserIds,
+    setMentionUserIds,
   } = useChatComposer({
     conversationId,
     user,
@@ -193,6 +202,45 @@ export default function ChatWindow({
 
   const poll = useChatPoll({ conversationId, messages });
   const isGroupConversation = effectiveConversation?.type === "GROUP";
+  const mentionCandidates = useMemo(() => {
+    if (!isGroupConversation || mentionQuery === null) return [];
+    const needle = mentionQuery.toLocaleLowerCase("vi");
+    return (effectiveConversation?.members || [])
+      .filter((member) => member.userId !== user.id)
+      .filter((member) => `${member.fullName || ""} ${member.username || ""}`.toLocaleLowerCase("vi").includes(needle))
+      .slice(0, 8);
+  }, [effectiveConversation?.members, isGroupConversation, mentionQuery, user.id]);
+
+  const updateMentionQuery = (value: string, caret: number) => {
+    const match = value.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
+    setMentionQuery(match ? match[1] : null);
+    setMentionIndex(0);
+  };
+
+  const chooseMention = (member: any) => {
+    const node = composerRef.current;
+    if (!node) return;
+    const caret = node.selectionStart;
+    const match = msg.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
+    if (!match) return;
+    const start = caret - match[0].length + (match[0].startsWith(" ") ? 1 : 0);
+    const token = `@${member.username || member.fullName?.replace(/\s+/g, "_") || "thanh_vien"}`;
+    setMsg(`${msg.slice(0, start)}${token} ${msg.slice(caret)}`);
+    setMentionUserIds((ids) => [...new Set([...ids, member.userId])]);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      node.focus();
+      node.setSelectionRange(start + token.length + 1, start + token.length + 1);
+    });
+  };
+
+  const jumpToMention = async () => {
+    const messageId = effectiveConversation?.lastMentionMessageId;
+    if (!conversationId || !messageId) return;
+    setInternalJumpId(messageId);
+    dispatch(clearConversationMentions({ conversationId }));
+    await clearConversationMentionsAPI(conversationId).catch(() => undefined);
+  };
 
   // Discovery: phòng gọi nhóm đang mở của hội thoại này (banner "Tham gia").
   const activeGroupRoom = useGroupCallDiscovery(
@@ -430,6 +478,20 @@ export default function ChatWindow({
         </button>
       )}
 
+      {(effectiveConversation?.unreadMentionCount || 0) > 0 && (
+        <button
+          type="button"
+          aria-label={`Đi đến ${effectiveConversation?.unreadMentionCount} lượt nhắc bạn`}
+          onClick={() => void jumpToMention()}
+          className="absolute bottom-36 right-4 z-20 flex size-10 items-center justify-center rounded-full bg-brand text-white shadow-lg transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          <AtSign className="size-5" aria-hidden="true" />
+          <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-destructive px-1 text-[10px] font-bold leading-5">
+            {effectiveConversation?.unreadMentionCount}
+          </span>
+        </button>
+      )}
+
       {!canSendMessage && (
         <div
           role="status"
@@ -583,22 +645,61 @@ export default function ChatWindow({
           {/* Auto-growing textarea: long messages stay fully visible instead of
               scrolling inside a one-line input, capped so the thread keeps most
               of the viewport. Enter sends, Shift+Enter breaks the line. */}
+          <div className="relative flex min-h-10 min-w-0 flex-1 items-center">
+          {mentionCandidates.length > 0 && (
+            <div role="listbox" aria-label="Chọn thành viên để nhắc" className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-full min-w-64 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl">
+              {mentionCandidates.map((member, index) => (
+                <button
+                  key={member.userId}
+                  type="button"
+                  role="option"
+                  aria-selected={index === mentionIndex}
+                  onMouseDown={(event) => { event.preventDefault(); chooseMention(member); }}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${index === mentionIndex ? "bg-accent" : "hover:bg-accent"}`}
+                >
+                  <Avatar className="size-8"><AvatarImage src={member.avatar || ""} /><AvatarFallback>{(member.fullName || member.username || "T")[0]}</AvatarFallback></Avatar>
+                  <span className="min-w-0"><span className="block truncate font-medium">{member.fullName || member.username}</span><span className="block truncate text-xs text-muted-foreground">@{member.username}</span></span>
+                </button>
+              ))}
+            </div>
+          )}
+          {mentionUserIds.length > 0 && (
+            <div className="pointer-events-none absolute -top-5 left-2 text-[11px] font-semibold text-brand">Đang nhắc {mentionUserIds.length} thành viên</div>
+          )}
           <textarea
             ref={composerRef}
             rows={1}
             placeholder="Nhập tin nhắn…"
             disabled={!canSendMessage}
             aria-label="Nhập tin nhắn"
-            className="custom-scrollbar max-h-32 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-placeholder disabled:cursor-not-allowed"
+            className="custom-scrollbar block max-h-32 min-h-10 w-full resize-none bg-transparent px-2 py-2.5 text-sm leading-5 text-foreground outline-none placeholder:text-placeholder disabled:cursor-not-allowed"
             onChange={(e) => {
               setMsg(e.target.value);
               handleTyping(e.target.value);
+              updateMentionQuery(e.target.value, e.target.selectionStart);
             }}
             value={msg}
             onFocus={handleInputFocus}
             onBlur={handleInputBlur}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
+              if (mentionCandidates.length) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setMentionIndex((current) => e.key === "ArrowDown" ? (current + 1) % mentionCandidates.length : (current - 1 + mentionCandidates.length) % mentionCandidates.length);
+                  return;
+                }
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  chooseMention(mentionCandidates[mentionIndex]);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setMentionQuery(null);
+                  return;
+                }
+              }
               // Escape drops the quote without touching what has been typed.
               if (e.key === "Escape" && replyingTo) {
                 e.preventDefault();
@@ -611,6 +712,7 @@ export default function ChatWindow({
               }
             }}
           />
+          </div>
 
           <Popover>
             <PopoverTrigger asChild>

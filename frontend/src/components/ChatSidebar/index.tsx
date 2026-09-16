@@ -274,7 +274,17 @@ export function ChatSidebar({ className }: { className?: string }) {
                 {preview}
               </p>
             )}
-            <CountBadge count={unread} />
+            <div className="flex shrink-0 items-center gap-1">
+              {(conversation.unreadMentionCount || 0) > 0 && (
+                <span
+                  className="flex size-5 items-center justify-center rounded-full bg-brand text-xs font-bold text-white"
+                  aria-label={`Bạn được nhắc ${conversation.unreadMentionCount} lần`}
+                >
+                  @
+                </span>
+              )}
+              <CountBadge count={unread} />
+            </div>
           </div>
         </div>
       </button>

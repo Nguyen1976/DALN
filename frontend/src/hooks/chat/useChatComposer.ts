@@ -65,6 +65,7 @@ export function useChatComposer({
   scrollToBottom,
 }: UseChatComposerOptions) {
   const dispatch = useDispatch<AppDispatch>();
+  const [mentionUserIds, setMentionUserIds] = useState<string[]>([]);
   /**
    * The composer text lives in the store, keyed by conversation.
    *
@@ -166,11 +167,13 @@ export function useChatComposer({
       content,
       clientMessageId,
       replyToMessageId,
+      mentionUserIds: mentions,
     }: {
       conversationId: string;
       content: string;
       clientMessageId: string;
       replyToMessageId?: string;
+      mentionUserIds?: string[];
     }) => {
       if (!socket.connected) {
         dispatch(failMessage({ conversationId: cid, clientMessageId }));
@@ -184,6 +187,7 @@ export function useChatComposer({
         clientMessageId,
         replyToMessageId,
         media: [],
+        mentionUserIds: mentions || [],
       });
 
       window.setTimeout(() => {
@@ -205,6 +209,7 @@ export function useChatComposer({
         content: message.text || "",
         clientMessageId,
         replyToMessageId: message.replyToMessageId,
+        mentionUserIds: message.mentionUserIds,
       });
     },
     [conversationId, dispatch, emitMessage],
@@ -378,11 +383,13 @@ export function useChatComposer({
           clientMessageId,
           replyToMessageId: quoted?.id,
           media: uploaded,
+          mentionUserIds,
         });
 
         clearAttachments();
         setMsg("");
         setReplyingTo(null);
+        setMentionUserIds([]);
       } catch (error) {
         showErrorToast(error, "Không thể tải tệp lên");
         dispatch(failMessage({ conversationId, clientMessageId }));
@@ -418,6 +425,7 @@ export function useChatComposer({
       type: "TEXT",
       text: msg,
       clientMessageId,
+      mentionUserIds,
       // Hiển thị trích dẫn ngay ở bản tạm, không đợi máy chủ dựng lại.
       ...(quoted
         ? {
@@ -446,10 +454,12 @@ export function useChatComposer({
       content: msg,
       clientMessageId,
       replyToMessageId: quoted?.id,
+      mentionUserIds,
     });
 
     stopTyping();
     setMsg("");
+    setMentionUserIds([]);
     setReplyingTo(null);
 
     requestAnimationFrame(() => {
@@ -466,6 +476,7 @@ export function useChatComposer({
     msg,
     attachments,
     isUploading,
+    mentionUserIds,
     replyingTo,
     sendWithAttachments,
     setMsg,
@@ -485,5 +496,7 @@ export function useChatComposer({
     addFiles,
     removeAttachment,
     isUploading,
+    mentionUserIds,
+    setMentionUserIds,
   };
 }

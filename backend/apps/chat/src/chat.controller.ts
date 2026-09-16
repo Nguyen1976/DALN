@@ -32,6 +32,7 @@ import {
   SubmitPollVoteDTO,
   ClosePollDTO,
   GroupCallLogDTO,
+  ClearMentionsDTO,
 } from './http/chat-http.dto'
 import { ConversationMapper } from './domain/conversation.mapper'
 import { MessageMapper } from './domain/message.mapper'
@@ -39,6 +40,12 @@ import { MessageMapper } from './domain/message.mapper'
 @Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
+
+  @Post('mentions/clear')
+  @RequireLogin()
+  clearMentions(@Body() dto: ClearMentionsDTO, @UserInfo() userInfo: any) {
+    return this.chatService.clearMentions(dto.conversationId, userInfo.userId)
+  }
 
   @Post('create')
   @UseInterceptors(

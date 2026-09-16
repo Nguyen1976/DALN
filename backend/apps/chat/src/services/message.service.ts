@@ -80,6 +80,16 @@ export class MessageService {
     private readonly redisService: RedisService,
   ) {}
 
+  async clearMentions(conversationId: string, userId: string) {
+    const member = await this.memberRepo.findByConversationIdAndUserId(
+      conversationId,
+      userId,
+    )
+    if (!member) ChatErrors.userNotMember()
+    await this.memberRepo.clearMentions(conversationId, userId)
+    return { success: true }
+  }
+
   async sendMessage(data: MessageSendPayload) {
     const conversationMembers = await this.memberRepo.findByConversationId(
       data.conversationId,
@@ -92,6 +102,9 @@ export class MessageService {
 
     const content = data.text?.trim() || null
     const medias = data.medias || []
+    const mentionUserIds = [...new Set(data.mentionUserIds || [])].filter(
+      (id) => id !== data.senderId && memberIds.includes(id),
+    )
 
     // A message needs to carry something: text, attachments, or both. It used
     // to be one or the other — a caption alongside files was impossible, and so
@@ -162,6 +175,7 @@ export class MessageService {
       content,
       replyToMessageId: data.replyToMessageId,
       medias,
+      mentionUserIds,
     })
 
     if (!message) {
@@ -172,6 +186,14 @@ export class MessageService {
       (member) => member.userId === data.senderId,
     )
     message.senderMember = senderMember
+    ;(message as any).mentionUserIds = mentionUserIds
+    if (mentionUserIds.length) {
+      await this.memberRepo.markMention(
+        data.conversationId,
+        mentionUserIds,
+        String(message.id),
+      )
+    }
 
     // Replies are rare next to plain messages, so the quoted message is fetched
     // here instead of through an `include` that would run for every send.

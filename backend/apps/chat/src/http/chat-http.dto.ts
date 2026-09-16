@@ -132,6 +132,12 @@ export class ClearConversationHistoryDTO {
   conversationId: string
 }
 
+export class ClearMentionsDTO {
+  @IsNotEmpty()
+  @IsString()
+  conversationId: string
+}
+
 export class CreatePollDTO {
   @IsNotEmpty()
   @IsString()

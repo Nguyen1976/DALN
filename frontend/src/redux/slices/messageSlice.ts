@@ -49,6 +49,7 @@ export interface Message {
   type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL" | "CALL";
   /** Với type=CALL: dữ liệu để render thẻ cuộc gọi + nút Gọi lại/Tham gia lại. */
   callInfo?: CallInfo;
+  mentionUserIds?: string[];
   clientMessageId?: string;
   replyToMessageId?: string;
   /** Tin nhắn được trích dẫn, đã được máy chủ dựng sẵn để hiển thị. */

@@ -92,6 +92,7 @@ export interface MessageSendPayload {
   medias?: MessageMediaInput[]
   replyToMessageId?: string
   tempMessageId: string
+  mentionUserIds?: string[]
 }
 
 export interface MessageMediaInput {

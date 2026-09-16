@@ -68,6 +68,8 @@ model conversationMember {
   role              participantRole   @default(MEMBER)
   isActive          Boolean           @default(true)
   unreadCount       Int               @default(0)
+  unreadMentionCount Int              @default(0)
+  lastMentionMessageId String?        @db.ObjectId
   lastReadMessageId String?           @db.ObjectId
   lastReadAt        DateTime?
   clearedHistoryAt  DateTime?
@@ -104,6 +106,7 @@ model message {
   /// nút Gọi lại/Tham gia lại (scope direct|group, callType, outcome, duration...).
   /// MongoDB schemaless nên field mới an toàn: tin cũ không có = null.
   callInfo        Json?
+  mentionUserIds  String[]           @default([]) @db.ObjectId
   replyToMessageId String?           @db.ObjectId
   /// KHÔNG đặt @unique: MongoDB coi tin thiếu field là `null`, nên unique index
   /// chỉ cho đúng MỘT tin không kèm bình chọn tồn tại — mọi tin sau đó vỡ P2002.
