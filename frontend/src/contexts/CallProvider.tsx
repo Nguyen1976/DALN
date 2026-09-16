@@ -1,4 +1,10 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { toast } from "sonner";
 import VoiceCallModal, {
   type VoiceCallMode,
@@ -9,6 +15,7 @@ import { SOCKET_EVENTS } from "@/lib/socket.events";
 import { describeGroupCallError } from "@/utils/groupCallError";
 import {
   CallContext,
+  type ActiveGroupRoom,
   type CallContextValue,
   type CallType,
 } from "./callContext";
@@ -26,6 +33,7 @@ type ActiveGroupCall = {
   url: string;
   token: string;
   callType: CallType;
+  startWithCamera: boolean;
   iceServers?: RTCIceServer[];
 };
 
@@ -41,6 +49,10 @@ type GroupCallStartAck =
     }
   | { ok: false; code?: string };
 
+type GroupCallAcceptAck =
+  | { ok: true; url: string; token: string; callType?: CallType; iceServers?: RTCIceServer[] }
+  | { ok: false; code?: string };
+
 /**
  * CallProvider — giữ cuộc gọi RA NGOÀI (outgoing) sống xuyên suốt ứng dụng.
  *
@@ -54,6 +66,36 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [voiceMinimized, setVoiceMinimized] = useState(false);
   const [groupCall, setGroupCall] = useState<ActiveGroupCall | null>(null);
   const [groupMinimized, setGroupMinimized] = useState(false);
+  // Hội thoại nhóm đang có phòng mở → chấm "đang gọi" ở danh sách. Cập nhật từ
+  // broadcast group_call.state (gửi tới mọi thành viên khi ai đó vào/ra) + ended.
+  const [activeGroupIds, setActiveGroupIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const onState = (p: {
+      conversationId?: string;
+      participants?: unknown[];
+    } = {}) => {
+      const cid = p.conversationId;
+      if (!cid) return;
+      const alive = (p.participants?.length ?? 0) > 0;
+      setActiveGroupIds((prev) => {
+        const has = prev.includes(cid);
+        if (alive && !has) return [...prev, cid];
+        if (!alive && has) return prev.filter((id) => id !== cid);
+        return prev;
+      });
+    };
+    const onEnded = (p: { conversationId?: string } = {}) => {
+      if (!p.conversationId) return;
+      setActiveGroupIds((prev) => prev.filter((id) => id !== p.conversationId));
+    };
+    socket.on(SOCKET_EVENTS.GROUP_CALL.STATE, onState);
+    socket.on(SOCKET_EVENTS.GROUP_CALL.ENDED, onEnded);
+    return () => {
+      socket.off(SOCKET_EVENTS.GROUP_CALL.STATE, onState);
+      socket.off(SOCKET_EVENTS.GROUP_CALL.ENDED, onEnded);
+    };
+  }, []);
 
   const startDirectCall = useCallback(
     (conversationId: string, callType: CallType) => {
@@ -81,6 +123,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
               token: ack.token,
               // Phòng đã mở giữ nguyên callType — tin theo ack của server.
               callType: ack.callType ?? callType,
+              startWithCamera: (ack.callType ?? callType) === "video",
               iceServers: ack.iceServers,
             });
           } else {
@@ -92,13 +135,48 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Tham gia phòng nhóm ĐANG diễn ra (banner discovery): accept để lấy token; vào
+  // với camera TẮT để không bất ngờ mở camera, người dùng tự bật khi muốn.
+  const joinGroupRoom = useCallback((room: ActiveGroupRoom) => {
+    socket.emit(
+      SOCKET_EVENTS.GROUP_CALL.ACCEPT,
+      { callId: room.callId },
+      (ack?: GroupCallAcceptAck) => {
+        if (ack?.ok) {
+          setGroupMinimized(false);
+          setGroupCall({
+            callId: room.callId,
+            conversationId: room.conversationId,
+            roomName: room.roomName,
+            url: ack.url,
+            token: ack.token,
+            callType: ack.callType ?? room.callType,
+            startWithCamera: false,
+            iceServers: ack.iceServers,
+          });
+        } else {
+          toast.error(describeGroupCallError(ack?.code));
+        }
+      },
+    );
+  }, []);
+
   const value = useMemo<CallContextValue>(
     () => ({
       startDirectCall,
       startGroupCall,
+      joinGroupRoom,
       hasActiveOutgoingCall: voiceCall !== null || groupCall !== null,
+      activeGroupConversationIds: activeGroupIds,
     }),
-    [startDirectCall, startGroupCall, voiceCall, groupCall],
+    [
+      startDirectCall,
+      startGroupCall,
+      joinGroupRoom,
+      voiceCall,
+      groupCall,
+      activeGroupIds,
+    ],
   );
 
   return (
@@ -127,6 +205,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           token={groupCall.token}
           conversationId={groupCall.conversationId}
           callType={groupCall.callType}
+          startWithCamera={groupCall.startWithCamera}
           iceServers={groupCall.iceServers}
           minimized={groupMinimized}
           onToggleMinimize={() => setGroupMinimized((v) => !v)}

@@ -60,6 +60,7 @@ export const SOCKET_EVENTS = {
     DECLINE: 'group_call.decline', //emit: từ chối
     LEAVE: 'group_call.leave', //emit: rời phòng
     STATE: 'group_call.state', //listen: danh sách người đang trong cuộc
+    QUERY_STATE: 'group_call.query_state', //emit + ack: hỏi hội thoại có phòng đang mở không (banner "Tham gia")
     ENDED: 'group_call.ended', //listen: phòng đã đóng
   },
 }

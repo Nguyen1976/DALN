@@ -934,6 +934,48 @@ export class RealtimeGateway
   // gateway không chuyển tiếp SDP/ICE — nó chỉ phân quyền, ký token vào phòng, và
   // giữ trạng thái "ai đang trong cuộc" (nguồn sự thật cuối là webhook LiveKit).
 
+  /**
+   * Hỏi một hội thoại nhóm có phòng gọi đang mở không (banner "Tham gia" khi mở
+   * hội thoại — mục DISCOVERY của thiết kế). Chỉ thành viên mới hỏi được; server
+   * là nguồn sự thật về phòng còn sống (dựa vào phiên Redis, không đoán từ tên).
+   */
+  @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.QUERY_STATE)
+  async handleGroupCallQueryState(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: Socket,
+  ): Promise<CallAck> {
+    const userId = client.data.userId
+    if (!userId) {
+      return callError('UNAUTHORIZED', 'Unauthorized socket client')
+    }
+    const conversationId =
+      typeof data?.conversationId === 'string' ? data.conversationId.trim() : ''
+    if (!conversationId) {
+      return callError('INVALID_PAYLOAD', 'conversationId is required')
+    }
+
+    const session = await this.groupCallStore.getByConversationId(conversationId)
+    if (!session || !GroupCallStore.isMember(session, userId)) {
+      return { ok: true, active: null }
+    }
+
+    const participants = GroupCallStore.participantList(session)
+    if (participants.length === 0) {
+      return { ok: true, active: null }
+    }
+
+    return {
+      ok: true,
+      active: {
+        callId: session.callId,
+        conversationId: session.conversationId,
+        roomName: session.roomName,
+        callType: session.callType,
+        participantCount: participants.length,
+      },
+    }
+  }
+
   /** Phát `group_call.state` tới mọi thành viên hội thoại đã lưu trong phiên. */
   private emitGroupCallState(session: GroupCallSession) {
     this.emitToUserSockets(
