@@ -16,6 +16,7 @@ export {
   ConversationMemberService,
   type AddMemberToConversationRequest,
   type RemoveMemberFromConversationRequest,
+  type PromoteMemberRequest,
   type LeaveConversationRequest,
 } from './conversation-member.service'
 export {

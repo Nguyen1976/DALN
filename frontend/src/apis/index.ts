@@ -11,7 +11,6 @@ export interface InterestTagItem {
   order: number;
 }
 
-
 function parseInterestTagsPayload(body: unknown): InterestTagItem[] {
   if (Array.isArray(body)) {
     return body as InterestTagItem[];
@@ -124,9 +123,7 @@ export interface RecommendationResponse {
 
 export const getMyRecommendationsAPI =
   async (): Promise<RecommendationResponse> => {
-    const response = await authorizeAxiosInstance.get(
-      `/recommendation/me`,
-    );
+    const response = await authorizeAxiosInstance.get(`/recommendation/me`);
     return response.data.data ?? response.data;
   };
 
@@ -147,25 +144,28 @@ export const registerAPI = async (data: {
   };
 }): Promise<{ email: string; requiresOtpVerification: boolean }> => {
   const payload = { ...data, email: normalizeEmail(data.email) };
-  const response = await authorizeAxiosInstance.post(`/user/register`, payload, {
-    skipErrorToast: true,
-  });
+  const response = await authorizeAxiosInstance.post(
+    `/user/register`,
+    payload,
+    {
+      skipErrorToast: true,
+    },
+  );
   return response.data.data;
 };
 
 export const verifyOtpAPI = async (data: { email: string; otp: string }) => {
-  const response = await authorizeAxiosInstance.post(
-    `/user/verify-otp`,
-    { ...data, email: normalizeEmail(data.email) },
-  );
+  const response = await authorizeAxiosInstance.post(`/user/verify-otp`, {
+    ...data,
+    email: normalizeEmail(data.email),
+  });
   return response.data.data;
 };
 
 export const resendOtpAPI = async (data: { email: string }) => {
-  const response = await authorizeAxiosInstance.post(
-    `/user/resend-otp`,
-    { email: normalizeEmail(data.email) },
-  );
+  const response = await authorizeAxiosInstance.post(`/user/resend-otp`, {
+    email: normalizeEmail(data.email),
+  });
   return response.data.data;
 };
 
@@ -246,9 +246,7 @@ export interface SearchFriendItem {
 export const getUserProfileByIdAPI = async (
   userId: string,
 ): Promise<UserProfileByIdResponse> => {
-  const response = await authorizeAxiosInstance.get(
-    `/user?userId=${userId}`,
-  );
+  const response = await authorizeAxiosInstance.get(`/user?userId=${userId}`);
   return response.data.data;
 };
 
@@ -383,10 +381,7 @@ export const createPollAPI = async (data: {
   options: string[];
   isMultipleChoice: boolean;
 }) => {
-  const response = await authorizeAxiosInstance.post(
-    `/chat/polls`,
-    data,
-  );
+  const response = await authorizeAxiosInstance.post(`/chat/polls`, data);
   return response.data.data as {
     message: {
       id: string;
@@ -412,10 +407,7 @@ export const submitPollVoteAPI = async (data: {
   pollId: string;
   optionIds: string[];
 }) => {
-  const response = await authorizeAxiosInstance.post(
-    `/chat/polls/vote`,
-    data,
-  );
+  const response = await authorizeAxiosInstance.post(`/chat/polls/vote`, data);
   return response.data.data as {
     pollId: string;
     messageId: string;
@@ -429,10 +421,7 @@ export const submitPollVoteAPI = async (data: {
 };
 
 export const closePollAPI = async (data: { pollId: string }) => {
-  const response = await authorizeAxiosInstance.post(
-    `/chat/polls/close`,
-    data,
-  );
+  const response = await authorizeAxiosInstance.post(`/chat/polls/close`, data);
   return response.data.data as {
     pollId: string;
     messageId: string;
@@ -561,6 +550,17 @@ export const removeMemberFromConversationAPI = async (payload: {
 }): Promise<{ status: string }> => {
   const response = await authorizeAxiosInstance.post(
     `/chat/remove-member`,
+    payload,
+  );
+  return response.data.data;
+};
+
+export const promoteMemberAPI = async (payload: {
+  conversationId: string;
+  targetUserId: string;
+}): Promise<{ status: string }> => {
+  const response = await authorizeAxiosInstance.post(
+    `/chat/promote-member`,
     payload,
   );
   return response.data.data;

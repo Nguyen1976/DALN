@@ -19,6 +19,7 @@ import {
   CreateConversationDTO,
   AddMemberToConversationDTO,
   RemoveMemberFromConversationDTO,
+  PromoteMemberDTO,
   LeaveConversationDTO,
   DeleteConversationDTO,
   CreateMessageUploadUrlDTO,
@@ -117,6 +118,19 @@ export class ChatController {
     @UserInfo() userInfo: any,
   ) {
     return await this.chatService.removeMemberFromConversation({
+      conversationId: body.conversationId,
+      targetUserId: body.targetUserId,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Post('promote-member')
+  @RequireLogin()
+  async promoteMember(
+    @Body() body: PromoteMemberDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    return await this.chatService.promoteMember({
       conversationId: body.conversationId,
       targetUserId: body.targetUserId,
       userId: userInfo.userId,

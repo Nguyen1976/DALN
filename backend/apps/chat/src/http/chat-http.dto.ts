@@ -70,6 +70,16 @@ export class RemoveMemberFromConversationDTO {
   targetUserId: string
 }
 
+export class PromoteMemberDTO {
+  @IsNotEmpty()
+  @IsString()
+  conversationId: string
+
+  @IsNotEmpty()
+  @IsString()
+  targetUserId: string
+}
+
 export class LeaveConversationDTO {
   @IsNotEmpty({
     message: 'conversationId is required',

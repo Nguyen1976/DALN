@@ -20,6 +20,7 @@ import {
   type ClosePollRequest,
   type AddMemberToConversationRequest,
   type RemoveMemberFromConversationRequest,
+  type PromoteMemberRequest,
   type LeaveConversationRequest,
   type CreateConversationData,
   type DeleteConversationRequest,
@@ -61,6 +62,10 @@ export class ChatService {
 
   removeMemberFromConversation(dto: RemoveMemberFromConversationRequest) {
     return this.conversationMemberService.removeMemberFromConversation(dto)
+  }
+
+  promoteMember(dto: PromoteMemberRequest) {
+    return this.conversationMemberService.promoteMember(dto)
   }
 
   leaveConversation(dto: LeaveConversationRequest) {

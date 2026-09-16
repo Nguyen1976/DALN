@@ -121,6 +121,15 @@ export class ChatEventsPublisher {
     )
   }
 
+  publishConversationUpdated(conversation: any): void {
+    const memberIds = conversation.members?.map((member: any) => member.userId) || []
+    this.emitToUsers(
+      memberIds,
+      SOCKET_EVENTS.CHAT.CONVERSATION_UPDATE,
+      (userId) => ({ conversation: ConversationMapper.toDetail(conversation, userId) }),
+    )
+  }
+
   publishConversationMemberRemoved(payload: {
     conversation: any
     actorId: string

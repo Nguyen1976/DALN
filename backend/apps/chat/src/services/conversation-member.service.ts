@@ -21,6 +21,12 @@ export interface RemoveMemberFromConversationRequest {
   targetUserId: string
 }
 
+export interface PromoteMemberRequest {
+  conversationId: string
+  userId: string
+  targetUserId: string
+}
+
 export interface LeaveConversationRequest {
   conversationId: string
   userId: string
@@ -165,7 +171,9 @@ export class ConversationMemberService {
     )
 
     const actor = existingMembers.find(
-      (member) => member.userId === dto.userId && member.role === 'ADMIN',
+      (member) =>
+        member.userId === dto.userId &&
+        (member.role === 'ADMIN' || member.role === 'OWNER'),
     )
     if (!actor) {
       ChatErrors.userNoPermission()
@@ -231,6 +239,48 @@ export class ConversationMemberService {
     return {
       status: 'SUCCESS',
     }
+  }
+
+  async promoteMember(dto: PromoteMemberRequest) {
+    const conversation = await this.conversationRepo.findById(dto.conversationId)
+    if (!conversation || conversation.type === conversationType.DIRECT) {
+      ChatErrors.conversationNotFound()
+    }
+
+    const members = await this.memberRepo.findByConversationId(dto.conversationId)
+    const actor = members.find(
+      (member) =>
+        member.userId === dto.userId &&
+        (member.role === 'ADMIN' || member.role === 'OWNER'),
+    )
+    if (!actor) ChatErrors.userNoPermission()
+
+    const target = members.find((member) => member.userId === dto.targetUserId)
+    if (!target) ChatErrors.memberNotFoundInConversation()
+    if (target.userId === dto.userId) {
+      ChatErrors.invalidMemberAction('Bạn đã là quản trị viên của nhóm')
+    }
+    if (target.role === 'ADMIN' || target.role === 'OWNER') {
+      return { status: 'SUCCESS' }
+    }
+
+    await this.memberRepo.promoteToAdmin(dto.conversationId, dto.targetUserId)
+    const targetName = target.fullName || target.username || target.userId
+    await this.messageService.createSystemMessageAndSync(
+      dto.conversationId,
+      dto.userId,
+      `${targetName} đã trở thành phó nhóm`,
+    )
+
+    const updated = await this.conversationRepo.findByIdWithMembers(
+      dto.conversationId,
+    )
+    if (!updated) ChatErrors.conversationNotFound()
+
+    this.safePublish(() =>
+      this.eventsPublisher.publishConversationUpdated(updated),
+    )
+    return { status: 'SUCCESS' }
   }
 
   async leaveConversation(dto: LeaveConversationRequest) {

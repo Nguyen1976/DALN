@@ -93,7 +93,7 @@ export class ConversationMemberRepository {
         userId: member.userId,
         role:
           type === conversationType.GROUP && createrId === member.userId
-            ? 'ADMIN'
+            ? 'OWNER'
             : 'MEMBER',
         isActive: true,
         unreadCount: 0,
