@@ -78,14 +78,20 @@ function GroupCallVideoTile({
   const track = participant.videoTrack ?? null;
   const showVideo = participant.isCameraEnabled && Boolean(track);
 
+  // Gắn track vào thẻ <video>. PHẢI phụ thuộc cả `showVideo`: khi tắt camera thẻ
+  // <video> bị gỡ (hiện avatar) rồi bật lại thì thẻ MỚI được tạo, nhưng LiveKit
+  // tái dùng CÙNG track object khi mute/unmute (setCameraEnabled). Nếu chỉ phụ
+  // thuộc [track] thì effect không chạy lại → thẻ mới không được attach → hình
+  // không hiện (chỉ hiện lại khi ghim vì ghim remount tile). Thêm showVideo để
+  // attach lại đúng thẻ mỗi lần tile hiện video trở lại.
   useEffect(() => {
     const element = videoRef.current;
-    if (!element || !track) return;
+    if (!element || !track || !showVideo) return;
     track.attach(element);
     return () => {
       track.detach(element);
     };
-  }, [track]);
+  }, [track, showVideo]);
 
   return (
     <div

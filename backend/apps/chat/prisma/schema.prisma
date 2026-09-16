@@ -26,6 +26,7 @@ enum messageType {
   VIDEO
   FILE
   POLL
+  CALL
 }
 
 enum mediaType {
@@ -99,6 +100,10 @@ model message {
   senderId        String             @db.ObjectId
   type            messageType        @default(TEXT)
   content         String?
+  /// Với tin type=CALL: dữ liệu có cấu trúc để client render thẻ "Cuộc gọi" +
+  /// nút Gọi lại/Tham gia lại (scope direct|group, callType, outcome, duration...).
+  /// MongoDB schemaless nên field mới an toàn: tin cũ không có = null.
+  callInfo        Json?
   replyToMessageId String?           @db.ObjectId
   /// KHÔNG đặt @unique: MongoDB coi tin thiếu field là `null`, nên unique index
   /// chỉ cho đúng MỘT tin không kèm bình chọn tồn tại — mọi tin sau đó vỡ P2002.

@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import FileAttachmentPreview from "./FileAttachmentPreview";
+import CallLogMessage from "./CallLogMessage";
 
 /** Nhãn thay cho nội dung khi tin nhắn gốc không phải văn bản. */
 function quotedPlaceholder(type: string): string {
@@ -273,6 +274,36 @@ const MessageComponent = ({
         // things anyone typed. Rendering them as ordinary outgoing bubbles
         // (complete with a read receipt) made a missed call look like a
         // message the user had sent.
+        // Tin tổng kết cuộc gọi → thẻ riêng (biểu tượng, kết cục, nút gọi lại)
+        // thay vì chữ trơn, để có thể gọi lại / tham gia lại như Messenger.
+        if (message.type === "CALL" && message.callInfo) {
+          return (
+            <div key={message.id}>
+              {dayDivider}
+              <div
+                id={`message-${message.id}`}
+                className={cn(
+                  "scroll-mt-24 transition-colors duration-300",
+                  highlightMessageId === message.id && "rounded-lg bg-accent",
+                )}
+              >
+                <CallLogMessage
+                  conversationId={message.conversationId}
+                  callInfo={message.callInfo}
+                  time={
+                    <time
+                      dateTime={message.createdAt}
+                      title={formatFullDateTime(message.createdAt)}
+                    >
+                      {formatDateTime(message.createdAt)}
+                    </time>
+                  }
+                />
+              </div>
+            </div>
+          );
+        }
+
         if (message.isSystem) {
           return (
             <div key={message.id}>

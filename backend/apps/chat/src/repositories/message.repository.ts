@@ -116,6 +116,30 @@ export class MessageRepository {
     }
   }
 
+  /**
+   * Ghi một tin tổng kết cuộc gọi (type=CALL) kèm `callInfo` có cấu trúc để client
+   * render thẻ "Cuộc gọi" + nút Gọi lại/Tham gia lại. Ghi THẲNG (không qua batch
+   * writer vốn chỉ nhận TEXT) vì tin gọi hiếm, cần chắc chắn có mặt.
+   */
+  async createCallLog(data: {
+    conversationId: string
+    senderId: string
+    content: string
+    callInfo: Record<string, unknown>
+  }) {
+    const created = await this.prisma.message.create({
+      data: {
+        conversationId: data.conversationId,
+        senderId: data.senderId,
+        type: 'CALL' as any,
+        content: data.content,
+        callInfo: data.callInfo as any,
+        isSystem: true,
+      },
+    })
+    return { ...created, medias: [], poll: null }
+  }
+
   async findById(id: string, conversationId: string) {
     return await this.prisma.message.findFirst({
       where: {
