@@ -128,7 +128,7 @@ export function useChatComposer({
         }),
       );
     },
-    [conversation, conversationId, dispatch, effectiveConversation, user.id],
+    [conversation, conversationId, dispatch, effectiveConversation],
   );
 
   const createTempMessage = useCallback(
@@ -403,6 +403,7 @@ export function useChatComposer({
       createTempMessage,
       dispatch,
       ensureConversationInStore,
+      mentionUserIds,
       setMsg,
       setReplyingTo,
     ],

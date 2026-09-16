@@ -73,7 +73,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { AppDispatch } from "@/redux/store";
-import { clearConversationMentions } from "@/redux/slices/conversationSlice";
+import {
+  clearConversationMentions,
+  type ConversationMember,
+} from "@/redux/slices/conversationSlice";
 import { clearConversationMentionsAPI } from "@/apis";
 
 interface ChatWindowProps {
@@ -217,7 +220,7 @@ export default function ChatWindow({
     setMentionIndex(0);
   };
 
-  const chooseMention = (member: any) => {
+  const chooseMention = (member: ConversationMember) => {
     const node = composerRef.current;
     if (!node) return;
     const caret = node.selectionStart;
