@@ -6,10 +6,14 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { useSelector } from "react-redux";
 import VoiceCallModal, {
   type VoiceCallMode,
 } from "@/components/VoiceCallModal";
 import GroupCallModal from "@/components/GroupCallModal";
+import PrejoinModal from "@/components/PrejoinModal";
+import { selectConversationById } from "@/redux/slices/conversationSlice";
+import type { RootState } from "@/redux/store";
 import { socket } from "@/lib/socket";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
 import { describeGroupCallError } from "@/utils/groupCallError";
@@ -97,7 +101,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const startDirectCall = useCallback(
+  // Prejoin: cuộc gọi VIDEO đi qua màn hình xem trước trước khi thật sự gọi. Gọi
+  // thoại bắt đầu ngay như cũ (không cần xem camera).
+  const [prejoin, setPrejoin] = useState<{
+    scope: "direct" | "group";
+    conversationId: string;
+  } | null>(null);
+
+  const startDirectNow = useCallback(
     (conversationId: string, callType: CallType) => {
       if (!conversationId) return;
       setVoiceMinimized(false);
@@ -106,7 +117,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const startGroupCall = useCallback(
+  const startGroupNow = useCallback(
     (conversationId: string, callType: CallType) => {
       if (!conversationId) return;
       socket.emit(
@@ -135,6 +146,37 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const startDirectCall = useCallback(
+    (conversationId: string, callType: CallType) => {
+      if (!conversationId) return;
+      if (callType === "video") setPrejoin({ scope: "direct", conversationId });
+      else startDirectNow(conversationId, "audio");
+    },
+    [startDirectNow],
+  );
+
+  const startGroupCall = useCallback(
+    (conversationId: string, callType: CallType) => {
+      if (!conversationId) return;
+      if (callType === "video") setPrejoin({ scope: "group", conversationId });
+      else startGroupNow(conversationId, "audio");
+    },
+    [startGroupNow],
+  );
+
+  // Xác nhận từ màn prejoin: camera bật → gọi video; camera tắt → gọi thoại.
+  const confirmPrejoin = useCallback(
+    (cameraOn: boolean) => {
+      const pj = prejoin;
+      setPrejoin(null);
+      if (!pj) return;
+      const type: CallType = cameraOn ? "video" : "audio";
+      if (pj.scope === "direct") startDirectNow(pj.conversationId, type);
+      else startGroupNow(pj.conversationId, type);
+    },
+    [prejoin, startDirectNow, startGroupNow],
+  );
+
   // Tham gia phòng nhóm ĐANG diễn ra (banner discovery): accept để lấy token; vào
   // với camera TẮT để không bất ngờ mở camera, người dùng tự bật khi muốn.
   const joinGroupRoom = useCallback((room: ActiveGroupRoom) => {
@@ -161,6 +203,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const prejoinConversation = useSelector((state: RootState) =>
+    prejoin ? selectConversationById(state, prejoin.conversationId) : undefined,
+  );
+
   const value = useMemo<CallContextValue>(
     () => ({
       startDirectCall,
@@ -182,6 +228,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
   return (
     <CallContext.Provider value={value}>
       {children}
+
+      {prejoin && (
+        <PrejoinModal
+          scope={prejoin.scope}
+          title={prejoinConversation?.displayName || "Cuộc gọi video"}
+          avatarUrl={prejoinConversation?.displayAvatar || undefined}
+          onConfirm={confirmPrejoin}
+          onCancel={() => setPrejoin(null)}
+        />
+      )}
 
       {voiceCall && (
         <VoiceCallModal
