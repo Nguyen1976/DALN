@@ -19,6 +19,7 @@ import {
   CreateConversationDTO,
   AddMemberToConversationDTO,
   RemoveMemberFromConversationDTO,
+  PromoteMemberDTO,
   LeaveConversationDTO,
   DeleteConversationDTO,
   CreateMessageUploadUrlDTO,
@@ -31,6 +32,7 @@ import {
   SubmitPollVoteDTO,
   ClosePollDTO,
   GroupCallLogDTO,
+  ClearMentionsDTO,
 } from './http/chat-http.dto'
 import { ConversationMapper } from './domain/conversation.mapper'
 import { MessageMapper } from './domain/message.mapper'
@@ -38,6 +40,12 @@ import { MessageMapper } from './domain/message.mapper'
 @Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
+
+  @Post('mentions/clear')
+  @RequireLogin()
+  clearMentions(@Body() dto: ClearMentionsDTO, @UserInfo() userInfo: any) {
+    return this.chatService.clearMentions(dto.conversationId, userInfo.userId)
+  }
 
   @Post('create')
   @UseInterceptors(
@@ -117,6 +125,19 @@ export class ChatController {
     @UserInfo() userInfo: any,
   ) {
     return await this.chatService.removeMemberFromConversation({
+      conversationId: body.conversationId,
+      targetUserId: body.targetUserId,
+      userId: userInfo.userId,
+    })
+  }
+
+  @Post('promote-member')
+  @RequireLogin()
+  async promoteMember(
+    @Body() body: PromoteMemberDTO,
+    @UserInfo() userInfo: any,
+  ) {
+    return await this.chatService.promoteMember({
       conversationId: body.conversationId,
       targetUserId: body.targetUserId,
       userId: userInfo.userId,

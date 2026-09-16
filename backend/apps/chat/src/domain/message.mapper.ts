@@ -14,6 +14,7 @@ export class MessageMapper {
       senderId: String(message.senderId),
       text: message.isRevoked ? '' : text,
       type: message.type || 'TEXT',
+      mentionUserIds: message.mentionUserIds || [],
       // Tin type=CALL: dữ liệu để client render thẻ cuộc gọi + nút gọi lại.
       callInfo: message.callInfo ?? undefined,
       clientMessageId: message.clientMessageId || message.tempMessageId || undefined,

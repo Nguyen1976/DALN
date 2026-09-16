@@ -30,6 +30,8 @@ export interface Conversation {
   displayName: string;
   displayAvatar: string;
   unreadCount: string;
+  unreadMentionCount?: number;
+  lastMentionMessageId?: string | null;
   membershipStatus?: "ACTIVE" | "REMOVED" | "LEFT";
   canSendMessage?: boolean;
   memberCount: number;
@@ -281,6 +283,24 @@ export const conversationSlice = createSlice({
       if (!target) return;
       target.unreadCount = "0";
     },
+    markConversationMention: (
+      state,
+      action: PayloadAction<{ conversationId: string; messageId: string }>,
+    ) => {
+      const target = state.find((item) => item.id === action.payload.conversationId);
+      if (!target) return;
+      target.unreadMentionCount = (target.unreadMentionCount || 0) + 1;
+      target.lastMentionMessageId = action.payload.messageId;
+    },
+    clearConversationMentions: (
+      state,
+      action: PayloadAction<{ conversationId: string }>,
+    ) => {
+      const target = state.find((item) => item.id === action.payload.conversationId);
+      if (!target) return;
+      target.unreadMentionCount = 0;
+      target.lastMentionMessageId = null;
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -320,6 +340,8 @@ export const {
   addConversationMembers,
   removeConversationMember,
   removeConversationById,
+  markConversationMention,
+  clearConversationMentions,
 } = conversationSlice.actions;
 
 export default conversationSlice.reducer;

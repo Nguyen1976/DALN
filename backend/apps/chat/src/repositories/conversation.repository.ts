@@ -102,6 +102,8 @@ export class ConversationRepository {
             fullName: true,
             lastMessageAt: true,
             unreadCount: true,
+            unreadMentionCount: true,
+            lastMentionMessageId: true,
           },
         },
         messages: {
@@ -154,6 +156,8 @@ export class ConversationRepository {
       take,
       select: {
         unreadCount: true,
+        unreadMentionCount: true,
+        lastMentionMessageId: true,
         lastReadAt: true,
         lastMessageAt: true,
         // Đối phương của DIRECT lấy từ chính dòng membership này -> KHÔNG cần
@@ -172,6 +176,8 @@ export class ConversationRepository {
     const result = memberships.map((membership) => ({
       ...membership.conversation,
       unreadCount: membership.unreadCount,
+      unreadMentionCount: membership.unreadMentionCount || 0,
+      lastMentionMessageId: membership.lastMentionMessageId || null,
       lastReadAt: membership.lastReadAt,
       lastMessageAt: membership.lastMessageAt,
       peerUserId: membership.peerUserId ?? null,

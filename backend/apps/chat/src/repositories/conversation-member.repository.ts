@@ -93,7 +93,7 @@ export class ConversationMemberRepository {
         userId: member.userId,
         role:
           type === conversationType.GROUP && createrId === member.userId
-            ? 'ADMIN'
+            ? 'OWNER'
             : 'MEMBER',
         isActive: true,
         unreadCount: 0,
@@ -239,6 +239,40 @@ export class ConversationMemberRepository {
         ...this.activeMemberFilter,
       },
       select: { userId: true },
+    })
+  }
+
+  async markMention(
+    conversationId: string,
+    userIds: string[],
+    messageId: string,
+  ) {
+    if (!userIds.length) return
+    const targets = await this.prisma.conversationMember.findMany({
+      where: {
+        conversationId,
+        userId: { in: userIds },
+        ...this.activeMemberFilter,
+      },
+      select: { id: true, unreadMentionCount: true },
+    })
+    await Promise.all(
+      targets.map((target) =>
+        this.prisma.conversationMember.update({
+          where: { id: target.id },
+          data: {
+            unreadMentionCount: Number(target.unreadMentionCount || 0) + 1,
+            lastMentionMessageId: messageId,
+          },
+        }),
+      ),
+    )
+  }
+
+  async clearMentions(conversationId: string, userId: string) {
+    return await this.prisma.conversationMember.updateMany({
+      where: { conversationId, userId, ...this.activeMemberFilter },
+      data: { unreadMentionCount: 0, lastMentionMessageId: null },
     })
   }
 

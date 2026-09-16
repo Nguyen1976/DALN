@@ -11,6 +11,7 @@ import {
   setConversationAccessState,
   updateNewMessage,
   upUnreadCount,
+  markConversationMention,
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import {
@@ -114,6 +115,12 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       );
 
       dispatch(addMessage(message));
+      if (user?.id && message.mentionUserIds?.includes(user.id)) {
+        dispatch(markConversationMention({
+          conversationId: message.conversationId,
+          messageId: message.id,
+        }));
+      }
       dispatch(
         updateNewMessage({
           conversationId: message.conversationId,

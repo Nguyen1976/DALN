@@ -1,242 +1,227 @@
-import { useEffect, useRef, useState } from "react";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import {
+  ChevronRight,
+  LogOut,
+  MoreHorizontal,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+  Users,
+} from "lucide-react";
+import { useLocation, useNavigate } from "react-router";
+import { useDispatch, useSelector } from "react-redux";
+import { toast } from "sonner";
+
 import {
   addMembersToConversationAPI,
   deleteConversationAPI,
+  getConversationByIdAPI,
   getUserProfileByIdAPI,
   leaveConversationAPI,
+  promoteMemberAPI,
   removeMemberFromConversationAPI,
 } from "@/apis";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { LogOut, Plus, User, Users, X } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { getErrorMessage } from "@/utils/getErrorMessage";
-import { useDispatch, useSelector } from "react-redux";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { SearchField } from "@/components/ui/search-field";
+import { getErrorMessage } from "@/utils/getErrorMessage";
+import {
+  applyConversationUpdate,
   removeConversationById,
   selectConversationById,
   setConversationAccessState,
+  type ConversationMember,
 } from "@/redux/slices/conversationSlice";
 import type { AppDispatch, RootState } from "@/redux/store";
-import {
-  getFriends,
-  selectFriend,
-  selectFriendPage,
-} from "@/redux/slices/friendSlice";
-import { useLocation, useNavigate } from "react-router";
+import { getFriends, selectFriend } from "@/redux/slices/friendSlice";
 import { selectUser } from "@/redux/slices/userSlice";
-import { toast } from "sonner";
+
+type Profile = {
+  username?: string;
+  fullName?: string;
+  avatar?: string;
+  email?: string;
+  bio?: string;
+};
+type ActionTarget = { userId: string; name: string };
+
+const displayName = (member: ConversationMember, profile?: Profile) =>
+  member.fullName ||
+  member.username ||
+  profile?.fullName ||
+  profile?.username ||
+  member.userId;
 
 export function GroupMemberManager() {
-  const PROFILE_ENRICH_MEMBER_LIMIT = 200;
-  const PROFILE_ENRICH_BATCH_SIZE = 20;
-
-  const [selectedTab, setSelectedTab] = useState("members");
-  const [open, setOpen] = useState(false);
-  const [isLeaving, setIsLeaving] = useState(false);
-  const [isDeletingConversation, setIsDeletingConversation] = useState(false);
-  const [pendingMemberId, setPendingMemberId] = useState<string | null>(null);
-  const [memberProfileMap, setMemberProfileMap] = useState<
-    Record<
-      string,
-      {
-        username?: string;
-        fullName?: string;
-        avatar?: string;
-      }
-    >
-  >({});
-  const requestedMemberIdsRef = useRef<Set<string>>(new Set());
-
-  const conversationId = useLocation().pathname.split("/").pop() || "";
+  const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
-
+  const conversationId = useLocation().pathname.split("/").pop() || "";
   const conversation = useSelector((state: RootState) =>
     selectConversationById(state, conversationId),
   );
-
   const friends = useSelector(selectFriend);
   const user = useSelector(selectUser);
-
-  const dispatch = useDispatch<AppDispatch>();
-
-  const page = useSelector(selectFriendPage);
-
-  const loadMoreFriends = () => {
-    dispatch(getFriends({ limit: 20, page: page + 1 }));
-  };
-
-  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  // Xoá thành viên từng chạy ngay ở cú bấm vào dấu X.
-  const [memberToRemove, setMemberToRemove] = useState<{
-    userId: string;
-    name: string;
-  } | null>(null);
-
-  const myRole = conversation?.members?.find(
-    (member) => member.userId === user.id,
-  )?.role;
-
+  const members = conversation?.members ?? [];
+  const memberCount = conversation?.memberCount ?? members.length;
+  const myRole = members.find((member) => member.userId === user.id)?.role;
   const isAdmin = myRole === "ADMIN" || myRole === "OWNER";
-  // The owner used to be excluded from both of these: they could not delete
-  // the group they created, and — despite the rule that ownership transfers on
-  // exit — they had no way to leave it either.
-  const isDeleteAdmin = isAdmin;
-  const canLeaveGroup = conversation?.membershipStatus === "ACTIVE";
-  const canDeleteConversation = isDeleteAdmin && conversation?.type === "GROUP";
+
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [profileMember, setProfileMember] = useState<ConversationMember | null>(
+    null,
+  );
+  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
+  const [memberSearch, setMemberSearch] = useState("");
+  const [friendSearch, setFriendSearch] = useState("");
+  const deferredMemberSearch = useDeferredValue(memberSearch);
+  const deferredFriendSearch = useDeferredValue(friendSearch);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [removeTarget, setRemoveTarget] = useState<ActionTarget | null>(null);
+  const [promoteTarget, setPromoteTarget] = useState<ActionTarget | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [leaveConfirm, setLeaveConfirm] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [groupActionPending, setGroupActionPending] = useState(false);
 
   useEffect(() => {
-    if (friends.length === 0) {
-      dispatch(getFriends({ limit: 20, page: 1 }));
-    }
+    if (!friends.length) void dispatch(getFriends({ limit: 50, page: 1 }));
   }, [dispatch, friends.length]);
 
-  useEffect(() => {
-    requestedMemberIdsRef.current.clear();
-    setMemberProfileMap({});
-  }, [conversationId]);
+  const filteredMembers = useMemo(() => {
+    const query = deferredMemberSearch.trim().toLocaleLowerCase("vi");
+    if (!query) return members;
+    return members.filter((member) => {
+      const profile = profiles[member.userId];
+      return [
+        member.fullName,
+        member.username,
+        profile?.fullName,
+        profile?.username,
+      ].some((value) => value?.toLocaleLowerCase("vi").includes(query));
+    });
+  }, [deferredMemberSearch, members, profiles]);
 
-  useEffect(() => {
-    const members = conversation?.members || [];
+  const availableFriends = useMemo(() => {
+    const memberIds = new Set(members.map((member) => member.userId));
+    const query = deferredFriendSearch.trim().toLocaleLowerCase("vi");
+    return friends.filter(
+      (friend) =>
+        !memberIds.has(friend.id) &&
+        (!query ||
+          [friend.fullName, friend.username, friend.email].some((value) =>
+            value?.toLocaleLowerCase("vi").includes(query),
+          )),
+    );
+  }, [deferredFriendSearch, friends, members]);
 
-    if (members.length > PROFILE_ENRICH_MEMBER_LIMIT) {
-      return;
+  const refresh = async () => {
+    const result = await getConversationByIdAPI(conversationId);
+    dispatch(applyConversationUpdate({ conversation: result.conversation }));
+  };
+
+  const openProfile = async (member: ConversationMember) => {
+    setProfileMember(member);
+    if (profiles[member.userId]?.email !== undefined) return;
+    try {
+      const profile = await getUserProfileByIdAPI(member.userId);
+      setProfiles((current) => ({ ...current, [member.userId]: profile }));
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Không thể tải thông tin thành viên"));
     }
+  };
 
-    const unresolvedMemberIds = members
-      .filter((member) => {
-        const hasDisplayName = Boolean(member.username || member.fullName);
-        const hasAvatar = Boolean(member.avatar);
-        const hasCachedProfile = Boolean(memberProfileMap[member.userId]);
-        const wasRequested = requestedMemberIdsRef.current.has(member.userId);
-
-        return (
-          (!hasDisplayName || !hasAvatar) && !hasCachedProfile && !wasRequested
-        );
-      })
-      .map((member) => member.userId)
-      .slice(0, PROFILE_ENRICH_BATCH_SIZE);
-
-    if (unresolvedMemberIds.length === 0) return;
-
-    unresolvedMemberIds.forEach((id) => requestedMemberIdsRef.current.add(id));
-
-    Promise.allSettled(
-      unresolvedMemberIds.map(async (userId) => {
-        const profile = await getUserProfileByIdAPI(userId);
-        return {
-          userId,
+  const addSelected = async () => {
+    if (!selectedIds.size || adding) return;
+    setAdding(true);
+    try {
+      const selected = friends.filter((friend) => selectedIds.has(friend.id));
+      const resolved = await Promise.all(
+        selected.map(async (friend) => ({
+          friend,
+          profile: await getUserProfileByIdAPI(friend.id),
+        })),
+      );
+      await addMembersToConversationAPI({
+        conversationId,
+        memberIds: resolved.map(({ friend }) => friend.id),
+        members: resolved.map(({ friend, profile }) => ({
+          userId: friend.id,
           username: profile.username,
           fullName: profile.fullName,
           avatar: profile.avatar,
-        };
-      }),
-    ).then((profiles) => {
-      const validProfiles = profiles
-        .filter((result) => result.status === "fulfilled")
-        .map((result) => result.value) as Array<{
-        userId: string;
-        username?: string;
-        fullName?: string;
-        avatar?: string;
-      }>;
-
-      if (validProfiles.length === 0) return;
-
-      setMemberProfileMap((prev) => {
-        const next = { ...prev };
-        for (const profile of validProfiles) {
-          next[profile.userId] = {
-            username: profile.username,
-            fullName: profile.fullName,
-            avatar: profile.avatar,
-          };
-        }
-        return next;
+        })),
       });
-    });
-  }, [
-    conversation?.members,
-    memberProfileMap,
-    PROFILE_ENRICH_BATCH_SIZE,
-    PROFILE_ENRICH_MEMBER_LIMIT,
-  ]);
-  const conversationMembers = conversation?.members ?? [];
-
-  // Get available friends not already in the group
-  const availableFriends = friends.filter(
-    (friend) =>
-      conversationMembers.map((m) => m.userId).indexOf(friend.id) === -1,
-  );
-
-  const handleAddMember = async (friend: {
-    id: string;
-    username?: string;
-    fullName?: string;
-    avatar?: string;
-  }) => {
-    if (!conversationId || !isAdmin) return;
-
-    try {
-      setPendingMemberId(friend.id);
-      await addMembersToConversationAPI({
-        conversationId,
-        memberIds: [friend.id],
-        members: [
-          {
-            userId: friend.id,
-            username: friend.username,
-            fullName: friend.fullName,
-            avatar: friend.avatar,
-          },
-        ],
-      });
-      toast.success("Đã thêm thành viên vào nhóm");
+      await refresh();
+      toast.success(`Đã thêm ${resolved.length} thành viên`);
+      setSelectedIds(new Set());
+      setFriendSearch("");
+      setAddOpen(false);
     } catch (error) {
       toast.error(getErrorMessage(error, "Không thể thêm thành viên"));
     } finally {
-      setPendingMemberId(null);
+      setAdding(false);
     }
   };
 
-  const handleRemoveMember = async (memberId: string) => {
-    if (!conversationId || !isAdmin) return;
-
+  const removeMember = async (target: ActionTarget) => {
+    setPendingId(target.userId);
     try {
-      setPendingMemberId(memberId);
       await removeMemberFromConversationAPI({
         conversationId,
-        targetUserId: memberId,
+        targetUserId: target.userId,
       });
-      toast.success("Đã xóa thành viên khỏi nhóm");
+      await refresh();
+      toast.success(`Đã xoá ${target.name} khỏi nhóm`);
     } catch (error) {
-      toast.error(getErrorMessage(error, "Không thể xóa thành viên"));
+      toast.error(getErrorMessage(error, "Không thể xoá thành viên"));
     } finally {
-      setPendingMemberId(null);
+      setPendingId(null);
+      setRemoveTarget(null);
     }
   };
 
-  const handleLeaveGroup = async () => {
-    if (isLeaving) return;
-    if (!conversationId) return;
-    setShowLeaveConfirm(false);
-    if (conversation?.membershipStatus !== "ACTIVE") {
-      toast.info("Bạn không còn trong nhóm này");
-      return;
-    }
+  const promoteMember = async (target: ActionTarget) => {
+    setPendingId(target.userId);
     try {
-      setIsLeaving(true);
-      await leaveConversationAPI({
-        conversationId,
-      });
+      await promoteMemberAPI({ conversationId, targetUserId: target.userId });
+      await refresh();
+      toast.success(`${target.name} đã trở thành phó nhóm`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Không thể thêm phó nhóm"));
+    } finally {
+      setPendingId(null);
+      setPromoteTarget(null);
+    }
+  };
+
+  const selectedProfile = profileMember
+    ? profiles[profileMember.userId]
+    : undefined;
+  const selectedName = profileMember
+    ? displayName(profileMember, selectedProfile)
+    : "";
+
+  const leaveGroup = async () => {
+    setGroupActionPending(true);
+    try {
+      await leaveConversationAPI({ conversationId });
       dispatch(
         setConversationAccessState({
           conversationId,
@@ -244,306 +229,411 @@ export function GroupMemberManager() {
           canSendMessage: false,
         }),
       );
+      setMembersOpen(false);
       toast.success("Bạn đã rời khỏi nhóm");
-      setOpen(false);
     } catch (error) {
       toast.error(getErrorMessage(error, "Không thể rời nhóm"));
     } finally {
-      setIsLeaving(false);
+      setGroupActionPending(false);
+      setLeaveConfirm(false);
     }
   };
 
-  const handleDeleteConversation = async () => {
-    if (!conversationId || !canDeleteConversation || isDeletingConversation) {
-      return;
-    }
-
-    setShowDeleteConfirm(false);
-
+  const deleteGroup = async () => {
+    setGroupActionPending(true);
     try {
-      setIsDeletingConversation(true);
-      await deleteConversationAPI({
-        conversationId,
-      });
-
-      dispatch(
-        removeConversationById({
-          conversationId,
-        }),
-      );
-
-      toast.success("Đã xóa cuộc trò chuyện");
-      setOpen(false);
+      await deleteConversationAPI({ conversationId });
+      dispatch(removeConversationById({ conversationId }));
+      toast.success("Đã xoá cuộc trò chuyện");
       navigate("/");
     } catch (error) {
-      toast.error(getErrorMessage(error, "Không thể xóa cuộc trò chuyện"));
+      toast.error(getErrorMessage(error, "Không thể xoá cuộc trò chuyện"));
     } finally {
-      setIsDeletingConversation(false);
+      setGroupActionPending(false);
+      setDeleteConfirm(false);
     }
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 gap-1 border-accent/20 hover:bg-accent/10 bg-transparent"
+    <>
+      <button
+        type="button"
+        onClick={() => setMembersOpen(true)}
+        className="group flex min-h-16 w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left shadow-sm transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        aria-label={`Xem ${memberCount} thành viên nhóm`}
+        data-testid="group-members-trigger"
+      >
+        <span
+          aria-hidden="true"
+          className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
         >
-          <Users className="w-4 h-4" />
-          Quản lý
-        </Button>
-      </PopoverTrigger>
-      <ConfirmDialog
-        open={showLeaveConfirm}
-        onOpenChange={setShowLeaveConfirm}
-        isPending={isLeaving}
-        title="Rời khỏi nhóm này?"
-        description={
-          isAdmin
-            ? `Bạn sẽ không nhận tin nhắn mới của "${conversation?.groupName || "nhóm"}" nữa và nhóm biến mất khỏi danh sách của bạn. Vì bạn đang quản lý nhóm, quyền quản lý sẽ được chuyển cho một thành viên còn lại. Thao tác này không thể hoàn tác.`
-            : `Bạn sẽ không nhận tin nhắn mới của "${conversation?.groupName || "nhóm"}" nữa và nhóm biến mất khỏi danh sách của bạn. Thao tác này không thể hoàn tác.`
-        }
-        confirmLabel="Rời nhóm"
-        pendingLabel="Đang rời nhóm..."
-        onConfirm={() => void handleLeaveGroup()}
-      />
+          <Users className="size-5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-foreground">
+            Thành viên nhóm
+          </span>
+          <span className="mt-0.5 block text-sm text-muted-foreground">
+            {memberCount} thành viên
+          </span>
+        </span>
+        <ChevronRight
+          aria-hidden="true"
+          className="size-5 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+        />
+      </button>
 
-      <ConfirmDialog
-        open={showDeleteConfirm}
-        onOpenChange={setShowDeleteConfirm}
-        isPending={isDeletingConversation}
-        title="Xoá cuộc trò chuyện này?"
-        description={`Toàn bộ nhóm "${conversation?.groupName || "nhóm"}" sẽ bị xoá với mọi thành viên. Thao tác này không thể hoàn tác.`}
-        confirmLabel="Xoá cuộc trò chuyện"
-        pendingLabel="Đang xoá..."
-        onConfirm={() => void handleDeleteConversation()}
-      />
-
-      <ConfirmDialog
-        open={memberToRemove !== null}
-        onOpenChange={(open) => {
-          if (!open) setMemberToRemove(null);
-        }}
-        title="Xoá thành viên khỏi nhóm?"
-        description={`${memberToRemove?.name ?? "Thành viên này"} sẽ bị xoá khỏi "${conversation?.groupName || "nhóm"}" và không nhận tin nhắn mới nữa. Muốn cho vào lại, bạn phải thêm lại từ đầu.`}
-        confirmLabel="Xoá khỏi nhóm"
-        onConfirm={() => {
-          const target = memberToRemove;
-          setMemberToRemove(null);
-          if (target) void handleRemoveMember(target.userId);
-        }}
-      />
-
-      <PopoverContent className="w-80 p-0 bg-background border-accent/20">
-        <div className="p-4 border-b border-accent/10">
-          <h3 className="text-sm font-semibold text-foreground">
-            {conversation?.groupName}
-          </h3>
-          <div className="mt-3">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowLeaveConfirm(true)}
-              disabled={isLeaving || !canLeaveGroup}
-              className="h-8 gap-2"
-            >
-              <LogOut className="w-3 h-3" />
-              {isLeaving ? "Đang rời nhóm..." : "Rời nhóm"}
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => setShowDeleteConfirm(true)}
-              disabled={!canDeleteConversation || isDeletingConversation}
-              className="mt-2 h-8 gap-2"
-            >
-              {isDeletingConversation ? "Đang xóa..." : "Xóa cuộc trò chuyện"}
-            </Button>
+      <Dialog open={membersOpen} onOpenChange={setMembersOpen}>
+        <DialogContent
+          className="flex h-[min(760px,calc(100dvh-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg"
+          data-testid="members-dialog"
+        >
+          <DialogHeader className="border-b border-border px-5 py-4">
+            <DialogTitle>Thành viên</DialogTitle>
+            <DialogDescription>
+              {conversation?.groupName} · {memberCount} thành viên
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 border-b border-border p-4">
+            {isAdmin && (
+              <Button
+                className="h-11 w-full gap-2"
+                onClick={() => setAddOpen(true)}
+                data-testid="open-add-members"
+              >
+                <UserPlus className="size-5" aria-hidden="true" />
+                Thêm thành viên
+              </Button>
+            )}
+            <SearchField
+              value={memberSearch}
+              onValueChange={setMemberSearch}
+              placeholder="Tìm thành viên"
+              label="Tìm trong danh sách thành viên"
+            />
           </div>
-        </div>
-
-        <Tabs
-          value={selectedTab}
-          onValueChange={setSelectedTab}
-          className="w-full"
-        >
-          <TabsList className="grid w-full grid-cols-2 bg-muted/50 m-3 mb-2">
-            <TabsTrigger
-              value="members"
-              className="flex items-center gap-2 text-xs"
-            >
-              <User className="w-3 h-3" />
-              Thành viên ({conversationMembers.length})
-            </TabsTrigger>
-            <TabsTrigger
-              value="add"
-              className="flex items-center gap-2 text-xs"
-            >
-              <Plus className="w-3 h-3" />
-              Thêm
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Members List Tab */}
-          <TabsContent value="members" className="m-0 p-3">
-            <ScrollArea className="h-[200px] pr-3">
-              <div className="space-y-2">
-                {conversationMembers.length === 0 ? (
-                  <div className="flex items-center justify-center h-40 text-muted-foreground">
-                    Nhóm này chưa có thành viên
-                  </div>
-                ) : (
-                  conversationMembers.map((member) =>
-                    (() => {
-                      const fallbackProfile = memberProfileMap[member.userId];
-                      const displayName =
-                        member.username ||
-                        member.fullName ||
-                        fallbackProfile?.username ||
-                        fallbackProfile?.fullName ||
-                        member.userId;
-                      const displayAvatar =
-                        member.avatar ||
-                        fallbackProfile?.avatar ||
-                        "";
-
-                      return (
-                        <div
-                          key={member.userId}
-                          className="flex items-center justify-between p-3 rounded-lg hover:bg-accent/10 transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <Avatar className="w-10 h-10">
-                              <AvatarImage
-                                src={displayAvatar}
-                                alt={displayName || "Người dùng"}
-                              />
-                              <AvatarFallback>
-                                {displayName?.[0] || "?"}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p
-                                className={`text-sm text-foreground ${
-                                  member.userId === user.id
-                                    ? "font-bold"
-                                    : "font-medium"
-                                }`}
-                              >
-                                {displayName}
-                                {member.userId === user.id ? " (Bạn)" : ""}
-                              </p>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                {member.role === "OWNER" && (
-                                  <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-                                    CHỦ NHÓM
-                                  </span>
-                                )}
-                                {member.role === "ADMIN" && (
-                                  <span className="rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-warning-foreground">
-                                    QUẢN TRỊ VIÊN
-                                  </span>
-                                )}
-                                {member.userId === user.id && (
-                                  <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                                    BẠN
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          {isAdmin && member.userId !== user.id && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              disabled={pendingMemberId === member.userId}
-                              onClick={() =>
-                                setMemberToRemove({
-                                  userId: member.userId,
-                                  name: displayName,
-                                })
-                              }
-                              aria-label={`Xoá ${displayName} khỏi nhóm`}
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            >
-                              <X className="w-4 h-4" />
-                            </Button>
-                          )}
-                        </div>
-                      );
-                    })(),
-                  )
+          <div className="flex items-center justify-between px-5 pb-2 pt-4">
+            <h3 className="text-sm font-semibold text-foreground">
+              Danh sách thành viên ({members.length})
+            </h3>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost-muted"
+                  size="icon"
+                  aria-label="Thao tác với nhóm"
+                >
+                  <MoreHorizontal className="size-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={() => setLeaveConfirm(true)}
+                >
+                  <LogOut aria-hidden="true" />
+                  Rời nhóm
+                </DropdownMenuItem>
+                {isAdmin && (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => setDeleteConfirm(true)}
+                  >
+                    <Trash2 aria-hidden="true" />
+                    Xoá cuộc trò chuyện
+                  </DropdownMenuItem>
                 )}
-              </div>
-            </ScrollArea>
-          </TabsContent>
-
-          {/* Add Member Tab */}
-          <TabsContent value="add" className="m-0 p-3">
-            <ScrollArea className="h-[200px] pr-3">
-              <div className="space-y-2">
-                {availableFriends.length === 0 ? (
-                  <div className="flex items-center justify-center h-40 text-muted-foreground">
-                    Tất cả bạn bè đã ở trong nhóm này
-                  </div>
-                ) : (
-                  availableFriends.map((friend) => (
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+            {filteredMembers.length ? (
+              <div className="space-y-1">
+                {filteredMembers.map((member) => {
+                  const profile = profiles[member.userId];
+                  const name = displayName(member, profile);
+                  const isSelf = member.userId === user.id;
+                  return (
                     <div
-                      key={friend.id}
-                      className="flex items-center justify-between p-3 rounded-lg hover:bg-accent/10 transition-colors"
+                      key={member.userId}
+                      className="flex min-h-16 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent"
+                      data-testid={`member-row-${member.userId}`}
                     >
-                      <div className="flex items-center gap-3">
-                        <Avatar className="w-10 h-10">
+                      <button
+                        type="button"
+                        onClick={() => void openProfile(member)}
+                        className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      >
+                        <Avatar className="size-11 border border-border">
                           <AvatarImage
-                            src={friend.avatar || ""}
-                            alt={friend.username || "Người dùng"}
+                            src={member.avatar || profile?.avatar || ""}
+                            alt=""
                           />
-                          <AvatarFallback>
-                            {friend.username?.[0] || "?"}
+                          <AvatarFallback className="font-semibold">
+                            {name.slice(0, 1).toLocaleUpperCase("vi")}
                           </AvatarFallback>
                         </Avatar>
-                        <div>
-                          <p className="text-sm font-medium text-foreground">
-                            {friend.username}
-                          </p>
-                          {/* <p className='text-xs text-muted-foreground'>
-                            {friend.status}
-                          </p> */}
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() =>
-                          handleAddMember({
-                            id: friend.id,
-                            username: friend.username,
-                            fullName: friend.fullName,
-                            avatar: friend.avatar,
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-foreground">
+                            {name}
+                            {isSelf ? " (Bạn)" : ""}
+                          </span>
+                          {(member.role === "OWNER" ||
+                            member.role === "ADMIN") && (
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              {member.role === "OWNER"
+                                ? "Trưởng nhóm"
+                                : "Phó nhóm"}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                      {isAdmin && !isSelf && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost-muted"
+                              size="icon"
+                              disabled={pendingId === member.userId}
+                              aria-label={`Quản lý ${name}`}
+                              data-testid={`member-menu-${member.userId}`}
+                            >
+                              <MoreHorizontal className="size-5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            {member.role !== "ADMIN" &&
+                              member.role !== "OWNER" && (
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    setPromoteTarget({
+                                      userId: member.userId,
+                                      name,
+                                    })
+                                  }
+                                >
+                                  <ShieldCheck aria-hidden="true" />
+                                  Thêm phó nhóm
+                                </DropdownMenuItem>
+                              )}
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() =>
+                                setRemoveTarget({ userId: member.userId, name })
+                              }
+                            >
+                              <Trash2 aria-hidden="true" />
+                              Xoá khỏi nhóm
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                Không tìm thấy thành viên phù hợp
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent
+          className="flex h-[min(680px,calc(100dvh-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg"
+          data-testid="add-members-dialog"
+        >
+          <DialogHeader className="border-b border-border px-5 py-4">
+            <DialogTitle>Thêm thành viên</DialogTitle>
+            <DialogDescription>
+              Chọn bạn bè muốn thêm vào {conversation?.groupName}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="p-4">
+            <SearchField
+              value={friendSearch}
+              onValueChange={setFriendSearch}
+              placeholder="Tìm theo tên hoặc username"
+              label="Tìm bạn bè để thêm vào nhóm"
+              autoFocus
+            />
+          </div>
+          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+            {availableFriends.length ? (
+              <div className="space-y-1">
+                {availableFriends.map((friend) => {
+                  const checked = selectedIds.has(friend.id);
+                  const name = friend.fullName || friend.username;
+                  return (
+                    <label
+                      key={friend.id}
+                      className="flex min-h-16 cursor-pointer items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setSelectedIds((current) => {
+                            const next = new Set(current);
+                            if (next.has(friend.id)) next.delete(friend.id);
+                            else next.add(friend.id);
+                            return next;
                           })
                         }
-                        disabled={!isAdmin || pendingMemberId === friend.id}
-                        className="h-8 w-8 text-muted-foreground hover:text-primary"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))
-                )}
-                <div className="w-full flex items-center justify-center my-4">
-                  <Button
-                    className="interceptor-loading"
-                    onClick={() => loadMoreFriends()}
-                  >
-                    Tải thêm
-                  </Button>
-                </div>
+                        className="size-5 shrink-0 accent-primary"
+                        aria-label={`Chọn ${name}`}
+                      />
+                      <Avatar className="size-11 border border-border">
+                        <AvatarImage src={friend.avatar || ""} alt="" />
+                        <AvatarFallback className="font-semibold">
+                          {name.slice(0, 1).toLocaleUpperCase("vi")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-foreground">
+                          {name}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          @{friend.username}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
-            </ScrollArea>
-          </TabsContent>
-        </Tabs>
-      </PopoverContent>
-    </Popover>
+            ) : (
+              <div className="flex h-40 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                {friendSearch
+                  ? "Không tìm thấy bạn bè phù hợp"
+                  : "Tất cả bạn bè đã có trong nhóm"}
+              </div>
+            )}
+          </div>
+          <DialogFooter className="border-t border-border bg-card px-4 py-3">
+            <Button variant="ghost" onClick={() => setAddOpen(false)}>
+              Huỷ
+            </Button>
+            <Button
+              onClick={() => void addSelected()}
+              disabled={!selectedIds.size || adding}
+              data-testid="confirm-add-members"
+            >
+              {adding
+                ? "Đang thêm..."
+                : `Thêm${selectedIds.size ? ` (${selectedIds.size})` : ""}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={profileMember !== null}
+        onOpenChange={(open) => !open && setProfileMember(null)}
+      >
+        <DialogContent
+          className="sm:max-w-md"
+          data-testid="member-profile-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle>Thông tin thành viên</DialogTitle>
+            <DialogDescription>
+              Thông tin cơ bản trong hồ sơ người dùng.
+            </DialogDescription>
+          </DialogHeader>
+          {profileMember && (
+            <div className="space-y-5">
+              <div className="flex flex-col items-center rounded-2xl bg-muted/60 p-6 text-center">
+                <Avatar className="size-24 border-2 border-background shadow-sm">
+                  <AvatarImage
+                    src={profileMember.avatar || selectedProfile?.avatar || ""}
+                    alt=""
+                  />
+                  <AvatarFallback className="text-2xl font-semibold">
+                    {selectedName.slice(0, 1).toLocaleUpperCase("vi")}
+                  </AvatarFallback>
+                </Avatar>
+                <h3 className="mt-4 text-lg font-semibold text-foreground">
+                  {selectedName}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  @{selectedProfile?.username || profileMember.username}
+                </p>
+              </div>
+              <dl className="divide-y divide-border rounded-xl border border-border">
+                <div className="grid grid-cols-[6rem_1fr] gap-3 px-4 py-3 text-sm">
+                  <dt className="text-muted-foreground">Vai trò</dt>
+                  <dd className="font-medium text-foreground">
+                    {profileMember.role === "OWNER"
+                      ? "Trưởng nhóm"
+                      : profileMember.role === "ADMIN"
+                        ? "Phó nhóm"
+                        : "Thành viên"}
+                  </dd>
+                </div>
+                {selectedProfile?.email && (
+                  <div className="grid grid-cols-[6rem_1fr] gap-3 px-4 py-3 text-sm">
+                    <dt className="text-muted-foreground">Email</dt>
+                    <dd className="break-all font-medium text-foreground">
+                      {selectedProfile.email}
+                    </dd>
+                  </div>
+                )}
+                <div className="grid grid-cols-[6rem_1fr] gap-3 px-4 py-3 text-sm">
+                  <dt className="text-muted-foreground">Giới thiệu</dt>
+                  <dd className="font-medium text-foreground">
+                    {selectedProfile?.bio || "Chưa có thông tin giới thiệu"}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={promoteTarget !== null}
+        onOpenChange={(open) => !open && setPromoteTarget(null)}
+        title="Thêm phó nhóm?"
+        description={`${promoteTarget?.name ?? "Thành viên này"} sẽ có quyền thêm, xoá và quản lý thành viên trong nhóm.`}
+        confirmLabel="Thêm phó nhóm"
+        pendingLabel="Đang cập nhật..."
+        destructive={false}
+        isPending={Boolean(promoteTarget && pendingId === promoteTarget.userId)}
+        onConfirm={() => promoteTarget && void promoteMember(promoteTarget)}
+      />
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => !open && setRemoveTarget(null)}
+        title="Xoá thành viên khỏi nhóm?"
+        description={`${removeTarget?.name ?? "Thành viên này"} sẽ không thể xem hoặc nhận tin nhắn mới trong nhóm.`}
+        confirmLabel="Xoá khỏi nhóm"
+        pendingLabel="Đang xoá..."
+        isPending={Boolean(removeTarget && pendingId === removeTarget.userId)}
+        onConfirm={() => removeTarget && void removeMember(removeTarget)}
+      />
+      <ConfirmDialog
+        open={leaveConfirm}
+        onOpenChange={setLeaveConfirm}
+        title="Rời khỏi nhóm?"
+        description={`Bạn sẽ không nhận tin nhắn mới từ “${conversation?.groupName || "nhóm"}”.`}
+        confirmLabel="Rời nhóm"
+        pendingLabel="Đang rời..."
+        isPending={groupActionPending}
+        onConfirm={() => void leaveGroup()}
+      />
+      <ConfirmDialog
+        open={deleteConfirm}
+        onOpenChange={setDeleteConfirm}
+        title="Xoá cuộc trò chuyện?"
+        description={`Toàn bộ nhóm “${conversation?.groupName || "nhóm"}” và lịch sử trò chuyện sẽ bị xoá. Thao tác này không thể hoàn tác.`}
+        confirmLabel="Xoá cuộc trò chuyện"
+        pendingLabel="Đang xoá..."
+        isPending={groupActionPending}
+        onConfirm={() => void deleteGroup()}
+      />
+    </>
   );
 }

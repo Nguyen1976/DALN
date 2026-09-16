@@ -22,6 +22,25 @@ import {
   User,
 } from "lucide-react";
 import { SeenStatus } from "@/components/SeenStatus";
+
+function renderMentionText(text: string, hasMentions: boolean, isMine = false) {
+  if (!hasMentions) return text;
+  return text.split(/(@[\w.-]+)/g).map((part, index) =>
+    part.startsWith("@") ? (
+      <span
+        key={`${part}-${index}`}
+        className={cn(
+          "font-semibold underline decoration-current/35 decoration-1 underline-offset-2",
+          isMine
+            ? "text-mention-out"
+            : "text-mention-in",
+        )}
+      >
+        {part}
+      </span>
+    ) : part,
+  );
+}
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -325,7 +344,7 @@ const MessageComponent = ({
                 )}
               >
                 <p className="max-w-[85%] rounded-full bg-muted px-3 py-1 text-center text-xs leading-relaxed text-muted-foreground">
-                  {message.text}
+                  {renderMentionText(message.text, Boolean(message.mentionUserIds?.length))}
                   <time
                     dateTime={message.createdAt}
                     title={formatFullDateTime(message.createdAt)}
@@ -521,7 +540,7 @@ const MessageComponent = ({
                     </p>
                   ) : message.text ? (
                     <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
-                      {message.text}
+                      {renderMentionText(message.text, Boolean(message.mentionUserIds?.length), isMine)}
                     </p>
                   ) : null}
 

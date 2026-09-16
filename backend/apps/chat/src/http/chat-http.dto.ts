@@ -51,6 +51,10 @@ export class AddMemberToConversationDTO {
   })
   memberIds: string[]
 
+  // ValidationPipe bật whitelist; thiếu decorator khiến toàn bộ profile
+  // snapshot bị loại khỏi body và controller chỉ còn memberIds.
+  @IsOptional()
+  @IsArray()
   members?: Member[]
 }
 
@@ -63,6 +67,16 @@ export class RemoveMemberFromConversationDTO {
   @IsNotEmpty({
     message: 'targetUserId is required',
   })
+  targetUserId: string
+}
+
+export class PromoteMemberDTO {
+  @IsNotEmpty()
+  @IsString()
+  conversationId: string
+
+  @IsNotEmpty()
+  @IsString()
   targetUserId: string
 }
 
@@ -115,6 +129,12 @@ export class DeleteMessageForMeDTO {
 
 export class ClearConversationHistoryDTO {
   @IsNotEmpty()
+  conversationId: string
+}
+
+export class ClearMentionsDTO {
+  @IsNotEmpty()
+  @IsString()
   conversationId: string
 }
 

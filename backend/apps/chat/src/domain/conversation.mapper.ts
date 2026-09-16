@@ -166,6 +166,16 @@ export class ConversationMapper {
             )?.userId ?? null)
           : null),
       unreadCount: this.resolveUnreadCount(conversation, userId),
+      unreadMentionCount:
+        conversation.unreadMentionCount ??
+        (conversation.members || []).find((m: any) => m.userId === userId)
+          ?.unreadMentionCount ??
+        0,
+      lastMentionMessageId:
+        conversation.lastMentionMessageId ??
+        (conversation.members || []).find((m: any) => m.userId === userId)
+          ?.lastMentionMessageId ??
+        null,
       createdAt: this.toIso(conversation.createdAt)!,
       updatedAt: this.toIso(conversation.updatedAt)!,
       members: (conversation.members || []).map((member: any) =>

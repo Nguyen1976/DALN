@@ -108,6 +108,9 @@
   --bubble-out: oklch(0.52 0.19 272); /* 5.66:1 vs canvas */
   --bubble-out-foreground: oklch(0.99 0 0);
   --bubble-out-meta: oklch(0.99 0 0 / 0.78);
+  /* Inline mentions: restrained text accents, tuned against each bubble. */
+  --mention-in: oklch(0.43 0.2 272);
+  --mention-out: oklch(0.95 0.045 220);
   --typing: oklch(0.52 0.025 272);
 
   /* ---- Presence ---- */
@@ -197,6 +200,8 @@
   --bubble-out: oklch(0.52 0.19 272); /* 3.26:1 vs canvas */
   --bubble-out-foreground: oklch(0.99 0 0);
   --bubble-out-meta: oklch(0.99 0 0 / 0.8);
+  --mention-in: oklch(0.79 0.12 272);
+  --mention-out: oklch(0.95 0.045 220);
   --typing: oklch(0.715 0.025 272);
 
   --presence-online: oklch(0.72 0.17 152); /* 7.74:1 vs card */
@@ -270,6 +275,8 @@
   --color-bubble-in-foreground: var(--bubble-in-foreground);
   --color-bubble-out: var(--bubble-out);
   --color-bubble-out-foreground: var(--bubble-out-foreground);
+  --color-mention-in: var(--mention-in);
+  --color-mention-out: var(--mention-out);
   --color-typing: var(--typing);
   --color-presence-online: var(--presence-online);
   --color-presence-away: var(--presence-away);
