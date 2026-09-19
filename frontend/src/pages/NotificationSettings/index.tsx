@@ -1,5 +1,12 @@
 import { useEffect, useMemo } from "react";
-import { Bell, BellOff, Mail, MessageSquare, Zap } from "lucide-react";
+import {
+  Bell,
+  BellOff,
+  Mail,
+  MessageSquare,
+  Zap,
+  type AppIcon,
+} from "@/components/icons";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/ui/feedback";
@@ -28,7 +35,7 @@ const CHANNELS: Array<{
   key: keyof ChannelToggles;
   label: string;
   hint: string;
-  icon: typeof Bell;
+  icon: AppIcon;
 }> = [
   {
     key: "IN_APP",

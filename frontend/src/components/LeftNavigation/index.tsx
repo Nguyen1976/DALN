@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Users, MessageSquare, LogOut, Settings, Sparkles } from "lucide-react";
+import { Users, MessageSquare, LogOut, Settings, Sparkles } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {

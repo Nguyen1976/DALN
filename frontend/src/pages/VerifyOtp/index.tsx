@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ModeToggle } from "@/components/ModeToggle";
-import { AlertCircle, ArrowLeft, Loader2, MailCheck } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, MailCheck } from "@/components/icons";
 import {
   Form,
   FormControl,

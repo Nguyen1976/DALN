@@ -17,7 +17,7 @@ import {
   Minimize2,
   Maximize2,
   SwitchCamera,
-} from "lucide-react";
+} from "@/components/icons";
 import { useSelector } from "react-redux";
 import { describeCallError, useWebRTC } from "@/hooks/useWebRTC";
 import { toast } from "sonner";

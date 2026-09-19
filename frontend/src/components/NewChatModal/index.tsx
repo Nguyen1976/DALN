@@ -2,7 +2,7 @@
 
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { X, Camera } from "lucide-react";
+import { X, Camera } from "@/components/icons";
 import { useEffect, useRef, useState } from "react";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";

@@ -4,7 +4,7 @@ import {
   Loader2Icon,
   OctagonXIcon,
   TriangleAlertIcon,
-} from "lucide-react";
+} from "@/components/icons";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
 import { useTheme } from "@/components/ThemeProvider";
@@ -19,10 +19,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
       theme={theme}
       className="toaster group"
       icons={{
-        success: <CircleCheckIcon className="size-4 text-success-text" />,
+        success: <CircleCheckIcon animate className="size-4 text-success-text" />,
         info: <InfoIcon className="size-4 text-brand" />,
         warning: <TriangleAlertIcon className="size-4 text-warning-text" />,
-        error: <OctagonXIcon className="size-4 text-destructive-text" />,
+        error: <OctagonXIcon animate className="size-4 text-destructive-text" />,
         loading: <Loader2Icon className="size-4 animate-spin" />,
       }}
       toastOptions={{

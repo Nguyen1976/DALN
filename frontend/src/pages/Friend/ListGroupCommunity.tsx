@@ -11,7 +11,7 @@ import {
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import type { AppDispatch } from "@/redux/store";
-import { ChevronRight, SearchX, UsersRound } from "lucide-react";
+import { ChevronRight, SearchX, UsersRound } from "@/components/icons";
 import { EmptyState } from "@/components/ui/feedback";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSelector } from "react-redux";
-import { Mail, PencilLine, Quote } from "lucide-react";
+import { Mail, PencilLine, Quote } from "@/components/icons";
 import { useMediaQuery } from "usehooks-ts";
 
 import {

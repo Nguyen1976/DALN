@@ -40,4 +40,15 @@ export default defineConfig([
       'react-refresh/only-export-components': 'off',
     },
   },
+  {
+    // Animate UI code copied in by the shadcn CLI. Each icon exports its
+    // `animations` table next to the component, and Slot wraps its child in
+    // motion.create() inside useMemo by design. Kept as shipped so updates
+    // from the registry stay a clean overwrite.
+    files: ['src/components/animate-ui/**/*.{ts,tsx}', 'src/hooks/use-is-in-view.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'react-hooks/static-components': 'off',
+    },
+  },
 ])

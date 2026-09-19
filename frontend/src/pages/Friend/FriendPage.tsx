@@ -2,7 +2,13 @@ import { cn } from "@/lib/utils";
 import MainLayout from "@/layouts/MainLayout";
 import { useLocation, useNavigate } from "react-router";
 import { useState } from "react";
-import { SquarePen, UserPlus, Users, Users2 } from "lucide-react";
+import {
+  SquarePen,
+  UserPlus,
+  Users,
+  Users2,
+  AnimateIcon,
+} from "@/components/icons";
 import { useSelector } from "react-redux";
 import { selectFriend } from "@/redux/slices/friendSlice";
 import { useLiquidUnderline } from "@/hooks/useLiquidUnderline";
@@ -95,26 +101,27 @@ export function FriendsPage({ children }: { children?: React.ReactNode }) {
             {TABS.map(({ path, label, icon: Icon }, index) => {
               const active = params === path;
               return (
-                <button
-                  key={path}
-                  ref={(node) => {
-                    tabRefs.current[index] = node;
-                  }}
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => navigate(path)}
-                  className={cn(
-                    "flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
-                    "transition-colors duration-(--motion-fast)",
-                    "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
-                    active
-                      ? "text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Icon className="size-4" aria-hidden="true" />
-                  {label}
-                </button>
+                <AnimateIcon key={path} asChild animateOnHover>
+                  <button
+                    ref={(node) => {
+                      tabRefs.current[index] = node;
+                    }}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => navigate(path)}
+                    className={cn(
+                      "flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
+                      "transition-colors duration-(--motion-fast)",
+                      "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                      active
+                        ? "text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="size-4" aria-hidden="true" />
+                    {label}
+                  </button>
+                </AnimateIcon>
               );
             })}
             {/* One shared bar that glides between tabs (useLiquidUnderline). */}

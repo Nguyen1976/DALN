@@ -11,7 +11,7 @@ import type {
   Conversation,
   ConversationState,
 } from "@/redux/slices/conversationSlice";
-import { FileText, ImageIcon, Link2, X } from "lucide-react";
+import { FileText, ImageIcon, Link2, X } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { GroupMemberManager } from "./GroupMemberManager";

@@ -21,7 +21,7 @@ import type { AppDispatch } from "@/redux/store";
 import { showErrorToast } from "@/utils/toastError";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { Skeleton } from "../ui/skeleton";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/components/icons";
 import { toast } from "sonner";
 
 interface FriendRequestModalProps {

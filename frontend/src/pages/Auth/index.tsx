@@ -1,4 +1,4 @@
-import { MessagesSquare, ShieldCheck, Sparkles } from "lucide-react";
+import { MessagesSquare, ShieldCheck, Sparkles } from "@/components/icons";
 import { useState } from "react";
 
 import { AuthForm } from "@/components/AuthForm";

@@ -33,7 +33,7 @@ import {
   SquarePen,
   X,
   Phone,
-} from "lucide-react";
+} from "@/components/icons";
 import { useCall } from "@/contexts/callContext";
 
 /** Vietnamese-friendly search: strips diacritics so "hoa" matches "Hoà". */

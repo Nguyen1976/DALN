@@ -8,7 +8,8 @@ import {
   UserPlus,
   Users,
   Users2,
-} from "lucide-react";
+  type AppIcon,
+} from "@/components/icons";
 import { toast } from "sonner";
 
 import MainLayout from "@/layouts/MainLayout";
@@ -40,7 +41,7 @@ import { cn } from "@/lib/utils";
  * trustworthy rather than arbitrary.
  */
 function buildReasons(candidate: RecommendationCandidateItem) {
-  const reasons: { icon: typeof Users; label: string }[] = [];
+  const reasons: { icon: AppIcon; label: string }[] = [];
 
   if (candidate.adamic_adar > 0 || candidate.jaccard > 0) {
     reasons.push({ icon: Users, label: "Có bạn chung" });

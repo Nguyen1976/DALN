@@ -6,7 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Check, CheckCheck } from "lucide-react";
+import { Check, CheckCheck } from "@/components/icons";
 
 interface SeenUser {
   userId: string;

@@ -1,4 +1,4 @@
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "@/components/icons";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";

@@ -2,6 +2,7 @@ import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 
+import { AnimateIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
@@ -64,14 +65,17 @@ function Button({
   }) {
   const Comp = asChild ? Slot : "button";
 
+  // Hovering the button (not just its glyph) plays any animated icon inside.
   return (
-    <Comp
-      data-slot="button"
-      data-variant={variant}
-      data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
+    <AnimateIcon asChild animateOnHover>
+      <Comp
+        data-slot="button"
+        data-variant={variant}
+        data-size={size}
+        className={cn(buttonVariants({ variant, size, className }))}
+        {...props}
+      />
+    </AnimateIcon>
   );
 }
 

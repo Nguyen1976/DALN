@@ -12,7 +12,7 @@ import {
   Settings2,
   UserPlus,
   Users,
-} from "lucide-react";
+} from "@/components/icons";
 import { EmptyState, Spinner } from "@/components/ui/feedback";
 import { cn } from "@/lib/utils";
 import { type UIEvent, useEffect, useState } from "react";

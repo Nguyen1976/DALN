@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSelector } from "react-redux";
-import { MessageSquareText } from "lucide-react";
+import { MessageSquareText } from "@/components/icons";
 import { EmptyState } from "@/components/ui/feedback";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";

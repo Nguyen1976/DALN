@@ -18,7 +18,7 @@ import { useDispatch } from "react-redux";
 import type { AppDispatch } from "@/redux/store";
 import { useNavigate, useLocation } from "react-router";
 import { toast } from "sonner";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/components/icons";
 import { PasswordField } from "./PasswordField";
 
 const Login = () => {

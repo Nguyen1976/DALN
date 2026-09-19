@@ -6,7 +6,7 @@ import {
   getFileNameFromUrl,
   getOfficeAccent,
 } from "@/utils/filePreview";
-import { FileText, Loader2 } from "lucide-react";
+import { FileText, Loader2 } from "@/components/icons";
 
 type FileAttachmentPreviewProps = {
   url: string;

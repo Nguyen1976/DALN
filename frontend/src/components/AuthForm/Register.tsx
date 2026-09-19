@@ -17,7 +17,7 @@ import {
 import { registerAPI } from "@/apis";
 import { toast } from "sonner";
 import { useNavigate } from "react-router";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/components/icons";
 import { PasswordField, PasswordStrength } from "./PasswordField";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { applyServerFieldError } from "@/utils/formServerError";

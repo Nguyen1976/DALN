@@ -7,7 +7,7 @@ import {
   Trash2,
   UserPlus,
   Users,
-} from "lucide-react";
+} from "@/components/icons";
 import { useLocation, useNavigate } from "react-router";
 import { useDispatch, useSelector } from "react-redux";
 import { toast } from "sonner";

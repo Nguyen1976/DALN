@@ -13,7 +13,14 @@ import FriendRequestModal from "@/components/FriendRequestModal";
 import { formatFullDateTime, formatRelativeTime } from "@/utils/formatDateTime";
 import { useLiquidUnderline } from "@/hooks/useLiquidUnderline";
 import { showErrorToast } from "@/utils/toastError";
-import { AlertCircle, ChevronRight, Clock, Inbox, Send } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronRight,
+  Clock,
+  Inbox,
+  Send,
+  AnimateIcon,
+} from "@/components/icons";
 import { EmptyState, Spinner } from "@/components/ui/feedback";
 import { staggerStyle } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -145,27 +152,28 @@ const ListFriendRequests = () => {
           const selected = tab.key === direction;
           const Icon = tab.key === "received" ? Inbox : Send;
           return (
-            <button
-              key={tab.key}
-              ref={(node) => {
-                tabRefs.current[index] = node;
-              }}
-              role="tab"
-              type="button"
-              aria-selected={selected}
-              onClick={() => setDirection(tab.key)}
-              className={cn(
-                "flex items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
-                "transition-colors duration-(--motion-fast)",
-                "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
-                selected
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="size-4" aria-hidden="true" />
-              {tab.label}
-            </button>
+            <AnimateIcon key={tab.key} asChild animateOnHover>
+              <button
+                ref={(node) => {
+                  tabRefs.current[index] = node;
+                }}
+                role="tab"
+                type="button"
+                aria-selected={selected}
+                onClick={() => setDirection(tab.key)}
+                className={cn(
+                  "flex items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
+                  "transition-colors duration-(--motion-fast)",
+                  "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                  selected
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="size-4" aria-hidden="true" />
+                {tab.label}
+              </button>
+            </AnimateIcon>
           );
         })}
         {/* One shared bar that glides between tabs (useLiquidUnderline).

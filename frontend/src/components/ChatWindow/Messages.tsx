@@ -21,7 +21,7 @@ import {
   RotateCcw,
   Trash2,
   User,
-} from "lucide-react";
+} from "@/components/icons";
 import { SeenStatus } from "@/components/SeenStatus";
 import {
   buildMentionSegments,

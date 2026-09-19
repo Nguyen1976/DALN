@@ -26,7 +26,7 @@ import {
   FileText,
   Loader2,
   AtSign,
-} from "lucide-react";
+} from "@/components/icons";
 import { useDispatch, useSelector } from "react-redux";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RootState } from "@/redux/store";

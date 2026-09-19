@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { AlertCircle, Loader2, UserPlus, X } from "lucide-react";
+import { AlertCircle, Loader2, UserPlus, X } from "@/components/icons";
 import { Input } from "../ui/input";
 import { useRef } from "react";
 import { useForm } from "react-hook-form";

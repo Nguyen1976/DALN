@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BrandLockup } from "@/components/Brand";
-import { Check, Loader2, Sparkles } from "lucide-react";
+import { Check, Loader2, Sparkles } from "@/components/icons";
 import { getInterestTagsAPI, type InterestTagItem } from "@/apis";
 import {
   completeInterestOnboardingAPI,

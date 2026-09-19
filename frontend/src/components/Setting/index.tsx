@@ -7,8 +7,8 @@ import {
   Shield,
   UserRound,
   X,
-  type LucideIcon,
-} from "lucide-react";
+  type AppIcon,
+} from "@/components/icons";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,7 @@ function SettingGroup({
   title,
   children,
 }: {
-  icon: LucideIcon;
+  icon: AppIcon;
   title: string;
   children: React.ReactNode;
 }) {

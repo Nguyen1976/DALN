@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
-import { Phone, PhoneOff, Video } from "lucide-react";
+import { Phone, PhoneOff, Video } from "@/components/icons";
 import { toast } from "sonner";
 import VoiceCallModal, {
   type VoiceCallMode,
