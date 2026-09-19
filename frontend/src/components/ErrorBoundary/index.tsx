@@ -1,4 +1,4 @@
-import { AlertTriangle, RotateCcw } from "lucide-react";
+import { AlertTriangle, RotateCcw } from "@/components/icons";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ export class ErrorBoundary extends Component<Props, State> {
     return (
       <div
         role="alert"
-        className="flex min-h-[100dvh] w-full flex-col items-center justify-center gap-5 bg-background px-6 text-center"
+        className="flex min-h-[100dvh] w-full animate-page-in flex-col items-center justify-center gap-5 bg-background px-6 text-center"
       >
         <span
           aria-hidden="true"

@@ -11,7 +11,16 @@ import type {
   Conversation,
   ConversationState,
 } from "@/redux/slices/conversationSlice";
-import { FileText, ImageIcon, Link2, X } from "lucide-react";
+import {
+  AnimateIcon,
+  FileText,
+  ImageIcon,
+  Link2,
+  Trash2,
+  X,
+} from "@/components/icons";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useClearConversationHistory } from "@/hooks/chat/useChatMessageActions";
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { GroupMemberManager } from "./GroupMemberManager";
@@ -46,6 +55,10 @@ export default function ProfilePanel({
   const canAccessConversationData =
     conversation?.membershipStatus !== "REMOVED" &&
     conversation?.membershipStatus !== "LEFT";
+
+  const clearHistory = useClearConversationHistory(conversationId);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   // Reset when the conversation or the tab changes.
   //
@@ -134,7 +147,7 @@ export default function ProfilePanel({
   };
 
   const panelClassName =
-    "fixed inset-0 z-40 flex flex-col bg-sidebar md:static md:z-auto md:w-80 md:shrink-0 md:border-l md:border-border lg:w-96";
+    "fixed inset-0 z-40 flex animate-panel-in flex-col bg-sidebar md:static md:z-auto md:w-80 md:shrink-0 md:border-l md:border-border lg:w-96";
   const header = (
     <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
       <h2 className="text-base font-semibold tracking-[-0.01em] text-foreground">
@@ -182,7 +195,7 @@ export default function ProfilePanel({
       <div className="custom-scrollbar flex-1 overflow-y-auto">
         <div className="space-y-6 p-6">
           {/* Avatar */}
-          <div className="flex flex-col items-center text-center">
+          <div className="flex animate-stagger-in flex-col items-center text-center [--stagger:1]">
             <Avatar className="mb-3 size-24 border border-border">
               <AvatarImage
                 src={conversation.groupAvatar || conversation.displayAvatar || ""}
@@ -201,7 +214,7 @@ export default function ProfilePanel({
           </div>
 
           {/* Settings */}
-          <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+          <div className="animate-stagger-in space-y-3 rounded-xl border border-border bg-card p-4 [--stagger:2]">
             {[
               ["Tắt thông báo cuộc trò chuyện", "chat-mute"],
               ["Tin nhắn tự biến mất", "chat-ephemeral"],
@@ -226,7 +239,7 @@ export default function ProfilePanel({
           {conversation.type === "GROUP" && <GroupMemberManager />}
 
           {/* Media */}
-          <div>
+          <div className="animate-stagger-in [--stagger:3]">
             <h4 className="mb-3 text-sm font-semibold text-foreground">
               Ảnh, liên kết & tài liệu
             </h4>
@@ -252,7 +265,9 @@ export default function ProfilePanel({
               ))}
             </div>
 
-            <div className="space-y-2">
+            {/* Keyed on the tab: switching Ảnh/Liên kết/Tài liệu slides the
+                new list in instead of swapping it in place. */}
+            <div key={assetKind} className="animate-slide-in-up space-y-2">
               {assets.map((message) => {
                 if (assetKind === "MEDIA") {
                   const url = resolveMediaPreviewUrl(message);
@@ -345,8 +360,53 @@ export default function ProfilePanel({
               )}
             </div>
           </div>
+
+          {/* Last, as in most chat apps: actions that remove things sit at the
+              foot of the details, away from everyday settings. */}
+          {canAccessConversationData && (
+            <section className="animate-stagger-in space-y-3 [--stagger:4]">
+              <h4 className="text-sm font-semibold text-foreground">
+                Quyền riêng tư & hỗ trợ
+              </h4>
+              <AnimateIcon asChild animateOnHover>
+                <button
+                  type="button"
+                  onClick={() => setConfirmClear(true)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border/70 p-3 text-left transition-colors duration-(--motion-fast) hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive-text">
+                    <Trash2 className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-destructive-text">
+                      Xóa lịch sử trò chuyện
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      Chỉ ẩn ở phía bạn, người khác vẫn thấy tin nhắn.
+                    </span>
+                  </span>
+                </button>
+              </AnimateIcon>
+            </section>
+          )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Xóa toàn bộ lịch sử trò chuyện?"
+        description="Lịch sử chỉ bị ẩn ở phía bạn và không thể khôi phục. Người khác vẫn nhìn thấy tin nhắn bình thường."
+        confirmLabel="Xóa lịch sử"
+        pendingLabel="Đang xóa…"
+        isPending={clearing}
+        onConfirm={async () => {
+          setClearing(true);
+          const done = await clearHistory();
+          setClearing(false);
+          if (done) setConfirmClear(false);
+        }}
+      />
     </div>
   );
 }

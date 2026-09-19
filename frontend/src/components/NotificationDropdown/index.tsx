@@ -12,7 +12,7 @@ import {
   Settings2,
   UserPlus,
   Users,
-} from "lucide-react";
+} from "@/components/icons";
 import { EmptyState, Spinner } from "@/components/ui/feedback";
 import { cn } from "@/lib/utils";
 import { type UIEvent, useEffect, useState } from "react";
@@ -31,6 +31,7 @@ import { formatFullDateTime, formatRelativeTime } from "@/utils/formatDateTime";
 import FriendRequestModal from "../FriendRequestModal";
 import { useNavigate } from "react-router";
 import { socket } from "@/lib/socket";
+import { staggerStyle } from "@/lib/motion";
 
 /** Notification type -> icon, so each row is scannable without reading it. */
 const iconForType = (type?: string) => {
@@ -155,8 +156,10 @@ export function NotificationsDropdown() {
             <Bell className="size-5" />
             {unreadCount > 0 && (
               <span
+                // Re-keyed per count: a new notification pops the badge.
+                key={unreadCount}
                 aria-hidden="true"
-                className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums text-destructive-foreground ring-2 ring-sidebar"
+                className="absolute right-1.5 top-1.5 flex animate-pop-in h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums text-destructive-foreground ring-2 ring-sidebar"
               >
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
@@ -195,14 +198,18 @@ export function NotificationsDropdown() {
           >
             {notifications.length > 0 ? (
               <ul className="flex flex-col">
-                {notifications.map((n) => {
+                {notifications.map((n, index) => {
                   const Icon = iconForType(n.type);
                   return (
-                    <li key={n.id}>
+                    <li
+                      key={n.id}
+                      className="animate-stagger-in"
+                      style={staggerStyle(index % limit)}
+                    >
                       <button
                         className={cn(
                           "flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left last:border-0",
-                          "transition-colors duration-[--motion-fast] hover:bg-accent",
+                          "transition-colors duration-(--motion-fast) hover:bg-accent",
                           "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
                           !n.isRead && "bg-accent/45",
                         )}

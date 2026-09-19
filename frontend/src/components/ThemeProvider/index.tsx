@@ -1,79 +1,86 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-type Theme = "dark" | "light" | "system";
+import { revealTheme, type RevealOrigin } from "@/lib/themeReveal";
+
+type Theme = "light" | "dark";
 
 type ThemeProviderProps = {
   children: React.ReactNode;
-  defaultTheme?: Theme;
   storageKey?: string;
 };
 
 type ThemeProviderState = {
-  /** What the user picked — may be "system". */
   theme: Theme;
-  /** What is actually painted right now — never "system". */
-  resolvedTheme: "light" | "dark";
-  setTheme: (theme: Theme) => void;
+  /**
+   * With `origin` (a point in viewport px, usually the toggle's centre) the
+   * new theme spreads out from there; without it the switch is instant.
+   */
+  setTheme: (theme: Theme, origin?: RevealOrigin) => void;
 };
 
 const ThemeProviderContext = createContext<ThemeProviderState | undefined>(
   undefined,
 );
 
-const getSystemTheme = (): "light" | "dark" =>
-  window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+/**
+ * Same rule as the pre-paint script in index.html: a stored choice wins; with
+ * none yet (or a legacy "system"), start from the OS scheme once. The app does
+ * not keep following the OS after that; the toggle is the only switch.
+ */
+const initialTheme = (storageKey: string): Theme => {
+  try {
+    const stored = localStorage.getItem(storageKey);
+    if (stored === "light" || stored === "dark") return stored;
+  } catch {
+    /* storage unavailable — fall back to the OS scheme */
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+};
+
+const paintTheme = (theme: Theme) => {
+  const root = window.document.documentElement;
+  root.classList.remove("light", "dark");
+  root.classList.add(theme);
+  // Lets the browser paint form controls, scrollbars and the caret in the
+  // matching scheme instead of forcing light chrome onto a dark page.
+  root.style.colorScheme = theme;
+};
 
 export function ThemeProvider({
   children,
-  defaultTheme = "system",
   storageKey = "vite-ui-theme",
   ...props
 }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      return (localStorage.getItem(storageKey) as Theme) || defaultTheme;
-    } catch {
-      return defaultTheme;
-    }
-  });
-
-  const [systemTheme, setSystemTheme] = useState<"light" | "dark">(
-    getSystemTheme,
-  );
-
-  // Follow the OS immediately while the user is on "system".
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => setSystemTheme(media.matches ? "dark" : "light");
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
-  }, []);
-
-  const resolvedTheme = theme === "system" ? systemTheme : theme;
+  const [theme, setTheme] = useState<Theme>(() => initialTheme(storageKey));
 
   useEffect(() => {
-    const root = window.document.documentElement;
-    root.classList.remove("light", "dark");
-    root.classList.add(resolvedTheme);
-    // Lets the browser paint form controls, scrollbars and the caret in the
-    // matching scheme instead of forcing light chrome onto a dark page.
-    root.style.colorScheme = resolvedTheme;
-  }, [resolvedTheme]);
+    paintTheme(theme);
+  }, [theme]);
 
   const value = useMemo<ThemeProviderState>(
     () => ({
       theme,
-      resolvedTheme,
-      setTheme: (next: Theme) => {
+      setTheme: (next: Theme, origin?: RevealOrigin) => {
         try {
           localStorage.setItem(storageKey, next);
         } catch {
           /* storage unavailable — keep the in-memory choice */
         }
-        setTheme(next);
+        if (!origin || next === theme) {
+          setTheme(next);
+          return;
+        }
+        // The class goes on synchronously so the view transition snapshots
+        // the new theme; the effect above then re-applies the same class.
+        revealTheme(origin, () => {
+          paintTheme(next);
+          setTheme(next);
+        });
       },
     }),
-    [theme, resolvedTheme, storageKey],
+    [theme, storageKey],
   );
 
   return (

@@ -1,56 +1,37 @@
-import { Check, Monitor, Moon, Sun } from "lucide-react";
+import { Moon, Sun } from "@/components/icons";
 
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useTheme } from "../ThemeProvider";
 import { cn } from "@/lib/utils";
 
-const OPTIONS = [
-  { value: "light", label: "Sáng", icon: Sun },
-  { value: "dark", label: "Tối", icon: Moon },
-  { value: "system", label: "Theo hệ thống", icon: Monitor },
-] as const;
-
+/** One tap flips light ↔ dark; the new theme spreads out from this button. */
 export function ModeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
+  const isDark = theme === "dark";
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Đổi giao diện sáng tối"
-          className={cn("relative", className)}
-        >
-          <Sun className="size-[1.15rem] scale-100 rotate-0 transition-transform duration-200 dark:scale-0 dark:-rotate-90" />
-          <Moon className="absolute size-[1.15rem] scale-0 rotate-90 transition-transform duration-200 dark:scale-100 dark:rotate-0" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuLabel>Giao diện</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {OPTIONS.map(({ value, label, icon: Icon }) => (
-          <DropdownMenuItem
-            key={value}
-            onClick={() => setTheme(value)}
-            // Communicates the active choice to screen readers, not just visually.
-            aria-checked={theme === value}
-            role="menuitemradio"
-          >
-            <Icon className="size-4 text-muted-foreground" />
-            <span className="flex-1">{label}</span>
-            {theme === value && <Check className="size-4 text-brand" />}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Button
+      variant="ghost"
+      size="icon"
+      data-theme-toggle
+      aria-label={isDark ? "Chuyển sang giao diện sáng" : "Chuyển sang giao diện tối"}
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        setTheme(isDark ? "light" : "dark", {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        });
+      }}
+      className={cn("relative", className)}
+    >
+      <Sun
+        aria-hidden="true"
+        className="size-[1.15rem] scale-100 rotate-0 transition-transform duration-(--motion-slow) ease-(--ease-out) dark:scale-0 dark:-rotate-90"
+      />
+      <Moon
+        aria-hidden="true"
+        className="absolute size-[1.15rem] scale-0 rotate-90 transition-transform duration-(--motion-slow) ease-(--ease-out) dark:scale-100 dark:rotate-0"
+      />
+    </Button>
   );
 }

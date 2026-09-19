@@ -121,8 +121,22 @@ export function useChatMessageActions({
     [conversationId, dispatch, messages],
   );
 
-  const handleClearHistory = useCallback(async () => {
-    if (!conversationId) return;
+  return {
+    handleRevokeMessage,
+    handleDeleteMessageForMe,
+  };
+}
+
+/**
+ * Hides the whole history on the caller's side only. Lives apart from the
+ * per-message actions because it is offered from the conversation details
+ * panel, which has no message list to hand over.
+ */
+export function useClearConversationHistory(conversationId?: string) {
+  const dispatch = useDispatch<AppDispatch>();
+
+  return useCallback(async () => {
+    if (!conversationId) return false;
 
     try {
       await clearConversationHistoryAPI({ conversationId });
@@ -136,10 +150,4 @@ export function useChatMessageActions({
       return false;
     }
   }, [conversationId, dispatch]);
-
-  return {
-    handleRevokeMessage,
-    handleDeleteMessageForMe,
-    handleClearHistory,
-  };
 }

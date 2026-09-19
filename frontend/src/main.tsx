@@ -19,7 +19,7 @@ injectStore(store);
 createRoot(document.getElementById("root")!).render(
   // ThemeProvider sits above the router so /auth, /verify-otp and the
   // onboarding routes get the same theme context as the chat shell.
-  <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
+  <ThemeProvider storageKey="vite-ui-theme">
     {/* Outermost so a render crash anywhere still lands on a real screen with
         a way out, instead of unmounting the tree into a blank page. */}
     <ErrorBoundary>

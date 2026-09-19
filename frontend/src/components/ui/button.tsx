@@ -2,15 +2,16 @@ import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 
+import { AnimateIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
   [
     "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium",
-    // Micro-interaction: 140ms colour/shadow, plus a small press displacement.
+    // Micro-interaction: 140ms colour/shadow, plus a small press-in scale.
     // Both are neutralised by the global prefers-reduced-motion rule.
-    "transition-[color,background-color,border-color,box-shadow,transform] duration-[--motion-fast] ease-[--ease-out]",
-    "active:translate-y-px",
+    "transition-[color,background-color,border-color,box-shadow,transform,scale] duration-(--motion-fast) ease-(--ease-out)",
+    "active:scale-[0.97]",
     "disabled:pointer-events-none disabled:opacity-55",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
     "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
@@ -64,14 +65,17 @@ function Button({
   }) {
   const Comp = asChild ? Slot : "button";
 
+  // Hovering the button (not just its glyph) plays any animated icon inside.
   return (
-    <Comp
-      data-slot="button"
-      data-variant={variant}
-      data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
+    <AnimateIcon asChild animateOnHover>
+      <Comp
+        data-slot="button"
+        data-variant={variant}
+        data-size={size}
+        className={cn(buttonVariants({ variant, size, className }))}
+        {...props}
+      />
+    </AnimateIcon>
   );
 }
 

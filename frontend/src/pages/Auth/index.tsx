@@ -1,9 +1,10 @@
-import { MessagesSquare, ShieldCheck, Sparkles } from "lucide-react";
+import { MessagesSquare, ShieldCheck, Sparkles } from "@/components/icons";
 import { useState } from "react";
 
 import { AuthForm } from "@/components/AuthForm";
 import { BrandLockup, BrandMark } from "@/components/Brand";
 import { ModeToggle } from "@/components/ModeToggle";
+import { staggerStyle } from "@/lib/motion";
 
 const HIGHLIGHTS = [
   {
@@ -47,7 +48,7 @@ export default function AuthPage() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.14)_1px,transparent_0)] [background-size:26px_26px]" />
         </div>
 
-        <div className="relative flex items-center gap-2.5">
+        <div className="relative flex animate-stagger-in items-center gap-2.5">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/15 text-white">
             <BrandMark className="size-6" />
           </span>
@@ -57,7 +58,7 @@ export default function AuthPage() {
         </div>
 
         <div className="relative max-w-md space-y-8">
-          <div className="space-y-3">
+          <div className="animate-stagger-in space-y-3" style={staggerStyle(1)}>
             <h2 className="text-3xl font-semibold leading-tight tracking-[-0.02em]">
               Giữ liên lạc với những người quan trọng
             </h2>
@@ -67,8 +68,12 @@ export default function AuthPage() {
           </div>
 
           <ul className="space-y-5">
-            {HIGHLIGHTS.map(({ icon: Icon, title, description }) => (
-              <li key={title} className="flex gap-3.5">
+            {HIGHLIGHTS.map(({ icon: Icon, title, description }, index) => (
+              <li
+                key={title}
+                className="flex animate-stagger-in gap-3.5"
+                style={staggerStyle(index + 2)}
+              >
                 <span
                   aria-hidden="true"
                   className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/15"
@@ -93,7 +98,10 @@ export default function AuthPage() {
 
       {/* ---- Form column ---- */}
       <main className="flex min-h-[100dvh] items-center justify-center px-5 py-12 sm:px-8 lg:min-h-0">
-        <div className="w-full max-w-[26rem]">
+        <div
+          className="w-full max-w-[26rem] animate-stagger-in"
+          style={staggerStyle(1)}
+        >
           <BrandLockup className="mb-8 lg:hidden" />
           <AuthForm mode={mode} onModeChange={setMode} />
         </div>

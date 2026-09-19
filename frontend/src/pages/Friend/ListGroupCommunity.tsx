@@ -11,13 +11,17 @@ import {
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import type { AppDispatch } from "@/redux/store";
-import { ChevronRight, SearchX, UsersRound } from "lucide-react";
+import { ChevronRight, SearchX, UsersRound } from "@/components/icons";
 import { EmptyState } from "@/components/ui/feedback";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
 import { showErrorToast } from "@/utils/toastError";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { staggerStyle } from "@/lib/motion";
+
+/** Groups load in pages of this size; each page staggers from the top. */
+const GROUPS_PAGE_SIZE = 20;
 
 const ListGroupCommunity = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -32,7 +36,7 @@ const ListGroupCommunity = () => {
 
   useEffect(() => {
     if (conversations.length === 0) {
-      dispatch(getConversations({ limit: 20, cursor: null }));
+      dispatch(getConversations({ limit: GROUPS_PAGE_SIZE, cursor: null }));
     }
   }, [dispatch, conversations.length]);
 
@@ -79,7 +83,7 @@ const ListGroupCommunity = () => {
     const last = conversations[conversations.length - 1];
     const cursor = last?.lastMessageAt ? `${last.lastMessageAt}|${last.id}` : null;
 
-    dispatch(getConversations({ limit: 20, cursor }));
+    dispatch(getConversations({ limit: GROUPS_PAGE_SIZE, cursor }));
   };
 
   const openConversation = (
@@ -103,14 +107,18 @@ const ListGroupCommunity = () => {
     });
   };
 
-  const renderGroupItem = (group: Conversation | SearchConversationItem) => {
+  const renderGroupItem = (
+    group: Conversation | SearchConversationItem,
+    index: number,
+  ) => {
     const memberCount = group.memberCount ?? group.members?.length ?? 0;
 
     return (
       <button
         key={group.id}
         onClick={() => openConversation(group)}
-        className="group flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-[--motion-fast] hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+        style={staggerStyle(index % GROUPS_PAGE_SIZE)}
+        className="group flex w-full animate-stagger-in items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
       >
         <div className="relative shrink-0">
           <Avatar className="size-12">

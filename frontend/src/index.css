@@ -30,9 +30,15 @@
   --motion-fast: 140ms;
   --motion-base: 200ms;
   --motion-slow: 320ms;
+  /* Theme switch: the new theme spreads over the whole page from the toggle. */
+  --motion-reveal: 450ms;
   --ease-out: cubic-bezier(0.22, 0.9, 0.28, 1);
   --ease-in-out: cubic-bezier(0.6, 0, 0.35, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+  /* Exits accelerate away; they run at --motion-fast, ~70% of an enter. */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  /* Gap between siblings that enter together (lists, grids, hero lines). */
+  --stagger-step: 60ms;
 
   /* ---- Elevation (light: soft, brand-tinted) ---- */
   --shadow-xs: 0 1px 2px oklch(0.2 0.02 272 / 0.06);
@@ -81,6 +87,9 @@
   --border: oklch(0.885 0.01 272); /* decorative separator */
   --input: oklch(0.65 0.022 272); /* field border — 3.06:1 vs card */
   --placeholder: oklch(0.545 0.022 272); /* 4.9:1 on card */
+  --field: oklch(1 0 0); /* form field fill: the card itself on light */
+  /* Backdrop behind dialogs and sheets: dims the page, never lightens it. */
+  --scrim: oklch(0.2 0.02 272 / 0.55);
   --ring: oklch(0.52 0.19 272);
 
   /* ---- Charts ---- */
@@ -174,8 +183,13 @@
   --warning-text: oklch(0.8 0.14 80);
 
   --border: oklch(0.315 0.014 272);
-  --input: oklch(0.545 0.02 272); /* 3.61:1 vs card */
+  /* Softer than light mode's 3:1 border (a bright outline glares on a dark
+     surface); dark fields are also told apart by their recessed fill. */
+  --input: oklch(0.42 0.018 272);
   --placeholder: oklch(0.66 0.02 272); /* 5.75:1 on card */
+  --field: oklch(0.18 0.013 272); /* a step below the card */
+  /* A light scrim (the old foreground/60) washed dark mode out to grey. */
+  --scrim: oklch(0.08 0.01 272 / 0.66);
   --ring: oklch(0.68 0.17 272);
 
   --chart-1: oklch(0.68 0.17 272);
@@ -246,6 +260,8 @@
   --color-warning-text: var(--warning-text);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-field: var(--field);
+  --color-scrim: var(--scrim);
   --color-placeholder: var(--placeholder);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
@@ -509,6 +525,124 @@
   }
 }
 
+/* Backdrop only fades: moving a full-screen scrim reads as the page jumping. */
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes overlayOut {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialogOut {
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+/* Route change: content settles in place, a shorter travel than riseIn. */
+@keyframes pageIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Small things that appear (badges, check marks, chips): scale from the centre. */
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Side panels come in from the edge they are docked to. */
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Sticky bottom bars rise from below the viewport edge. */
+@keyframes barUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Result bars grow from empty to the transform set inline on the element. */
+@keyframes growX {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+/* A rejected submit: short, damped, horizontal only. */
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-6px);
+  }
+  40% {
+    transform: translateX(5px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+
 /* ==========================================================================
    Utilities
    ========================================================================== */
@@ -529,6 +663,90 @@
   .animate-call-ring-progress {
     stroke-dashoffset: var(--ring-circumference);
     animation: callRingProgress var(--ring-duration, 30s) linear forwards;
+  }
+
+  .animate-overlay-in {
+    animation: overlayIn var(--motion-base) var(--ease-out);
+  }
+
+  .animate-dialog-in {
+    animation: dialogIn var(--motion-slow) var(--ease-out);
+  }
+
+  /* Siblings enter one after another: set --stagger (0, 1, 2…) per item, see
+     staggerStyle(). `backwards` holds the first frame during the delay but
+     releases transform afterwards, so hover transforms still apply. */
+  .animate-stagger-in {
+    animation: riseIn var(--motion-slow) var(--ease-out) backwards;
+    animation-delay: calc(var(--stagger, 0) * var(--stagger-step));
+  }
+
+  /* Card hover: a 2px lift, and the deeper shadow fades in on a pseudo-element
+     so only transform and opacity animate. */
+  .hover-lift {
+    position: relative;
+    transition:
+      transform var(--motion-base) var(--ease-out),
+      background-color var(--motion-fast) var(--ease-out);
+  }
+
+  .hover-lift::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: var(--shadow-md);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-base) var(--ease-out);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .hover-lift:hover {
+      transform: translateY(-2px);
+    }
+
+    .hover-lift:hover::after {
+      opacity: 1;
+    }
+  }
+
+  /* Exit pair for the hand-rolled modals (see useModalExit). `forwards` keeps
+     the last frame until the modal unmounts. */
+  .animate-overlay-out {
+    animation: overlayOut var(--motion-fast) var(--ease-in) forwards;
+  }
+
+  .animate-dialog-out {
+    animation: dialogOut var(--motion-fast) var(--ease-in) forwards;
+  }
+
+  .animate-page-in {
+    animation: pageIn var(--motion-slow) var(--ease-out);
+  }
+
+  /* Delay via its own variable, not --stagger: that one is inherited from list
+     rows, and a badge inside row 7 must not wait 420ms to bump its count. */
+  .animate-pop-in {
+    animation: popIn var(--motion-base) var(--ease-spring) backwards;
+    animation-delay: var(--pop-delay, 0ms);
+  }
+
+  .animate-panel-in {
+    animation: panelIn var(--motion-slow) var(--ease-out);
+  }
+
+  .animate-bar-up {
+    animation: barUp var(--motion-slow) var(--ease-out) backwards;
+    animation-delay: calc(3 * var(--stagger-step));
+  }
+
+  .animate-shake {
+    animation: shake 360ms var(--ease-in-out);
+  }
+
+  .animate-grow-x {
+    animation: growX var(--motion-slow) var(--ease-out);
   }
 
   /* Chat canvas: a very low-contrast dot grid so bubbles read as raised
@@ -584,6 +802,30 @@
 }
 
 /* ==========================================================================
+   Theme reveal (lib/themeReveal.ts) — only while data-theme-reveal is set,
+   so any other view transition keeps the browser's default crossfade.
+   ========================================================================== */
+
+html[data-theme-reveal]::view-transition-old(root),
+html[data-theme-reveal]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html[data-theme-reveal]::view-transition-new(root) {
+  clip-path: var(--theme-reveal-from);
+}
+
+/* The circle is the transition. Colour transitions would otherwise replay
+   inside the revealed area, fading buttons from their old-theme colours.
+   The toggle's own sun/moon swap is the one exception. */
+html[data-theme-reveal] *:not([data-theme-toggle] > svg),
+html[data-theme-reveal] *::before,
+html[data-theme-reveal] *::after {
+  transition: none !important;
+}
+
+/* ==========================================================================
    Reduced motion — final state, immediately.
    ========================================================================== */
 
@@ -596,8 +838,19 @@
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .hover-lift:hover {
+    transform: none;
+  }
+
+  /* Nothing to shake: the alert text already says what went wrong. */
+  .animate-shake {
+    animation: none !important;
   }
 }

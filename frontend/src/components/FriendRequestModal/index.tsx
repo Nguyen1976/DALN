@@ -21,7 +21,7 @@ import type { AppDispatch } from "@/redux/store";
 import { showErrorToast } from "@/utils/toastError";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { Skeleton } from "../ui/skeleton";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/components/icons";
 import { toast } from "sonner";
 
 interface FriendRequestModalProps {
@@ -169,7 +169,7 @@ const FriendRequestModal = ({
         {loadError ? (
           <div
             role="alert"
-            className="flex items-start gap-2.5 rounded-lg border border-destructive/35 bg-destructive/10 px-3.5 py-3 text-sm text-destructive-text"
+            className="flex animate-fade-in items-start gap-2.5 rounded-lg border border-destructive/35 bg-destructive/10 px-3.5 py-3 text-sm text-destructive-text"
           >
             <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <span>{loadError}</span>

@@ -17,7 +17,12 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
         Bỏ qua điều hướng
       </a>
       <LeftNavigation />
-      <div id="main-content" className="flex min-h-0 min-w-0 flex-1">
+      {/* Each screen mounts its own layout, so this plays once per route
+          change (not when switching conversations inside /chat). */}
+      <div
+        id="main-content"
+        className="flex min-h-0 min-w-0 flex-1 animate-page-in"
+      >
         {children}
       </div>
     </div>

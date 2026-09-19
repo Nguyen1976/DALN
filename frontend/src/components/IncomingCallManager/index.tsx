@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
-import { Phone, PhoneOff, Video } from "lucide-react";
+import { Phone, PhoneOff, Video } from "@/components/icons";
 import { toast } from "sonner";
 import VoiceCallModal, {
   type VoiceCallMode,
@@ -278,9 +278,9 @@ export default function IncomingCallManager() {
           role="dialog"
           aria-modal="true"
           aria-label="Cuộc gọi nhóm đến"
-          className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex animate-overlay-in items-center justify-center bg-scrim p-4 backdrop-blur-sm"
         >
-          <div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-lg">
+          <div className="relative w-full max-w-sm animate-dialog-in rounded-2xl border border-border bg-card p-8 shadow-lg">
             <div className="flex flex-col items-center text-center">
               <CallRingAvatar
                 displayName={incomingGroupCall.title}

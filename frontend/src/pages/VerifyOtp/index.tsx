@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ModeToggle } from "@/components/ModeToggle";
-import { AlertCircle, ArrowLeft, Loader2, MailCheck } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, MailCheck } from "@/components/icons";
 import {
   Form,
   FormControl,
@@ -191,13 +191,13 @@ export default function VerifyOtpPage() {
       </div>
 
       <div className="relative z-20 w-full max-w-[27rem] space-y-8">
-        <BrandLockup />
+        <BrandLockup className="animate-stagger-in" />
 
-        <div className="space-y-6 rounded-2xl border border-border bg-card p-6 shadow-md sm:p-8">
+        <div className="animate-stagger-in space-y-6 rounded-2xl border border-border bg-card p-6 shadow-md [--stagger:1] sm:p-8">
           <header className="space-y-3">
             <span
               aria-hidden="true"
-              className="flex size-12 items-center justify-center rounded-xl bg-accent text-accent-foreground"
+              className="flex size-12 animate-pop-in items-center justify-center rounded-xl bg-accent text-accent-foreground [--pop-delay:calc(2*var(--stagger-step))]"
             >
               <MailCheck className="size-6" />
             </span>
@@ -217,8 +217,9 @@ export default function VerifyOtpPage() {
 
           {formError && (
             <div
+              key={formError}
               role="alert"
-              className="flex items-start gap-2.5 rounded-lg border border-destructive/35 bg-destructive/10 px-3.5 py-3 text-sm text-destructive-text"
+              className="flex animate-shake items-start gap-2.5 rounded-lg border border-destructive/35 bg-destructive/10 px-3.5 py-3 text-sm text-destructive-text"
             >
               <AlertCircle
                 className="mt-0.5 size-4 shrink-0"
@@ -316,7 +317,7 @@ export default function VerifyOtpPage() {
           variant="ghost-muted"
           size="sm"
           onClick={() => navigate("/auth")}
-          className="mx-auto flex"
+          className="mx-auto flex animate-stagger-in [--stagger:2]"
         >
           <ArrowLeft className="size-4" aria-hidden="true" />
           Quay lại đăng nhập

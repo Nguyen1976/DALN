@@ -1,5 +1,5 @@
-import { Loader2 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Loader2 } from "@/components/icons";
+import { AnimateIcon, type AppIcon } from "@/components/icons";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
@@ -37,7 +37,7 @@ function EmptyState({
   className,
   compact = false,
 }: {
-  icon: LucideIcon;
+  icon: AppIcon;
   title: string;
   description?: string;
   action?: React.ReactNode;
@@ -55,13 +55,15 @@ function EmptyState({
       <div
         aria-hidden="true"
         className={cn(
-          "flex items-center justify-center rounded-2xl bg-accent text-accent-foreground",
+          "flex animate-pop-in items-center justify-center rounded-2xl bg-accent text-accent-foreground",
           compact ? "size-12" : "size-16",
         )}
       >
-        <Icon className={compact ? "size-6" : "size-7"} />
+        <AnimateIcon animateOnView className="flex">
+          <Icon className={compact ? "size-6" : "size-7"} />
+        </AnimateIcon>
       </div>
-      <div className="space-y-1.5">
+      <div className="animate-stagger-in space-y-1.5 [--stagger:1]">
         <p
           className={cn(
             "font-semibold text-foreground",
@@ -92,7 +94,7 @@ function PageHeader({
   title: string;
   description?: string;
   actions?: React.ReactNode;
-  icon?: LucideIcon;
+  icon?: AppIcon;
   className?: string;
 }) {
   return (
@@ -108,7 +110,9 @@ function PageHeader({
             aria-hidden="true"
             className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground"
           >
-            <Icon className="size-5" />
+            <AnimateIcon animateOnView className="flex">
+              <Icon className="size-5" />
+            </AnimateIcon>
           </span>
         )}
         <div className="min-w-0 space-y-1">

@@ -17,7 +17,7 @@ import {
 import { registerAPI } from "@/apis";
 import { toast } from "sonner";
 import { useNavigate } from "react-router";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/components/icons";
 import { PasswordField, PasswordStrength } from "./PasswordField";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { applyServerFieldError } from "@/utils/formServerError";
@@ -126,8 +126,10 @@ const Register = () => {
       >
         {formError && (
           <div
+            // Keyed on the message: a new, different error shakes again.
+            key={formError}
             role="alert"
-            className="flex items-start gap-2.5 rounded-lg border border-destructive/35 bg-destructive/10 px-3.5 py-3 text-sm text-destructive-text"
+            className="flex animate-shake items-start gap-2.5 rounded-lg border border-destructive/35 bg-destructive/10 px-3.5 py-3 text-sm text-destructive-text"
           >
             <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <span>{formError}</span>

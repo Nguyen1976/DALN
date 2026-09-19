@@ -1,4 +1,4 @@
-import { Search, X } from "lucide-react";
+import { Search, X } from "@/components/icons";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
@@ -65,9 +65,9 @@ function SearchField({
         aria-label={accessibleName}
         autoFocus={autoFocus}
         className={cn(
-          "h-10 w-full rounded-xl border border-input bg-card pl-9 pr-9 text-sm text-foreground",
+          "h-10 w-full rounded-xl border border-input bg-field pl-9 pr-9 text-sm text-foreground",
           "placeholder:text-muted-foreground",
-          "transition-[border-color,box-shadow] duration-[--motion-fast]",
+          "transition-[border-color,box-shadow] duration-(--motion-fast)",
           "outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
           inputClassName,
         )}
@@ -81,8 +81,8 @@ function SearchField({
           }}
           aria-label="Xoá từ khoá tìm kiếm"
           className={cn(
-            "absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md",
-            "text-muted-foreground transition-colors duration-[--motion-fast]",
+            "absolute right-2 top-1/2 flex size-6 -translate-y-1/2 animate-pop-in items-center justify-center rounded-md",
+            "text-muted-foreground transition-colors duration-(--motion-fast)",
             "hover:bg-accent hover:text-foreground",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
           )}

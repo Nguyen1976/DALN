@@ -5,17 +5,18 @@ import {
   AvatarWithPresence,
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { EmptyState, Spinner } from "@/components/ui/feedback";
 import { FILE_INPUT_ACCEPT, formatFileSize } from "@/utils/mediaLimits";
 import {
   Phone,
   Video,
-  MoreVertical,
+  PanelRightClose,
+  PanelRightOpen,
   Paperclip,
   Smile,
   Send,
   ChevronDown,
-  Trash2,
   Plus,
   X,
   Settings,
@@ -26,7 +27,7 @@ import {
   FileText,
   Loader2,
   AtSign,
-} from "lucide-react";
+} from "@/components/icons";
 import { useDispatch, useSelector } from "react-redux";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RootState } from "@/redux/store";
@@ -64,13 +65,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { AppDispatch } from "@/redux/store";
 import {
@@ -87,6 +81,8 @@ import {
 interface ChatWindowProps {
   conversationId?: string;
   onToggleProfile: () => void;
+  /** Whether the details panel is showing, so its toggle can say so. */
+  profileOpen?: boolean;
   onVoiceCall: () => void;
   onVideoCall?: () => void;
   onBack?: () => void;
@@ -97,6 +93,7 @@ interface ChatWindowProps {
 export default function ChatWindow({
   conversationId,
   onToggleProfile,
+  profileOpen = false,
   onVoiceCall,
   onVideoCall,
   onBack,
@@ -105,7 +102,6 @@ export default function ChatWindow({
 }: ChatWindowProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const [showClearHistoryDialog, setShowClearHistoryDialog] = useState(false);
   const [internalJumpId, setInternalJumpId] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -197,7 +193,7 @@ export default function ChatWindow({
     scrollToBottom,
   });
 
-  const { handleRevokeMessage, handleDeleteMessageForMe, handleClearHistory } =
+  const { handleRevokeMessage, handleDeleteMessageForMe } =
     useChatMessageActions({ conversationId, messages });
 
   // Thu hồi với mọi người và xoá phía mình đều không hoàn tác được, mà trước
@@ -334,11 +330,6 @@ export default function ChatWindow({
     node.style.height = `${Math.min(node.scrollHeight, 128)}px`;
   }, [msg]);
 
-  const onConfirmClearHistory = async () => {
-    const success = await handleClearHistory();
-    if (success) setShowClearHistoryDialog(false);
-  };
-
   // A conversation that cannot be loaded needs to say so. Falling through to
   // the normal shell left an empty thread with no explanation.
   if (loadError && !effectiveConversation) {
@@ -377,9 +368,12 @@ export default function ChatWindow({
             </Button>
           )}
           <button
+            // ChatWindow stays mounted across conversations; keying the
+            // identity block lets the new name and avatar fade in.
+            key={conversationId}
             onClick={onToggleProfile}
             aria-label={`Xem chi tiết ${conversationName || "cuộc trò chuyện"}`}
-            className="flex min-w-0 items-center gap-3 rounded-xl p-1.5 text-left transition-colors duration-[--motion-fast] hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className="flex min-w-0 animate-fade-in items-center gap-3 rounded-xl p-1.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             <AvatarWithPresence
               status={
@@ -443,39 +437,33 @@ export default function ChatWindow({
             <Video className="size-5" />
           </Button>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Tùy chọn cuộc trò chuyện"
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <MoreVertical className="size-5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuGroup>
-                <DropdownMenuItem onClick={onToggleProfile}>
-                  Xem chi tiết đoạn chat
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => setShowClearHistoryDialog(true)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Xóa toàn bộ lịch sử
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Straight to the details panel; clearing the history lives in
+              there, next to the rest of what you can do with this chat. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleProfile}
+            title="Thông tin cuộc trò chuyện"
+            aria-label="Thông tin cuộc trò chuyện"
+            aria-pressed={profileOpen}
+            className={cn(
+              "text-muted-foreground hover:text-foreground",
+              profileOpen && "bg-accent text-accent-foreground",
+            )}
+          >
+            {profileOpen ? (
+              <PanelRightClose className="size-5" />
+            ) : (
+              <PanelRightOpen className="size-5" />
+            )}
+          </Button>
         </div>
       </div>
 
       {/* Discovery: hội thoại đang có phòng gọi nhóm mở → mời tham gia. Ẩn khi
           mình đã ở trong một cuộc gọi. */}
       {activeGroupRoom && !hasActiveOutgoingCall && (
-        <div className="flex items-center gap-3 border-b border-border bg-primary/10 px-4 py-2">
+        <div className="flex animate-fade-in items-center gap-3 border-b border-border bg-primary/10 px-4 py-2">
           <span className="relative flex size-2.5 shrink-0" aria-hidden="true">
             <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
             <span className="relative inline-flex size-2.5 rounded-full bg-success" />
@@ -548,7 +536,7 @@ export default function ChatWindow({
           type="button"
           aria-label="Cuộn xuống tin nhắn mới nhất"
           onClick={scrollToBottom}
-          className="absolute bottom-24 right-4 z-10 flex size-10 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-md transition-[background-color,transform] duration-[--motion-fast] hover:bg-accent active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="absolute bottom-24 right-4 z-10 flex size-10 animate-pop-in items-center justify-center rounded-full border border-border bg-card text-foreground shadow-md transition-[background-color,transform] duration-(--motion-fast) hover:bg-accent active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <ChevronDown className="size-5" aria-hidden="true" />
         </button>
@@ -559,10 +547,12 @@ export default function ChatWindow({
           type="button"
           aria-label={`Đi đến ${effectiveConversation?.unreadMentionCount} lượt nhắc bạn`}
           onClick={() => void jumpToMention()}
-          className="absolute bottom-36 right-4 z-20 flex size-10 items-center justify-center rounded-full bg-brand text-white shadow-lg transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="absolute bottom-36 right-4 z-20 flex size-10 animate-pop-in items-center justify-center rounded-full bg-brand text-white shadow-lg transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <AtSign className="size-5" aria-hidden="true" />
-          <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-destructive px-1 text-[10px] font-bold leading-5">
+          <span
+            key={effectiveConversation?.unreadMentionCount}
+            className="absolute -right-1 -top-1 min-w-5 animate-pop-in rounded-full bg-destructive px-1 text-[10px] font-bold leading-5">
             {effectiveConversation?.unreadMentionCount}
           </span>
         </button>
@@ -571,7 +561,7 @@ export default function ChatWindow({
       {!canSendMessage && (
         <div
           role="status"
-          className="flex items-center justify-center gap-2 border-t border-border bg-muted px-6 py-3 text-sm text-muted-foreground"
+          className="flex animate-fade-in items-center justify-center gap-2 border-t border-border bg-muted px-6 py-3 text-sm text-muted-foreground"
         >
           <Lock className="size-4 shrink-0" aria-hidden="true" />
           {membershipStatus === "REMOVED"
@@ -585,7 +575,7 @@ export default function ChatWindow({
             Files used to upload the moment they were chosen — no chance to
             check the right file was picked, and no way to drop one. */}
         {attachments.length > 0 && (
-          <div className="mb-2 rounded-xl border border-border bg-card p-2">
+          <div className="mb-2 animate-slide-in-up rounded-xl border border-border bg-card p-2">
             <div className="mb-1.5 flex items-center justify-between px-1">
               <p className="text-xs font-medium text-muted-foreground">
                 {attachments.length} tệp đã chọn
@@ -601,7 +591,7 @@ export default function ChatWindow({
               {attachments.map((attachment) => (
                 <li
                   key={attachment.id}
-                  className="relative flex w-40 shrink-0 flex-col gap-1.5 rounded-lg border border-border bg-background p-2"
+                  className="relative flex w-40 shrink-0 animate-pop-in flex-col gap-1.5 rounded-lg border border-border bg-background p-2"
                 >
                   {attachment.kind === "IMAGE" ? (
                     <img
@@ -647,7 +637,7 @@ export default function ChatWindow({
         {/* Quote bar: shows what is being replied to before the message goes
             out, and can be dismissed without losing the text already typed. */}
         {replyingTo && (
-          <div className="mb-2 flex items-stretch gap-2 rounded-xl border border-border bg-card px-3 py-2">
+          <div className="mb-2 flex animate-slide-in-up items-stretch gap-2 rounded-xl border border-border bg-card px-3 py-2">
             <span
               aria-hidden="true"
               className="w-0.5 shrink-0 rounded-full bg-primary"
@@ -679,7 +669,7 @@ export default function ChatWindow({
           </div>
         )}
 
-        <div className="flex items-end gap-1 rounded-2xl border border-border bg-card p-1.5 shadow-xs transition-[border-color,box-shadow] duration-[--motion-fast] focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25">
+        <div className="flex items-end gap-1 rounded-2xl border border-border bg-card p-1.5 shadow-xs transition-[border-color,box-shadow] duration-(--motion-fast) focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25">
           <input
             ref={fileInputRef}
             type="file"
@@ -723,7 +713,7 @@ export default function ChatWindow({
               of the viewport. Enter sends, Shift+Enter breaks the line. */}
           <div className="relative flex min-h-10 min-w-0 flex-1 items-center">
           {mentionCandidates.length > 0 && (
-            <div role="listbox" aria-label="Chọn thành viên để nhắc" className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-full min-w-64 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl">
+            <div role="listbox" aria-label="Chọn thành viên để nhắc" className="absolute bottom-full left-0 z-30 mb-2 animate-slide-in-up max-h-64 w-full min-w-64 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl">
               {mentionCandidates.map((option, index) => (
                 <button
                   key={option.kind === "all" ? "@all" : option.member.userId}
@@ -765,7 +755,7 @@ export default function ChatWindow({
                   onClick={() => setMsg(removeMentionFromText(msg, mention.label))}
                   aria-label={`Bỏ nhắc @${mention.label}`}
                   title="Bỏ nhắc"
-                  className="flex max-w-40 items-center gap-1 rounded-full bg-brand/15 px-2 py-0.5 text-[11px] font-semibold text-brand hover:bg-brand/25"
+                  className="flex max-w-40 animate-pop-in items-center gap-1 rounded-full bg-brand/15 px-2 py-0.5 text-[11px] font-semibold text-brand transition-colors duration-(--motion-fast) hover:bg-brand/25"
                 >
                   <span className="truncate">@{mention.label}</span>
                   <X className="size-3 shrink-0" />
@@ -910,35 +900,6 @@ export default function ChatWindow({
       />
 
       <Dialog
-        open={showClearHistoryDialog}
-        onOpenChange={setShowClearHistoryDialog}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Xóa toàn bộ lịch sử trò chuyện?</DialogTitle>
-            <DialogDescription>
-              Hành động này chỉ ẩn lịch sử ở phía bạn và không thể hoàn tác.
-              Người khác vẫn nhìn thấy tin nhắn bình thường.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowClearHistoryDialog(false)}
-            >
-              Hủy
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => void onConfirmClearHistory()}
-            >
-              Xóa lịch sử
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
         open={poll.showCreatePollDialog}
         onOpenChange={poll.setShowCreatePollDialog}
       >
@@ -983,7 +944,10 @@ export default function ChatWindow({
                     Boolean(key) && (poll.duplicateOptionMap.get(key) || 0) > 1;
 
                   return (
-                    <div key={`poll-option-${index}`}>
+                    <div
+                      key={`poll-option-${index}`}
+                      className="animate-slide-in-up"
+                    >
                       <div className="flex items-center gap-2 rounded-xl border border-input bg-background px-3 py-2">
                         <input
                           value={option}

@@ -11,9 +11,18 @@ import {
 } from "@/apis";
 import FriendRequestModal from "@/components/FriendRequestModal";
 import { formatFullDateTime, formatRelativeTime } from "@/utils/formatDateTime";
+import { useLiquidUnderline } from "@/hooks/useLiquidUnderline";
 import { showErrorToast } from "@/utils/toastError";
-import { AlertCircle, ChevronRight, Clock, Inbox, Send } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronRight,
+  Clock,
+  Inbox,
+  Send,
+  AnimateIcon,
+} from "@/components/icons";
 import { EmptyState, Spinner } from "@/components/ui/feedback";
+import { staggerStyle } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
@@ -45,6 +54,9 @@ const ListFriendRequests = () => {
   const requestIdFromUrl = searchParams.get("requestId") || "";
   const [direction, setDirection] =
     useState<FriendRequestDirection>("received");
+  const { listRef, lineRef, tabRefs } = useLiquidUnderline(
+    TABS.findIndex((tab) => tab.key === direction),
+  );
   const [requests, setRequests] = useState<FriendRequestListItem[]>([]);
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -131,39 +143,51 @@ const ListFriendRequests = () => {
 
       {/* Two separate lists: who is waiting on me, and who I am waiting on. */}
       <div
+        ref={listRef}
         role="tablist"
         aria-label="Loại lời mời kết bạn"
-        className="flex gap-1 border-b border-border px-4 pt-3 sm:px-6"
+        className="relative flex gap-1 border-b border-border px-4 pt-3 sm:px-6"
       >
-        {TABS.map((tab) => {
+        {TABS.map((tab, index) => {
           const selected = tab.key === direction;
           const Icon = tab.key === "received" ? Inbox : Send;
           return (
-            <button
-              key={tab.key}
-              role="tab"
-              type="button"
-              aria-selected={selected}
-              onClick={() => setDirection(tab.key)}
-              className={cn(
-                "flex items-center gap-2 rounded-t-lg border-b-2 px-3 py-2.5 text-sm font-medium",
-                "transition-colors duration-[--motion-fast]",
-                "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
-                selected
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="size-4" aria-hidden="true" />
-              {tab.label}
-            </button>
+            <AnimateIcon key={tab.key} asChild animateOnHover>
+              <button
+                ref={(node) => {
+                  tabRefs.current[index] = node;
+                }}
+                role="tab"
+                type="button"
+                aria-selected={selected}
+                onClick={() => setDirection(tab.key)}
+                className={cn(
+                  "flex items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
+                  "transition-colors duration-(--motion-fast)",
+                  "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                  selected
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="size-4" aria-hidden="true" />
+                {tab.label}
+              </button>
+            </AnimateIcon>
           );
         })}
+        {/* One shared bar that glides between tabs (useLiquidUnderline).
+            -bottom-px puts it on this row's own bottom border, not above it. */}
+        <span
+          ref={lineRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-px left-0 h-0.5 origin-left rounded-full bg-primary opacity-0"
+        />
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-2 p-4 sm:p-6">
-          {requests.map((request) => {
+          {requests.map((request, index) => {
             const person = request.fromUser;
             const Row = isReceived ? "button" : "div";
             return (
@@ -175,10 +199,11 @@ const ListFriendRequests = () => {
                       type: "button" as const,
                     }
                   : {})}
+                style={staggerStyle(index % PAGE_SIZE)}
                 className={cn(
-                  "group flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-xs",
+                  "group flex w-full animate-stagger-in items-center gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-xs",
                   isReceived &&
-                    "transition-[background-color,box-shadow] duration-[--motion-fast] hover:bg-accent hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    "hover-lift hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                 )}
               >
                 <Avatar className="size-12 shrink-0">
@@ -242,7 +267,7 @@ const ListFriendRequests = () => {
           {loadError && !isLoading && (
             <div
               role="alert"
-              className="flex items-center justify-between gap-3 rounded-xl border border-destructive/35 bg-destructive/10 px-4 py-3 text-sm text-destructive-text"
+              className="flex animate-fade-in items-center justify-between gap-3 rounded-xl border border-destructive/35 bg-destructive/10 px-4 py-3 text-sm text-destructive-text"
             >
               <span className="flex items-center gap-2">
                 <AlertCircle className="size-4 shrink-0" aria-hidden="true" />

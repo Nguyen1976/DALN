@@ -1,11 +1,13 @@
 import { Button } from "@/components/ui/button";
-import { AlertCircle, Loader2, UserPlus, X } from "lucide-react";
+import { AlertCircle, Loader2, UserPlus, X } from "@/components/icons";
 import { Input } from "../ui/input";
 import { useRef } from "react";
 import { useForm } from "react-hook-form";
 import { makeFriendRequest } from "@/apis";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/utils/getErrorMessage";
+import { useModalExit } from "@/hooks/useModalExit";
+import { cn } from "@/lib/utils";
 
 interface MakeFriendModalProps {
   onClose: () => void;
@@ -22,6 +24,8 @@ export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
   // `isSubmitting` only disables the button after React re-renders; two clicks
   // inside the same tick both get through. This ref closes that window.
   const inFlight = useRef(false);
+  const { closing, requestClose, onOverlayAnimationEnd } =
+    useModalExit(onClose);
 
   /**
    * The previous version was `makeFriendRequest(email).then(close)` with no
@@ -36,7 +40,7 @@ export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
     try {
       await makeFriendRequest(data.email);
       toast.success("Đã gửi lời mời kết bạn thành công");
-      onClose();
+      requestClose();
     } catch (error) {
       setError("email", {
         type: "server",
@@ -48,10 +52,19 @@ export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm animate-fade-in">
+    <div
+      className={cn(
+        "fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 backdrop-blur-sm",
+        closing ? "animate-overlay-out" : "animate-overlay-in",
+      )}
+      onAnimationEnd={onOverlayAnimationEnd}
+    >
       <form
         noValidate
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-lg"
+        className={cn(
+          "w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-lg",
+          closing ? "animate-dialog-out" : "animate-dialog-in",
+        )}
         onSubmit={handleSubmit(onSubmit)}
       >
         <div className="flex items-start justify-between gap-3 border-b border-border p-5">
@@ -75,7 +88,7 @@ export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
             type="button"
             variant="ghost-muted"
             size="icon"
-            onClick={onClose}
+            onClick={requestClose}
             aria-label="Đóng"
             className="-mr-1 -mt-1 shrink-0"
           >
@@ -110,9 +123,11 @@ export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
           />
           {errors.email ? (
             <p
+              // Re-keyed per message so a second, different error shakes too.
+              key={errors.email.message}
               id="make-friend-email-error"
               role="alert"
-              className="flex items-start gap-1.5 text-sm text-destructive-text"
+              className="flex animate-shake items-start gap-1.5 text-sm text-destructive-text"
             >
               <AlertCircle
                 className="mt-0.5 size-3.5 shrink-0"
@@ -131,7 +146,7 @@ export function MakeFriendModal({ onClose }: MakeFriendModalProps) {
           <Button
             type="button"
             variant="ghost"
-            onClick={onClose}
+            onClick={requestClose}
             disabled={isSubmitting}
           >
             Huỷ
