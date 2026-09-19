@@ -34,13 +34,18 @@ import IncomingCallManager from "./components/IncomingCallManager";
 import { CallProvider } from "./contexts/CallProvider";
 import { Spinner } from "@/components/ui/feedback";
 import VerifyOtpPage from "./pages/VerifyOtp";
+import { SettingsPage } from "./pages/Settings/SettingsPage";
+import ProfileSettings from "./pages/Settings/Profile";
+import AccountSettings from "./pages/Settings/Account";
+import PrivacySettings from "./pages/Settings/Privacy";
 
 /**
  * Secondary screens are split out of the first bundle.
  *
  * Suggestions, notification settings, the interests step and the group list
  * were all pulled in on the very first load even though most sessions never
- * open them.
+ * open them. The tabs that do load this way are framed by the same page
+ * component as their siblings, so switching to them keeps the header up.
  *
  * They load through the route's `lazy`, not React.lazy + Suspense. The router
  * fetches the chunk before it commits the navigation, so the current screen
@@ -126,14 +131,51 @@ const router = createBrowserRouter([
     ),
   },
   {
-    path: "/settings/notifications",
-    hydrateFallbackElement: <RouteFallback />,
-    lazy: lazyProtected(() => import("./pages/NotificationSettings")),
-  },
-  {
     path: "/recommendations",
     hydrateFallbackElement: <RouteFallback />,
-    lazy: lazyProtected(() => import("./pages/Recommendation")),
+    lazy: lazyProtected(
+      () => import("./pages/Friend/ListRecommendation"),
+      (page) => <FriendsPage>{page}</FriendsPage>,
+    ),
+  },
+  // Settings: one route per tab, all inside the same SettingsPage frame.
+  {
+    path: "/settings",
+    element: (
+      <ProtectedRoute>
+        <SettingsPage>
+          <ProfileSettings />
+        </SettingsPage>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/settings/account",
+    element: (
+      <ProtectedRoute>
+        <SettingsPage>
+          <AccountSettings />
+        </SettingsPage>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/settings/privacy",
+    element: (
+      <ProtectedRoute>
+        <SettingsPage>
+          <PrivacySettings />
+        </SettingsPage>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/settings/notifications",
+    hydrateFallbackElement: <RouteFallback />,
+    lazy: lazyProtected(
+      () => import("./pages/Settings/Notifications"),
+      (page) => <SettingsPage>{page}</SettingsPage>,
+    ),
   },
 ]);
 

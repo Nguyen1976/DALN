@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Users, MessageSquare, LogOut, Settings, Sparkles } from "@/components/icons";
+import { Users, MessageSquare, LogOut, Settings } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -15,7 +15,6 @@ import type { AppDispatch } from "@/redux/store";
 import { useDispatch } from "react-redux";
 import { logoutAPI } from "@/redux/slices/userSlice";
 import { BrandMark } from "@/components/Brand";
-import { ProfileSettings } from "@/components/Setting";
 
 /**
  * Which tab the rail's highlight sat on last. Every screen renders its own
@@ -155,7 +154,6 @@ export function LeftNavigation() {
   // The logout button sits at the bottom of the rail, right where a stray
   // click lands; it used to sign out on the spot and drop unsent drafts.
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const handleLogout = () => {
     setConfirmLogout(false);
     dispatch(logoutAPI());
@@ -173,16 +171,18 @@ export function LeftNavigation() {
       label: "Bạn bè",
       icon: Users,
       onClick: () => navigate("/friends"),
+      // Suggestions live in the Friends screen as one of its tabs.
       active:
         pathname === "/friends" ||
         pathname === "/groups" ||
-        pathname === "/friend_requests",
+        pathname === "/friend_requests" ||
+        pathname === "/recommendations",
     },
     {
-      label: "Gợi ý bạn bè",
-      icon: Sparkles,
-      onClick: () => navigate("/recommendations"),
-      active: pathname === "/recommendations",
+      label: "Cài đặt",
+      icon: Settings,
+      onClick: () => navigate("/settings"),
+      active: pathname.startsWith("/settings"),
     },
   ];
 
@@ -291,25 +291,8 @@ export function LeftNavigation() {
           ))}
         </div>
 
-        {/* Account-level actions sit at the foot of the rail, away from the
-            screens above them: settings first, sign-out last. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Cài đặt"
-              onClick={() => setShowSettings(true)}
-              className="size-11 rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground md:mt-auto"
-            >
-              <Settings className="size-5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right" className="hidden md:block">
-            Cài đặt
-          </TooltipContent>
-        </Tooltip>
-
+        {/* Sign-out sits alone at the foot of the rail, away from the
+            screens above it. */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -317,7 +300,7 @@ export function LeftNavigation() {
               size="icon"
               aria-label="Đăng xuất"
               onClick={() => setConfirmLogout(true)}
-              className="size-11 rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive-text"
+              className="size-11 rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive-text md:mt-auto"
             >
               <LogOut className="size-5" />
             </Button>
@@ -327,10 +310,6 @@ export function LeftNavigation() {
           </TooltipContent>
         </Tooltip>
       </nav>
-
-      {showSettings && (
-        <ProfileSettings onClose={() => setShowSettings(false)} />
-      )}
 
       <ConfirmDialog
         open={confirmLogout}

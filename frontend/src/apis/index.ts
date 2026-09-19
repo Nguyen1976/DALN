@@ -96,6 +96,13 @@ export interface RecommendationCandidateProfile {
   lastSeen?: string | null;
 }
 
+export interface MutualFriendPreview {
+  userId: string;
+  username: string;
+  fullName: string;
+  avatar?: string | null;
+}
+
 export interface RecommendationCandidateItem {
   candidateId: string;
   score: number;
@@ -115,6 +122,11 @@ export interface RecommendationCandidateItem {
   group_jaccard: number;
   same_group: number;
   profile: RecommendationCandidateProfile;
+  /** Friends you both have; `preview` is the first two, photos first. */
+  mutualFriends?: {
+    count: number;
+    preview: MutualFriendPreview[];
+  };
 }
 
 export interface RecommendationResponse {
