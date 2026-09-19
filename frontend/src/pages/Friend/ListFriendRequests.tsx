@@ -168,11 +168,12 @@ const ListFriendRequests = () => {
             </button>
           );
         })}
-        {/* One shared bar that glides between tabs (useLiquidUnderline). */}
+        {/* One shared bar that glides between tabs (useLiquidUnderline).
+            -bottom-px puts it on this row's own bottom border, not above it. */}
         <span
           ref={lineRef}
           aria-hidden="true"
-          className="pointer-events-none absolute bottom-0 left-0 h-0.5 origin-left rounded-full bg-primary opacity-0"
+          className="pointer-events-none absolute -bottom-px left-0 h-0.5 origin-left rounded-full bg-primary opacity-0"
         />
       </div>
 

@@ -1,24 +1,97 @@
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useState } from "react";
+import { useNavigate } from "react-router";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Bell, Lock, Shield, X } from "lucide-react";
-import Profile from "./Profile";
+  Bell,
+  ChevronRight,
+  KeyRound,
+  Shield,
+  UserRound,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useLiquidUnderline } from "@/hooks/useLiquidUnderline";
 import { useModalExit } from "@/hooks/useModalExit";
 import { cn } from "@/lib/utils";
+import Profile from "./Profile";
+
+const TABS = [
+  { value: "profile", label: "Hồ sơ", icon: UserRound },
+  { value: "account", label: "Tài khoản", icon: KeyRound },
+  { value: "privacy", label: "Riêng tư", icon: Shield },
+  { value: "notifications", label: "Thông báo", icon: Bell },
+] as const;
+
+type TabValue = (typeof TABS)[number]["value"];
 
 interface ProfileSettingsProps {
   onClose: () => void;
 }
 
+/** One settings line: what it is, why it matters, and its control. */
+function SettingRow({
+  title,
+  description,
+  soon = false,
+  children,
+}: {
+  title: string;
+  description: string;
+  soon?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+      <div className="min-w-0 space-y-0.5">
+        <p className="flex items-center gap-2 text-sm font-medium text-foreground">
+          {title}
+          {soon && (
+            <Badge variant="secondary" size="sm">
+              Sắp có
+            </Badge>
+          )}
+        </p>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SettingGroup({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-2.5">
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
+        {title}
+      </h3>
+      <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70">
+        {children}
+      </div>
+    </section>
+  );
+}
+
 export function ProfileSettings({ onClose }: ProfileSettingsProps) {
   const { closing, requestClose, onOverlayAnimationEnd } =
     useModalExit(onClose);
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<TabValue>("profile");
+  const { listRef, lineRef, tabRefs } = useLiquidUnderline(
+    TABS.findIndex((item) => item.value === tab),
+  );
 
   return (
     <div
@@ -29,244 +102,148 @@ export function ProfileSettings({ onClose }: ProfileSettingsProps) {
       onAnimationEnd={onOverlayAnimationEnd}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
         className={cn(
-          "mt-4 flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl sm:mt-8",
+          "mt-4 flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-2xl sm:mt-10",
           closing ? "animate-dialog-out" : "animate-dialog-in",
         )}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border p-4">
-          <h2 className="text-lg font-semibold sm:text-xl">
-            Cài đặt &amp; Quyền riêng tư
-          </h2>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={requestClose}
-            aria-label="Đóng"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="size-5" />
-          </Button>
-        </div>
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as TabValue)}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <header className="shrink-0 border-b border-border/60 px-5 pt-5 sm:px-6">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <h2
+                  id="settings-title"
+                  className="text-lg font-semibold tracking-[-0.01em]"
+                >
+                  Cài đặt
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Hồ sơ, tài khoản và quyền riêng tư của bạn.
+                </p>
+              </div>
+              <Button
+                variant="ghost-muted"
+                size="icon"
+                onClick={requestClose}
+                aria-label="Đóng"
+                className="-mr-2 -mt-1"
+              >
+                <X className="size-5" />
+              </Button>
+            </div>
 
-        {/* Content */}
-        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
-          <Tabs defaultValue="profile" className="w-full">
-            <TabsList className="custom-scrollbar w-full justify-start overflow-x-auto rounded-none border-b border-border bg-transparent p-0">
-              <TabsTrigger
-                value="profile"
-                className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium data-[state=active]:border-primary"
-              >
-                Hồ sơ
-              </TabsTrigger>
-              <TabsTrigger
-                value="account"
-                className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium data-[state=active]:border-primary"
-              >
-                Tài khoản
-              </TabsTrigger>
-              <TabsTrigger
-                value="privacy"
-                className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium data-[state=active]:border-primary"
-              >
-                Riêng tư
-              </TabsTrigger>
-              <TabsTrigger
-                value="notifications"
-                className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium data-[state=active]:border-primary"
-              >
-                Thông báo
-              </TabsTrigger>
+            {/* Same underline tabs as the Friends screen. -mb-px lays the row
+                over the header's bottom border, so the bar covers that line
+                instead of floating above it (and the scroll box can't clip it). */}
+            <TabsList
+              ref={listRef}
+              className="custom-scrollbar relative -mb-px mt-3 h-auto w-full justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0"
+            >
+              {TABS.map(({ value, label, icon: Icon }, index) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  ref={(node) => {
+                    tabRefs.current[index] = node;
+                  }}
+                  className="h-auto flex-none gap-2 rounded-none border-b-2 border-transparent bg-transparent px-3 py-2.5 text-muted-foreground shadow-none hover:text-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                >
+                  <Icon className="size-4" aria-hidden="true" />
+                  {label}
+                </TabsTrigger>
+              ))}
+              <span
+                ref={lineRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute bottom-0 left-0 h-0.5 origin-left rounded-full bg-primary opacity-0"
+              />
             </TabsList>
+          </header>
 
-            {/* Profile Tab */}
-            <TabsContent value="profile" className="p-6 space-y-6">
+          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
+            <TabsContent value="profile">
               <Profile />
             </TabsContent>
 
-            {/* Account Tab */}
-            <TabsContent value="account" className="p-6 space-y-6">
-              <div>
-                <h3 className="text-lg font-semibold mb-4">
-                  Cài đặt tài khoản
-                </h3>
-
-                <Card className="bg-muted border-border">
-                  <CardHeader>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Lock className="w-4 h-4" />
-                      Mật khẩu & Bảo mật
-                    </CardTitle>
-                    <CardDescription>
-                      Quản lý mật khẩu và các tùy chọn bảo mật
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <Button variant="outline" className="w-full bg-transparent">
-                      Đổi mật khẩu
-                    </Button>
-                    <Button variant="outline" className="w-full bg-transparent">
-                      Xác thực 2 lớp
-                    </Button>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-muted border-border mt-4">
-                  <CardHeader>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Shield className="w-4 h-4" />
-                      Phiên đăng nhập
-                    </CardTitle>
-                    <CardDescription>
-                      Quản lý các phiên đang hoạt động
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Button variant="outline" className="w-full bg-transparent">
-                      Xem tất cả phiên
-                    </Button>
-                  </CardContent>
-                </Card>
-              </div>
+            <TabsContent value="account" className="space-y-6 p-5 sm:p-6">
+              <SettingGroup icon={KeyRound} title="Mật khẩu & bảo mật">
+                <SettingRow
+                  title="Đổi mật khẩu"
+                  description="Đặt mật khẩu mới cho tài khoản của bạn."
+                  soon
+                />
+                <SettingRow
+                  title="Xác thực 2 lớp"
+                  description="Thêm một bước xác nhận khi đăng nhập."
+                  soon
+                />
+              </SettingGroup>
+              <SettingGroup icon={Shield} title="Phiên đăng nhập">
+                <SettingRow
+                  title="Thiết bị đang đăng nhập"
+                  description="Xem và đăng xuất khỏi các thiết bị khác."
+                  soon
+                />
+              </SettingGroup>
             </TabsContent>
 
-            {/* Privacy Tab */}
-            <TabsContent value="privacy" className="p-6 space-y-6">
-              <div>
-                <h3 className="text-lg font-semibold mb-4">
-                  Cài đặt quyền riêng tư
-                </h3>
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg border border-border">
-                    <div>
-                      <h4 className="font-medium">Ai có thể xem hồ sơ của bạn</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Kiểm soát ai có thể xem thông tin hồ sơ của bạn
-                      </p>
-                    </div>
-                    <select className="px-3 py-1 bg-field border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
-                      <option>Mọi người</option>
-                      <option>Chỉ bạn bè</option>
-                      <option>Riêng tư</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg border border-border">
-                    <div>
-                      <h4 className="font-medium">
-                        Trạng thái hoạt động gần đây
-                      </h4>
-                      <p className="text-sm text-muted-foreground">
-                        Hiển thị thời điểm bạn hoạt động gần nhất
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Bật/tắt tùy chọn"
-                      className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
-                    >
-                      <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg border border-border">
-                    <div>
-                      <h4 className="font-medium">Trạng thái trực tuyến</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Hiển thị trạng thái trực tuyến cho người khác
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Bật/tắt tùy chọn"
-                      className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
-                    >
-                      <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
-                    </button>
-                  </div>
-                </div>
-              </div>
+            <TabsContent value="privacy" className="space-y-6 p-5 sm:p-6">
+              <SettingGroup icon={Shield} title="Ai thấy gì về bạn">
+                <SettingRow
+                  title="Hiển thị hồ sơ"
+                  description="Chọn ai có thể xem thông tin hồ sơ của bạn."
+                  soon
+                />
+                <SettingRow
+                  title="Trạng thái trực tuyến"
+                  description="Cho người khác thấy khi bạn đang hoạt động."
+                  soon
+                >
+                  <Switch
+                    checked
+                    disabled
+                    aria-label="Trạng thái trực tuyến"
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="Hoạt động gần đây"
+                  description="Hiển thị thời điểm bạn hoạt động gần nhất."
+                  soon
+                >
+                  <Switch checked disabled aria-label="Hoạt động gần đây" />
+                </SettingRow>
+              </SettingGroup>
             </TabsContent>
 
-            {/* Notifications Tab */}
-            <TabsContent value="notifications" className="p-6 space-y-6">
-              <div>
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <Bell className="w-5 h-5" />
-                  Tùy chọn thông báo
-                </h3>
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg border border-border">
-                    <div>
-                      <h4 className="font-medium">Tin nhắn</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Nhận thông báo khi có tin nhắn mới
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Bật/tắt tùy chọn"
-                      className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
-                    >
-                      <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg border border-border">
-                    <div>
-                      <h4 className="font-medium">Lời mời kết bạn</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Nhận thông báo khi có lời mời kết bạn mới
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Bật/tắt tùy chọn"
-                      className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
-                    >
-                      <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg border border-border">
-                    <div>
-                      <h4 className="font-medium">Thông báo cuộc gọi</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Nhận thông báo khi có người gọi cho bạn
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Bật/tắt tùy chọn"
-                      className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
-                    >
-                      <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-muted rounded-lg border border-border">
-                    <div>
-                      <h4 className="font-medium">Âm thanh</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Phát âm thanh khi có thông báo
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Bật/tắt tùy chọn"
-                      className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors"
-                    >
-                      <span className="inline-block size-4 translate-x-1 rounded-full bg-background shadow-sm transition-transform" />
-                    </button>
-                  </div>
-                </div>
-              </div>
+            <TabsContent value="notifications" className="space-y-6 p-5 sm:p-6">
+              <SettingGroup icon={Bell} title="Thông báo">
+                <SettingRow
+                  title="Cài đặt thông báo"
+                  description="Chọn loại thông báo và kênh nhận: trong ứng dụng, email."
+                >
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      onClose();
+                      navigate("/settings/notifications");
+                    }}
+                  >
+                    Mở
+                    <ChevronRight aria-hidden="true" />
+                  </Button>
+                </SettingRow>
+              </SettingGroup>
             </TabsContent>
-          </Tabs>
-        </div>
+          </div>
+        </Tabs>
       </div>
     </div>
   );
