@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router";
 import { UserPlus, Users, Users2 } from "lucide-react";
 import { useSelector } from "react-redux";
 import { selectFriend } from "@/redux/slices/friendSlice";
+import { useLiquidUnderline } from "@/hooks/useLiquidUnderline";
 
 const TABS = [
   { path: "/friends", label: "Bạn bè", icon: Users },
@@ -33,6 +34,9 @@ export function FriendsPage({ children }: { children?: React.ReactNode }) {
   const friends = useSelector(selectFriend);
 
   const meta = TITLES[params] || TITLES["/friends"];
+  const { listRef, lineRef, tabRefs } = useLiquidUnderline(
+    TABS.findIndex((tab) => tab.path === params),
+  );
 
   return (
     <MainLayout>
@@ -53,20 +57,24 @@ export function FriendsPage({ children }: { children?: React.ReactNode }) {
           {/* Underline tabs: the active section is marked by an indicator bar,
               not by colour alone. */}
           <div
+            ref={listRef}
             role="tablist"
             aria-label="Mục bạn bè"
-            className="custom-scrollbar -mb-px flex gap-1 overflow-x-auto"
+            className="custom-scrollbar relative -mb-px flex gap-1 overflow-x-auto"
           >
-            {TABS.map(({ path, label, icon: Icon }) => {
+            {TABS.map(({ path, label, icon: Icon }, index) => {
               const active = params === path;
               return (
                 <button
                   key={path}
+                  ref={(node) => {
+                    tabRefs.current[index] = node;
+                  }}
                   role="tab"
                   aria-selected={active}
                   onClick={() => navigate(path)}
                   className={cn(
-                    "tab-underline flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
+                    "flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
                     "transition-colors duration-(--motion-fast)",
                     "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
                     active
@@ -79,6 +87,12 @@ export function FriendsPage({ children }: { children?: React.ReactNode }) {
                 </button>
               );
             })}
+            {/* One shared bar that glides between tabs (useLiquidUnderline). */}
+            <span
+              ref={lineRef}
+              aria-hidden="true"
+              className="pointer-events-none absolute bottom-0 left-0 h-0.5 origin-left rounded-full bg-primary opacity-0"
+            />
           </div>
         </div>
 

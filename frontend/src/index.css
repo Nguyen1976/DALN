@@ -739,28 +739,6 @@
     animation: growX var(--motion-slow) var(--ease-out);
   }
 
-  /* Tab underline that grows from the centre instead of snapping. Keeps the
-     tab's own transparent 2px bottom border so layout does not change. */
-  .tab-underline {
-    position: relative;
-  }
-
-  .tab-underline::after {
-    content: "";
-    position: absolute;
-    inset-inline: 0;
-    bottom: -2px;
-    height: 2px;
-    border-radius: 2px;
-    background-color: var(--primary);
-    transform: scaleX(0);
-    transition: transform var(--motion-base) var(--ease-out);
-  }
-
-  .tab-underline[aria-selected="true"]::after {
-    transform: scaleX(1);
-  }
-
   /* Chat canvas: a very low-contrast dot grid so bubbles read as raised
      surfaces without competing with message text. */
   .chat-canvas {

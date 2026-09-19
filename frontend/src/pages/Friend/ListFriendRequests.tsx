@@ -11,6 +11,7 @@ import {
 } from "@/apis";
 import FriendRequestModal from "@/components/FriendRequestModal";
 import { formatFullDateTime, formatRelativeTime } from "@/utils/formatDateTime";
+import { useLiquidUnderline } from "@/hooks/useLiquidUnderline";
 import { showErrorToast } from "@/utils/toastError";
 import { AlertCircle, ChevronRight, Clock, Inbox, Send } from "lucide-react";
 import { EmptyState, Spinner } from "@/components/ui/feedback";
@@ -46,6 +47,9 @@ const ListFriendRequests = () => {
   const requestIdFromUrl = searchParams.get("requestId") || "";
   const [direction, setDirection] =
     useState<FriendRequestDirection>("received");
+  const { listRef, lineRef, tabRefs } = useLiquidUnderline(
+    TABS.findIndex((tab) => tab.key === direction),
+  );
   const [requests, setRequests] = useState<FriendRequestListItem[]>([]);
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -132,22 +136,26 @@ const ListFriendRequests = () => {
 
       {/* Two separate lists: who is waiting on me, and who I am waiting on. */}
       <div
+        ref={listRef}
         role="tablist"
         aria-label="Loại lời mời kết bạn"
-        className="flex gap-1 border-b border-border px-4 pt-3 sm:px-6"
+        className="relative flex gap-1 border-b border-border px-4 pt-3 sm:px-6"
       >
-        {TABS.map((tab) => {
+        {TABS.map((tab, index) => {
           const selected = tab.key === direction;
           const Icon = tab.key === "received" ? Inbox : Send;
           return (
             <button
               key={tab.key}
+              ref={(node) => {
+                tabRefs.current[index] = node;
+              }}
               role="tab"
               type="button"
               aria-selected={selected}
               onClick={() => setDirection(tab.key)}
               className={cn(
-                "tab-underline flex items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
+                "flex items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
                 "transition-colors duration-(--motion-fast)",
                 "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
                 selected
@@ -160,6 +168,12 @@ const ListFriendRequests = () => {
             </button>
           );
         })}
+        {/* One shared bar that glides between tabs (useLiquidUnderline). */}
+        <span
+          ref={lineRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-0 left-0 h-0.5 origin-left rounded-full bg-primary opacity-0"
+        />
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
