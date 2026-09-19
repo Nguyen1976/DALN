@@ -107,6 +107,9 @@ model message {
   /// MongoDB schemaless nên field mới an toàn: tin cũ không có = null.
   callInfo        Json?
   mentionUserIds  String[]           @default([]) @db.ObjectId
+  /// Nhãn đúng như trong text cho từng lượt nhắc ([{userId,label}] hoặc
+  /// {all:true,label}) để client tô sáng chính xác, không phải dò regex.
+  mentions        Json?
   replyToMessageId String?           @db.ObjectId
   /// KHÔNG đặt @unique: MongoDB coi tin thiếu field là `null`, nên unique index
   /// chỉ cho đúng MỘT tin không kèm bình chọn tồn tại — mọi tin sau đó vỡ P2002.

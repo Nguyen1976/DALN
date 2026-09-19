@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import type {
+  ChatMentionPayload,
   UserCreatedPayload,
   UserMakeFriendPayload,
   UserRegisterOtpPayload,
@@ -57,4 +58,14 @@ export class NotificationSubscriber {
       this.notificationService.handleUpdateStatusMakeFriend(data),
     )
   }
+
+  @RabbitSubscribeWithRetry({
+    exchange: EXCHANGE_RMQ.CHAT_EVENTS,
+    routingKey: ROUTING_RMQ.CHAT_MENTION,
+    queue: QUEUE_RMQ.NOTIFICATION_CHAT_MENTION,
+  })
+  async handleChatMention(data: ChatMentionPayload): Promise<void> {
+    await safeExecute(() => this.notificationService.handleChatMention(data))
+  }
+
 }

@@ -52,6 +52,7 @@ export class MessageRepository {
     medias?: MediaInput[]
     isSystem?: boolean
     mentionUserIds?: string[]
+    mentions?: unknown
   }) {
     // Đường nóng: tin nhắn thuần văn bản, không media, không poll — chiếm đại
     // đa số lưu lượng. Gom lô qua createMany thay vì mỗi tin một create().
@@ -66,6 +67,7 @@ export class MessageRepository {
         replyToMessageId: data.replyToMessageId,
         isSystem: data.isSystem,
         mentionUserIds: data.mentionUserIds,
+        mentions: data.mentions as any,
       })
     }
 
@@ -79,6 +81,7 @@ export class MessageRepository {
         replyToMessageId: data.replyToMessageId || null,
         pollId: data.pollId || null,
         mentionUserIds: data.mentionUserIds || [],
+        mentions: (data.mentions ?? undefined) as any,
 
         // Khởi tạo Medias luôn (Prisma tự động làm Transaction ngầm)
         medias: data.medias?.length

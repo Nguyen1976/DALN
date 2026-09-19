@@ -49,6 +49,8 @@ export interface Message {
   type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL" | "CALL";
   /** Với type=CALL: dữ liệu để render thẻ cuộc gọi + nút Gọi lại/Tham gia lại. */
   callInfo?: CallInfo;
+  /** Nhãn đúng như trong text cho từng lượt nhắc — server resolve, client chỉ tô. */
+  mentions?: ({ userId: string; label: string } | { all: true; label: string })[];
   mentionUserIds?: string[];
   clientMessageId?: string;
   replyToMessageId?: string;

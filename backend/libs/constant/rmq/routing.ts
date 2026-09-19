@@ -16,4 +16,5 @@ export const ROUTING_RMQ = {
   MESSAGE_READ: 'message.read',
   UPDATE_MESSAGE_READ: 'message.updateRead',
   CALL_ENDED: 'call.ended',
+  CHAT_MENTION: 'chat.mention',
 }

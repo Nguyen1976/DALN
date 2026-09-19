@@ -194,3 +194,15 @@ export interface CallEndedPayload {
   /** Loại cuộc gọi; bỏ trống thì coi như 'audio'. */
   callType?: 'audio' | 'video'
 }
+
+/** Một tin nhắn vừa nhắc (@) tới một số thành viên. */
+export interface ChatMentionPayload {
+  conversationId: string
+  messageId: string
+  senderId: string
+  senderName: string
+  /** Những người bị nhắc (đã loại người gửi). */
+  userIds: string[]
+  /** Trích đoạn nội dung để hiện trong thông báo. */
+  preview: string
+}

@@ -7,6 +7,7 @@ import {
 } from './repositories'
 import { NotificationEventsPublisher } from './rmq/publishers/notification-events.publisher'
 import type {
+  ChatMentionPayload,
   UserCreatedPayload,
   UserMakeFriendPayload,
   UserRegisterOtpPayload,
@@ -154,6 +155,32 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     }
 
     return
+  }
+
+  /**
+   * Có người nhắc (@) mình trong một cuộc trò chuyện. Badge trong khung chat chỉ
+   * thấy khi đang mở app, nên vẫn cần một thông báo thật để không bỏ lỡ.
+   */
+  async handleChatMention(data: ChatMentionPayload) {
+    for (const userId of data.userIds || []) {
+      if (!userId || userId === data.senderId) continue
+
+      const created = await this.createNotification({
+        userId,
+        message: data.preview
+          ? `${data.senderName} đã nhắc đến bạn: ${data.preview}`
+          : `${data.senderName} đã nhắc đến bạn trong một cuộc trò chuyện.`,
+        type: NotificationType.MENTIONED_IN_CONVERSATION,
+      })
+
+      if (await this.redisService.isOnline(userId)) {
+        this.notificationEventsPublisher.emitToUsers(
+          [created?.userId],
+          SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
+          created,
+        )
+      }
+    }
   }
 
   async createNotification(data: any) {

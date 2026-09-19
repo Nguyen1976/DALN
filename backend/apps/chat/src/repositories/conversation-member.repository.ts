@@ -248,25 +248,20 @@ export class ConversationMemberRepository {
     messageId: string,
   ) {
     if (!userIds.length) return
-    const targets = await this.prisma.conversationMember.findMany({
+    // MỘT lệnh ghi nguyên tử cho cả nhóm. Trước đây đọc rồi mới ghi
+    // (`count + 1`) nên hai lượt nhắc tới cùng lúc cùng đọc một giá trị cũ ->
+    // mất một lượt đếm; và mỗi người một truy vấn riêng.
+    await this.prisma.conversationMember.updateMany({
       where: {
         conversationId,
         userId: { in: userIds },
         ...this.activeMemberFilter,
       },
-      select: { id: true, unreadMentionCount: true },
+      data: {
+        unreadMentionCount: { increment: 1 },
+        lastMentionMessageId: messageId,
+      },
     })
-    await Promise.all(
-      targets.map((target) =>
-        this.prisma.conversationMember.update({
-          where: { id: target.id },
-          data: {
-            unreadMentionCount: Number(target.unreadMentionCount || 0) + 1,
-            lastMentionMessageId: messageId,
-          },
-        }),
-      ),
-    )
   }
 
   async clearMentions(conversationId: string, userId: string) {
@@ -404,6 +399,20 @@ export class ConversationMemberRepository {
     // bằng" thoát sớm, nên +1 cron cộng muộn cho tin đã đọc không bao giờ về 0.
     const stored = normalizeObjectId(member.lastReadMessageId)
     const effective = stored && stored > messageId ? stored : messageId
+
+    // Đã đọc tới/qua lượt nhắc cuối thì tắt luôn badge nhắc. Trước đây badge
+    // chỉ tắt khi bấm chip "đi tới lượt nhắc", nên đọc hết tin rồi vẫn còn
+    // chấm đỏ. `unreadMentionCount > 0` cũng chặn dòng chưa từng bị nhắc.
+    await this.prisma.conversationMember.updateMany({
+      where: {
+        conversationId,
+        userId,
+        ...this.activeMemberFilter,
+        unreadMentionCount: { gt: 0 },
+        lastMentionMessageId: { lte: effective },
+      },
+      data: { unreadMentionCount: 0, lastMentionMessageId: null },
+    })
 
     // Chặn dưới bằng createdAt để truy vấn bám index (conversationId,
     // createdAt, _id): lọc riêng theo _id quét gấp 5 lần số key index trên
