@@ -19,9 +19,18 @@ export interface Friend {
 }
 
 export interface FriendState {
-  page: number;
   friends: Array<Friend>;
+  /**
+   * How many rows of the server's list have been read. Kept apart from
+   * `friends.length`: friends who come online get prepended out of order.
+   */
+  serverOffset: number;
+  /** False once a page came back shorter than asked. */
+  hasMore: boolean;
 }
+
+/** Page size for scrolling through the friend list. */
+export const FRIENDS_PAGE_SIZE = 20;
 
 interface UserProfileByIdResponse {
   fullName: string;
@@ -32,19 +41,59 @@ interface UserProfileByIdResponse {
 }
 
 const initialState: FriendState = {
-  page: 1,
   friends: [],
+  serverOffset: 0,
+  hasMore: true,
 };
 
+type FriendPage = { friends: Friend[]; page: number; limit: number };
+
+const fetchFriendPage = async (
+  limit: number,
+  page: number,
+): Promise<FriendPage> => {
+  const response = await authorizeAxiosInstance.get(
+    `/user/list-friends?limit=${limit}&page=${page}`,
+  );
+  return { friends: response.data.data?.friends ?? [], page, limit };
+};
+
+/** A page of the list; page 1 replaces what is loaded. */
 export const getFriends = createAsyncThunk(
   `/user/list-friends`,
-  async ({ limit, page }: { limit: number; page: number }) => {
-    const response = await authorizeAxiosInstance.get(
-      `/user/list-friends?limit=${limit}&page=${page}`,
-    );
-    return { ...response.data.data, page: page };
+  ({ limit, page }: { limit: number; page: number }) =>
+    fetchFriendPage(limit, page),
+);
+
+/**
+ * The next page while scrolling. Callers load page 1 with different sizes
+ * (20, 50, 100), so the page is derived from how far the server list has been
+ * read, rounded down: at worst a few rows come back twice and are dropped as
+ * duplicates, never a gap.
+ */
+export const getMoreFriends = createAsyncThunk(
+  `/user/list-friends/more`,
+  (_: void, { getState }) => {
+    const { serverOffset } = (getState() as RootState).friend;
+    const page = Math.floor(serverOffset / FRIENDS_PAGE_SIZE) + 1;
+    return fetchFriendPage(FRIENDS_PAGE_SIZE, page);
   },
 );
+
+const applyFriendPage = (
+  state: FriendState,
+  { friends, page, limit }: FriendPage,
+) => {
+  const skip = (page - 1) * limit;
+  if (page === 1) {
+    state.friends = friends;
+  } else {
+    const known = new Set(state.friends.map((friend) => friend.id));
+    state.friends.push(...friends.filter((friend) => !known.has(friend.id)));
+  }
+  state.serverOffset = skip + friends.length;
+  state.hasMore = friends.length >= limit;
+};
 
 export const upsertOnlineFriend = createAsyncThunk(
   `/friend/upsert-online`,
@@ -89,17 +138,12 @@ export const friendSlice = createSlice({
     },
   },
   extraReducers: (builder) => {
-    builder.addCase(
-      getFriends.fulfilled,
-      (state, action: PayloadAction<FriendState>) => {
-        if (action.payload.page === 1) {
-          state.friends = action.payload.friends;
-        } else {
-          state.friends = [...state.friends, ...action.payload.friends];
-        }
-        state.page = action.payload.page;
-      },
-    );
+    builder.addCase(getFriends.fulfilled, (state, action) => {
+      applyFriendPage(state, action.payload);
+    });
+    builder.addCase(getMoreFriends.fulfilled, (state, action) => {
+      applyFriendPage(state, action.payload);
+    });
 
     builder.addCase(upsertOnlineFriend.fulfilled, (state, action) => {
       const { friendId, profile } = action.payload;
@@ -136,10 +180,7 @@ export const selectFriend = createSelector(
   (friend) => friend.friends,
 );
 
-export const selectFriendPage = createSelector(
-  (state: RootState) => state.friend,
-  (friend) => friend.page,
-);
+export const selectFriendHasMore = (state: RootState) => state.friend.hasMore;
 
 export const { updateStatusOffline } = friendSlice.actions;
 export default friendSlice.reducer;

@@ -13,9 +13,11 @@ import {
   UserPlus,
   Users,
 } from "@/components/icons";
-import { EmptyState, Spinner } from "@/components/ui/feedback";
+import { EmptyState } from "@/components/ui/feedback";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { cn } from "@/lib/utils";
-import { type UIEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch } from "@/redux/store";
 import {
@@ -49,7 +51,6 @@ export function NotificationsDropdown() {
   // counting it capped the badge at the page size.
   const unreadCount = useSelector(selectUnreadNotificationCount);
   const [page, setPage] = useState(1);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const limit = 10;
@@ -105,34 +106,21 @@ export function NotificationsDropdown() {
     }
   };
 
-  const handleLoadMore = async () => {
-    if (isLoadingMore || !hasMore) return;
-
-    const nextPage = page + 1;
-    setIsLoadingMore(true);
-    try {
+  // Older notifications page in as the list is scrolled. A failure used to
+  // end the list silently; it now offers a retry at the bottom.
+  const paging = useInfiniteScroll({
+    hasMore,
+    enabled: notifications.length > 0,
+    itemCount: notifications.length,
+    loadMore: async () => {
+      const nextPage = page + 1;
       const res = await dispatch(
         getNotifications({ limit, page: nextPage }),
       ).unwrap();
-      const loaded = (res.notifications || []).length;
       setPage(nextPage);
-      setHasMore(loaded >= limit);
-    } catch {
-      setHasMore(false);
-    } finally {
-      setIsLoadingMore(false);
-    }
-  };
-
-  const handleNotificationScroll = (event: UIEvent<HTMLDivElement>) => {
-    const target = event.currentTarget;
-    const nearBottom =
-      target.scrollHeight - target.scrollTop - target.clientHeight < 80;
-
-    if (nearBottom) {
-      void handleLoadMore();
-    }
-  };
+      setHasMore((res.notifications || []).length >= limit);
+    },
+  });
 
   return (
     <>
@@ -194,7 +182,7 @@ export function NotificationsDropdown() {
 
           <div
             className="custom-scrollbar h-96 overflow-y-auto"
-            onScroll={handleNotificationScroll}
+            aria-busy={paging.status === "loading"}
           >
             {notifications.length > 0 ? (
               <ul className="flex flex-col">
@@ -260,12 +248,6 @@ export function NotificationsDropdown() {
                     </li>
                   );
                 })}
-                {isLoadingMore && (
-                  <li className="flex items-center justify-center gap-2 px-4 py-3 text-xs text-muted-foreground">
-                    <Spinner label="Đang tải thêm thông báo" />
-                    Đang tải thêm…
-                  </li>
-                )}
               </ul>
             ) : (
               <EmptyState
@@ -273,6 +255,14 @@ export function NotificationsDropdown() {
                 title="Chưa có thông báo"
                 description="Tin nhắn mới và lời mời kết bạn sẽ hiện ở đây."
                 compact
+              />
+            )}
+            {notifications.length > 0 && (
+              <InfiniteListFooter
+                sentinelRef={paging.sentinelRef}
+                status={paging.status}
+                hasMore={hasMore}
+                onRetry={paging.retry}
               />
             )}
           </div>

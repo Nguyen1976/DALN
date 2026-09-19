@@ -8,7 +8,7 @@ import {
   Users2,
 } from "@/components/icons";
 import { useSelector } from "react-redux";
-import { selectFriend } from "@/redux/slices/friendSlice";
+import { selectFriend, selectFriendHasMore } from "@/redux/slices/friendSlice";
 import { Button } from "@/components/ui/button";
 import { MakeFriendModal } from "@/components/MakeFriendModal";
 import { NewChatModal } from "@/components/NewChatModal";
@@ -44,6 +44,9 @@ const TITLES: Record<string, { title: string; description: string }> = {
 export function FriendsPage({ children }: { children?: React.ReactNode }) {
   const params = useLocation().pathname;
   const friends = useSelector(selectFriend);
+  // The list pages in as it scrolls, so until the last page the count is
+  // only how many are loaded: "20+", not a total.
+  const allFriendsLoaded = !useSelector(selectFriendHasMore);
 
   const meta = TITLES[params] || TITLES["/friends"];
   // One primary action per section: grow the friend list, or start a group.
@@ -58,6 +61,7 @@ export function FriendsPage({ children }: { children?: React.ReactNode }) {
           {params === "/friends" && friends.length > 0 && (
             <span className="ml-2 text-sm font-normal text-muted-foreground">
               {friends.length}
+              {!allFriendsLoaded && "+"}
             </span>
           )}
         </>

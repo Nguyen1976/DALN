@@ -8,12 +8,15 @@ import { cn } from "@/lib/utils";
 import { ModeToggle } from "../ModeToggle";
 import type { AppDispatch } from "@/redux/store";
 import { useDispatch, useSelector } from "react-redux";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getConversations,
+  nextConversationCursor,
   selectConversation,
   type Conversation,
 } from "@/redux/slices/conversationSlice";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { getFriends, selectFriend } from "@/redux/slices/friendSlice";
 import { formatConversationTime } from "@/utils/formatDateTime";
 import { NewChatModal } from "../NewChatModal";
@@ -55,6 +58,23 @@ type FilterKey = (typeof FILTERS)[number]["key"];
 /** Scrolling to the end loads this many more; each page staggers from the top. */
 const CONVERSATIONS_PAGE_SIZE = 10;
 
+/** Placeholder rows shaped like a conversation row. */
+function ConversationRowsSkeleton({ count }: { count: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 p-2.5">
+          <Skeleton className="size-12 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-2/3" />
+            <Skeleton className="h-3 w-4/5" />
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 const unreadCountOf = (conversation: Conversation) => {
   const raw = conversation.unreadCount;
   if (raw === "5+") return 6;
@@ -80,8 +100,7 @@ export function ChatSidebar({ className }: { className?: string }) {
   const [query, setQuery] = useState("");
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [filter, setFilter] = useState<FilterKey>("all");
-  const isFetchingMoreRef = useRef(false);
-  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const [hasMore, setHasMore] = useState(true);
 
   // Presence dots read from the friend slice, so make sure it is populated
   // even when the user lands straight on the chat screen.
@@ -96,48 +115,37 @@ export function ChatSidebar({ className }: { className?: string }) {
     if (conversations.length === 0) {
       void dispatch(
         getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor: null }),
-      ).finally(() => setInitialLoading(false));
+      )
+        .unwrap()
+        .then((page) => setHasMore(page.length >= CONVERSATIONS_PAGE_SIZE))
+        .catch(() => {})
+        .finally(() => setInitialLoading(false));
     } else {
       setInitialLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
-  // Reset the in-flight guard whenever new conversations arrive so the next
-  // page can be requested; when nothing new arrives we stop loading more.
-  useEffect(() => {
-    isFetchingMoreRef.current = false;
-  }, [conversations.length]);
-
-  const loadMoreConversations = () => {
-    if (isFetchingMoreRef.current) return;
-    const last = conversations[conversations.length - 1];
-    // The id rides along as a tie-breaker: several conversations can share the
-    // same lastMessageAt (the friendship saga stamps them together), and a
-    // timestamp-only cursor skips whichever ones fell on the page boundary.
-    const cursor = last?.lastMessageAt ? `${last.lastMessageAt}|${last.id}` : null;
-    if (!cursor) return;
-    isFetchingMoreRef.current = true;
-    dispatch(getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor }));
-  };
-
-  useEffect(() => {
-    const sentinel = loadMoreSentinelRef.current;
-    if (!sentinel) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          loadMoreConversations();
-        }
-      },
-      { rootMargin: "200px" },
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversations.length]);
+  // Older conversations page in as the list nears its end. The old observer
+  // watched the viewport, so its look-ahead margin was clipped by this list's
+  // own scroll box and loading only began at the very bottom; it also fired
+  // again on every new message once the list was exhausted.
+  const paging = useInfiniteScroll({
+    hasMore,
+    enabled: !initialLoading,
+    itemCount: conversations.length,
+    loadMore: async () => {
+      const cursor = nextConversationCursor(conversations);
+      if (cursor === undefined) {
+        setHasMore(false);
+        return;
+      }
+      const page = await dispatch(
+        getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor }),
+      ).unwrap();
+      setHasMore(page.length >= CONVERSATIONS_PAGE_SIZE);
+    },
+  });
 
   /** userId -> online, so a direct chat can show the peer's presence. */
   const presenceByUserId = useMemo(() => {
@@ -283,7 +291,10 @@ export function ChatSidebar({ className }: { className?: string }) {
           <div className="flex items-center justify-between gap-2">
             {isCalling ? (
               <span className="flex min-w-0 animate-fade-in items-center gap-1.5 truncate text-sm font-medium text-success">
-                <Phone className="size-3.5 shrink-0 animate-pulse" aria-hidden="true" />
+                <Phone
+                  className="size-3.5 shrink-0 animate-pulse"
+                  aria-hidden="true"
+                />
                 Đang gọi…
               </span>
             ) : (
@@ -323,9 +334,7 @@ export function ChatSidebar({ className }: { className?: string }) {
         className,
       )}
     >
-      {showNewGroup && (
-        <NewChatModal onClose={() => setShowNewGroup(false)} />
-      )}
+      {showNewGroup && <NewChatModal onClose={() => setShowNewGroup(false)} />}
       <div className="shrink-0 space-y-3 border-b border-sidebar-border px-3 pb-3 pt-3">
         <div className="flex items-center justify-between gap-2 pl-1">
           <div className="flex items-baseline gap-2">
@@ -416,17 +425,12 @@ export function ChatSidebar({ className }: { className?: string }) {
         </div>
       </div>
 
-      <div className="custom-scrollbar flex-1 space-y-0.5 overflow-y-auto p-2">
+      <div
+        className="custom-scrollbar flex-1 space-y-0.5 overflow-y-auto p-2"
+        aria-busy={initialLoading || paging.status === "loading"}
+      >
         {initialLoading ? (
-          Array.from({ length: 7 }).map((_, index) => (
-            <div key={index} className="flex items-center gap-3 p-2.5">
-              <Skeleton className="size-12 shrink-0 rounded-full" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-3.5 w-2/3" />
-                <Skeleton className="h-3 w-4/5" />
-              </div>
-            </div>
-          ))
+          <ConversationRowsSkeleton count={7} />
         ) : conversations.length === 0 ? (
           <EmptyState
             icon={MessagesSquare}
@@ -458,7 +462,13 @@ export function ChatSidebar({ className }: { className?: string }) {
         ) : (
           <>
             {visibleConversations.map(renderConversationItem)}
-            <div ref={loadMoreSentinelRef} className="h-px w-full" />
+            <InfiniteListFooter
+              sentinelRef={paging.sentinelRef}
+              status={paging.status}
+              hasMore={hasMore}
+              onRetry={paging.retry}
+              loading={<ConversationRowsSkeleton count={3} />}
+            />
           </>
         )}
       </div>

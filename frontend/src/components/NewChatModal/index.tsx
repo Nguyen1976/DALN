@@ -9,9 +9,9 @@ import { Input } from "../ui/input";
 import { SearchField } from "../ui/search-field";
 import { useDispatch, useSelector } from "react-redux";
 import {
-  getFriends,
+  getMoreFriends,
   selectFriend,
-  selectFriendPage,
+  selectFriendHasMore,
 } from "@/redux/slices/friendSlice";
 import type { AppDispatch } from "@/redux/store";
 import { useForm } from "react-hook-form";
@@ -21,6 +21,8 @@ import z from "zod";
 import { useModalExit } from "@/hooks/useModalExit";
 import { staggerStyle } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 
 interface NewChatModalProps {
   onClose: () => void;
@@ -38,19 +40,23 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
   const { closing, requestClose, onOverlayAnimationEnd } =
     useModalExit(onClose);
   const friends = useSelector(selectFriend);
-  const page = useSelector(selectFriendPage);
+  const hasMore = useSelector(selectFriendHasMore);
   const dispatch = useDispatch<AppDispatch>();
 
-  useEffect(() => {
-    //fetch friends từ redux store hoặc API
-    if (friends.length === 0) {
-      dispatch(getFriends({ limit: 20, page: 1 }));
-    }
-  }, [dispatch, friends.length]);
-
-  const loadMoreFriends = () => {
-    dispatch(getFriends({ limit: 20, page: page + 1 }));
-  };
+  // The search box filters the friends loaded so far; scrolling (or a search
+  // with few matches, which leaves the end in view) keeps loading the rest.
+  const needle = search.trim().toLocaleLowerCase("vi");
+  const shownFriends = needle
+    ? friends.filter((friend) =>
+        [friend.fullName, friend.username].some((value) =>
+          value?.toLocaleLowerCase("vi").includes(needle),
+        ),
+      )
+    : friends;
+  const paging = useInfiniteScroll({
+    hasMore,
+    loadMore: () => dispatch(getMoreFriends()).unwrap(),
+  });
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -183,12 +189,15 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
             label="Tìm bạn bè"
           />
 
-          <div className="custom-scrollbar max-h-[300px] space-y-1 overflow-y-auto">
-            {friends?.map((user, index) => (
+          <div
+            className="custom-scrollbar max-h-[300px] space-y-1 overflow-y-auto"
+            aria-busy={paging.status === "loading"}
+          >
+            {shownFriends.map((user, index) => (
               <label
                 key={user.id}
                 htmlFor={`${user.id}`}
-                style={staggerStyle(index)}
+                style={staggerStyle(index % 20)}
                 className="flex w-full animate-stagger-in cursor-pointer items-center gap-3 rounded-lg p-2.5 transition-colors duration-(--motion-fast) hover:bg-accent has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-[-2px] has-[:focus-visible]:outline-ring"
               >
                 <Checkbox
@@ -214,19 +223,19 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
                 </span>
               </label>
             ))}
-            <div className="my-2 flex items-center justify-center">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="interceptor-loading"
-                onClick={() => {
-                  loadMoreFriends();
-                }}
-              >
-                Tải thêm
-              </Button>
-            </div>
+            {shownFriends.length === 0 && !hasMore && (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                {needle
+                  ? "Không tìm thấy bạn bè phù hợp"
+                  : "Bạn chưa có bạn bè nào để thêm"}
+              </p>
+            )}
+            <InfiniteListFooter
+              sentinelRef={paging.sentinelRef}
+              status={paging.status}
+              hasMore={hasMore}
+              onRetry={paging.retry}
+            />
           </div>
         </div>
 

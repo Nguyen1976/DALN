@@ -34,9 +34,10 @@ import {
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import {
-  getFriends,
+  FRIENDS_PAGE_SIZE,
+  getMoreFriends,
   selectFriend,
-  selectFriendPage,
+  selectFriendHasMore,
   type Friend,
 } from "@/redux/slices/friendSlice";
 import type { AppDispatch } from "@/redux/store";
@@ -48,9 +49,25 @@ import { formatLastSeen } from "@/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { showErrorToast } from "@/utils/toastError";
 import { staggerStyle } from "@/lib/motion";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 
-/** "Tải thêm" appends pages of this size; each page staggers from the top. */
-const FRIENDS_PAGE_SIZE = 20;
+/** Placeholder rows shaped like a friend row, while a page loads. */
+function FriendRowsSkeleton({ count = 4 }: { count?: number }) {
+  return (
+    <div className="space-y-1">
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 p-3">
+          <Skeleton className="size-12 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-2/3" />
+            <Skeleton className="h-3 w-1/3" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const ListFriend = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -68,13 +85,6 @@ const ListFriend = () => {
   const [searchResults, setSearchResults] = useState<SearchFriendItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
-
-  useEffect(() => {
-    //fetch friends từ redux store hoặc API
-    if (friends.length === 0) {
-      dispatch(getFriends({ limit: 100, page: 1 }));
-    }
-  }, [dispatch, friends.length]);
 
   useEffect(() => {
     if (friends.length > 0 && !selectedFriendId) {
@@ -120,11 +130,14 @@ const ListFriend = () => {
     };
   }, [debouncedKeyword, selectedFriendId]);
 
-  const page = useSelector(selectFriendPage);
-
-  const loadMoreFriends = () => {
-    dispatch(getFriends({ limit: FRIENDS_PAGE_SIZE, page: page + 1 }));
-  };
+  // Pages load as the list scrolls; the first one too, when nothing is
+  // loaded yet. Searching shows server results, so paging pauses meanwhile.
+  const hasMore = useSelector(selectFriendHasMore);
+  const paging = useInfiniteScroll({
+    hasMore,
+    enabled: !debouncedKeyword,
+    loadMore: () => dispatch(getMoreFriends()).unwrap(),
+  });
 
   const displayedFriends = debouncedKeyword
     ? (searchResults as Friend[])
@@ -290,7 +303,10 @@ const ListFriend = () => {
         </div>
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-1 p-3">
+          <div
+            className="space-y-1 p-3"
+            aria-busy={paging.status === "loading"}
+          >
             {displayedFriends.map((friend: Friend, index) => (
               <AnimateIcon key={friend.id} asChild animateOnHover>
                 <button
@@ -299,7 +315,9 @@ const ListFriend = () => {
                     void handleSelectFriend(friend);
                     setMobileDetailOpen(true);
                   }}
-                  aria-current={selectedFriendId === friend.id ? "true" : undefined}
+                  aria-current={
+                    selectedFriendId === friend.id ? "true" : undefined
+                  }
                   className={cn(
                     "group flex w-full animate-stagger-in items-center gap-3 rounded-xl p-2.5 text-left",
                     "transition-colors duration-(--motion-fast) hover:bg-accent",
@@ -338,48 +356,40 @@ const ListFriend = () => {
               </AnimateIcon>
             ))}
 
-            {isSearching && (
-              <div className="space-y-1">
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <div key={index} className="flex items-center gap-3 p-3">
-                    <Skeleton className="size-12 shrink-0 rounded-full" />
-                    <div className="flex-1 space-y-2">
-                      <Skeleton className="h-3.5 w-2/3" />
-                      <Skeleton className="h-3 w-1/3" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {isSearching && <FriendRowsSkeleton />}
 
-            {displayedFriends.length === 0 && !isSearching && (
-              <EmptyState
-                icon={debouncedKeyword ? SearchX : Users}
-                title={
-                  debouncedKeyword
-                    ? "Không tìm thấy ai phù hợp"
-                    : "Chưa có bạn bè nào"
+            {displayedFriends.length === 0 &&
+              !isSearching &&
+              (debouncedKeyword || !hasMore) && (
+                <EmptyState
+                  icon={debouncedKeyword ? SearchX : Users}
+                  title={
+                    debouncedKeyword
+                      ? "Không tìm thấy ai phù hợp"
+                      : "Chưa có bạn bè nào"
+                  }
+                  description={
+                    debouncedKeyword
+                      ? `Không có kết quả cho “${debouncedKeyword}”.`
+                      : "Hãy xem mục Gợi ý kết bạn để tìm những người có thể bạn quen."
+                  }
+                  compact
+                />
+              )}
+
+            {!debouncedKeyword && (
+              <InfiniteListFooter
+                sentinelRef={paging.sentinelRef}
+                status={paging.status}
+                hasMore={hasMore}
+                onRetry={paging.retry}
+                loading={<FriendRowsSkeleton count={friends.length ? 3 : 6} />}
+                endLabel={
+                  friends.length > FRIENDS_PAGE_SIZE
+                    ? `Đã hiển thị tất cả ${friends.length} bạn bè`
+                    : undefined
                 }
-                description={
-                  debouncedKeyword
-                    ? `Không có kết quả cho “${debouncedKeyword}”.`
-                    : "Hãy xem mục Gợi ý kết bạn để tìm những người có thể bạn quen."
-                }
-                compact
               />
-            )}
-
-            {!debouncedKeyword && displayedFriends.length > 0 && (
-              <div className="my-3 flex items-center justify-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="interceptor-loading"
-                  onClick={loadMoreFriends}
-                >
-                  Tải thêm
-                </Button>
-              </div>
             )}
           </div>
         </ScrollArea>

@@ -684,9 +684,15 @@ export class UserService {
       UserErrors.userNotFound()
     }
 
-    const friends = await this.userRepo.findManyByIds(
+    const users = await this.userRepo.findManyByIds(
       friendships.map((f) => f.friendId) || [],
     )
+    // `$in` hands users back in its own order; keep the page's order so the
+    // list reads the same across pages.
+    const userById = new Map(users.map((u) => [u.id, u]))
+    const friends = friendships
+      .map((f) => userById.get(f.friendId))
+      .filter((u): u is (typeof users)[number] => Boolean(u))
 
     const friendsWithStatus = await Promise.all(
       friends.map(async (f) => ({

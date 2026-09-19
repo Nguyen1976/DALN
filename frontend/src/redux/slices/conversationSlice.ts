@@ -93,6 +93,26 @@ export const getConversations = createAsyncThunk(
   },
 );
 
+/**
+ * Keyset cursor for the page after those loaded. Pages are appended to the
+ * end of the list while new and active conversations move to the front, so
+ * the tail is where paging left off. The id breaks ties: the friendship saga
+ * stamps several conversations with the same lastMessageAt.
+ *
+ * `null` asks for the first page; `undefined` means the loaded list offers
+ * nothing to page from, and the caller should stop rather than re-request.
+ */
+export const nextConversationCursor = (
+  conversations: Conversation[],
+): string | null | undefined => {
+  if (conversations.length === 0) return null;
+  for (let i = conversations.length - 1; i >= 0; i -= 1) {
+    const { lastMessageAt, id } = conversations[i];
+    if (lastMessageAt) return `${lastMessageAt}|${id}`;
+  }
+  return undefined;
+};
+
 export const createConversation = createAsyncThunk(
   `/chat/create`,
   async (formData: FormData) => {
@@ -127,7 +147,9 @@ export const conversationSlice = createSlice({
       action: PayloadAction<{ conversationId: string; lastMessage: Message }>,
     ) => {
       const { conversationId, lastMessage } = action.payload;
-      const target = state.find((conversation) => conversation.id === conversationId);
+      const target = state.find(
+        (conversation) => conversation.id === conversationId,
+      );
       if (!target) return;
 
       const preview = MessageMapper.previewText(lastMessage);
@@ -146,7 +168,9 @@ export const conversationSlice = createSlice({
         updatedAt: lastMessage.createdAt || target.updatedAt,
       };
 
-      const rest = state.filter((conversation) => conversation.id !== conversationId);
+      const rest = state.filter(
+        (conversation) => conversation.id !== conversationId,
+      );
       state.splice(0, state.length, updated, ...rest);
     },
     setConversationAccessState: (
@@ -178,8 +202,7 @@ export const conversationSlice = createSlice({
         ...conversation,
         membershipStatus:
           membershipStatus || conversation.membershipStatus || "ACTIVE",
-        canSendMessage:
-          canSendMessage ?? conversation.canSendMessage ?? true,
+        canSendMessage: canSendMessage ?? conversation.canSendMessage ?? true,
       });
     },
     addConversationMembers: (
@@ -205,7 +228,9 @@ export const conversationSlice = createSlice({
       const incomingById = new Map(
         (action.payload.members || []).map((member) => [member.userId, member]),
       );
-      const existingIds = new Set(target.members.map((member) => member.userId));
+      const existingIds = new Set(
+        target.members.map((member) => member.userId),
+      );
       let addedCount = 0;
 
       for (let index = 0; index < target.members.length; index += 1) {
@@ -287,7 +312,9 @@ export const conversationSlice = createSlice({
       state,
       action: PayloadAction<{ conversationId: string; messageId: string }>,
     ) => {
-      const target = state.find((item) => item.id === action.payload.conversationId);
+      const target = state.find(
+        (item) => item.id === action.payload.conversationId,
+      );
       if (!target) return;
       target.unreadMentionCount = (target.unreadMentionCount || 0) + 1;
       target.lastMentionMessageId = action.payload.messageId;
@@ -296,7 +323,9 @@ export const conversationSlice = createSlice({
       state,
       action: PayloadAction<{ conversationId: string }>,
     ) => {
-      const target = state.find((item) => item.id === action.payload.conversationId);
+      const target = state.find(
+        (item) => item.id === action.payload.conversationId,
+      );
       if (!target) return;
       target.unreadMentionCount = 0;
       target.lastMentionMessageId = null;
@@ -325,7 +354,10 @@ export const conversationSlice = createSlice({
 export const selectConversation = (state: RootState) => state.conversations;
 
 export const selectConversationById = createSelector(
-  [selectConversation, (_state: RootState, conversationId: string) => conversationId],
+  [
+    selectConversation,
+    (_state: RootState, conversationId: string) => conversationId,
+  ],
   (conversations, conversationId) =>
     conversations.find((conversation) => conversation.id === conversationId),
 );
