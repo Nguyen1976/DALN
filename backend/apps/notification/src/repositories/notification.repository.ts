@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from 'apps/notification/prisma/prisma.service'
+import type { NotificationTypeName } from '../notification-types'
+import { olderThanCursor, type KeysetCursor } from '@app/util'
 
 @Injectable()
 export class NotificationRepository {
@@ -8,8 +10,8 @@ export class NotificationRepository {
   create(data: {
     userId: string
     message: string
-    type: string
-    friendRequestId?: string | null
+    type: NotificationTypeName
+    friendRequestId?: string
     digestEligible?: boolean
   }) {
     return this.prisma.notification.create({
@@ -23,11 +25,10 @@ export class NotificationRepository {
     })
   }
 
-  findManyByUser(userId: string, skip: number, take: number) {
+  findManyByUser(userId: string, take: number, cursor: KeysetCursor | null) {
     return this.prisma.notification.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      skip,
+      where: { userId, ...olderThanCursor('createdAt', cursor) },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take,
     })
   }
@@ -37,16 +38,6 @@ export class NotificationRepository {
       where: {
         userId,
         isRead: false,
-      },
-    })
-  }
-
-  countUnreadDigestEligible(userId: string) {
-    return this.prisma.notification.count({
-      where: {
-        userId,
-        isRead: false,
-        digestEligible: true,
       },
     })
   }

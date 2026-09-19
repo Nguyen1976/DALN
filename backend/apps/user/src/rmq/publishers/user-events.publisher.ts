@@ -6,8 +6,6 @@ import {
   EmitToUserPayload,
   UserCreatedPayload,
   UserInterestsUpdatedPayload,
-  UserJoinGroupPayload,
-  UserLeftGroupPayload,
   UserMakeFriendPayload,
   UserRegisterOtpPayload,
   UserUpdatedPayload,
@@ -15,6 +13,7 @@ import {
 } from 'libs/constant/rmq/payload'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
+import type { FriendView } from '../../domain/user.domain'
 
 @Injectable()
 export class UserEventsPublisher {
@@ -76,25 +75,11 @@ export class UserEventsPublisher {
     )
   }
 
-  publishUserJoinedGroup(payload: UserJoinGroupPayload): void {
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.USER_EVENTS,
-      ROUTING_RMQ.USER_JOINED_GROUP,
-      payload,
-    )
-  }
-
-  publishUserLeftGroup(payload: UserLeftGroupPayload): void {
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.USER_EVENTS,
-      ROUTING_RMQ.USER_LEFT_GROUP,
-      payload,
-    )
-  }
-
-  publisherUserOnline(payload: { userIds: string[]; userId: string }): void {
+  /**
+   * `friend` came online; their friends get the row their list shows, so
+   * someone not loaded yet can be put on it without asking the server again.
+   */
+  publisherUserOnline(payload: { userIds: string[]; friend: FriendView }): void {
     publishEvent(
       this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
@@ -102,7 +87,7 @@ export class UserEventsPublisher {
       {
         userIds: payload.userIds,
         event: SOCKET_EVENTS.USER.ONLINE_STATUS_CHANGED,
-        data: payload.userId,
+        data: { userId: payload.friend.id, friend: payload.friend },
       } as EmitToUserPayload,
     )
   }

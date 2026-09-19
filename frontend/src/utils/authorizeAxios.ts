@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
 import { logoutAPI } from "@/redux/slices/userSlice";
 import { toast } from "sonner";
 import type { AppDispatch } from "@/redux/store";
@@ -56,5 +56,25 @@ authorizeAxiosInstance.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+const bodyOf = <T>(response: AxiosResponse<T>) => response.data;
+
+/** One page of a list; send `nextCursor` back for the next (null: no more). */
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
+/** Calls that answer with the response body, typed. */
+export const api = {
+  get: <T>(url: string, config?: AxiosRequestConfig) =>
+    authorizeAxiosInstance.get<T>(url, config).then(bodyOf),
+  post: <T = void>(url: string, body?: unknown, config?: AxiosRequestConfig) =>
+    authorizeAxiosInstance.post<T>(url, body, config).then(bodyOf),
+  put: <T = void>(url: string, body?: unknown, config?: AxiosRequestConfig) =>
+    authorizeAxiosInstance.put<T>(url, body, config).then(bodyOf),
+  patch: <T = void>(url: string, body?: unknown, config?: AxiosRequestConfig) =>
+    authorizeAxiosInstance.patch<T>(url, body, config).then(bodyOf),
+};
 
 export default authorizeAxiosInstance;

@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useDispatch } from "react-redux";
 import { toast } from "sonner";
 import { closePollAPI, createPollAPI, submitPollVoteAPI } from "@/apis";
-import { socket } from "@/lib/socket";
-import { SOCKET_EVENTS } from "@/lib/socket.events";
 import {
   addMessage,
   updateMessagePoll,
@@ -13,16 +11,19 @@ import {
 import { updateNewMessage } from "@/redux/slices/conversationSlice";
 import type { AppDispatch } from "@/redux/store";
 
-interface PollStats {
-  totalVoters: number;
-  totalVotes: number;
-}
-
 interface UseChatPollOptions {
   conversationId?: string;
   messages: Message[];
 }
 
+const totalVotesOf = (poll: PollData) =>
+  poll.options.reduce((sum, option) => sum + option.count, 0);
+
+/**
+ * Creating, voting on and closing polls. What a poll looks like — counts,
+ * voters, your own vote — lives on its message in the store; votes by others
+ * arrive there over the socket (see useProtectedRouteChatSockets).
+ */
 export function useChatPoll({ conversationId, messages }: UseChatPollOptions) {
   const dispatch = useDispatch<AppDispatch>();
 
@@ -36,13 +37,10 @@ export function useChatPoll({ conversationId, messages }: UseChatPollOptions) {
   const [activePollMessageId, setActivePollMessageId] = useState<string | null>(
     null,
   );
+  /** The choice being made in the open dialog, before it is sent. */
   const [selectedVoteOptionIds, setSelectedVoteOptionIds] = useState<string[]>(
     [],
   );
-  const [pollVoteSelections, setPollVoteSelections] = useState<
-    Record<string, string[]>
-  >({});
-  const [pollStats, setPollStats] = useState<Record<string, PollStats>>({});
 
   const activePollMessage = messages.find(
     (message) => message.id === activePollMessageId,
@@ -74,73 +72,8 @@ export function useChatPoll({ conversationId, messages }: UseChatPollOptions) {
     normalizedCreateOptions.length >= 2 &&
     !hasDuplicateOptions;
 
-  const activePollTotalVotes = activePoll
-    ? (pollStats[activePoll.id]?.totalVotes ??
-      activePoll.options.reduce((sum, option) => sum + option.count, 0))
-    : 0;
-
-  const activePollTotalVoters = activePoll
-    ? (pollStats[activePoll.id]?.totalVoters ?? 0)
-    : 0;
-
-  useEffect(() => {
-    if (!activePoll) return;
-    setSelectedVoteOptionIds(pollVoteSelections[activePoll.id] || []);
-  }, [activePoll, pollVoteSelections]);
-
-  useEffect(() => {
-    const handlePollUpdated = (payload: {
-      pollId: string;
-      totalVoters: number;
-      options: Array<{ id: string; text: string; count: number }>;
-    }) => {
-      if (!payload?.pollId) return;
-
-      setPollStats((prev) => ({
-        ...prev,
-        [payload.pollId]: {
-          totalVoters: payload.totalVoters || 0,
-          totalVotes: (payload.options || []).reduce(
-            (sum, option) => sum + Number(option.count || 0),
-            0,
-          ),
-        },
-      }));
-    };
-
-    const handlePollClosed = (payload: {
-      pollId: string;
-      options: Array<{ id: string; text: string; count: number }>;
-    }) => {
-      if (!payload?.pollId) return;
-
-      setPollStats((prev) => {
-        const current = prev[payload.pollId] || {
-          totalVoters: 0,
-          totalVotes: 0,
-        };
-
-        return {
-          ...prev,
-          [payload.pollId]: {
-            totalVoters: current.totalVoters,
-            totalVotes: (payload.options || []).reduce(
-              (sum, option) => sum + Number(option.count || 0),
-              0,
-            ),
-          },
-        };
-      });
-    };
-
-    socket.on(SOCKET_EVENTS.CHAT.POLL_UPDATED, handlePollUpdated);
-    socket.on(SOCKET_EVENTS.CHAT.POLL_CLOSED, handlePollClosed);
-
-    return () => {
-      socket.off(SOCKET_EVENTS.CHAT.POLL_UPDATED, handlePollUpdated);
-      socket.off(SOCKET_EVENTS.CHAT.POLL_CLOSED, handlePollClosed);
-    };
-  }, []);
+  const activePollTotalVotes = activePoll ? totalVotesOf(activePoll) : 0;
+  const activePollTotalVoters = activePoll?.totalVoters ?? 0;
 
   const handleOpenCreatePollDialog = useCallback(() => {
     setPollQuestion("");
@@ -153,29 +86,14 @@ export function useChatPoll({ conversationId, messages }: UseChatPollOptions) {
     if (!conversationId || !canCreatePoll) return;
 
     try {
-      const result = await createPollAPI({
+      const message = await createPollAPI({
         conversationId,
         question: pollQuestion.trim(),
         options: normalizedCreateOptions,
         isMultipleChoice: isMultipleChoicePoll,
       });
-
-      if (result?.message) {
-        dispatch(addMessage(result.message as Message));
-        dispatch(
-          updateNewMessage({
-            conversationId,
-            lastMessage: result.message as Message,
-          }),
-        );
-
-        if (result.poll?.id) {
-          setPollStats((prev) => ({
-            ...prev,
-            [result.poll.id]: { totalVoters: 0, totalVotes: 0 },
-          }));
-        }
-      }
+      dispatch(addMessage(message));
+      dispatch(updateNewMessage({ conversationId, lastMessage: message }));
 
       setShowCreatePollDialog(false);
       toast.success("Tạo bình chọn thành công");
@@ -191,15 +109,12 @@ export function useChatPoll({ conversationId, messages }: UseChatPollOptions) {
     pollQuestion,
   ]);
 
-  const handleOpenPoll = useCallback(
-    (message: Message) => {
-      if (!message.poll) return;
-      setActivePollMessageId(message.id);
-      setSelectedVoteOptionIds(pollVoteSelections[message.poll.id] || []);
-      setShowPollDetailDialog(true);
-    },
-    [pollVoteSelections],
-  );
+  const handleOpenPoll = useCallback((message: Message) => {
+    if (!message.poll) return;
+    setActivePollMessageId(message.id);
+    setSelectedVoteOptionIds(message.poll.myOptionIds ?? []);
+    setShowPollDetailDialog(true);
+  }, []);
 
   const handleToggleVoteOption = useCallback(
     (optionId: string) => {
@@ -219,149 +134,56 @@ export function useChatPoll({ conversationId, messages }: UseChatPollOptions) {
     [activePoll],
   );
 
+  /** Show the vote at once; the server's answer then replaces the guess. */
   const handleSubmitPollVote = useCallback(async () => {
     if (!activePoll || !activePollMessage || selectedVoteOptionIds.length < 1) {
       return;
     }
 
-    const previousOptions = activePoll.options;
-    const previousSelection = pollVoteSelections[activePoll.id] || [];
-    const previousStats = pollStats[activePoll.id] || {
-      totalVoters: 0,
-      totalVotes: previousOptions.reduce(
-        (sum, option) => sum + option.count,
-        0,
-      ),
+    const where = {
+      conversationId: activePollMessage.conversationId,
+      messageId: activePollMessage.id,
     };
-
-    const previousSet = new Set(previousSelection);
-    const nextSet = new Set(selectedVoteOptionIds);
-
-    const optimisticOptions = previousOptions.map((option) => {
-      const wasSelected = previousSet.has(option.id);
-      const isSelected = nextSet.has(option.id);
-      if (wasSelected === isSelected) return option;
-
-      return {
-        ...option,
-        count: Math.max(0, option.count + (isSelected ? 1 : -1)),
-      };
-    });
-
-    const optimisticPoll: PollData = {
-      ...activePoll,
-      options: optimisticOptions,
-    };
-
+    const previous = activePoll.myOptionIds ?? [];
+    const before = new Set(previous);
+    const after = new Set(selectedVoteOptionIds);
     dispatch(
       updateMessagePoll({
-        conversationId: activePollMessage.conversationId,
-        messageId: activePollMessage.id,
-        poll: optimisticPoll,
+        ...where,
+        poll: {
+          ...activePoll,
+          options: activePoll.options.map((option) =>
+            before.has(option.id) === after.has(option.id)
+              ? option
+              : {
+                  ...option,
+                  count: Math.max(0, option.count + (after.has(option.id) ? 1 : -1)),
+                },
+          ),
+          totalVoters: activePoll.totalVoters + (previous.length ? 0 : 1),
+          myOptionIds: selectedVoteOptionIds,
+        },
       }),
     );
-
-    const optimisticTotalVotes = optimisticOptions.reduce(
-      (sum, option) => sum + option.count,
-      0,
-    );
-    const optimisticTotalVoters = Math.max(
-      0,
-      previousStats.totalVoters + (previousSelection.length ? 0 : 1),
-    );
-
-    setPollVoteSelections((prev) => ({
-      ...prev,
-      [activePoll.id]: selectedVoteOptionIds,
-    }));
-    setPollStats((prev) => ({
-      ...prev,
-      [activePoll.id]: {
-        totalVoters: optimisticTotalVoters,
-        totalVotes: optimisticTotalVotes,
-      },
-    }));
 
     try {
       const result = await submitPollVoteAPI({
         pollId: activePoll.id,
         optionIds: selectedVoteOptionIds,
       });
-
-      dispatch(
-        updateMessagePoll({
-          conversationId: result.conversationId,
-          messageId: result.messageId,
-          poll: {
-            ...activePoll,
-            isClosed: result.isClosed,
-            closedAt: result.closedAt || null,
-            options: result.options,
-          },
-        }),
-      );
-
-      setPollVoteSelections((prev) => ({
-        ...prev,
-        [activePoll.id]: result.userVoteOptionIds || selectedVoteOptionIds,
-      }));
-      setPollStats((prev) => ({
-        ...prev,
-        [activePoll.id]: {
-          totalVoters:
-            result.totalVoters || prev[activePoll.id]?.totalVoters || 0,
-          totalVotes: result.options.reduce(
-            (sum, option) => sum + option.count,
-            0,
-          ),
-        },
-      }));
-
+      dispatch(updateMessagePoll(result));
       toast.success("Đã cập nhật bình chọn");
     } catch {
-      dispatch(
-        updateMessagePoll({
-          conversationId: activePollMessage.conversationId,
-          messageId: activePollMessage.id,
-          poll: { ...activePoll, options: previousOptions },
-        }),
-      );
-      setPollVoteSelections((prev) => ({
-        ...prev,
-        [activePoll.id]: previousSelection,
-      }));
-      setPollStats((prev) => ({
-        ...prev,
-        [activePoll.id]: previousStats,
-      }));
+      dispatch(updateMessagePoll({ ...where, poll: activePoll }));
       toast.error("Không thể gửi bình chọn");
     }
-  }, [
-    activePoll,
-    activePollMessage,
-    dispatch,
-    pollStats,
-    pollVoteSelections,
-    selectedVoteOptionIds,
-  ]);
+  }, [activePoll, activePollMessage, dispatch, selectedVoteOptionIds]);
 
   const handleClosePoll = useCallback(async () => {
     if (!activePoll || !activePollMessage) return;
 
     try {
-      const result = await closePollAPI({ pollId: activePoll.id });
-
-      dispatch(
-        updateMessagePoll({
-          conversationId: result.conversationId,
-          messageId: result.messageId,
-          poll: {
-            ...activePoll,
-            isClosed: true,
-            closedAt: result.closedAt || new Date().toISOString(),
-          },
-        }),
-      );
+      dispatch(updateMessagePoll(await closePollAPI({ pollId: activePoll.id })));
       setShowClosePollConfirmDialog(false);
       toast.success("Đã đóng bình chọn");
     } catch {
@@ -385,7 +207,6 @@ export function useChatPoll({ conversationId, messages }: UseChatPollOptions) {
     activePollMessage,
     activePoll,
     selectedVoteOptionIds,
-    pollVoteSelections,
     duplicateOptionMap,
     canCreatePoll,
     activePollTotalVotes,

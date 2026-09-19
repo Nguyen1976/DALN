@@ -21,7 +21,7 @@ export {
 } from './conversation-member.service'
 export {
   ConversationService,
-  type CreateConversationData,
+  type CreateGroupData,
   type DeleteConversationRequest,
   type CallPeerRequest,
   type CallMembersRequest,

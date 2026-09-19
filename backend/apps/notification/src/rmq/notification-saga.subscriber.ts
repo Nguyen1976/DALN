@@ -22,6 +22,7 @@ import {
 } from 'libs/constant/rmq/saga'
 import { PrismaService } from '../../prisma/prisma.service'
 import { NotificationEventsPublisher } from './publishers/notification-events.publisher'
+import { NotificationService } from '../notification.service'
 
 @Injectable()
 export class NotificationSagaSubscriber {
@@ -31,6 +32,7 @@ export class NotificationSagaSubscriber {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
     private readonly eventsPublisher: NotificationEventsPublisher,
+    private readonly notifications: NotificationService,
   ) {}
 
   /**
@@ -54,22 +56,30 @@ export class NotificationSagaSubscriber {
     const message = `Lời mời kết bạn của ${p.inviteeName} đã được chấp nhận.`
 
     try {
+      // Switched off by the inviter: the step still succeeds, with nothing
+      // to show.
+      const channels = await this.notifications.channelsFor(
+        p.inviterId,
+        'FRIEND_REQUEST_ACCEPTED',
+      )
       const { processed, result } = await consumeIdempotent(
-        this.prisma as any,
+        this.prisma,
         {
           messageId: envelope.messageId,
           consumer: SAGA_CONSUMER.NOTIFICATION_NOTIFY_ACCEPTED,
           sagaId: envelope.sagaId,
         },
-        async (tx: any) => {
-          const notification = await tx.notification.create({
-            data: {
-              userId: p.inviterId,
-              message,
-              type: 'FRIEND_REQUEST_ACCEPTED',
-              digestEligible: true,
-            },
-          })
+        async (tx) => {
+          const notification = channels.inApp
+            ? await tx.notification.create({
+                data: {
+                  userId: p.inviterId,
+                  message,
+                  type: 'FRIEND_REQUEST_ACCEPTED',
+                  digestEligible: true,
+                },
+              })
+            : null
 
           const reply = buildReply(envelope, 'OK')
           await enqueueOutbox(tx, {
@@ -82,26 +92,26 @@ export class NotificationSagaSubscriber {
         },
       )
 
-      if (processed && result) {
+      if (processed && result && channels.realtime) {
         const online = await this.redisService.isOnline(p.inviterId)
         if (online) {
           this.eventsPublisher.emitToUsers(
             [p.inviterId],
             SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
-            { ...result, createdAt: result.createdAt?.toString?.() },
+            result,
           )
         }
         this.logger.log(`Saga ${envelope.sagaId}: đã notify accepted`)
       }
     } catch (error) {
       await consumeIdempotent(
-        this.prisma as any,
+        this.prisma,
         {
           messageId: envelope.messageId,
           consumer: SAGA_CONSUMER.NOTIFICATION_NOTIFY_ACCEPTED,
           sagaId: envelope.sagaId,
         },
-        async (tx: any) => {
+        async (tx) => {
           const reply = buildReply(
             envelope,
             'FAILED',

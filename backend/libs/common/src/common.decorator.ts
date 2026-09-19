@@ -4,6 +4,7 @@ import {
   SetMetadata,
 } from '@nestjs/common'
 import { Request } from 'express'
+import type { JwtPayload } from './auth/resolve-tokens'
 
 export const RequireLogin = () => SetMetadata('without-login', false)
 
@@ -18,15 +19,16 @@ export const WithoutLogin = () => SetMetadata('without-login', true)
  */
 export const InternalOnly = () => SetMetadata('internal-only', true)
 
+/**
+ * The signed-in user from the session token (`JwtPayload`), or one of its
+ * fields: `@UserInfo('userId') userId: string`.
+ */
 export const UserInfo = createParamDecorator(
-  (data: string, ctx: ExecutionContext) => {
+  (key: keyof JwtPayload | undefined, ctx: ExecutionContext) => {
     const request = ctx
       .switchToHttp()
-      .getRequest<Request & { user?: Record<string, any> }>()
+      .getRequest<Request & { user?: JwtPayload }>()
     if (!request.user) return null
-    return data ? request.user[data] : request.user
+    return key ? request.user[key] : request.user
   },
 )
-
-export const IS_TRANSFORM_KEY = 'isTransform';
-export const NoTransform = () => SetMetadata(IS_TRANSFORM_KEY, true);

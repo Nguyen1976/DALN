@@ -13,6 +13,7 @@ import {
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { selectUser } from "@/redux/slices/userSlice";
+import { displayNameOf } from "@/utils/displayName";
 
 /**
  * The rail's avatar opens a card with who you are (name, handle, email, bio)
@@ -22,7 +23,7 @@ const ProfileSetting = () => {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const user = useSelector(selectUser);
-  const name = user.fullName || user.username;
+  const name = displayNameOf(user);
   const initial = (name || "U")[0].toUpperCase();
   // Desktop: the avatar sits in the left rail, so the card opens beside it.
   // Phones: it sits in the bottom bar, so the card opens above the bar.

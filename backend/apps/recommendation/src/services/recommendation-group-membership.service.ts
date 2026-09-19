@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { FriendGraphService } from './friend-graph.service'
 import { RecommendationDirtyService } from './recommendation-dirty.service'
+import type {
+  UserJoinGroupPayload,
+  UserLeftGroupPayload,
+} from 'libs/constant/rmq/payload'
 
 @Injectable()
 export class RecommendationGroupMembershipService {
@@ -11,19 +15,12 @@ export class RecommendationGroupMembershipService {
     private readonly dirty: RecommendationDirtyService,
   ) {}
 
-  async onUserJoinedGroup(payload: {
-    userId: string
-    groupId: string
-    conversationId?: string
-    groupName?: string
-    createdAt?: string
-  }): Promise<void> {
-    const conversationId = payload.conversationId ?? payload.groupId
+  async onUserJoinedGroup(payload: UserJoinGroupPayload): Promise<void> {
     await this.dirty.markDirty(payload.userId)
     try {
       await this.friendGraph.upsertGroupMembership(
         payload.userId,
-        conversationId,
+        payload.conversationId,
         payload.groupName,
       )
     } catch (e) {
@@ -31,16 +28,13 @@ export class RecommendationGroupMembershipService {
     }
   }
 
-  async onUserLeftGroup(payload: {
-    userId: string
-    groupId: string
-    conversationId?: string
-    leftAt?: string
-  }): Promise<void> {
-    const conversationId = payload.conversationId ?? payload.groupId
+  async onUserLeftGroup(payload: UserLeftGroupPayload): Promise<void> {
     await this.dirty.markDirty(payload.userId)
     try {
-      await this.friendGraph.removeGroupMembership(payload.userId, conversationId)
+      await this.friendGraph.removeGroupMembership(
+        payload.userId,
+        payload.conversationId,
+      )
     } catch (e) {
       this.logger.warn(`remove group membership failed: ${String(e)}`)
     }

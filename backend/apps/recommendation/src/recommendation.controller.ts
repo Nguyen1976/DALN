@@ -28,14 +28,8 @@ export class RecommendationController {
 
   @Get('me')
   @RequireLogin()
-  async getMyRecommendationsMe(@UserInfo() user: any) {
-    return this.recommendationService.getRecommendationForUser(user.userId)
-  }
-
-  @Get()
-  @RequireLogin()
-  async getMyRecommendationsRoot(@UserInfo() user: any) {
-    return this.recommendationService.getRecommendationForUser(user.userId)
+  getMyRecommendations(@UserInfo('userId') userId: string) {
+    return this.recommendationService.getRecommendationForUser(userId)
   }
 
   // Ba endpoint dưới đây không thuộc về người dùng cuối: chúng được service

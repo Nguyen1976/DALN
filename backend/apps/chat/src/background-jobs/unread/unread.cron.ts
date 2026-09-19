@@ -186,7 +186,7 @@ export class UnreadCron {
     lastMsg: LastMessageSnapshot,
   ): Promise<void> {
     await Promise.all([
-      this.conversationRepo.updateUpdatedAt(conversationId, {
+      this.conversationRepo.saveLastMessage(conversationId, {
         lastMessageId: lastMsg.lastMessageId || undefined,
         lastMessageAt: lastMsg.lastMessageAt
           ? new Date(lastMsg.lastMessageAt)

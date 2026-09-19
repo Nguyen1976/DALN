@@ -77,44 +77,8 @@ export class RecommendationFriendshipService {
     ])
   }
 
-  /** Remove every current friend from stored list (GET safety net if RMQ lagged). */
-  async stripFriendsFromStoredRecommendations(
-    userId: string,
-    friendIds: string[],
-  ): Promise<boolean> {
-    if (!friendIds.length) return false
-    const exclude = new Set(friendIds.map(String))
-
-    const result = await this.prisma.recommendationResult.findUnique({
-      where: { userId },
-    })
-    if (!result) return false
-
-    const candidates = Array.isArray(result.candidates)
-      ? (result.candidates as CandidateJson[])
-      : []
-    const filteredCandidates = candidates.filter(
-      (c) => !exclude.has(String(c?.candidateId ?? '')),
-    )
-    if (filteredCandidates.length === candidates.length) {
-      return false
-    }
-
-    const features = Array.isArray(result.features)
-      ? (result.features as CandidateJson[])
-      : []
-    const filteredFeatures = features.filter(
-      (f) => !exclude.has(String(f?.candidateId ?? '')),
-    )
-
-    await this.prisma.recommendationResult.update({
-      where: { userId },
-      data: {
-        topK: filteredCandidates.length,
-        candidates: asPrismaJson(filteredCandidates),
-        features: asPrismaJson(filteredFeatures),
-      },
-    })
-    return true
+  /** The friendship was undone: both graphs changed, recompute both lists. */
+  async onFriendshipReverted(userAId: string, userBId: string): Promise<void> {
+    await this.dirty.markDirty(userAId, userBId)
   }
 }

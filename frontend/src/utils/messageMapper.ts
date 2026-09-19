@@ -1,10 +1,10 @@
 import type { Message } from "@/redux/slices/messageSlice";
 
 export const MessageMapper = {
-  previewText(message: Pick<Message, "text" | "type" | "isRevoked" | "poll">) {
+  previewText(message: Pick<Message, "content" | "type" | "isRevoked" | "poll">) {
     if (message.isRevoked) return "Tin nhắn đã bị thu hồi";
 
-    const text = String(message.text || "").trim();
+    const text = message.content.trim();
     if (text) return text;
 
     switch (message.type) {

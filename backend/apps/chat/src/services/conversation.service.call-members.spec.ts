@@ -17,10 +17,10 @@ function setup() {
   const service = new ConversationService(
     conversationRepo as never,
     memberRepo as never,
-    {} as never, // messageRepo
     {} as never, // eventsPublisher
     {} as never, // messageMediaService
     {} as never, // s3StorageService
+    {} as never, // userDirectory
   )
   return { service, conversationRepo, memberRepo }
 }

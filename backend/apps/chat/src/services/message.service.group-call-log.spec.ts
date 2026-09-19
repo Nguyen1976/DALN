@@ -21,6 +21,7 @@ function setup() {
     {} as never, // eventsPublisher
     {} as never, // messageMediaService
     redisService as never,
+    {} as never, // pollRepo
   )
   const sync = jest
     .spyOn(service, 'createCallLogAndSync')

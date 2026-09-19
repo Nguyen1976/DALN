@@ -47,10 +47,6 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
       // khởi động (bind vào exchange chưa tồn tại -> 404 NOT_FOUND -> app chết).
       exchanges: [
         {
-          name: EXCHANGE_RMQ.NOTIFICATION_EVENTS,
-          type: 'topic',
-        },
-        {
           name: EXCHANGE_RMQ.SAGA_EVENTS,
           type: 'topic',
         },
@@ -60,6 +56,12 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
         },
         {
           name: EXCHANGE_RMQ.REALTIME_EVENTS,
+          type: 'topic',
+        },
+        {
+          // Mentions come from chat (handleChatMention); undeclared, a fresh
+          // broker would refuse the binding when notification starts first.
+          name: EXCHANGE_RMQ.CHAT_EVENTS,
           type: 'topic',
         },
       ],

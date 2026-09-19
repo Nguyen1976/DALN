@@ -1,6 +1,7 @@
+import { toGeoPoint } from '@app/util'
 import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import { EmbeddingNotifyService } from './embedding-notify.service'
+import { EmbeddingService } from './embedding.service'
 import {
   UserCreatedPayload,
   UserInterestsUpdatedPayload,
@@ -14,28 +15,25 @@ export class UserSnapshotSyncService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly embeddingNotify: EmbeddingNotifyService,
+    private readonly embeddingService: EmbeddingService,
     private readonly dirty: RecommendationDirtyService,
   ) {}
 
   async syncUserCreated(payload: UserCreatedPayload): Promise<void> {
     const now = new Date()
-    await this.dirty.markDirty(payload.id)
+    await this.dirty.markDirty(payload.userId)
 
     await this.prisma.userSnapshot.upsert({
-      where: { userId: payload.id },
+      where: { userId: payload.userId },
       create: {
-        userId: payload.id,
+        userId: payload.userId,
         username: payload.username,
         fullName: payload.fullName ?? payload.username,
         avatar: payload.avatar ?? null,
         bio: payload.bio ?? null,
-        location: payload.location
-          ? {
-              type: 'Point',
-              coordinates: [payload.location.lon, payload.location.lat],
-            }
-          : null,
+        // Either shape: messages published before the payload became a
+        // GeoJSON Point may still be queued.
+        location: toGeoPoint(payload.location),
         isActive: true,
         lastSeen: now,
         syncedAt: now,
@@ -51,12 +49,7 @@ export class UserSnapshotSyncService {
 
     const bio = (payload.bio ?? '').trim()
     if (bio) {
-      const r = await this.embeddingNotify.notifyBioEmbedded(payload.id, bio)
-      if (!r.ok) {
-        this.logger.error(
-          `[snapshot] USER_CREATED bio embed/Qdrant failed userId=${payload.id} detail=${r.detail ?? ''}`,
-        )
-      }
+      await this.embeddingService.embedBio(payload.userId, bio)
     }
   }
 
@@ -99,15 +92,7 @@ export class UserSnapshotSyncService {
     })
 
     if (payload.bio !== undefined) {
-      const r = await this.embeddingNotify.notifyBioEmbedded(
-        payload.userId,
-        payload.bio ?? '',
-      )
-      if (!r.ok) {
-        this.logger.error(
-          `[snapshot] bio saved but embedding/Qdrant notify failed userId=${payload.userId} detail=${r.detail ?? ''}`,
-        )
-      }
+      await this.embeddingService.embedBio(payload.userId, payload.bio)
     }
   }
 

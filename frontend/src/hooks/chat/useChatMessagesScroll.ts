@@ -13,7 +13,7 @@ import { getMessages, type Message } from "@/redux/slices/messageSlice";
 import type { AppDispatch } from "@/redux/store";
 
 interface MessagePagination {
-  oldestCursor: string | null;
+  nextCursor: string | null;
   hasMore: boolean;
   /** The first page has been fetched (possibly empty). */
   loaded: boolean;
@@ -153,7 +153,7 @@ export function useChatMessagesScroll({
     if (!conversationId || !canLoadMessages) return;
     if (
       !pagination.hasMore ||
-      !pagination.oldestCursor ||
+      !pagination.nextCursor ||
       loadingOlderRef.current
     ) {
       return;
@@ -170,7 +170,7 @@ export function useChatMessagesScroll({
         getMessages({
           conversationId,
           limit: 20,
-          cursor: pagination.oldestCursor,
+          cursor: pagination.nextCursor,
         }),
       ).unwrap();
     } finally {
@@ -194,7 +194,7 @@ export function useChatMessagesScroll({
     conversationId,
     dispatch,
     pagination.hasMore,
-    pagination.oldestCursor,
+    pagination.nextCursor,
   ]);
 
   useEffect(() => {

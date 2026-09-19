@@ -3,7 +3,6 @@ import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
-import { safeExecute } from '@app/common/rpc/safe-execute'
 import { UserSnapshotSyncService } from '../../services/user-snapshot-sync.service'
 import type {
   UserCreatedPayload,
@@ -23,9 +22,7 @@ export class UserSnapshotSyncSubscriber {
     queue: QUEUE_RMQ.RECOMMENDATION_USER_CREATED,
   })
   async handleUserCreated(payload: UserCreatedPayload): Promise<void> {
-    await safeExecute(() =>
-      this.userSnapshotSyncService.syncUserCreated(payload),
-    )
+    await this.userSnapshotSyncService.syncUserCreated(payload)
   }
 
   @RabbitSubscribeWithRetry({
@@ -34,9 +31,7 @@ export class UserSnapshotSyncSubscriber {
     queue: QUEUE_RMQ.RECOMMENDATION_USER_UPDATED,
   })
   async handleUserUpdated(payload: UserUpdatedPayload): Promise<void> {
-    await safeExecute(() =>
-      this.userSnapshotSyncService.syncUserUpdated(payload),
-    )
+    await this.userSnapshotSyncService.syncUserUpdated(payload)
   }
 
   @RabbitSubscribeWithRetry({
@@ -47,8 +42,6 @@ export class UserSnapshotSyncSubscriber {
   async handleUserInterestsUpdated(
     payload: UserInterestsUpdatedPayload,
   ): Promise<void> {
-    await safeExecute(() =>
-      this.userSnapshotSyncService.syncUserInterestsUpdated(payload),
-    )
+    await this.userSnapshotSyncService.syncUserInterestsUpdated(payload)
   }
 }

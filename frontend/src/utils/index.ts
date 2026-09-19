@@ -14,7 +14,7 @@ export const interceptorLoadingElements = (calling: unknown) => {
   })
 }
 
-export function formatLastSeen(isoString?: string) {
+export function formatLastSeen(isoString?: string | null) {
   if (!isoString) return ""
   const diffMs = new Date().getTime() - new Date(isoString).getTime()
   const diffSeconds = Math.floor(diffMs / 1000)

@@ -4,8 +4,7 @@ import { publishEvent } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   EmitToUserPayload,
-  PollClosedPayload,
-  PollUpdatedPayload,
+  PollEventPayload,
   MessageRevokedPayload,
   UserJoinGroupPayload,
   UserLeftGroupPayload,
@@ -13,7 +12,7 @@ import {
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 import { ConversationMapper } from '../../domain/conversation.mapper'
-import { MessageMapper } from '../../domain/message.mapper'
+import { type MessageDto } from '../../domain/message.mapper'
 
 @Injectable()
 export class ChatEventsPublisher {
@@ -21,70 +20,72 @@ export class ChatEventsPublisher {
 
   constructor(private readonly amqpConnection: AmqpConnection) {}
 
+  /**
+   * Every event leaves through here. Publishing is fire-and-forget: the
+   * change it reports is already saved, so a broker failure is logged rather
+   * than failing (or crashing) whatever made that change.
+   */
+  private publish(exchange: string, routingKey: string, payload: unknown) {
+    publishEvent(this.amqpConnection, exchange, routingKey, payload).catch(
+      (error: unknown) =>
+        this.logger.error(`publish ${routingKey} failed`, error),
+    )
+  }
+
+  /** A socket event for these users, via the realtime gateway. */
+  private emit(userIds: string[], event: string, data: unknown) {
+    const payload: EmitToUserPayload = { userIds, event, data }
+    this.publish(
+      EXCHANGE_RMQ.REALTIME_EVENTS,
+      ROUTING_RMQ.EMIT_REALTIME_EVENT,
+      payload,
+    )
+  }
+
+  /** The same event with a body built for each user. */
   private emitToUsers(
     userIds: string[],
     event: string,
     buildData: (userId: string) => Record<string, unknown>,
   ) {
     for (const userId of userIds) {
-      publishEvent(
-        this.amqpConnection,
-        EXCHANGE_RMQ.REALTIME_EVENTS,
-        ROUTING_RMQ.EMIT_REALTIME_EVENT,
-        {
-          userIds: [userId],
-          event,
-          data: buildData(userId),
-        } as EmitToUserPayload,
-      )
+      try {
+        this.emit([userId], event, buildData(userId))
+      } catch (error) {
+        this.logger.error(`${event} for ${userId} not sent`, error)
+      }
     }
   }
 
   publishConversationCreated(conversation: any): void {
-    const memberIds = conversation.memberIds || conversation.members?.map(
-      (member: any) => member.userId,
-    ) || []
+    const memberIds =
+      conversation.memberIds ||
+      conversation.members?.map((member: any) => member.userId) ||
+      []
 
-    this.emitToUsers(memberIds, SOCKET_EVENTS.CHAT.NEW_CONVERSATION, (userId) => ({
-      conversation: ConversationMapper.toDetail(conversation, userId),
-    }))
+    this.emitToUsers(
+      memberIds,
+      SOCKET_EVENTS.CHAT.NEW_CONVERSATION,
+      (userId) => ({
+        conversation: ConversationMapper.toDetail(conversation, userId),
+      }),
+    )
   }
 
-  publishMessageSent(message: any, memberIds: string[]): void {
-    const normalized = MessageMapper.toResponse(message)
-    if (!normalized) return
-
+  /** `message` is already mapped (see MessageDto): sent on as is. */
+  publishMessageSent(normalized: MessageDto, memberIds: string[]): void {
     const senderId = String(normalized.senderId)
     const otherMemberIds = memberIds.filter((id) => id !== senderId)
 
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds: [senderId],
-        event: SOCKET_EVENTS.CHAT.MESSAGE_ACK,
-        data: {
-          status: 'SUCCESS',
-          clientMessageId: normalized.clientMessageId || message.tempMessageId,
-          serverMessageId: normalized.id,
-          conversationId: normalized.conversationId,
-          createdAt: normalized.createdAt,
-          message: normalized,
-        },
-      } as EmitToUserPayload,
-    )
+    // The saved message itself: its id, time and conversation are all on it.
+    this.emit([senderId], SOCKET_EVENTS.CHAT.MESSAGE_ACK, {
+      clientMessageId: normalized.clientMessageId,
+      message: normalized,
+    })
 
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds: otherMemberIds,
-        event: SOCKET_EVENTS.CHAT.MESSAGE_NEW,
-        data: { message: normalized },
-      } as EmitToUserPayload,
-    )
+    this.emit(otherMemberIds, SOCKET_EVENTS.CHAT.MESSAGE_NEW, {
+      message: normalized,
+    })
   }
 
   publishMemberAddedToConversation(payload: any): void {
@@ -93,21 +94,12 @@ export class ChatEventsPublisher {
       (payload.newMemberIds || []).includes(member.userId),
     )
 
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds: allMemberIds,
-        event: SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_ADDED,
-        data: {
-          conversationId: payload.id,
-          actorId: payload.actorId,
-          memberIds: payload.newMemberIds,
-          members: newMembers,
-        },
-      } as EmitToUserPayload,
-    )
+    this.emit(allMemberIds, SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_ADDED, {
+      conversationId: payload.id,
+      actorId: payload.actorId,
+      memberIds: payload.newMemberIds,
+      members: newMembers,
+    })
 
     this.emitToUsers(
       payload.newMemberIds || [],
@@ -122,11 +114,14 @@ export class ChatEventsPublisher {
   }
 
   publishConversationUpdated(conversation: any): void {
-    const memberIds = conversation.members?.map((member: any) => member.userId) || []
+    const memberIds =
+      conversation.members?.map((member: any) => member.userId) || []
     this.emitToUsers(
       memberIds,
       SOCKET_EVENTS.CHAT.CONVERSATION_UPDATE,
-      (userId) => ({ conversation: ConversationMapper.toDetail(conversation, userId) }),
+      (userId) => ({
+        conversation: ConversationMapper.toDetail(conversation, userId),
+      }),
     )
   }
 
@@ -138,19 +133,14 @@ export class ChatEventsPublisher {
   }) {
     const { conversation, actorId, targetUserId, remainingMemberIds } = payload
 
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
+    this.emit(
+      remainingMemberIds,
+      SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_REMOVED,
       {
-        userIds: remainingMemberIds,
-        event: SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_REMOVED,
-        data: {
-          conversationId: conversation.id,
-          actorId,
-          targetUserId,
-        },
-      } as EmitToUserPayload,
+        conversationId: conversation.id,
+        actorId,
+        targetUserId,
+      },
     )
 
     this.emitToUsers(
@@ -161,8 +151,6 @@ export class ChatEventsPublisher {
           membershipStatus: 'REMOVED',
           canSendMessage: false,
         }),
-        membershipStatus: 'REMOVED',
-        canSendMessage: false,
       }),
     )
   }
@@ -176,20 +164,11 @@ export class ChatEventsPublisher {
     const { conversation, actorId, remainingMemberIds, promotedUserId } =
       payload
 
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds: remainingMemberIds,
-        event: SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_LEFT,
-        data: {
-          conversationId: conversation.id,
-          actorId,
-          promotedUserId,
-        },
-      } as EmitToUserPayload,
-    )
+    this.emit(remainingMemberIds, SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_LEFT, {
+      conversationId: conversation.id,
+      actorId,
+      promotedUserId,
+    })
 
     this.emitToUsers(
       [actorId],
@@ -199,25 +178,14 @@ export class ChatEventsPublisher {
           membershipStatus: 'LEFT',
           canSendMessage: false,
         }),
-        membershipStatus: 'LEFT',
-        canSendMessage: false,
       }),
     )
   }
 
-  publishSystemMessage(memberIds: string[], message: any) {
-    const normalized = MessageMapper.toResponse(message)
-
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds: memberIds,
-        event: SOCKET_EVENTS.CHAT.MESSAGE_SYSTEM,
-        data: { message: normalized },
-      } as EmitToUserPayload,
-    )
+  publishSystemMessage(memberIds: string[], normalized: MessageDto) {
+    this.emit(memberIds, SOCKET_EVENTS.CHAT.MESSAGE_SYSTEM, {
+      message: normalized,
+    })
   }
 
   publishMessageError(
@@ -230,91 +198,34 @@ export class ChatEventsPublisher {
       retryable: boolean
     },
   ): void {
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds: [userId],
-        event: SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
-        data: payload,
-      } as EmitToUserPayload,
-    )
+    this.emit([userId], SOCKET_EVENTS.CHAT.MESSAGE_ERROR, payload)
   }
 
   publishMessageRevoked(
     payload: MessageRevokedPayload,
     userIds: string[],
   ): void {
-    const normalizedPayload = {
-      ...payload,
-      message: payload.message
-        ? MessageMapper.toResponse(payload.message)
-        : undefined,
-    }
-
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds,
-        event: SOCKET_EVENTS.CHAT.MESSAGE_REVOKED,
-        data: normalizedPayload,
-      } as EmitToUserPayload,
-    )
+    this.emit(userIds, SOCKET_EVENTS.CHAT.MESSAGE_REVOKED, payload)
   }
 
-  publishPollUpdated(payload: PollUpdatedPayload, userIds: string[]): void {
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds,
-        event: SOCKET_EVENTS.CHAT.POLL_UPDATED,
-        data: payload,
-      } as EmitToUserPayload,
-    )
+  publishPollUpdated(payload: PollEventPayload, userIds: string[]): void {
+    this.emit(userIds, SOCKET_EVENTS.CHAT.POLL_UPDATED, payload)
   }
 
-  publishPollClosed(payload: PollClosedPayload, userIds: string[]): void {
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.EMIT_REALTIME_EVENT,
-      {
-        userIds,
-        event: SOCKET_EVENTS.CHAT.POLL_CLOSED,
-        data: payload,
-      } as EmitToUserPayload,
-    )
+  publishPollClosed(payload: PollEventPayload, userIds: string[]): void {
+    this.emit(userIds, SOCKET_EVENTS.CHAT.POLL_CLOSED, payload)
   }
 
   publishUserJoinedGroup(payload: UserJoinGroupPayload): void {
-    try {
-      publishEvent(
-        this.amqpConnection,
-        EXCHANGE_RMQ.USER_EVENTS,
-        ROUTING_RMQ.USER_JOINED_GROUP,
-        payload,
-      )
-    } catch (e) {
-      this.logger.warn('[chat-events] publishUserJoinedGroup failed', e)
-    }
+    this.publish(
+      EXCHANGE_RMQ.USER_EVENTS,
+      ROUTING_RMQ.USER_JOINED_GROUP,
+      payload,
+    )
   }
 
   publishUserLeftGroup(payload: UserLeftGroupPayload): void {
-    try {
-      publishEvent(
-        this.amqpConnection,
-        EXCHANGE_RMQ.USER_EVENTS,
-        ROUTING_RMQ.USER_LEFT_GROUP,
-        payload,
-      )
-    } catch (e) {
-      this.logger.warn('[chat-events] publishUserLeftGroup failed', e)
-    }
+    this.publish(EXCHANGE_RMQ.USER_EVENTS, ROUTING_RMQ.USER_LEFT_GROUP, payload)
   }
 
   /**
@@ -330,12 +241,6 @@ export class ChatEventsPublisher {
     preview: string
   }): void {
     if (!payload.userIds.length) return
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.CHAT_EVENTS,
-      ROUTING_RMQ.CHAT_MENTION,
-      payload,
-    )
+    this.publish(EXCHANGE_RMQ.CHAT_EVENTS, ROUTING_RMQ.CHAT_MENTION, payload)
   }
-
 }

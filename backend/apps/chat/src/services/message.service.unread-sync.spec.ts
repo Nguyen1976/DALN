@@ -24,6 +24,7 @@ function setup() {
     eventsPublisher as never,
     {} as never, // messageMediaService
     redisService as never,
+    {} as never, // pollRepo
   )
   return { service, redisService }
 }

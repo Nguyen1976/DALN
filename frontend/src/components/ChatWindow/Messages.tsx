@@ -115,7 +115,6 @@ const MessageComponent = ({
   onRevokeMessage,
   onDeleteMessageForMe,
   onOpenPoll,
-  pollVoteSelections,
   onRetryMessage,
   onDiscardMessage,
   onReplyMessage,
@@ -134,7 +133,6 @@ const MessageComponent = ({
   onRevokeMessage?: (message: Message) => void;
   onDeleteMessageForMe?: (message: Message) => void;
   onOpenPoll?: (message: Message) => void;
-  pollVoteSelections?: Record<string, string[]>;
   onRetryMessage?: (message: Message) => void;
   onDiscardMessage?: (message: Message) => void;
   onReplyMessage?: (message: Message) => void;
@@ -198,9 +196,7 @@ const MessageComponent = ({
           const kind = resolveMediaKind(media);
           return kind === "IMAGE" || kind === "VIDEO";
         }).length;
-        const selectedPollOptions = message.poll
-          ? pollVoteSelections?.[message.poll.id] || []
-          : [];
+        const selectedPollOptions = message.poll?.myOptionIds ?? [];
 
         const dayDivider = startsNewDay ? (
           <div className="my-4 flex items-center gap-3" role="separator">
@@ -352,7 +348,7 @@ const MessageComponent = ({
           message.type === "CALL" && message.callInfo
             ? message.callInfo
             : message.isSystem
-              ? parseLegacyCallInfo(message.text)
+              ? parseLegacyCallInfo(message.content)
               : null;
         if (callInfo) {
           return (
@@ -398,7 +394,7 @@ const MessageComponent = ({
                 )}
               >
                 <p className="max-w-[85%] rounded-full bg-muted px-3 py-1 text-center text-xs leading-relaxed text-muted-foreground">
-                  <MentionText text={message.text} message={message} members={members} selfId={user.id} />
+                  <MentionText text={message.content} message={message} members={members} selfId={user.id} />
                   <time
                     dateTime={message.createdAt}
                     title={formatFullDateTime(message.createdAt)}
@@ -576,7 +572,7 @@ const MessageComponent = ({
                         >
                           {message.replyTo.isRevoked
                             ? "Tin nhắn đã bị thu hồi"
-                            : message.replyTo.text ||
+                            : message.replyTo.content ||
                               message.replyTo.attachmentName ||
                               quotedPlaceholder(message.replyTo.type)}
                         </span>
@@ -595,9 +591,9 @@ const MessageComponent = ({
                     >
                       Tin nhắn đã bị thu hồi
                     </p>
-                  ) : message.text ? (
+                  ) : message.content ? (
                     <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
-                      <MentionText text={message.text} message={message} members={members} selfId={user.id} isMine={isMine} />
+                      <MentionText text={message.content} message={message} members={members} selfId={user.id} isMine={isMine} />
                     </p>
                   ) : null}
 

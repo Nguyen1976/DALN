@@ -1,15 +1,20 @@
+import type { GeoPoint } from '@app/util'
 export interface UserCreatedPayload {
-  id: string
+  userId: string
   email: string
   username: string
   /** Optional profile fields so recommendation can hydrate snapshot + Qdrant on signup */
   fullName?: string
   avatar?: string
   bio?: string
-  location?: {
-    lat: number
-    lon: number
-  }
+  /** GeoJSON Point, exactly as the user service stores it. */
+  location?: GeoPoint
+}
+
+/** Same pair as the accepted request that created the friendship. */
+export interface UserFriendshipRevertedPayload {
+  inviterId: string
+  inviteeId: string
 }
 
 export interface UserRegisterOtpPayload {
@@ -33,20 +38,6 @@ export interface UserUpdateStatusMakeFriendPayload {
   inviteeId: string
   inviteeName: string
   status: string
-  members: {
-    userId: string
-    username: string
-    avatar: string
-    fullName: string
-  }[]
-}
-
-export interface SendMessagePayload {
-  conversationId: string
-  senderId: string
-  message: string
-  replyToMessageId?: string
-  tempMessageId: string
 }
 
 export interface UserUpdatedPayload {
@@ -63,18 +54,15 @@ export interface UserInterestsUpdatedPayload {
 
 export interface UserJoinGroupPayload {
   userId: string
-  groupId: string
-  // optional metadata — conversationId in DB, group name, timestamp
-  conversationId?: string
+  conversationId: string
   groupName?: string
-  createdAt?: string
+  createdAt: string
 }
 
 export interface UserLeftGroupPayload {
   userId: string
-  groupId: string
-  conversationId?: string
-  leftAt?: string
+  conversationId: string
+  leftAt: string
 }
 
 export interface EmitToUserPayload {
@@ -83,16 +71,19 @@ export interface EmitToUserPayload {
   data: any
 }
 
+/**
+ * A message the client sent over the socket. Who is mentioned is worked out
+ * from `content` by the chat service, never taken from the client.
+ */
 export interface MessageSendPayload {
   conversationId: string
   senderId: string
-  text?: string
+  content?: string | null
   type?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE'
-  clientMessageId?: string
+  /** The client's id for its optimistic copy; comes back on the ack. */
+  clientMessageId: string
   medias?: MessageMediaInput[]
   replyToMessageId?: string
-  tempMessageId: string
-  mentionUserIds?: string[]
 }
 
 export interface MessageMediaInput {
@@ -109,70 +100,26 @@ export interface MessageMediaInput {
   sortOrder?: number
 }
 
-export interface MessageAckPayload {
-  status: 'SUCCESS'
-  clientMessageId: string
-  serverMessageId: string
-  conversationId: string
-  duplicated: boolean
-  createdAt: string
-  message: any
-}
-
 export interface MessageRevokedPayload {
   conversationId: string
   messageId: string
-  message: any
+  /** The revoked message, already mapped for clients. */
+  message: unknown
 }
 
-export interface PollUpdatedPayload {
-  pollId: string
+/** A poll changed (a vote, or closing): the same shape either way. */
+export interface PollEventPayload {
+  conversationId: string
   messageId: string
-  conversationId: string
-  question: string
-  isMultipleChoice: boolean
-  isClosed: boolean
-  closedAt?: string | null
-  options: Array<{
+  poll: {
     id: string
-    text: string
-    count: number
-  }>
-  totalVoters: number
-}
-
-export interface PollClosedPayload {
-  pollId: string
-  messageId: string
-  conversationId: string
-  question: string
-  isMultipleChoice: boolean
-  isClosed: boolean
-  closedAt: string
-  options: Array<{
-    id: string
-    text: string
-    count: number
-  }>
-}
-
-export interface MessageErrorPayload {
-  clientMessageId?: string
-  code: string
-  message: string
-  retryable: boolean
-}
-
-export interface UserTypingPayload {
-  conversationId: string
-  userId: string
-  status: 'start' | 'stop'
-}
-
-export interface UserReadPayload {
-  conversationId: string
-  userId: string
-  lastReadMessageId: string
+    question: string
+    isMultipleChoice: boolean
+    isClosed: boolean
+    closedAt: string | null
+    options: Array<{ id: string; text: string; count: number }>
+    totalVoters: number
+  }
 }
 
 export interface UpdateMessageReadPayload {

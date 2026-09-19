@@ -148,7 +148,7 @@ function setup() {
       .mockResolvedValue({ count: 1 }),
   }
   const conversationRepo = {
-    updateUpdatedAt: jest
+    saveLastMessage: jest
       .fn<Promise<object>, [string, UpdateUpdatedAtData]>()
       .mockResolvedValue({}),
   }
@@ -197,7 +197,7 @@ describe('UnreadCron', () => {
       undefined,
     )
     expect(
-      conversationRepo.updateUpdatedAt.mock.calls[0][1].lastMessageId,
+      conversationRepo.saveLastMessage.mock.calls[0][1].lastMessageId,
     ).toBe(B1)
     // Claim đúng một lần bằng script, trên đủ ba key; flush xong không còn gì.
     expect(redis.eval.mock.calls).toEqual([[CLAIM_SCRIPT, liveKeys]])
@@ -243,7 +243,7 @@ describe('UnreadCron', () => {
       last: redis.strings.get(lastMessageKey(CONV)),
     }
     memberRepo.updateUnreadCount.mockRejectedValue(new Error('mongo down'))
-    conversationRepo.updateUpdatedAt.mockRejectedValue(new Error('mongo down'))
+    conversationRepo.saveLastMessage.mockRejectedValue(new Error('mongo down'))
 
     await cron.handleCron()
 

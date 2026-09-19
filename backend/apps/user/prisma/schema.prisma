@@ -27,6 +27,11 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Back sides of the relations below (Prisma needs both); not read directly.
+  friendOf         Friendship[]    @relation("FriendshipFriend")
+  sentRequests     friendRequest[] @relation("RequestFrom")
+  receivedRequests friendRequest[] @relation("RequestTo")
+
   @@index([location], map: "location_2dsphere")
 }
 
@@ -34,6 +39,7 @@ model Friendship {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   userId    String   @db.ObjectId
   friendId  String   @db.ObjectId
+  friend    User     @relation("FriendshipFriend", fields: [friendId], references: [id])
   createdAt DateTime @default(now())
 }
 
@@ -47,6 +53,8 @@ model friendRequest {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
   fromUserId String   @db.ObjectId
   toUserId   String   @db.ObjectId
+  fromUser   User     @relation("RequestFrom", fields: [fromUserId], references: [id])
+  toUser     User     @relation("RequestTo", fields: [toUserId], references: [id])
   status     Status   @default(PENDING)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt

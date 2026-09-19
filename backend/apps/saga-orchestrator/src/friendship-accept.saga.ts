@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { v4 as uuid } from 'uuid'
 import { consumeIdempotent, enqueueOutbox } from '@app/saga'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
+  buildMessage,
   SAGA_CONSUMER,
   SAGA_ROUTING,
   SAGA_STEP,
@@ -18,8 +18,12 @@ import {
   type SagaStep,
 } from 'libs/constant/rmq/saga'
 import { PrismaService } from '../prisma/prisma.service'
+import type { FriendshipAcceptSaga as SagaRow } from './generated'
 
 const MAX_NOTIFY_ATTEMPTS = 3
+
+/** The interactive transaction every step runs in. */
+type Tx = Parameters<Parameters<PrismaService['$transaction']>[0]>[0]
 
 @Injectable()
 export class FriendshipAcceptSaga {
@@ -35,7 +39,7 @@ export class FriendshipAcceptSaga {
     envelope: SagaEnvelope<FriendshipAcceptTriggerPayload>,
   ): Promise<void> {
     const { processed } = await consumeIdempotent(
-      this.prisma as any,
+      this.prisma,
       {
         messageId: envelope.messageId,
         consumer: SAGA_CONSUMER.ORCHESTRATOR_TRIGGER,
@@ -43,7 +47,7 @@ export class FriendshipAcceptSaga {
       },
       async (tx) => {
         const payload = envelope.payload
-        const sagaModel = (tx as any).friendshipAcceptSaga
+        const sagaModel = tx.friendshipAcceptSaga
 
         const existing = await sagaModel.findUnique({
           where: { sagaId: envelope.sagaId },
@@ -86,14 +90,14 @@ export class FriendshipAcceptSaga {
    */
   async handleReply(envelope: SagaEnvelope): Promise<void> {
     await consumeIdempotent(
-      this.prisma as any,
+      this.prisma,
       {
         messageId: envelope.messageId,
         consumer: SAGA_CONSUMER.ORCHESTRATOR_REPLY,
         sagaId: envelope.sagaId,
       },
       async (tx) => {
-        const sagaModel = (tx as any).friendshipAcceptSaga
+        const sagaModel = tx.friendshipAcceptSaga
         const saga = await sagaModel.findUnique({
           where: { sagaId: envelope.sagaId },
         })
@@ -133,8 +137,8 @@ export class FriendshipAcceptSaga {
   }
 
   private async onCreateConversationReply(
-    tx: any,
-    saga: any,
+    tx: Tx,
+    saga: SagaRow,
     envelope: SagaEnvelope,
     ok: boolean,
   ): Promise<void> {
@@ -160,8 +164,8 @@ export class FriendshipAcceptSaga {
   }
 
   private async onNotifyReply(
-    tx: any,
-    saga: any,
+    tx: Tx,
+    saga: SagaRow,
     envelope: SagaEnvelope,
     ok: boolean,
   ): Promise<void> {
@@ -195,7 +199,12 @@ export class FriendshipAcceptSaga {
       },
     })
     if (saga.conversationId) {
-      await this.enqueueDeleteConversation(tx, saga, envelope.correlationId)
+      await this.enqueueDeleteConversation(
+        tx,
+        saga.sagaId,
+        saga.conversationId,
+        envelope.correlationId,
+      )
     } else {
       await this.enqueueRevertFriendship(tx, saga, envelope.correlationId)
     }
@@ -204,7 +213,7 @@ export class FriendshipAcceptSaga {
   // ---- helpers phát command/compensation qua outbox ----
 
   private async enqueueCreateConversation(
-    tx: any,
+    tx: Tx,
     sagaId: string,
     inviterId: string,
     inviteeId: string,
@@ -228,8 +237,8 @@ export class FriendshipAcceptSaga {
   }
 
   private async enqueueNotify(
-    tx: any,
-    saga: any,
+    tx: Tx,
+    saga: SagaRow,
     correlationId?: string,
   ): Promise<void> {
     const payload: NotifyAcceptedCommandPayload = {
@@ -249,16 +258,15 @@ export class FriendshipAcceptSaga {
   }
 
   private async enqueueDeleteConversation(
-    tx: any,
-    saga: any,
+    tx: Tx,
+    sagaId: string,
+    conversationId: string,
     correlationId?: string,
   ): Promise<void> {
-    const payload: DeleteConversationCommandPayload = {
-      conversationId: saga.conversationId,
-    }
+    const payload: DeleteConversationCommandPayload = { conversationId }
     await this.dispatch(
       tx,
-      saga.sagaId,
+      sagaId,
       SAGA_ROUTING.CMP_DELETE_CONVERSATION,
       SAGA_STEP.DELETE_CONVERSATION,
       'COMPENSATE',
@@ -268,8 +276,8 @@ export class FriendshipAcceptSaga {
   }
 
   private async enqueueRevertFriendship(
-    tx: any,
-    saga: any,
+    tx: Tx,
+    saga: SagaRow,
     correlationId?: string,
   ): Promise<void> {
     const payload: RevertFriendshipCommandPayload = {
@@ -293,7 +301,7 @@ export class FriendshipAcceptSaga {
    * cho cả outbox row lẫn envelope để consumer dedupe đúng khi relay publish lặp.
    */
   private async dispatch(
-    tx: any,
+    tx: Tx,
     sagaId: string,
     routingKey: string,
     step: SagaStep,
@@ -301,16 +309,14 @@ export class FriendshipAcceptSaga {
     payload: unknown,
     correlationId?: string,
   ): Promise<void> {
-    const envelope: SagaEnvelope = {
-      messageId: uuid(),
-      sagaId,
-      sagaType: SAGA_TYPE.FRIENDSHIP_ACCEPT,
-      step,
+    const envelope = buildMessage(
       kind,
+      sagaId,
+      SAGA_TYPE.FRIENDSHIP_ACCEPT,
+      step,
       payload,
       correlationId,
-      occurredAt: new Date().toISOString(),
-    }
+    )
     await enqueueOutbox(tx, {
       messageId: envelope.messageId,
       exchange: EXCHANGE_RMQ.SAGA_EVENTS,

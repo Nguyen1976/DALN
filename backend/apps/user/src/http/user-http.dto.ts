@@ -1,10 +1,10 @@
-import { Status } from 'apps/user/src/generated'
 import {
   ArrayMaxSize,
   ArrayUnique,
   IsArray,
   IsEmail,
-  IsEnum,
+  IsIn,
+  IsMongoId,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -14,6 +14,7 @@ import {
   ValidateNested,
 } from 'class-validator'
 import { Transform, Type, type TransformFnParams } from 'class-transformer'
+import { PageQueryDto } from '@app/common/http/page-query.dto'
 
 /**
  * Email so khớp KHÔNG phân biệt hoa thường và không dính khoảng trắng thừa:
@@ -119,18 +120,25 @@ export class MakeFriendByUsernameDto {
   username: string
 }
 
-export class UpdateStatusMakeFriendDto {
-  @IsNotEmpty()
-  @IsEnum(Status, {
-    message: `Status must be one of the following values: ${Object.values(Status).join(', ')}`,
-  })
-  status: Status
+export class FriendRequestsQueryDto extends PageQueryDto {
+  @IsOptional()
+  @IsIn(['received', 'sent'])
+  direction: 'received' | 'sent' = 'received'
+}
 
-  @IsNotEmpty()
-  inviterId: string
+export class ProfileQueryDto {
+  @IsMongoId()
+  userId!: string
+}
 
-  @IsNotEmpty()
-  inviteeName: string
+export class RespondFriendRequestDto {
+  @IsIn(['ACCEPTED', 'REJECTED'])
+  status!: 'ACCEPTED' | 'REJECTED'
+}
+
+export class FriendRequestParamsDto {
+  @IsMongoId()
+  id!: string
 }
 
 export class UpdateProfileDto {
@@ -154,4 +162,12 @@ export class CompleteInterestOnboardingDto {
   @IsString({ each: true })
   @MaxLength(64, { each: true })
   slugs!: string[]
+}
+
+/** Internal: profiles of up to 200 users, by id. */
+export class MemberProfilesDto {
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsMongoId({ each: true })
+  ids!: string[]
 }

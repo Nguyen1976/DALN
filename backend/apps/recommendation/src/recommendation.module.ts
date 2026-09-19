@@ -24,7 +24,6 @@ import { CommonModule, AuthGuard } from '@app/common'
 import { RecommendationCron } from './background-jobs/recommendation/recommendation.cron'
 import { InterestTagService } from './services/interest-tag.service'
 import { InterestTagSeedService } from './services/interest-tag-seed.service'
-import { EmbeddingNotifyService } from './services/embedding-notify.service'
 import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
 import { RecommendationFriendshipService } from './services/recommendation-friendship.service'
 import { FriendshipRecommendationSubscriber } from './rmq/subscribers/friendship-recommendation.subscriber'
@@ -87,7 +86,6 @@ import { TrainingProcessor } from './background-jobs/training/training.processor
     DatasetBuilderService,
     ModelTrainingService,
     UserSnapshotSyncService,
-    EmbeddingNotifyService,
     UserSnapshotHydrateService,
     RecommendationFriendshipService,
     UserSnapshotSyncSubscriber,

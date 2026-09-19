@@ -1,8 +1,53 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { conversationType } from 'apps/chat/src/generated'
+import { conversationType, type Prisma } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { RedisService } from '@app/redis'
 import { olderThanCursor, type KeysetCursor } from '@app/util'
+
+/**
+ * A conversation as a row of the caller's list, read off their membership.
+ * The DIRECT peer comes from the membership row itself, not from an
+ * `include: { members }`: that include grows with the member count (measured
+ * 2 -> 1.56ms, 500 -> 6.10ms) while these fields keep the query flat (0.85ms)
+ * however big a group is.
+ */
+const LIST_ROW_SELECT = {
+  unreadCount: true,
+  unreadMentionCount: true,
+  lastMentionMessageId: true,
+  lastReadAt: true,
+  lastMessageAt: true,
+  peerUserId: true,
+  peerUsername: true,
+  peerFullName: true,
+  peerAvatar: true,
+  conversation: true,
+} as const
+
+/** What a member row brings to a conversation's detail. */
+const MEMBER_VIEW_SELECT = {
+  userId: true,
+  role: true,
+  username: true,
+  fullName: true,
+  avatar: true,
+  lastReadAt: true,
+  lastReadMessageId: true,
+  lastMessageAt: true,
+  unreadCount: true,
+  unreadMentionCount: true,
+  lastMentionMessageId: true,
+} as const
+
+const toListRow = ({
+  conversation,
+  ...membership
+}: Prisma.conversationMemberGetPayload<{
+  select: typeof LIST_ROW_SELECT
+}>) => ({
+  ...conversation,
+  ...membership,
+})
 
 @Injectable()
 export class ConversationRepository {
@@ -32,24 +77,9 @@ export class ConversationRepository {
         },
       },
       include: {
-        members: {
-          where: this.activeMemberWhere,
-        },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          include: {
-            senderMember: true,
-            poll: true,
-            medias: {
-              orderBy: {
-                sortOrder: 'asc',
-              },
-            },
-          },
-        },
+        members: { where: this.activeMemberWhere, select: MEMBER_VIEW_SELECT },
       },
-    } as any)
+    })
   }
 
   private normalizeString(str: string) {
@@ -86,56 +116,14 @@ export class ConversationRepository {
     })
   }
 
-  async findByIdWithMembers(id: string): Promise<any> {
+  /** A conversation with its active members, as detail views and events need. */
+  async findByIdWithMembers(id: string) {
     return await this.prisma.conversation.findUnique({
       where: { id },
       include: {
-        members: {
-          where: this.activeMemberWhere,
-          select: {
-            userId: true,
-            role: true,
-            username: true,
-            avatar: true,
-            lastReadAt: true,
-            lastReadMessageId: true,
-            fullName: true,
-            lastMessageAt: true,
-            unreadCount: true,
-            unreadMentionCount: true,
-            lastMentionMessageId: true,
-          },
-        },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: {
-            id: true,
-            content: true,
-            type: true,
-            senderId: true,
-            createdAt: true,
-            conversationId: true,
-            replyToMessageId: true,
-            isDeleted: true,
-            poll: true,
-            medias: {
-              orderBy: {
-                sortOrder: 'asc',
-              },
-            },
-            senderMember: {
-              select: {
-                userId: true,
-                username: true,
-                avatar: true,
-                fullName: true,
-              },
-            },
-          },
-        },
+        members: { where: this.activeMemberWhere, select: MEMBER_VIEW_SELECT },
       },
-    } as any)
+    })
   }
 
   async findByUserIdPaginated(
@@ -143,53 +131,51 @@ export class ConversationRepository {
     cursor: KeysetCursor | null,
     take: number,
   ) {
-    const memberships = (await this.prisma.conversationMember.findMany({
+    const memberships = await this.prisma.conversationMember.findMany({
       where: {
         userId,
         ...this.activeMemberWhere,
         // Ordering by lastMessageAt alone dropped every conversation that
         // shared the boundary timestamp — the friendship saga stamps several
         // at once, so this was reachable in normal use.
-        ...olderThanCursor('lastMessageAt', cursor),
+        // Ties break on conversationId: that is the id each row goes out
+        // with, so it is the id the next cursor carries back. Breaking them
+        // on the membership row's own id compared ids from two collections.
+        ...olderThanCursor('lastMessageAt', cursor, 'conversationId'),
       },
-      orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ lastMessageAt: 'desc' }, { conversationId: 'desc' }],
       take,
-      select: {
-        unreadCount: true,
-        unreadMentionCount: true,
-        lastMentionMessageId: true,
-        lastReadAt: true,
-        lastMessageAt: true,
-        // Đối phương của DIRECT lấy từ chính dòng membership này -> KHÔNG cần
-        // `include: { members }`. Include đó tốn tuyến tính theo số thành viên
-        // (đo được: 2 -> 1,56ms, 500 -> 6,10ms), trong khi bốn trường dưới đây
-        // giữ truy vấn phẳng 0,85ms bất kể nhóm to đến đâu. Nhóm không cần dữ
-        // liệu này (hiển thị bằng groupName/groupAvatar), nên nhóm đông không
-        // còn phải trả giá cho một thứ chỉ DIRECT dùng.
-        peerUserId: true,
-        peerUsername: true,
-        peerFullName: true,
-        peerAvatar: true,
-        conversation: true,
-      },
-    } as any)) as any[]
-    const result = memberships.map((membership) => ({
-      ...membership.conversation,
-      unreadCount: membership.unreadCount,
-      unreadMentionCount: membership.unreadMentionCount || 0,
-      lastMentionMessageId: membership.lastMentionMessageId || null,
-      lastReadAt: membership.lastReadAt,
-      lastMessageAt: membership.lastMessageAt,
-      peerUserId: membership.peerUserId ?? null,
-      peerUsername: membership.peerUsername ?? null,
-      peerFullName: membership.peerFullName ?? null,
-      peerAvatar: membership.peerAvatar ?? null,
-    }))
-
-    return result
+      select: LIST_ROW_SELECT,
+    })
+    return memberships.map(toListRow)
   }
 
-  async updateUpdatedAt(
+  /**
+   * The caller's groups whose name starts with `keyword` (accents ignored),
+   * as list rows. Direct conversations are found from the friend list, not
+   * here.
+   */
+  async searchGroups(userId: string, keyword: string) {
+    const memberships = await this.prisma.conversationMember.findMany({
+      where: {
+        userId,
+        ...this.activeMemberWhere,
+        conversation: {
+          is: {
+            type: 'GROUP',
+            groupNameSearch: { startsWith: this.normalizeString(keyword) },
+          },
+        },
+      },
+      orderBy: [{ lastMessageAt: 'desc' }, { conversationId: 'desc' }],
+      take: 20,
+      select: LIST_ROW_SELECT,
+    })
+    return memberships.map(toListRow)
+  }
+
+  /** The last-message snapshot the conversation list shows. */
+  async saveLastMessage(
     conversationId: string,
     data?: {
       lastMessageId?: string | null
@@ -300,202 +286,5 @@ export class ConversationRepository {
 
     // Cuộc trò chuyện đã biến mất -> dọn cache thành viên kèm theo.
     await this.redisService.delMany([`conv:members:${conversationId}`])
-  }
-
-  // async searchByKeyword(userId: string, keyword: string) {
-  //   const memberships = await this.prisma.conversationMember.findMany({
-  //     where: {
-  //       userId,
-  //       conversation: {
-  //         groupName: {
-  //           startsWith: keyword,
-  //           mode: 'insensitive',
-  //         },
-  //       },
-  //     },
-  //     orderBy: { lastMessageAt: 'desc' },
-  //     include: {
-  //       conversation: {
-  //         include: {
-  //           members: true,
-  //           messages: {
-  //             orderBy: { createdAt: 'desc' },
-  //             take: 1,
-  //             include: {
-  //               senderMember: true,
-  //             },
-  //           },
-  //         },
-  //       },
-  //     },
-  //   })
-
-  //   if (!memberships.length) return []
-
-  //   // 👇 Trả về đúng structure như cũ
-  //   return memberships.map((m) => m.conversation)
-  // }
-
-  // async findDirectConversationOfFriend(userId: string, keyword: string) {
-  //   // 1️⃣ Lấy conversationMember của user hiện tại
-  //   const memberships = await this.prisma.conversationMember.findMany({
-  //     where: {
-  //       userId,
-  //       conversation: {
-  //         type: 'DIRECT',
-  //         members: {
-  //           some: {
-  //             NOT: { userId }, // phải là người khác
-  //             username: {
-  //               startsWith: keyword,
-  //               mode: 'insensitive',
-  //             },
-  //           },
-  //         },
-  //       },
-  //     },
-  //     orderBy: { lastMessageAt: 'desc' },
-  //     select: { conversationId: true },
-  //   })
-
-  //   if (!memberships.length) return []
-
-  //   // 2️⃣ Lấy conversation giống searchByKeyword
-  //   const conversations = await this.prisma.conversation.findMany({
-  //     where: {
-  //       id: { in: memberships.map((m) => m.conversationId) },
-  //     },
-  //     include: {
-  //       members: true,
-  //       messages: {
-  //         orderBy: { createdAt: 'desc' },
-  //         take: 1,
-  //         include: {
-  //           senderMember: true,
-  //         },
-  //       },
-  //     },
-  //   })
-
-  //   // 3️⃣ Giữ thứ tự theo membership
-  //   const map = new Map(conversations.map((c) => [c.id, c]))
-  //   const ordered = memberships.map((m) => map.get(m.conversationId))
-
-  //   return ordered
-  // }
-
-  async searchByKeyword(userId: string, keyword: string) {
-    const safeKeyword = this.normalizeString(keyword)
-
-    // BƯỚC 1: Lấy danh sách ID các nhóm mà User đang tham gia (Nhanh như chớp)
-    const myMemberships = await this.prisma.conversationMember.findMany({
-      where: {
-        userId: userId,
-        ...this.activeMemberWhere,
-      },
-      select: { conversationId: true },
-    })
-
-    // Ép mảng object thành mảng String IDs
-    const myConversationIds = myMemberships.map((m) => m.conversationId)
-
-    if (myConversationIds.length === 0) return []
-
-    // BƯỚC 2: Tìm kiếm Conversation bằng toán tử "in" (Bỏ qua hoàn toàn lệnh Join "some")
-    return await this.prisma.conversation.findMany({
-      where: {
-        id: { in: myConversationIds }, // Chỉ tìm trong các nhóm tôi đã tham gia
-        type: 'GROUP',
-        groupNameSearch: {
-          startsWith: safeKeyword, // Ăn thẳng vào Index, cực nhanh
-        },
-      },
-      // Thêm take để chặn đứng việc DB bị quá tải
-      take: 20,
-
-      // Khuyên chân thành: Cắt giảm bớt include nếu UI tìm kiếm không cần thiết
-      include: {
-        members: {
-          where: this.activeMemberWhere,
-        },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          include: {
-            senderMember: true,
-            poll: true,
-            // Thật sự UI lúc search có cần load chi tiết cả Media không?
-            // Nếu không cần, hãy xóa mảng medias này đi để nhẹ DB.
-            medias: { orderBy: { sortOrder: 'asc' } },
-          },
-        },
-      },
-      orderBy: {
-        updatedAt: 'desc',
-      },
-    } as any)
-  }
-
-  async findDirectConversationOfFriend(userId: string, keyword: string) {
-    // 1️⃣ Tìm member KHÁC user match username
-    const matchedMembers = await this.prisma.conversationMember.findMany({
-      where: {
-        ...this.activeMemberWhere,
-        userId: { not: userId },
-        username: {
-          startsWith: keyword,
-          mode: 'insensitive',
-        },
-      },
-      select: { conversationId: true },
-    })
-
-    if (!matchedMembers.length) return []
-
-    const conversationIds = matchedMembers.map((m) => m.conversationId)
-
-    // 2️⃣ Lấy membership của current user trong các conversation đó
-    const memberships = await this.prisma.conversationMember.findMany({
-      where: {
-        userId,
-        ...this.activeMemberWhere,
-        conversationId: { in: conversationIds },
-        conversation: {
-          type: 'DIRECT',
-        },
-      },
-      orderBy: { lastMessageAt: 'desc' },
-      select: { conversationId: true },
-    })
-
-    if (!memberships.length) return []
-
-    // 3️⃣ Lấy conversation giống như cũ
-    const conversations = await this.prisma.conversation.findMany({
-      where: {
-        id: { in: memberships.map((m) => m.conversationId) },
-      },
-      include: {
-        members: {
-          where: this.activeMemberWhere,
-        },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          include: {
-            senderMember: true,
-            poll: true,
-            medias: {
-              orderBy: {
-                sortOrder: 'asc',
-              },
-            },
-          },
-        },
-      },
-    } as any)
-
-    const map = new Map(conversations.map((c) => [c.id, c]))
-    return memberships.map((m) => map.get(m.conversationId))
   }
 }

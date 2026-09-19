@@ -3,7 +3,6 @@ import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
-import { safeExecute } from '@app/common/rpc/safe-execute'
 import { UserService } from '../../user.service'
 
 @Injectable()
@@ -16,7 +15,7 @@ export class MessageSubscriber {
     queue: QUEUE_RMQ.USER_ONLINE,
   })
   async handleUserOnline(data: { userId: string }): Promise<void> {
-    await safeExecute(() => this.userService.handleUserOnline(data.userId))
+    await this.userService.handleUserOnline(data.userId)
   }
 
   @RabbitSubscribeWithRetry({
@@ -25,6 +24,6 @@ export class MessageSubscriber {
     queue: QUEUE_RMQ.USER_OFFLINE,
   })
   async handleUserOffline(data: { userId: string, lastSeen: string }): Promise<void> {
-    await safeExecute(() => this.userService.handleUserOffline(data.userId, data.lastSeen))
+    await this.userService.handleUserOffline(data.userId, data.lastSeen)
   }
 }

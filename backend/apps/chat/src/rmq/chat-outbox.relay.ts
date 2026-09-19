@@ -6,6 +6,6 @@ import { PrismaService } from 'apps/chat/prisma/prisma.service'
 @Injectable()
 export class ChatOutboxRelay extends OutboxRelay {
   constructor(prisma: PrismaService, amqp: AmqpConnection) {
-    super(prisma as any, amqp, { name: 'ChatOutboxRelay' })
+    super(prisma, amqp, { name: 'ChatOutboxRelay' })
   }
 }

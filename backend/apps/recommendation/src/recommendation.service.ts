@@ -5,12 +5,16 @@ import { QdrantService } from '@app/qdrant/qdrant.service'
 import { UtilService } from '@app/util/util.service'
 import { RedisService } from '@app/redis/redis.service'
 import { UserSnapshotHydrateService } from './services/user-snapshot-hydrate.service'
-import { RecommendationFriendshipService } from './services/recommendation-friendship.service'
 import { FriendGraphService } from './services/friend-graph.service'
 import { EmbeddingService } from './services/embedding.service'
-import { FeatureService } from './services/feature.service'
-import { GbRankerService } from './services/gb-ranker.service'
+import { FeatureService, SAFE_FEATURES } from './services/feature.service'
+import {
+  GbRankerService,
+  type RankedCandidate,
+  type RankingCandidateInput,
+} from './services/gb-ranker.service'
 import * as _ from 'lodash'
+import { toGeoPoint } from '@app/util'
 
 type NearbyUser = {
   userId: string
@@ -33,28 +37,16 @@ type MutualFriendPreview = {
   avatar: string | null
 }
 
+/** A suggested friend, as GET /recommendation/me returns it. */
+export type SuggestedFriend = MutualFriendPreview & {
+  mutualFriends: { count: number; preview: MutualFriendPreview[] }
+}
+
 /** How many mutual friends each card shows as avatars. */
 const MUTUAL_FRIEND_PREVIEW = 2
 
-type RecommendationFeatureRow = {
-  candidateId: string
-  score?: number
-  jaccard?: number
-  cosine_graph?: number
-  adamic_adar?: number
-  pref_attach?: number
-  deg_u?: number
-  deg_v?: number
-  dist_km?: number
-  dist_bucket?: number
-  bio_cosine?: number
-  bio_dot?: number
-  bio_l2?: number
-  same_cluster?: number
-  group_inter?: number
-  group_jaccard?: number
-  same_group?: number
-}
+/** A stored suggestion: the candidate, its score and the features behind it. */
+type RecommendationFeatureRow = RankingCandidateInput & { score?: number }
 
 @Injectable()
 export class RecommendationService {
@@ -69,7 +61,6 @@ export class RecommendationService {
     private readonly featureService: FeatureService,
     private readonly gbRankerService: GbRankerService,
     private readonly userSnapshotHydrate: UserSnapshotHydrateService,
-    private readonly recommendationFriendship: RecommendationFriendshipService,
     private readonly friendGraph: FriendGraphService,
     private readonly dirty: RecommendationDirtyService,
   ) {}
@@ -107,38 +98,6 @@ export class RecommendationService {
 
     const union = currentTokens.size + candidateTokens.size - intersection
     return union > 0 ? intersection / union : 0
-  }
-
-  private getCoordinates(location: unknown): [number, number] | null {
-    const coordinates = (location as { coordinates?: unknown })?.coordinates
-    if (!Array.isArray(coordinates) || coordinates.length < 2) {
-      return null
-    }
-
-    const lng = Number(coordinates[0])
-    const lat = Number(coordinates[1])
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-      return null
-    }
-    return [lng, lat]
-  }
-
-  /** GeoJSON Point for $geoNear — supports legacy `{ lat, lon }` snapshots. */
-  private toGeoNearNearField(location: unknown): {
-    type: 'Point'
-    coordinates: [number, number]
-  } | null {
-    const fromCoordinates = this.getCoordinates(location)
-    if (fromCoordinates) {
-      return { type: 'Point', coordinates: fromCoordinates }
-    }
-    const lo = location as { lat?: unknown; lon?: unknown } | null
-    const lat = typeof lo?.lat === 'number' ? lo.lat : Number(lo?.lat)
-    const lon = typeof lo?.lon === 'number' ? lo.lon : Number(lo?.lon)
-    if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      return { type: 'Point', coordinates: [lon, lat] }
-    }
-    return null
   }
 
   private computeInterestJaccard(a: string[], b: string[]): number {
@@ -312,16 +271,6 @@ export class RecommendationService {
     return rows.filter((r) => !exclude.has(String(r.candidateId ?? '')))
   }
 
-  private async requestEmbedAndSave(
-    userId: string,
-    bio: string,
-  ): Promise<boolean> {
-    const result = await this.embeddingService.embedAndSave([
-      { id: userId, bio: bio || '', age: 0 },
-    ])
-    return result.status === 'ok'
-  }
-
   private async fetchTopInterestOverlapUserIds(
     excludeIds: string[],
     interestSlugs: string[],
@@ -366,73 +315,19 @@ export class RecommendationService {
     }
   }
 
-  private buildHeuristicCandidateRow(
-    candidateId: string,
-    score: number,
-    profile: {
-      userId: string
-      username: string
-      fullName: string
-      avatar: string | null
-      bio: string | null
-      location: unknown
-      isActive: boolean
-      lastSeen: Date | null
-    },
-  ) {
-    return {
-      candidateId,
-      score,
-      jaccard: 0,
-      cosine_graph: 0,
-      adamic_adar: 0,
-      pref_attach: 0,
-      deg_u: 0,
-      deg_v: 0,
-      dist_km: 0,
-      dist_bucket: 0,
-      bio_cosine: 0,
-      bio_dot: 0,
-      bio_l2: 0,
-      same_cluster: 0,
-      group_inter: 0,
-      group_jaccard: 0,
-      same_group: 0,
-      profile: {
-        userId: profile.userId,
-        username: profile.username,
-        fullName: profile.fullName,
-        avatar: profile.avatar,
-        bio: profile.bio,
-        location: profile.location,
-        isActive: profile.isActive,
-        lastSeen: profile.lastSeen,
-      },
-    }
-  }
-
   /**
    * Read-time cold start when there is no stored recommendation list.
    * Pool = 3 Qdrant (similar bio) + 3 $geoNear + 3 best interest overlap, de-duplicated. No Python GB model.
    */
   private async getLiveHeuristicColdStartRecommendations(
     userId: string,
-  ): Promise<any[]> {
+  ): Promise<string[]> {
     await this.userSnapshotHydrate.ensureUserSnapshot(userId)
     await this.userSnapshotHydrate.hydratePeerSnapshotsIfNeeded(1)
 
     const me = await this.prisma.userSnapshot.findUnique({
       where: { userId },
-      select: {
-        bio: true,
-        location: true,
-        interests: true,
-        username: true,
-        fullName: true,
-        avatar: true,
-        isActive: true,
-        lastSeen: true,
-      },
+      select: { bio: true, location: true, interests: true },
     })
     if (!me) return []
 
@@ -446,7 +341,7 @@ export class RecommendationService {
       let rows = await this.qdrantService.getVectorsBatch([qid])
       let vec = this.extractDenseVector(rows[0]?.vector)
       if (!vec || !vec.length) {
-        await this.requestEmbedAndSave(userId, me.bio ?? '')
+        await this.embeddingService.embedBio(userId, me.bio ?? '')
         rows = await this.qdrantService.getVectorsBatch([qid])
         vec = this.extractDenseVector(rows[0]?.vector)
       }
@@ -466,7 +361,7 @@ export class RecommendationService {
       }
     }
 
-    const nearPoint = this.toGeoNearNearField(me.location)
+    const nearPoint = toGeoPoint(me.location)
     let fromGeo: string[] = []
     if (nearPoint) {
       fromGeo = await this.fetchColdStartGeoRing(excludeIds, nearPoint, k)
@@ -493,38 +388,7 @@ export class RecommendationService {
       mergedIds = fallback.map((r) => r.userId)
     }
 
-    if (!mergedIds.length) return []
-
-    const profiles = await this.prisma.userSnapshot.findMany({
-      where: { userId: { in: mergedIds } },
-      select: {
-        userId: true,
-        username: true,
-        fullName: true,
-        avatar: true,
-        bio: true,
-        location: true,
-        isActive: true,
-        lastSeen: true,
-      },
-    })
-    const byId = new Map(profiles.map((p) => [p.userId, p]))
-
-    const out: any[] = []
-    let rank = 0
-    for (const id of mergedIds) {
-      const profile = byId.get(id)
-      if (!profile) continue
-      rank += 1
-      out.push(
-        this.buildHeuristicCandidateRow(
-          profile.userId,
-          1 - rank * 0.01,
-          profile,
-        ),
-      )
-    }
-    return out
+    return mergedIds
   }
 
   private toStoredScore(score: unknown): number {
@@ -539,233 +403,125 @@ export class RecommendationService {
     )
   }
 
-  async getRecommendationForUser(userId: string) {
+  /**
+   * The suggestions to show `userId`, best first: the stored list (rebuilt
+   * nightly), or — when there is none yet — a quick heuristic one that is
+   * stored in its place. Friends are left out; the stored row is written back
+   * only when that actually removed someone.
+   */
+  async getRecommendationForUser(userId: string): Promise<SuggestedFriend[]> {
     const friendIds = await this.getFriendIdsExclusive(userId)
-    await this.recommendationFriendship.stripFriendsFromStoredRecommendations(
-      userId,
+    const exclude = new Set([userId, ...friendIds])
+
+    const stored = await this.prisma.recommendationResult.findUnique({
+      where: { userId },
+      select: { candidates: true },
+    })
+    const storedRows = Array.isArray(stored?.candidates)
+      ? (stored.candidates as RecommendationFeatureRow[])
+      : []
+    const visibleRows = storedRows.filter(
+      (row) => typeof row?.candidateId === 'string' && !exclude.has(row.candidateId),
+    )
+    if (stored && visibleRows.length !== storedRows.length) {
+      await this.prisma.recommendationResult.update({
+        where: { userId },
+        data: { candidates: visibleRows, topK: visibleRows.length },
+      })
+    }
+
+    let suggestions = await this.toSuggestedFriends(
+      visibleRows.map((row) => row.candidateId),
       friendIds,
     )
-
-    const response = await this.readRecommendationList(userId, friendIds)
-    return {
-      ...response,
-      candidates: await this.withMutualFriends(response.candidates, friendIds),
+    if (suggestions.length === 0) {
+      const liveIds = (
+        await this.getLiveHeuristicColdStartRecommendations(userId)
+      ).filter((id) => !exclude.has(id))
+      if (liveIds.length > 0) {
+        await this.storeList(
+          userId,
+          liveIds.map((candidateId, rank) => ({
+            candidateId,
+            score: 1 - (rank + 1) * 0.01,
+          })),
+          [],
+        )
+        suggestions = await this.toSuggestedFriends(liveIds, friendIds)
+      }
     }
+    return suggestions
   }
 
   /**
-   * Who the viewer and each candidate both know: how many, plus the first few
-   * (those with a photo first) for the stacked avatars on the card. Read live
-   * rather than stored with the list, because friendships change during the
-   * day while the list itself is only rebuilt nightly.
+   * Candidates as the client shows them: name, avatar and the friends they
+   * share with the viewer — nothing else. The stored rows also hold the
+   * ranking features and the snapshot has bio and exact location; none of
+   * that leaves the service. Mutual friends are read live, as friendships
+   * change during the day while the list is rebuilt only nightly.
    */
-  private async withMutualFriends<T extends { candidateId: string }>(
-    candidates: T[],
-    friendIds: string[],
-  ) {
-    const empty = { count: 0, preview: [] as MutualFriendPreview[] }
-    let mutualIds = new Map<string, string[]>()
-    try {
-      mutualIds = await this.friendGraph.getMutualFriendIds(
-        friendIds,
-        candidates.map((candidate) => candidate.candidateId),
-      )
-    } catch (e) {
-      // The list is still useful without the "N mutual friends" line.
-      this.logger.warn('[recommendation] mutual friends failed', e)
-    }
-    if (!mutualIds.size) {
-      return candidates.map((candidate) => ({ ...candidate, mutualFriends: empty }))
-    }
+  private async toSuggestedFriends(
+    candidateIds: string[],
+    viewerFriendIds: string[],
+  ): Promise<SuggestedFriend[]> {
+    if (candidateIds.length === 0) return []
 
-    const allIds = Array.from(new Set(Array.from(mutualIds.values()).flat()))
-    const people = await this.prisma.userSnapshot.findMany({
-      where: { userId: { in: allIds } },
-      select: { userId: true, username: true, fullName: true, avatar: true },
-    })
+    const [profiles, mutualIds] = await Promise.all([
+      this.prisma.userSnapshot.findMany({
+        where: { userId: { in: candidateIds } },
+        select: { userId: true, username: true, fullName: true, avatar: true },
+      }),
+      this.friendGraph
+        .getMutualFriendIds(viewerFriendIds, candidateIds)
+        .catch((e) => {
+          // The list is still useful without the "N mutual friends" line.
+          this.logger.warn('[recommendation] mutual friends failed', e)
+          return new Map<string, string[]>()
+        }),
+    ])
+
+    const previewIds = [...new Set([...mutualIds.values()].flat())]
+    const people = previewIds.length
+      ? await this.prisma.userSnapshot.findMany({
+          where: { userId: { in: previewIds } },
+          select: { userId: true, username: true, fullName: true, avatar: true },
+        })
+      : []
     const personById = new Map(people.map((person) => [person.userId, person]))
+    const profileById = new Map(profiles.map((profile) => [profile.userId, profile]))
 
-    return candidates.map((candidate) => {
-      const ids = mutualIds.get(candidate.candidateId) ?? []
+    return candidateIds.flatMap((candidateId) => {
+      const profile = profileById.get(candidateId)
+      if (!profile) return []
+      const ids = mutualIds.get(candidateId) ?? []
       const preview = ids
         .map((id) => personById.get(id))
         .filter((person): person is MutualFriendPreview => Boolean(person))
+        // Photos first: the stacked avatars look empty without them.
         .sort((a, b) => Number(Boolean(b.avatar)) - Number(Boolean(a.avatar)))
         .slice(0, MUTUAL_FRIEND_PREVIEW)
-      return { ...candidate, mutualFriends: { count: ids.length, preview } }
+      return [{ ...profile, mutualFriends: { count: ids.length, preview } }]
     })
   }
 
-  private async readRecommendationList(userId: string, friendIds: string[]) {
-
-    const result = await this.prisma.recommendationResult.findUnique({
+  /** Save `userId`'s list (and, from the nightly run, its features for audit). */
+  private async storeList(
+    userId: string,
+    candidates: RecommendationFeatureRow[],
+    features: unknown[],
+  ) {
+    const data = {
+      topK: candidates.length,
+      candidates: candidates as object[],
+      features: features as object[],
+      dayVersion: this.getDayVersion(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    }
+    await this.prisma.recommendationResult.upsert({
       where: { userId },
+      create: { userId, ...data },
+      update: data,
     })
-
-    let storedCandidates = Array.isArray(result?.candidates)
-      ? (result!.candidates as RecommendationFeatureRow[])
-      : []
-    storedCandidates = this.filterCandidatesExcludingFriends(
-      storedCandidates,
-      friendIds,
-    )
-
-    const candidateIds = storedCandidates
-      .map((candidate) => candidate?.candidateId)
-      .filter(
-        (candidateId): candidateId is string => typeof candidateId === 'string',
-      )
-
-    const noStoredList = !result || candidateIds.length === 0
-
-    if (noStoredList) {
-      const live = this.filterCandidatesExcludingFriends(
-        await this.getLiveHeuristicColdStartRecommendations(userId),
-        friendIds,
-      )
-      if (live.length > 0) {
-        const now = new Date()
-        const dayVersion = this.getDayVersion()
-        const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-        await this.prisma.recommendationResult.upsert({
-          where: { userId },
-          create: {
-            userId,
-            topK: live.length,
-            candidates: live,
-            features: [],
-            dayVersion,
-            expiresAt,
-          },
-          update: {
-            topK: live.length,
-            candidates: live,
-            features: [],
-            dayVersion,
-            expiresAt,
-          },
-        })
-        return {
-          status: 'ok',
-          source: 'live_heuristic',
-          userId,
-          topK: live.length,
-          dayVersion,
-          expiresAt,
-          createdAt: now,
-          updatedAt: now,
-          candidates: live,
-        }
-      }
-    }
-
-    if (!result) {
-      return {
-        status: 'empty',
-        userId,
-        topK: 0,
-        dayVersion: this.getDayVersion(),
-        candidates: [],
-      }
-    }
-
-    const candidates = storedCandidates
-
-    const profiles = await this.prisma.userSnapshot.findMany({
-      where: { userId: { in: candidateIds } },
-      select: {
-        userId: true,
-        username: true,
-        fullName: true,
-        avatar: true,
-        bio: true,
-        location: true,
-        isActive: true,
-        lastSeen: true,
-      },
-    })
-
-    const profileByUserId = new Map(
-      profiles.map((profile) => [profile.userId, profile]),
-    )
-
-    const enriched = candidates
-      .map((candidate) => {
-        const profile = profileByUserId.get(candidate.candidateId)
-        if (!profile) return null
-
-        return {
-          ...candidate,
-          profile: {
-            userId: profile.userId,
-            username: profile.username,
-            fullName: profile.fullName,
-            avatar: profile.avatar,
-            bio: profile.bio,
-            location: profile.location,
-            isActive: profile.isActive,
-            lastSeen: profile.lastSeen,
-          },
-        }
-      })
-      .filter(
-        (candidate): candidate is NonNullable<typeof candidate> =>
-          candidate !== null,
-      )
-
-    if (enriched.length === 0) {
-      const live = this.filterCandidatesExcludingFriends(
-        await this.getLiveHeuristicColdStartRecommendations(userId),
-        friendIds,
-      )
-      if (live.length > 0) {
-        const now = new Date()
-        const dayVersion = this.getDayVersion()
-        const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-        await this.prisma.recommendationResult.upsert({
-          where: { userId },
-          create: {
-            userId,
-            topK: live.length,
-            candidates: live,
-            features: [],
-            dayVersion,
-            expiresAt,
-          },
-          update: {
-            topK: live.length,
-            candidates: live,
-            features: [],
-            dayVersion,
-            expiresAt,
-          },
-        })
-        return {
-          status: 'ok',
-          source: 'live_heuristic',
-          userId,
-          topK: live.length,
-          dayVersion,
-          expiresAt,
-          createdAt: now,
-          updatedAt: now,
-          candidates: live,
-        }
-      }
-    }
-
-    const visible = this.filterCandidatesExcludingFriends(enriched, friendIds)
-
-    return {
-      status: 'ok',
-      userId,
-      topK: visible.length,
-      dayVersion: result.dayVersion,
-      expiresAt: result.expiresAt,
-      createdAt: result.createdAt,
-      updatedAt: result.updatedAt,
-      candidates: visible,
-    }
   }
 
   /**
@@ -855,7 +611,7 @@ export class RecommendationService {
     const friendCountExclusive = friendIds.length
     const uniqueExcludeIds = Array.from(new Set([...friendIds, userId]))
 
-    const qdrantUuid = await this.utilService.mongoIdToUuid(userId)
+    const qdrantUuid = this.utilService.mongoIdToUuid(userId)
 
     const settled = await Promise.allSettled([
       this.friendGraph.getCommonFriends(userId, 300),
@@ -896,7 +652,7 @@ export class RecommendationService {
       )
     }
 
-    const nearPoint = this.toGeoNearNearField(currentUser?.location)
+    const nearPoint = toGeoPoint(currentUser?.location)
     let suggestBasedOnNearby: Array<NearbyUser> = []
 
     if (nearPoint) {
@@ -974,26 +730,19 @@ export class RecommendationService {
     const allCandidateIds = orderedCandidateIds
 
     // Giai đoạn 6.5: Lấy bio embedding vectors từ Qdrant
-    const userIdsForBioVectors = [userId, ...allCandidateIds]
-    const qdrantUserUuids: string[] = []
-    for (const id of userIdsForBioVectors) {
-      try {
-        const uuid = await this.utilService.mongoIdToUuid(id)
-        qdrantUserUuids.push(uuid)
-      } catch {
-        // Skip if conversion fails
-      }
-    }
-
-    // Map UUID -> MongoDB ID
-    const uuidToMongoId = new Map<string, string>()
-    for (let i = 0; i < userIdsForBioVectors.length; i++) {
-      uuidToMongoId.set(qdrantUserUuids[i], userIdsForBioVectors[i])
-    }
+    // Qdrant point ids are UUIDs derived from the Mongo ids.
+    const uuidToMongoId = new Map(
+      [userId, ...allCandidateIds].map((id) => [
+        this.utilService.mongoIdToUuid(id),
+        id,
+      ]),
+    )
 
     let vectorPoints: any[] = []
     try {
-      vectorPoints = await this.qdrantService.getVectorsBatch(qdrantUserUuids)
+      vectorPoints = await this.qdrantService.getVectorsBatch([
+        ...uuidToMongoId.keys(),
+      ])
     } catch (e) {
       this.logger.warn('[recommendation] getVectorsBatch failed', e)
     }
@@ -1106,9 +855,6 @@ export class RecommendationService {
     )
 
     const currentUserBio = currentUser?.bio ?? null
-    const currentUserCoordinates = this.featureService.getLngLatPair(
-      currentUser?.location,
-    )
     const currentUserInterests = currentUser?.interests ?? []
 
     this.logger.debug(
@@ -1143,101 +889,38 @@ export class RecommendationService {
       )
       const qdrantScore = qdrantScoreById.get(candidateId) ?? 0
 
-      const candidateCoordinates = this.featureService.getLngLatPair(
-        candidateProfile?.location,
-      )
       const interestJaccard = this.computeInterestJaccard(
         currentUserInterests,
         candidateProfile?.interests ?? [],
       )
-      const distanceKm =
-        currentUserCoordinates && candidateCoordinates
-          ? this.featureService.haversineDistanceKm(
-              currentUserCoordinates,
-              candidateCoordinates,
-            )
-          : 0
 
-      // Graph Features
-      const candidateNeighbors = neighborsByUserId.get(candidateId) ?? new Set()
-      const degreeU = this.featureService.computeDegree(currentUserNeighbors)
-      const degreeV = this.featureService.computeDegree(candidateNeighbors)
-      const jaccard = this.featureService.computeJaccard(
-        currentUserNeighbors,
-        candidateNeighbors,
-      )
-      const cosineGraph = this.featureService.computeCosineGraph(
-        currentUserNeighbors,
-        candidateNeighbors,
-      )
-      const adamicAdar = this.featureService.computeAdamicAdar(
-        currentUserNeighbors,
-        candidateNeighbors,
-        degreesByUserId,
-      )
-      const prefAttach = this.featureService.computePreferentialAttachment(
-        currentUserNeighbors,
-        candidateNeighbors,
-      )
+      // The very function the training set is built with (dataset-builder):
+      // a hand-copied version here had drifted — a missing location scored as
+      // distance 0, "right next door", where training had used -1.
+      const features = this.featureService.computePairFeatures({
+        neighU: currentUserNeighbors,
+        neighV: neighborsByUserId.get(candidateId) ?? new Set(),
+        degrees: degreesByUserId,
+        bioU: currentUserBioVector,
+        bioV: bioVectorsByUserId.get(candidateId) ?? null,
+        locationU: currentUser?.location,
+        locationV: candidateProfile?.location,
+        groupsU: groupsByUserId.get(userId) ?? new Set(),
+        groupsV: groupsByUserId.get(candidateId) ?? new Set(),
+      })
 
-      // Bio Embedding Features
-      const candidateBioVector = bioVectorsByUserId.get(candidateId) ?? null
-      const bioCosine = this.featureService.computeBioCosine(
-        currentUserBioVector,
-        candidateBioVector,
-      )
-      const bioDot = this.featureService.computeBioDot(
-        currentUserBioVector,
-        candidateBioVector,
-      )
-      const bioL2 = this.featureService.computeBioL2(
-        currentUserBioVector,
-        candidateBioVector,
-      )
-
-      // Distance & Community Features
-      const distanceBucket = this.featureService.computeDistanceBucket(distanceKm)
-      const currentUserGroups = groupsByUserId.get(userId) ?? new Set()
-      const candidateGroups = groupsByUserId.get(candidateId) ?? new Set()
-      const sameGroup = this.featureService.computeSameGroup(
-        currentUserGroups,
-        candidateGroups,
-      )
-      const groupInter = this.featureService.computeGroupIntersection(
-        currentUserGroups,
-        candidateGroups,
-      )
-      const groupJaccard = this.featureService.computeGroupJaccard(
-        currentUserGroups,
-        candidateGroups,
-      )
-
-      const vecSignal = Math.max(bioCosine, Math.min(1, qdrantScore))
+      const vecSignal = Math.max(features.bio_cosine, Math.min(1, qdrantScore))
       const coldPrior = this.computeColdStartPrior({
         interestJaccard,
         bioTokenSim: bioSimilarity,
-        distKm: distanceKm,
+        distKm: features.dist_km,
         vecSignal,
       })
       coldPriorById.set(candidateId, coldPrior)
 
       map.set(candidateId, {
         candidateId,
-        jaccard,
-        cosine_graph: cosineGraph,
-        adamic_adar: adamicAdar,
-        pref_attach: prefAttach,
-        deg_u: degreeU,
-        deg_v: degreeV,
-        dist_km: distanceKm,
-        dist_bucket: distanceBucket,
-        bio_cosine: bioCosine,
-        bio_dot: bioDot,
-        bio_l2: bioL2,
-        same_cluster: 0,
-        group_inter: groupInter,
-        group_jaccard: groupJaccard,
-        same_group: sameGroup,
+        ...features,
         interest_jaccard: interestJaccard,
         cold_prior: coldPrior,
       })
@@ -1261,25 +944,12 @@ export class RecommendationService {
       Array.from(map.values()),
     )
       .map((c) => stripColdMeta(c as Record<string, unknown>))
+      // Only candidates with every feature the model reads.
       .filter(
-        (candidate) =>
+        (candidate): candidate is RankingCandidateInput =>
           typeof candidate?.candidateId === 'string' &&
-          Number.isFinite(Number(candidate?.jaccard)) &&
-          Number.isFinite(Number(candidate?.cosine_graph)) &&
-          Number.isFinite(Number(candidate?.adamic_adar)) &&
-          Number.isFinite(Number(candidate?.pref_attach)) &&
-          Number.isFinite(Number(candidate?.deg_u)) &&
-          Number.isFinite(Number(candidate?.deg_v)) &&
-          Number.isFinite(Number(candidate?.dist_km)) &&
-          Number.isFinite(Number(candidate?.dist_bucket)) &&
-          Number.isFinite(Number(candidate?.bio_cosine)) &&
-          Number.isFinite(Number(candidate?.bio_dot)) &&
-          Number.isFinite(Number(candidate?.bio_l2)) &&
-          Number.isFinite(Number(candidate?.same_cluster)) &&
-          Number.isFinite(Number(candidate?.group_inter)) &&
-          Number.isFinite(Number(candidate?.group_jaccard)) &&
-          Number.isFinite(Number(candidate?.same_group)),
-      ) as any
+          SAFE_FEATURES.every((name) => Number.isFinite(Number(candidate[name]))),
+      )
 
     let topKCandidates =
       await this.gbRankerService.predictTop100(candidatesForPython)
@@ -1287,7 +957,7 @@ export class RecommendationService {
     const priorValues = Array.from(coldPriorById.values())
     const maxColdPrior = Math.max(1e-9, ...priorValues)
 
-    const blendWithColdPrior = (rows: any[]): any[] => {
+    const blendWithColdPrior = (rows: RankedCandidate[]): RankedCandidate[] => {
       if (!rows.length || !coldPriorById.size) return rows
       const alphaModel = coldStart ? 0.44 : 0.86
       return [...rows]
@@ -1310,7 +980,7 @@ export class RecommendationService {
 
     if (!topKCandidates.length && candidatesForPython.length) {
       topKCandidates = [...candidatesForPython]
-        .map((c: any) => ({
+        .map((c) => ({
           ...c,
           score: (coldPriorById.get(String(c.candidateId)) ?? 0) / maxColdPrior,
         }))
@@ -1327,32 +997,14 @@ export class RecommendationService {
       latestFriendIds,
     ).slice(0, 100)
 
-    const dayVersion = this.getDayVersion()
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
-
-    const featuresForAudit = this.filterCandidatesExcludingFriends(
-      Array.from(map.values()),
-      latestFriendIds,
+    await this.storeList(
+      userId,
+      topKCandidates,
+      this.filterCandidatesExcludingFriends(
+        Array.from(map.values()),
+        latestFriendIds,
+      ),
     )
-
-    await this.prisma.recommendationResult.upsert({
-      where: { userId },
-      create: {
-        userId,
-        topK: topKCandidates.length,
-        candidates: topKCandidates,
-        features: featuresForAudit,
-        dayVersion,
-        expiresAt,
-      },
-      update: {
-        topK: topKCandidates.length,
-        candidates: topKCandidates,
-        features: featuresForAudit,
-        dayVersion,
-        expiresAt,
-      },
-    })
 
     return topKCandidates
   }

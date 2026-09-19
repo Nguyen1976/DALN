@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common'
 import { RealtimeGatewayController } from './realtime-gateway.controller'
-import { RealtimeGatewayService } from './realtime-gateway.service'
 import { RealtimeGateway } from './realtime/realtime.gateway'
 import { RedisModule } from '@app/redis'
 import { CommonModule } from '@app/common'
@@ -31,6 +30,6 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
     CommonModule,
   ],
   controllers: [RealtimeGatewayController],
-  providers: [RealtimeGatewayService, RealtimeGateway],
+  providers: [RealtimeGateway],
 })
 export class RealtimeGatewayModule {}

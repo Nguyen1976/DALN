@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { useLocation } from "react-router";
 import {
   applyConversationUpdate,
   selectConversationById,
-  type Conversation,
 } from "@/redux/slices/conversationSlice";
 import { selectTypingUsersInConversation } from "@/redux/slices/typingIndicatorSlice";
 import {
@@ -15,11 +13,11 @@ import { selectUser } from "@/redux/slices/userSlice";
 import { getConversationByIdAPI } from "@/apis";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import type { AppDispatch, RootState } from "@/redux/store";
+import { displayNameOf } from "@/utils/displayName";
 
 export function useChatConversationContext(conversationId?: string) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const dispatch = useDispatch<AppDispatch>();
-  const location = useLocation();
   const user = useSelector(selectUser);
   const hydratedConversationRef = useRef<string | null>(null);
 
@@ -27,39 +25,30 @@ export function useChatConversationContext(conversationId?: string) {
     conversationId ? selectConversationById(state, conversationId) : undefined,
   );
 
-  const pendingConversation = (
-    location.state as { conversation?: Conversation } | null
-  )?.conversation;
-
-  const fallbackConversation =
-    pendingConversation?.id === conversationId ? pendingConversation : undefined;
-
-  const effectiveConversation = conversation || fallbackConversation;
-  const canSendMessage = effectiveConversation?.canSendMessage !== false;
-  const membershipStatus = effectiveConversation?.membershipStatus || "ACTIVE";
+  // Until the conversation has loaded, nothing says otherwise.
+  const canSendMessage = conversation?.canSendMessage ?? true;
+  const membershipStatus = conversation?.membershipStatus ?? "ACTIVE";
   const canLoadMessages = membershipStatus === "ACTIVE";
 
-  const conversationName = effectiveConversation?.displayName || "Trò chuyện";
-  const conversationAvatar = effectiveConversation?.displayAvatar || "";
+  const conversationName = conversation?.displayName || "Trò chuyện";
+  const conversationAvatar = conversation?.displayAvatar || "";
 
   const typingUsers = useSelector((state: RootState) =>
     selectTypingUsersInConversation(state, conversationId || ""),
   );
 
-  const allSeenStatus = useSelector((state: RootState) =>
-    conversationId
-      ? selectConversationSeenStatus(state, conversationId)
-      : selectConversationSeenStatus(state, ""),
+  const readMarks = useSelector((state: RootState) =>
+    selectConversationSeenStatus(state, conversationId ?? ""),
   );
 
-  const conversationMembers = effectiveConversation?.members || [];
+  const conversationMembers = conversation?.members || [];
 
   const memberNamesMap = useMemo(
     () =>
       new Map(
         conversationMembers.map((member) => [
           member.userId,
-          member.username || member.fullName || "Unknown",
+          displayNameOf(member) || "Unknown",
         ]),
       ),
     [conversationMembers],
@@ -84,22 +73,21 @@ export function useChatConversationContext(conversationId?: string) {
     [memberNamesMap, typingUsers, user.id],
   );
 
+  /** Who has read up to each message, for the receipts under it. */
   const seenMessages = useMemo(() => {
     const result: Record<
       string,
       { userId: string; username?: string; avatar?: string }[]
     > = {};
-
-    Object.entries(allSeenStatus).forEach(([messageId, seenUsers]) => {
-      result[messageId] = seenUsers.map((seen) => ({
-        userId: seen.userId,
-        username: memberNamesMap.get(seen.userId),
-        avatar: memberAvatarMap.get(seen.userId),
-      }));
-    });
-
+    for (const [userId, messageId] of Object.entries(readMarks)) {
+      (result[messageId] ??= []).push({
+        userId,
+        username: memberNamesMap.get(userId),
+        avatar: memberAvatarMap.get(userId),
+      });
+    }
     return result;
-  }, [allSeenStatus, memberAvatarMap, memberNamesMap]);
+  }, [readMarks, memberAvatarMap, memberNamesMap]);
 
   const hydratedSeenRef = useRef<string>("");
 
@@ -128,7 +116,7 @@ export function useChatConversationContext(conversationId?: string) {
 
   useEffect(() => {
     if (!conversationId) return;
-    if (effectiveConversation?.members?.length) return;
+    if (conversation?.members?.length) return;
     if (hydratedConversationRef.current === conversationId) return;
 
     hydratedConversationRef.current = conversationId;
@@ -136,15 +124,9 @@ export function useChatConversationContext(conversationId?: string) {
 
     void (async () => {
       try {
-        const response = await getConversationByIdAPI(conversationId);
-        if (!response?.conversation) return;
-
+        const conversation = await getConversationByIdAPI(conversationId);
         setLoadError(null);
-        dispatch(
-          applyConversationUpdate({
-            conversation: response.conversation as Conversation,
-          }),
-        );
+        dispatch(applyConversationUpdate({ conversation }));
       } catch (error) {
         hydratedConversationRef.current = null;
         // Swallowing this left the user staring at "Chọn một cuộc trò chuyện",
@@ -158,12 +140,11 @@ export function useChatConversationContext(conversationId?: string) {
         );
       }
     })();
-  }, [conversationId, dispatch, effectiveConversation?.members?.length]);
+  }, [conversationId, dispatch, conversation?.members?.length]);
 
   return {
     user,
     conversation,
-    effectiveConversation,
     canSendMessage,
     membershipStatus,
     canLoadMessages,

@@ -1,15 +1,13 @@
 import { HttpException, Injectable, Logger } from '@nestjs/common'
-import { ChatService } from '../../chat.service'
+import { ConversationService, MessageService } from '../../services'
 import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
-import { safeExecute } from '@app/common/rpc/safe-execute'
 import type {
   CallEndedPayload,
   MessageSendPayload,
   UserUpdatedPayload,
-  UserUpdateStatusMakeFriendPayload,
   UpdateMessageReadPayload,
 } from 'libs/constant/rmq/payload'
 import { ChatEventsPublisher } from '../publishers/chat-events.publisher'
@@ -18,28 +16,13 @@ import { ChatEventsPublisher } from '../publishers/chat-events.publisher'
 export class MessageSubscriber {
   private readonly logger = new Logger(MessageSubscriber.name)
 
+  // The conversation for a new friendship is created by the saga
+  // (ChatSagaSubscriber.createConversation), with outbox and compensation.
   constructor(
-    private readonly chatService: ChatService,
+    private readonly conversations: ConversationService,
+    private readonly messages: MessageService,
     private readonly chatEventsPublisher: ChatEventsPublisher,
   ) {}
-
-  // NOTE: Việc tạo conversation khi accept friend đã được chuyển sang
-  // saga orchestration (ChatSagaSubscriber.createConversation) để có outbox +
-  // idempotency + compensation. Subscriber choreography cũ được vô hiệu hoá để
-  // tránh tạo conversation trùng.
-  //
-  // @RabbitSubscribeWithRetry({
-  //   exchange: EXCHANGE_RMQ.USER_EVENTS,
-  //   routingKey: ROUTING_RMQ.USER_UPDATE_STATUS_MAKE_FRIEND,
-  //   queue: QUEUE_RMQ.CHAT_USER_UPDATE_STATUS_MAKE_FRIEND,
-  // })
-  // async createConversationWhenAcceptFriend(
-  //   data: UserUpdateStatusMakeFriendPayload,
-  // ): Promise<void> {
-  //   await safeExecute(() =>
-  //     this.chatService.createConversationWhenAcceptFriend(data),
-  //   )
-  // }
 
   @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,
@@ -47,7 +30,7 @@ export class MessageSubscriber {
     queue: QUEUE_RMQ.CHAT_USER_UPDATED,
   })
   async handleUserUpdated(data: UserUpdatedPayload): Promise<void> {
-    await safeExecute(() => this.chatService.handleUserUpdated(data))
+    await this.conversations.handleUserUpdated(data)
   }
 
   @RabbitSubscribeWithRetry({
@@ -56,7 +39,7 @@ export class MessageSubscriber {
     queue: QUEUE_RMQ.CHAT_CALL_ENDED,
   })
   async recordCallOutcome(data: CallEndedPayload): Promise<void> {
-    await safeExecute(() => this.chatService.recordCallOutcome(data))
+    await this.messages.recordCallOutcome(data)
   }
 
   @RabbitSubscribeWithRetry({
@@ -66,15 +49,18 @@ export class MessageSubscriber {
   })
   async sendMessage(data: MessageSendPayload): Promise<void> {
     try {
-      await safeExecute(() => this.chatService.sendMessage(data))
-    } catch (error: any) {
+      await this.messages.sendMessage(data)
+    } catch (error: unknown) {
       this.chatEventsPublisher.publishMessageError(data.senderId, {
-        clientMessageId: data.clientMessageId || data.tempMessageId,
+        clientMessageId: data.clientMessageId,
         conversationId: data.conversationId,
         code: 'MESSAGE_CREATE_FAILED',
+        // Only our own errors are worded for people; anything else stays in
+        // the log.
         message:
-          error?.message ||
-          'Unable to create message. Please retry or upload again.',
+          error instanceof HttpException
+            ? error.message
+            : 'Unable to create message. Please retry or upload again.',
         retryable: true,
       })
       // 4xx (không còn là thành viên, payload sai, file chưa upload...) là lỗi
@@ -101,6 +87,6 @@ export class MessageSubscriber {
     queue: QUEUE_RMQ.CHAT_UPDATE_MESSAGE_READ,
   })
   async updateMessageRead(data: UpdateMessageReadPayload): Promise<void> {
-    await safeExecute(() => this.chatService.updateMessageRead(data))
+    await this.messages.updateMessageRead(data)
   }
 }

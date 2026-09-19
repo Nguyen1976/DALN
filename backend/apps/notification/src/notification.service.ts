@@ -14,13 +14,20 @@ import type {
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
-import { NotificationType } from './generated'
-
-type NotificationChannelToggle = {
-  IN_APP: boolean
-  EMAIL: boolean
-  REALTIME: boolean
-}
+import type { notification } from './generated'
+import {
+  channelsFrom,
+  NOTIFICATION_TYPES,
+  type NotificationChannelToggle,
+  type NotificationTypeName,
+} from './notification-types'
+import {
+  buildKeysetCursor,
+  parseKeysetCursor,
+  toPage,
+  type Page,
+} from '@app/util'
+import type { UpdateNotificationPreferencesDto } from './notification.dto'
 
 type NotificationPreferenceDocument = {
   global: {
@@ -38,17 +45,6 @@ type NotificationPreferenceDocument = {
   updatedAt?: string
 }
 
-const NOTIFICATION_TYPES = [
-  'MESSAGE_RECEIVED',
-  'FRIEND_REQUEST_SENT',
-  'FRIEND_REQUEST_ACCEPTED',
-  'FRIEND_REQUEST_REJECTED',
-  'SYSTEM_NOTIFICATION',
-  'USER_JOINED_GROUP',
-  'USER_LEFT_GROUP',
-  'USER_KICKED_FROM_GROUP',
-  'USER_ADDED_TO_GROUP',
-]
 
 const DEFAULT_CHANNELS: NotificationChannelToggle = {
   IN_APP: true,
@@ -92,7 +88,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
 
   async handleUserRegistered(data: UserCreatedPayload) {
     await this.mailerService.sendUserConfirmation(data)
-    await this.ensureUserPreference(data.id)
+    await this.ensureUserPreference(data.userId)
   }
 
   async handleUserRegisterOtp(data: UserRegisterOtpPayload) {
@@ -100,32 +96,25 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   }
 
   async handleMakeFriend(data: UserMakeFriendPayload) {
-    const inviteeStatus = await this.redisService.isOnline(data.inviteeId)
-
-    const notificationCreated = await this.createNotification({
+    const { channels } = await this.deliver({
       userId: data.inviteeId,
       message: `${data.inviterName} đã gửi lời mời kết bạn cho bạn.`,
-      type: NotificationType.FRIEND_REQUEST,
+      type: 'FRIEND_REQUEST_SENT',
       friendRequestId: data.friendRequestId,
     })
 
-    if (!inviteeStatus) {
-      // Offline thì báo qua email, trừ khi người nhận đã tắt kênh Email: link
-      // "Tắt email thông báo" trong mail dẫn tới đúng các công tắc này.
-      if (await this.acceptsEmail(data.inviteeId, 'FRIEND_REQUEST_SENT')) {
-        await this.mailerService.sendMakeFriendNotification({
-          senderName: data.inviterName,
-          friendEmail: data.inviteeEmail,
-          receiverName: data.inviteeName,
-          friendRequestId: data.friendRequestId,
-        })
-      }
-    } else {
-      this.notificationEventsPublisher.emitToUsers(
-        [notificationCreated?.userId],
-        SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
-        notificationCreated,
-      )
+    // Someone away from the app hears about it by mail, unless they switched
+    // mail off: the "Tắt email thông báo" link in it leads to these switches.
+    if (
+      channels.email &&
+      !(await this.redisService.isOnline(data.inviteeId))
+    ) {
+      await this.mailerService.sendMakeFriendNotification({
+        senderName: data.inviterName,
+        friendEmail: data.inviteeEmail,
+        receiverName: data.inviteeName,
+        friendRequestId: data.friendRequestId,
+      })
     }
   }
 
@@ -136,25 +125,11 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     if (data.status === 'ACCEPTED') {
       return
     }
-
-    const createdNotification = await this.createNotification({
+    await this.deliver({
       userId: data.inviterId,
-      message: `Lời mời kết bạn của ${data.inviteeName} đã được ${
-        data.status === 'ACCEPTED' ? 'chấp nhận' : 'từ chối'
-      }.`,
-      type: NotificationType.NORMAL_NOTIFICATION,
+      message: `Lời mời kết bạn của ${data.inviteeName} đã được từ chối.`,
+      type: 'FRIEND_REQUEST_REJECTED',
     })
-    const inviterStatus = await this.redisService.isOnline(data.inviterId)
-
-    if (inviterStatus) {
-      this.notificationEventsPublisher.emitToUsers(
-        [createdNotification?.userId],
-        SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
-        createdNotification,
-      )
-    }
-
-    return
   }
 
   /**
@@ -164,48 +139,44 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   async handleChatMention(data: ChatMentionPayload) {
     for (const userId of data.userIds || []) {
       if (!userId || userId === data.senderId) continue
-
-      const created = await this.createNotification({
+      await this.deliver({
         userId,
         message: data.preview
           ? `${data.senderName} đã nhắc đến bạn: ${data.preview}`
           : `${data.senderName} đã nhắc đến bạn trong một cuộc trò chuyện.`,
-        type: NotificationType.MENTIONED_IN_CONVERSATION,
+        type: 'MENTIONED_IN_CONVERSATION',
       })
-
-      if (await this.redisService.isOnline(userId)) {
-        this.notificationEventsPublisher.emitToUsers(
-          [created?.userId],
-          SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
-          created,
-        )
-      }
     }
   }
 
-  async createNotification(data: any) {
-    const res = await this.notificationRepo.create({
-      userId: data.userId,
-      message: data.message,
-      type: data.type as NotificationType,
-      friendRequestId: data.friendRequestId || null,
-      digestEligible: data.digestEligible ?? true,
-    })
-
-    return {
-      ...res,
-      createdAt: res.createdAt.toString(),
-    }
+  /** Where a notification of `type` may go for `userId`. */
+  async channelsFor(userId: string, type: NotificationTypeName) {
+    return channelsFrom(await this.ensureUserPreference(userId), type)
   }
 
-  /** Công tắc chung, kênh Email và công tắc riêng của loại thông báo đều phải bật. */
-  private async acceptsEmail(userId: string, type: string) {
-    const { global, overrides } = await this.ensureUserPreference(userId)
-    return (
-      global.enabled &&
-      global.channels.EMAIL &&
-      overrides[type]?.EMAIL !== false
-    )
+  /**
+   * Store a notification and push it to an open app, as far as the
+   * recipient's settings allow. The channels are returned for the caller's
+   * own delivery (mail).
+   */
+  private async deliver(input: {
+    userId: string
+    message: string
+    type: NotificationTypeName
+    friendRequestId?: string
+  }) {
+    const channels = await this.channelsFor(input.userId, input.type)
+    if (!channels.inApp) return { channels, created: null }
+
+    const created = await this.notificationRepo.create(input)
+    if (channels.realtime && (await this.redisService.isOnline(input.userId))) {
+      this.notificationEventsPublisher.emitToUsers(
+        [input.userId],
+        SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
+        created,
+      )
+    }
+    return { channels, created }
   }
 
   private async runDigestSweep() {
@@ -251,24 +222,22 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
 
       for (const { userId, unreadCount } of due) {
         const pref = prefByUser.get(userId)!
-        const message = `Bạn có ${unreadCount} thông báo chưa đọc.`
+        const channels = channelsFrom(pref, 'SYSTEM_NOTIFICATION')
+        if (!channels.inApp) continue
 
-        await this.createNotification({
+        const created = await this.notificationRepo.create({
           userId,
-          message,
-          type: NotificationType.SYSTEM_NOTIFICATION,
+          message: `Bạn có ${unreadCount} thông báo chưa đọc.`,
+          type: 'SYSTEM_NOTIFICATION',
           digestEligible: false,
         })
 
-        if (onlineByUser.get(userId)) {
+        // The stored row, id included: the bell dedupes and marks read by id.
+        if (channels.realtime && onlineByUser.get(userId)) {
           this.notificationEventsPublisher.emitToUsers(
             [userId],
             SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
-            {
-              type: NotificationType.SYSTEM_NOTIFICATION,
-              message,
-              createdAt: now.toISOString(),
-            },
+            created,
           )
         }
 
@@ -311,7 +280,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     const digestSettings = (raw?.digestSettings ?? {}) as any
     const overrides = (raw?.overrides ?? {}) as Record<
       string,
-      NotificationChannelToggle
+      Partial<NotificationChannelToggle>
     >
 
     return {
@@ -327,10 +296,13 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
             defaults.global.channels.REALTIME,
         },
       },
-      overrides: {
-        ...defaults.overrides,
-        ...overrides,
-      },
+      // Only the types that exist: keys from older builds are dropped.
+      overrides: Object.fromEntries(
+        NOTIFICATION_TYPES.map((type) => [
+          type,
+          { ...DEFAULT_CHANNELS, ...overrides[type] },
+        ]),
+      ) as Record<NotificationTypeName, NotificationChannelToggle>,
       digest: {
         enabled: digestSettings.enabled ?? defaults.digest.enabled,
         minUnread: digestSettings.minUnread ?? defaults.digest.minUnread,
@@ -368,56 +340,28 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     return this.ensureUserPreference(userId)
   }
 
-  async updateNotificationPreferences(userId: string, payload: any) {
+  async updateNotificationPreferences(
+    userId: string,
+    change: UpdateNotificationPreferencesDto,
+  ) {
     const current = await this.ensureUserPreference(userId)
 
-    const global = payload?.global
-      ? {
-          enabled:
-            typeof payload.global.enabled === 'boolean'
-              ? payload.global.enabled
-              : current.global.enabled,
-          channels: {
-            IN_APP:
-              payload?.global?.channels?.IN_APP ??
-              current.global.channels.IN_APP,
-            EMAIL:
-              payload?.global?.channels?.EMAIL ?? current.global.channels.EMAIL,
-            REALTIME:
-              payload?.global?.channels?.REALTIME ??
-              current.global.channels.REALTIME,
-          },
-        }
-      : current.global
+    // The DTO has checked the types; anything left out keeps its value.
+    const global = {
+      enabled: change.global?.enabled ?? current.global.enabled,
+      channels: { ...current.global.channels, ...change.global?.channels },
+    }
+    const digest = {
+      ...current.digest,
+      enabled: change.digest?.enabled ?? current.digest.enabled,
+      minUnread: change.digest?.minUnread ?? current.digest.minUnread,
+      cooldownMinutes:
+        change.digest?.cooldownMinutes ?? current.digest.cooldownMinutes,
+    }
 
-    const digest = payload?.digest
-      ? {
-          enabled:
-            typeof payload.digest.enabled === 'boolean'
-              ? payload.digest.enabled
-              : current.digest.enabled,
-          minUnread:
-            Number.isFinite(payload.digest.minUnread) &&
-            payload.digest.minUnread > 0
-              ? payload.digest.minUnread
-              : current.digest.minUnread,
-          cooldownMinutes:
-            Number.isFinite(payload.digest.cooldownMinutes) &&
-            payload.digest.cooldownMinutes > 0
-              ? payload.digest.cooldownMinutes
-              : current.digest.cooldownMinutes,
-          lastDigestAt: current.digest.lastDigestAt,
-        }
-      : current.digest
-
-    const incomingOverrides = (payload?.overrides || {}) as Record<
-      string,
-      Partial<NotificationChannelToggle>
-    >
     const mergedOverrides = { ...current.overrides }
-
-    for (const [type, value] of Object.entries(incomingOverrides)) {
-      if (!NOTIFICATION_TYPES.includes(type)) continue
+    for (const [type, value] of Object.entries(change.overrides ?? {})) {
+      if (!(NOTIFICATION_TYPES as readonly string[]).includes(type)) continue
       mergedOverrides[type] = {
         IN_APP: value.IN_APP ?? mergedOverrides[type]?.IN_APP ?? true,
         EMAIL: value.EMAIL ?? mergedOverrides[type]?.EMAIL ?? true,
@@ -436,56 +380,35 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     return this.normalizePreference(updated)
   }
 
-  async getUnreadCount(userId: string) {
-    const unreadCount = await this.notificationRepo.countUnread(userId)
-
-    return {
-      unreadCount,
-    }
+  getUnreadCount(userId: string) {
+    return this.notificationRepo.countUnread(userId)
   }
 
   getNotificationTypes() {
-    return {
-      types: NOTIFICATION_TYPES,
-    }
+    return NOTIFICATION_TYPES
   }
 
-  async getNotifications(data) {
-    const { userId, page, limit } = data
-
-    const take = Number(limit) || 5
-    const skip = ((Number(page) || 1) - 1) * take
-
-    const notifications = await this.notificationRepo.findManyByUser(
-      userId,
-      skip,
-      take,
+  /** Newest first, by keyset: new arrivals do not shift later pages. */
+  async getNotifications(
+    userId: string,
+    page: { limit: number; cursor?: string },
+  ): Promise<Page<notification>> {
+    return toPage(
+      await this.notificationRepo.findManyByUser(
+        userId,
+        page.limit + 1,
+        parseKeysetCursor(page.cursor),
+      ),
+      page.limit,
+      (row) => buildKeysetCursor(row.createdAt, row.id),
     )
-
-    return {
-      notifications: notifications.map((n) => ({
-        ...n,
-        createdAt: n.createdAt.toString(),
-      })),
-    }
   }
 
-  async markNotificationAsRead(data) {
-    const { userId, notificationId } = data
-
+  async markNotificationAsRead(userId: string, notificationId: string) {
     await this.notificationRepo.markOneRead(userId, notificationId)
-
-    return { success: true }
   }
 
-  async markAllNotificationsAsRead(data) {
-    const { userId } = data
-
-    const result = await this.notificationRepo.markAllRead(userId)
-
-    return {
-      success: true,
-      updatedCount: result.count,
-    }
+  async markAllNotificationsAsRead(userId: string) {
+    await this.notificationRepo.markAllRead(userId)
   }
 }

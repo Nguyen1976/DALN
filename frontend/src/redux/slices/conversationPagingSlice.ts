@@ -12,25 +12,23 @@ import { logoutAPI } from "./userSlice";
 interface ConversationPagingState {
   /** The first page has arrived this session (possibly empty). */
   loaded: boolean;
-  /** False once a page came back shorter than asked. */
-  hasMore: boolean;
+  /** Where the next page starts, as the server said; null once complete. */
+  nextCursor: string | null;
 }
 
-const initialState: ConversationPagingState = { loaded: false, hasMore: true };
+const initialState: ConversationPagingState = {
+  loaded: false,
+  nextCursor: null,
+};
 
 export const conversationPagingSlice = createSlice({
   name: "conversationPaging",
   initialState,
-  reducers: {
-    /** Nothing left to page from (no conversation carries a timestamp). */
-    markConversationsExhausted: (state) => {
-      state.hasMore = false;
-    },
-  },
+  reducers: {},
   extraReducers: (builder) => {
     builder.addCase(getConversations.fulfilled, (state, action) => {
       state.loaded = true;
-      state.hasMore = (action.payload?.length ?? 0) >= action.meta.arg.limit;
+      state.nextCursor = action.payload.nextCursor;
     });
     builder.addCase(logoutAPI.fulfilled, () => initialState);
   },
@@ -38,8 +36,10 @@ export const conversationPagingSlice = createSlice({
 
 export const selectConversationsLoaded = (state: RootState) =>
   state.conversationPaging.loaded;
+export const selectConversationsNextCursor = (state: RootState) =>
+  state.conversationPaging.nextCursor;
+/** More to page in: the first page has not come yet, or it had a cursor. */
 export const selectConversationsHasMore = (state: RootState) =>
-  state.conversationPaging.hasMore;
+  !state.conversationPaging.loaded || state.conversationPaging.nextCursor !== null;
 
-export const { markConversationsExhausted } = conversationPagingSlice.actions;
 export default conversationPagingSlice.reducer;

@@ -4,7 +4,7 @@ import type {
   OutboxCapablePrisma,
   OutboxEventInput,
   OutboxRecord,
-  TxClient,
+  OutboxTx,
 } from './types'
 
 /**
@@ -14,7 +14,7 @@ import type {
  * bao giờ xảy ra cảnh DB đã đổi nhưng event bị mất (hoặc ngược lại).
  */
 export async function enqueueOutbox(
-  tx: TxClient,
+  tx: OutboxTx,
   input: OutboxEventInput,
 ): Promise<void> {
   await tx.outboxEvent.create({

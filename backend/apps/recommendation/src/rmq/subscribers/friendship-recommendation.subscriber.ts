@@ -3,10 +3,12 @@ import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
-import { safeExecute } from '@app/common/rpc/safe-execute'
 import { RecommendationFriendshipService } from '../../services/recommendation-friendship.service'
 import { FriendGraphService } from '../../services/friend-graph.service'
-import type { UserUpdateStatusMakeFriendPayload } from 'libs/constant/rmq/payload'
+import type {
+  UserFriendshipRevertedPayload,
+  UserUpdateStatusMakeFriendPayload,
+} from 'libs/constant/rmq/payload'
 
 @Injectable()
 export class FriendshipRecommendationSubscriber {
@@ -28,19 +30,37 @@ export class FriendshipRecommendationSubscriber {
     }
 
     // 1. Persist the friendship into the MongoDB replica (graph source for RCM).
-    await safeExecute(() =>
-      this.friendGraphService.upsertFriendship(
-        payload.inviterId,
-        payload.inviteeId,
-      ),
+    await this.friendGraphService.upsertFriendship(
+      payload.inviterId,
+      payload.inviteeId,
     )
 
     // 2. Drop each other from any cached recommendation lists.
-    await safeExecute(() =>
-      this.recommendationFriendshipService.onFriendshipAccepted(
-        payload.inviterId,
-        payload.inviteeId,
-      ),
+    await this.recommendationFriendshipService.onFriendshipAccepted(
+      payload.inviterId,
+      payload.inviteeId,
+    )
+  }
+
+  /**
+   * The accept saga failed later on and undid the friendship: drop it from
+   * the graph copy too, and let both lists be recomputed.
+   */
+  @RabbitSubscribeWithRetry({
+    exchange: EXCHANGE_RMQ.USER_EVENTS,
+    routingKey: ROUTING_RMQ.USER_FRIENDSHIP_REVERTED,
+    queue: QUEUE_RMQ.RECOMMENDATION_USER_FRIENDSHIP_REVERTED,
+  })
+  async handleFriendshipReverted(
+    payload: UserFriendshipRevertedPayload,
+  ): Promise<void> {
+    await this.friendGraphService.removeFriendship(
+      payload.inviterId,
+      payload.inviteeId,
+    )
+    await this.recommendationFriendshipService.onFriendshipReverted(
+      payload.inviterId,
+      payload.inviteeId,
     )
   }
 }

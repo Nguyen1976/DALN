@@ -1,15 +1,14 @@
-import {
-  ForbiddenException,
-  InternalServerErrorException,
-  Logger,
-} from '@nestjs/common'
+import { ForbiddenException, Logger } from '@nestjs/common'
 import type { MessageSendPayload } from 'libs/constant/rmq/payload'
-import type { ChatService } from '../../chat.service'
+import type { MessageService } from '../../services'
 import type { ChatEventsPublisher } from '../publishers/chat-events.publisher'
 import { MessageSubscriber } from './chat-subcribers'
 
-// Chỉ cần hình dạng: không kéo Prisma/Redis của ChatService vào test.
-jest.mock('../../chat.service', () => ({ ChatService: class {} }))
+// Chỉ cần hình dạng: không kéo Prisma/Redis của các service vào test.
+jest.mock('../../services', () => ({
+  ConversationService: class {},
+  MessageService: class {},
+}))
 jest.mock('../publishers/chat-events.publisher', () => ({
   ChatEventsPublisher: class {},
 }))
@@ -30,7 +29,8 @@ describe('MessageSubscriber.sendMessage', () => {
     chatService = { sendMessage: jest.fn() }
     publisher = { publishMessageError: jest.fn() }
     subscriber = new MessageSubscriber(
-      chatService as unknown as ChatService,
+      {} as never,
+      chatService as unknown as MessageService,
       publisher as unknown as ChatEventsPublisher,
     )
     warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
@@ -57,12 +57,18 @@ describe('MessageSubscriber.sendMessage', () => {
   })
 
   it('lỗi hệ thống: ném tiếp để retryThenDeadLetter thử lại', async () => {
-    chatService.sendMessage.mockRejectedValue(new Error('mongo down'))
+    const failure = new Error('mongo down')
+    chatService.sendMessage.mockRejectedValue(failure)
 
-    await expect(subscriber.sendMessage(data)).rejects.toBeInstanceOf(
-      InternalServerErrorException,
+    // The error itself goes on, so the retry handler (and the dead-letter log)
+    // see what actually failed; the client gets a generic sentence.
+    await expect(subscriber.sendMessage(data)).rejects.toBe(failure)
+    expect(publisher.publishMessageError).toHaveBeenCalledWith(
+      'u1',
+      expect.objectContaining({
+        message: 'Unable to create message. Please retry or upload again.',
+      }),
     )
-    expect(publisher.publishMessageError).toHaveBeenCalledTimes(1)
     expect(warn).not.toHaveBeenCalled()
   })
 })

@@ -15,11 +15,11 @@ import { TokenExpiredError } from 'jsonwebtoken'
  * WebSocket không có `Response` để set.
  */
 
+/** What the user service signs into both session tokens. */
 export type JwtPayload = {
   userId: string
-  email?: string
-  username?: string
-  [key: string]: unknown
+  email: string
+  username: string
 }
 
 export type TokenResolution =

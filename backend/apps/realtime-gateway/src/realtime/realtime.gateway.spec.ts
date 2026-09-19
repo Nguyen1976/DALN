@@ -130,7 +130,11 @@ describe('RealtimeGateway', () => {
     })
 
     it('chat service từ chối (403) -> ack CALL_FORBIDDEN, không ai đổ chuông', async () => {
-      ;(global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 403 })
+      ;(global.fetch as jest.Mock).mockResolvedValue({
+        ok: false,
+        status: 403,
+        text: async () => '',
+      })
 
       const ack = await gateway.handleIncomingCall(
         {
@@ -152,7 +156,7 @@ describe('RealtimeGateway', () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ data: { peerId: 'callee' } }),
+        text: async () => JSON.stringify({ peerId: 'callee' }),
       })
 
       const ack: any = await gateway.handleIncomingCall(
@@ -177,7 +181,7 @@ describe('RealtimeGateway', () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ data: { peerId: 'callee' } }),
+        text: async () => JSON.stringify({ peerId: 'callee' }),
       })
       // acquire(caller) thắng SET NX; isBusy(callee) đọc thấy cuộc gọi khác.
       redisStub.get.mockResolvedValueOnce('another-call-id')
@@ -197,7 +201,7 @@ describe('RealtimeGateway', () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ data: { peerId: 'callee' } }),
+        text: async () => JSON.stringify({ peerId: 'callee' }),
       })
       // acquire(caller): SET NX thất bại rồi GET thấy callId khác -> đang bận.
       redisStub.set.mockResolvedValueOnce(null)
@@ -360,7 +364,11 @@ describe('RealtimeGateway', () => {
     ]
 
     it('chat trả 403 -> ack NOT_MEMBER, không ai đổ chuông', async () => {
-      ;(global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 403 })
+      ;(global.fetch as jest.Mock).mockResolvedValue({
+        ok: false,
+        status: 403,
+        text: async () => '',
+      })
 
       const ack = await gateway.handleGroupCallStart(
         { conversationId: 'conv-1' },
@@ -379,7 +387,7 @@ describe('RealtimeGateway', () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ data: { members, type: 'DIRECT' } }),
+        text: async () => JSON.stringify({ members, type: 'DIRECT' }),
       })
 
       const ack = await gateway.handleGroupCallStart(
@@ -397,7 +405,7 @@ describe('RealtimeGateway', () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ data: { members, type: 'GROUP' } }),
+        text: async () => JSON.stringify({ members, type: 'GROUP' }),
       })
 
       const ack: any = await gateway.handleGroupCallStart(
@@ -422,7 +430,7 @@ describe('RealtimeGateway', () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ data: { members, type: 'GROUP' } }),
+        text: async () => JSON.stringify({ members, type: 'GROUP' }),
       })
 
       const ack: any = await gateway.handleGroupCallStart(
@@ -455,7 +463,7 @@ describe('RealtimeGateway', () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ data: { members, type: 'GROUP' } }),
+        text: async () => JSON.stringify({ members, type: 'GROUP' }),
       })
 
       const ack = await gateway.handleGroupCallStart(
@@ -479,7 +487,7 @@ describe('RealtimeGateway', () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ data: { members, type: 'GROUP' } }),
+        text: async () => JSON.stringify({ members, type: 'GROUP' }),
       })
 
       const ok: any = await gateway.handleGroupCallAccept(
@@ -573,7 +581,7 @@ describe('RealtimeGateway', () => {
       expect.objectContaining({
         conversationId: 'c1',
         senderId: 'u1',
-        text: 'xin chao',
+        content: 'xin chao',
         clientMessageId: 'tmp-1',
       }),
       expect.objectContaining({

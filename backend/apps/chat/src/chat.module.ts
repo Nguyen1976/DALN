@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common'
 import { ScheduleModule } from '@nestjs/schedule'
 import { ChatController } from './chat.controller'
-import { ChatService } from './chat.service'
 import { MessageService, MessageMediaService, PollService, ConversationMemberService, ConversationService, MessageBatchWriter } from './services'
 import { UtilModule } from '@app/util'
+import { UserDirectoryClient } from './clients/user-directory.client'
 import {
   ConversationRepository,
   MessageRepository,
@@ -60,7 +60,7 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
       provide: APP_GUARD,
       useClass: AuthGuard,
     },
-    ChatService,
+    UserDirectoryClient,
     MessageService,
     MessageMediaService,
     PollService,

@@ -15,11 +15,11 @@ import { toast } from "sonner";
 import {
   addMembersToConversationAPI,
   deleteConversationAPI,
-  getConversationByIdAPI,
   getUserProfileByIdAPI,
   leaveConversationAPI,
   promoteMemberAPI,
   removeMemberFromConversationAPI,
+  type UserProfile,
 } from "@/apis";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,6 @@ import {
 import { SearchField } from "@/components/ui/search-field";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import {
-  applyConversationUpdate,
   removeConversationById,
   selectConversationById,
   setConversationAccessState,
@@ -57,22 +56,12 @@ import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { selectUser } from "@/redux/slices/userSlice";
 import { staggerStyle } from "@/lib/motion";
+import { displayNameOf } from "@/utils/displayName";
 
-type Profile = {
-  username?: string;
-  fullName?: string;
-  avatar?: string;
-  email?: string;
-  bio?: string;
-};
 type ActionTarget = { userId: string; name: string };
 
-const displayName = (member: ConversationMember, profile?: Profile) =>
-  member.fullName ||
-  member.username ||
-  profile?.fullName ||
-  profile?.username ||
-  member.userId;
+const nameOf = (member: ConversationMember) =>
+  displayNameOf(member) || member.userId;
 
 export function GroupMemberManager() {
   const dispatch = useDispatch<AppDispatch>();
@@ -84,7 +73,7 @@ export function GroupMemberManager() {
   const friends = useSelector(selectFriend);
   const user = useSelector(selectUser);
   const members = conversation?.members ?? [];
-  const memberCount = conversation?.memberCount ?? members.length;
+  const memberCount = conversation?.memberCount ?? 0;
   const myRole = members.find((member) => member.userId === user.id)?.role;
   const isAdmin = myRole === "ADMIN" || myRole === "OWNER";
 
@@ -93,7 +82,8 @@ export function GroupMemberManager() {
   const [profileMember, setProfileMember] = useState<ConversationMember | null>(
     null,
   );
-  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
+  /** Profiles of members who are not friends, fetched when opened. */
+  const [profiles, setProfiles] = useState<Record<string, UserProfile>>({});
   const [memberSearch, setMemberSearch] = useState("");
   const [friendSearch, setFriendSearch] = useState("");
   const deferredMemberSearch = useDeferredValue(memberSearch);
@@ -119,16 +109,12 @@ export function GroupMemberManager() {
   const filteredMembers = useMemo(() => {
     const query = deferredMemberSearch.trim().toLocaleLowerCase("vi");
     if (!query) return members;
-    return members.filter((member) => {
-      const profile = profiles[member.userId];
-      return [
-        member.fullName,
-        member.username,
-        profile?.fullName,
-        profile?.username,
-      ].some((value) => value?.toLocaleLowerCase("vi").includes(query));
-    });
-  }, [deferredMemberSearch, members, profiles]);
+    return members.filter((member) =>
+      [member.fullName, member.username].some((value) =>
+        value?.toLocaleLowerCase("vi").includes(query),
+      ),
+    );
+  }, [deferredMemberSearch, members]);
 
   const availableFriends = useMemo(() => {
     const memberIds = new Set(members.map((member) => member.userId));
@@ -143,14 +129,17 @@ export function GroupMemberManager() {
     );
   }, [deferredFriendSearch, friends, members]);
 
-  const refresh = async () => {
-    const result = await getConversationByIdAPI(conversationId);
-    dispatch(applyConversationUpdate({ conversation: result.conversation }));
-  };
+  // Member changes come back over the socket (member added / removed /
+  // conversation updated), which also reaches whoever made them, so nothing
+  // here refetches the conversation afterwards.
+
+  /** Email and bio: from the friend list, else fetched once. */
+  const profileOf = (userId: string) =>
+    friends.find((friend) => friend.id === userId) ?? profiles[userId];
 
   const openProfile = async (member: ConversationMember) => {
     setProfileMember(member);
-    if (profiles[member.userId]?.email !== undefined) return;
+    if (profileOf(member.userId)) return;
     try {
       const profile = await getUserProfileByIdAPI(member.userId);
       setProfiles((current) => ({ ...current, [member.userId]: profile }));
@@ -163,25 +152,10 @@ export function GroupMemberManager() {
     if (!selectedIds.size || adding) return;
     setAdding(true);
     try {
-      const selected = friends.filter((friend) => selectedIds.has(friend.id));
-      const resolved = await Promise.all(
-        selected.map(async (friend) => ({
-          friend,
-          profile: await getUserProfileByIdAPI(friend.id),
-        })),
-      );
-      await addMembersToConversationAPI({
-        conversationId,
-        memberIds: resolved.map(({ friend }) => friend.id),
-        members: resolved.map(({ friend, profile }) => ({
-          userId: friend.id,
-          username: profile.username,
-          fullName: profile.fullName,
-          avatar: profile.avatar,
-        })),
-      });
-      await refresh();
-      toast.success(`Đã thêm ${resolved.length} thành viên`);
+      // Ids only: the server takes names and avatars from the user service.
+      const memberIds = [...selectedIds];
+      await addMembersToConversationAPI({ conversationId, memberIds });
+      toast.success(`Đã thêm ${memberIds.length} thành viên`);
       setSelectedIds(new Set());
       setFriendSearch("");
       setAddOpen(false);
@@ -199,7 +173,6 @@ export function GroupMemberManager() {
         conversationId,
         targetUserId: target.userId,
       });
-      await refresh();
       toast.success(`Đã xoá ${target.name} khỏi nhóm`);
     } catch (error) {
       toast.error(getErrorMessage(error, "Không thể xoá thành viên"));
@@ -213,7 +186,6 @@ export function GroupMemberManager() {
     setPendingId(target.userId);
     try {
       await promoteMemberAPI({ conversationId, targetUserId: target.userId });
-      await refresh();
       toast.success(`${target.name} đã trở thành phó nhóm`);
     } catch (error) {
       toast.error(getErrorMessage(error, "Không thể thêm phó nhóm"));
@@ -224,11 +196,9 @@ export function GroupMemberManager() {
   };
 
   const selectedProfile = profileMember
-    ? profiles[profileMember.userId]
+    ? profileOf(profileMember.userId)
     : undefined;
-  const selectedName = profileMember
-    ? displayName(profileMember, selectedProfile)
-    : "";
+  const selectedName = profileMember ? nameOf(profileMember) : "";
 
   const leaveGroup = async () => {
     setGroupActionPending(true);
@@ -362,8 +332,7 @@ export function GroupMemberManager() {
             {filteredMembers.length ? (
               <div className="space-y-1">
                 {filteredMembers.map((member, index) => {
-                  const profile = profiles[member.userId];
-                  const name = displayName(member, profile);
+                  const name = nameOf(member);
                   const isSelf = member.userId === user.id;
                   return (
                     <div
@@ -379,7 +348,7 @@ export function GroupMemberManager() {
                       >
                         <Avatar className="size-11 border border-border">
                           <AvatarImage
-                            src={member.avatar || profile?.avatar || ""}
+                            src={member.avatar || ""}
                             alt=""
                           />
                           <AvatarFallback className="font-semibold">
@@ -482,7 +451,7 @@ export function GroupMemberManager() {
               <div className="space-y-1">
                 {availableFriends.map((friend, index) => {
                   const checked = selectedIds.has(friend.id);
-                  const name = friend.fullName || friend.username;
+                  const name = displayNameOf(friend);
                   return (
                     <label
                       key={friend.id}
@@ -574,7 +543,7 @@ export function GroupMemberManager() {
               <div className="flex flex-col items-center rounded-2xl bg-muted/60 p-6 text-center">
                 <Avatar className="size-24 border-2 border-background shadow-sm">
                   <AvatarImage
-                    src={profileMember.avatar || selectedProfile?.avatar || ""}
+                    src={profileMember.avatar || ""}
                     alt=""
                   />
                   <AvatarFallback className="text-2xl font-semibold">
@@ -585,7 +554,7 @@ export function GroupMemberManager() {
                   {selectedName}
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  @{selectedProfile?.username || profileMember.username}
+                  @{profileMember.username}
                 </p>
               </div>
               <dl className="divide-y divide-border rounded-xl border border-border">

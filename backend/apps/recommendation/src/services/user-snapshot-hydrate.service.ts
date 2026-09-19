@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { toGeoPoint } from '@app/util'
 import { MongoClient, ObjectId } from 'mongodb'
 import { PrismaService } from '../../prisma/prisma.service'
 
@@ -9,7 +10,7 @@ type UserMongoDoc = {
   avatar?: string | null
   bio?: string | null
   interests?: string[]
-  location?: { lat?: number; lon?: number } | null
+  location?: unknown
   isActive?: boolean
   lastSeen?: Date | null
 }
@@ -59,16 +60,6 @@ export class UserSnapshotHydrateService {
     return this.client.db(dbName).collection<UserMongoDoc>('User')
   }
 
-  private toSnapshotLocation(
-    location: UserMongoDoc['location'],
-  ): { type: 'Point'; coordinates: [number, number] } | null {
-    if (!location || typeof location !== 'object') return null
-    const lat = Number(location.lat)
-    const lon = Number(location.lon)
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
-    return { type: 'Point', coordinates: [lon, lat] }
-  }
-
   private async upsertFromMongoUser(doc: UserMongoDoc): Promise<void> {
     const userId = doc._id.toString()
     const now = new Date()
@@ -81,7 +72,7 @@ export class UserSnapshotHydrateService {
         avatar: doc.avatar ?? null,
         bio: doc.bio ?? null,
         interests: Array.isArray(doc.interests) ? doc.interests : [],
-        location: this.toSnapshotLocation(doc.location),
+        location: toGeoPoint(doc.location),
         isActive: doc.isActive ?? true,
         lastSeen: doc.lastSeen ?? now,
         syncedAt: now,
@@ -92,7 +83,7 @@ export class UserSnapshotHydrateService {
         avatar: doc.avatar ?? undefined,
         bio: doc.bio ?? undefined,
         interests: Array.isArray(doc.interests) ? doc.interests : undefined,
-        location: this.toSnapshotLocation(doc.location) ?? undefined,
+        location: toGeoPoint(doc.location) ?? undefined,
         isActive: doc.isActive ?? undefined,
         syncedAt: now,
       },

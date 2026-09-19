@@ -2,371 +2,263 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
-  Param,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common'
-import { ChatService } from './chat.service'
 import { FileInterceptor } from '@nestjs/platform-express/multer/interceptors/file.interceptor'
+import type { Multer } from 'multer'
 import {
   InternalOnly,
   RequireLogin,
   UserInfo,
 } from '@app/common/common.decorator'
 import {
-  CreateConversationDTO,
   AddMemberToConversationDTO,
-  RemoveMemberFromConversationDTO,
-  PromoteMemberDTO,
-  LeaveConversationDTO,
-  DeleteConversationDTO,
-  CreateMessageUploadUrlDTO,
-  ConversationAssetKind,
-  MessageType,
-  RevokeMessageDTO,
-  DeleteMessageForMeDTO,
+  AssetsQueryDTO,
   ClearConversationHistoryDTO,
-  CreatePollDTO,
-  SubmitPollVoteDTO,
-  ClosePollDTO,
-  GroupCallLogDTO,
   ClearMentionsDTO,
+  ClosePollDTO,
+  CreateConversationDTO,
+  CreateMessageUploadUrlDTO,
+  CreatePollDTO,
+  DeleteConversationDTO,
+  DeleteMessageForMeDTO,
+  GroupCallLogDTO,
+  LeaveConversationDTO,
+  PromoteMemberDTO,
+  RemoveMemberFromConversationDTO,
+  RevokeMessageDTO,
+  SubmitPollVoteDTO,
 } from './http/chat-http.dto'
 import { ConversationMapper } from './domain/conversation.mapper'
-import { MessageMapper } from './domain/message.mapper'
+import { PageQueryDto } from '@app/common/http/page-query.dto'
+import {
+  ConversationMemberService,
+  ConversationService,
+  MessageService,
+  PollService,
+} from './services'
 
+/**
+ * HTTP entry points. Each handler validates through its DTO, takes the
+ * caller's id from the session, and hands off to the service that owns the
+ * work — no reshaping of input here.
+ */
 @Controller('chat')
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly conversations: ConversationService,
+    private readonly members: ConversationMemberService,
+    private readonly messages: MessageService,
+    private readonly polls: PollService,
+  ) {}
 
   @Post('mentions/clear')
   @RequireLogin()
-  clearMentions(@Body() dto: ClearMentionsDTO, @UserInfo() userInfo: any) {
-    return this.chatService.clearMentions(dto.conversationId, userInfo.userId)
+  clearMentions(
+    @Body() dto: ClearMentionsDTO,
+    @UserInfo('userId') userId: string,
+  ) {
+    return this.messages.clearMentions(dto.conversationId, userId)
   }
 
   @Post('create')
   @UseInterceptors(
-    FileInterceptor('groupAvatar', {
-      limits: {
-        fileSize: 2 * 1024 * 1024,
-      },
-    }),
+    FileInterceptor('groupAvatar', { limits: { fileSize: 2 * 1024 * 1024 } }),
   )
   @RequireLogin()
   async createConversation(
     @Body() dto: CreateConversationDTO,
-    @UserInfo() userInfo: any,
-    @UploadedFile() groupAvatar?,
+    @UserInfo('userId') userId: string,
+    @UploadedFile() groupAvatar?: Multer.File,
   ) {
-    const parsedMembers =
-      typeof dto.members === 'string'
-        ? JSON.parse(dto.members || '[]')
-        : dto.members || []
-
-    const res = await this.chatService.createConversation({
-      ...dto,
-      type: 'GROUP',
-      members: [
-        ...(parsedMembers as any[]),
-        {
-          userId: userInfo.userId,
-          username: userInfo.username,
-          fullName: userInfo.fullName,
-        },
-      ],
-      createrId: userInfo.userId,
-      groupAvatar: groupAvatar?.buffer,
-      groupAvatarFilename: groupAvatar?.originalname,
+    const conversation = await this.conversations.createGroup(userId, {
+      groupName: dto.groupName,
+      memberIds: dto.memberIds,
+      avatar: groupAvatar
+        ? { buffer: groupAvatar.buffer, filename: groupAvatar.originalname }
+        : undefined,
     })
-
-    return ConversationMapper.toCreateResponse(res, userInfo.userId)
+    return ConversationMapper.toDetail(conversation, userId)
   }
 
   @Post('add-member')
   @RequireLogin()
-  async addMemberToConversation(
-    @Body() body: AddMemberToConversationDTO,
-    @UserInfo() userInfo: any,
+  addMemberToConversation(
+    @Body() dto: AddMemberToConversationDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    const providedMembers = body.members || []
-
-    const normalizedMembers: Array<{
-      userId: string
-      username: string
-      fullName?: string
-      avatar?: string
-    }> =
-      providedMembers.length > 0
-        ? providedMembers.map((member) => ({
-            userId: member.userId,
-            username: member.username || '',
-            fullName: member.fullName,
-            avatar: member.avatar,
-          }))
-        : (body.memberIds || []).map((memberId) => ({
-            username: '',
-            userId: memberId,
-          }))
-
-    return await this.chatService.addMemberToConversation({
-      conversationId: body.conversationId,
-      members: normalizedMembers,
-      userId: userInfo.userId,
-    })
+    return this.members.addMemberToConversation({ ...dto, userId })
   }
 
   @Post('remove-member')
   @RequireLogin()
-  async removeMemberFromConversation(
-    @Body() body: RemoveMemberFromConversationDTO,
-    @UserInfo() userInfo: any,
+  removeMemberFromConversation(
+    @Body() dto: RemoveMemberFromConversationDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    return await this.chatService.removeMemberFromConversation({
-      conversationId: body.conversationId,
-      targetUserId: body.targetUserId,
-      userId: userInfo.userId,
-    })
+    return this.members.removeMemberFromConversation({ ...dto, userId })
   }
 
   @Post('promote-member')
   @RequireLogin()
-  async promoteMember(
-    @Body() body: PromoteMemberDTO,
-    @UserInfo() userInfo: any,
+  promoteMember(
+    @Body() dto: PromoteMemberDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    return await this.chatService.promoteMember({
-      conversationId: body.conversationId,
-      targetUserId: body.targetUserId,
-      userId: userInfo.userId,
-    })
+    return this.members.promoteMember({ ...dto, userId })
   }
 
   @Post('leave-group')
   @RequireLogin()
-  async leaveConversation(
-    @Body() body: LeaveConversationDTO,
-    @UserInfo() userInfo: any,
+  leaveConversation(
+    @Body() dto: LeaveConversationDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    return await this.chatService.leaveConversation({
-      conversationId: body.conversationId,
-      userId: userInfo.userId,
-    })
+    return this.members.leaveConversation({ ...dto, userId })
   }
 
   @Post('delete-conversation')
   @RequireLogin()
-  async deleteConversation(
-    @Body() body: DeleteConversationDTO,
-    @UserInfo() userInfo: any,
+  deleteConversation(
+    @Body() dto: DeleteConversationDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    return await this.chatService.deleteConversation({
-      conversationId: body.conversationId,
-      userId: userInfo.userId,
-    })
+    return this.conversations.deleteConversation({ ...dto, userId })
   }
 
   @Get('conversations')
   @RequireLogin()
   async getConversations(
-    @UserInfo() userInfo: any,
-    @Query('limit') limit?: string,
-    @Query('cursor') cursor?: string,
+    @UserInfo('userId') userId: string,
+    @Query() page: PageQueryDto,
   ) {
-    const result = await this.chatService.getConversations(userInfo.userId, {
-      limit: limit ? parseInt(limit, 10) : 20,
-      cursor: cursor || null,
-    })
-
-    return result.map((conversation) =>
-      ConversationMapper.toSummary(conversation, userInfo.userId),
+    const { items, nextCursor } = await this.conversations.getConversations(
+      userId,
+      page,
     )
+    return {
+      items: items.map((conversation) =>
+        ConversationMapper.toSummary(conversation, userId),
+      ),
+      nextCursor,
+    }
   }
 
   @Get('conversations/:conversationId')
   @RequireLogin()
   async getConversationById(
     @Param('conversationId') conversationId: string,
-    @UserInfo() userInfo: any,
+    @UserInfo('userId') userId: string,
   ) {
-    const result = await this.chatService.getConversationById(
+    const conversation = await this.conversations.getConversationById(
       conversationId,
-      userInfo.userId,
+      userId,
     )
-
-    return {
-      conversation: ConversationMapper.toDetail(
-        result.conversation,
-        userInfo.userId,
-      ),
-    }
+    return ConversationMapper.toDetail(conversation, userId)
   }
 
   @Get('messages/:conversationId')
   @RequireLogin()
-  async getMessagesByConversationId(
+  getMessagesByConversationId(
     @Param('conversationId') conversationId: string,
-    @UserInfo() userInfo: any,
-    @Query('limit') limit?: string,
-    @Query('page') page?: string,
-    @Query('cursor') cursor?: string,
+    @UserInfo('userId') userId: string,
+    @Query() page: PageQueryDto,
   ) {
-    return await this.chatService.getMessagesByConversationId(
+    return this.messages.getMessagesByConversationId(
       conversationId,
-      userInfo.userId,
-      {
-        limit: limit ? parseInt(limit, 10) : 20,
-        page: page ? parseInt(page, 10) : 1,
-        cursor: cursor || null,
-      },
+      userId,
+      page,
     )
   }
 
   @Post('messages/revoke')
   @RequireLogin()
-  async revokeMessage(
-    @Body() body: RevokeMessageDTO,
-    @UserInfo() userInfo: any,
+  revokeMessage(
+    @Body() dto: RevokeMessageDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    const result = await this.chatService.revokeMessage({
-      conversationId: body.conversationId,
-      messageId: body.messageId,
-      userId: userInfo.userId,
-    })
-
-    return {
-      message: MessageMapper.toResponse(result.message),
-    }
+    return this.messages.revokeMessage({ ...dto, userId })
   }
 
   @Post('messages/delete-for-me')
   @RequireLogin()
-  async deleteMessageForMe(
-    @Body() body: DeleteMessageForMeDTO,
-    @UserInfo() userInfo: any,
+  deleteMessageForMe(
+    @Body() dto: DeleteMessageForMeDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    return await this.chatService.deleteMessageForMe({
-      conversationId: body.conversationId,
-      messageId: body.messageId,
-      userId: userInfo.userId,
-    })
+    return this.messages.deleteMessageForMe({ ...dto, userId })
   }
 
   @Post('conversations/clear-history')
   @RequireLogin()
-  async clearConversationHistory(
-    @Body() body: ClearConversationHistoryDTO,
-    @UserInfo() userInfo: any,
+  clearConversationHistory(
+    @Body() dto: ClearConversationHistoryDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    return await this.chatService.clearConversationHistory({
-      conversationId: body.conversationId,
-      userId: userInfo.userId,
-    })
+    return this.messages.clearConversationHistory({ ...dto, userId })
   }
 
   @Post('polls')
   @RequireLogin()
-  async createPoll(@Body() body: CreatePollDTO, @UserInfo() userInfo: any) {
-    const result = await this.chatService.createPoll({
-      conversationId: body.conversationId,
-      question: body.question,
-      options: body.options,
-      isMultipleChoice: Boolean(body.isMultipleChoice),
-      userId: userInfo.userId,
+  createPoll(@Body() dto: CreatePollDTO, @UserInfo('userId') userId: string) {
+    return this.polls.createPoll({
+      ...dto,
+      isMultipleChoice: Boolean(dto.isMultipleChoice),
+      userId,
     })
-
-    return {
-      message: MessageMapper.toResponse(result.message),
-      poll: result.poll,
-    }
   }
 
   @Post('polls/vote')
   @RequireLogin()
-  async submitPollVote(
-    @Body() body: SubmitPollVoteDTO,
-    @UserInfo() userInfo: any,
+  submitPollVote(
+    @Body() dto: SubmitPollVoteDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    return await this.chatService.submitPollVote({
-      pollId: body.pollId,
-      optionIds: body.optionIds,
-      userId: userInfo.userId,
-    })
+    return this.polls.submitPollVote({ ...dto, userId })
   }
 
   @Post('polls/close')
   @RequireLogin()
-  async closePoll(@Body() body: ClosePollDTO, @UserInfo() userInfo: any) {
-    return await this.chatService.closePoll({
-      pollId: body.pollId,
-      userId: userInfo.userId,
-    })
+  closePoll(@Body() dto: ClosePollDTO, @UserInfo('userId') userId: string) {
+    return this.polls.closePoll({ ...dto, userId })
   }
 
   @Get('assets')
   @RequireLogin()
-  async getConversationAssets(
-    @Query('conversationId') conversationId: string,
-    @Query('kind') kind: 'MEDIA' | 'LINK' | 'DOC',
-    @Query('limit') limit?: string,
-    @Query('cursor') cursor?: string,
-    @UserInfo() userInfo?: any,
+  getConversationAssets(
+    @Query() query: AssetsQueryDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    const kindMap: Record<'MEDIA' | 'LINK' | 'DOC', ConversationAssetKind> = {
-      MEDIA: ConversationAssetKind.ASSET_MEDIA,
-      LINK: ConversationAssetKind.ASSET_LINK,
-      DOC: ConversationAssetKind.ASSET_DOC,
-    }
-
-    const assetKind = ['MEDIA', 'LINK', 'DOC'].includes(kind)
-      ? kindMap[kind]
-      : ConversationAssetKind.ASSET_MEDIA
-
-    return await this.chatService.getConversationAssets(
-      conversationId,
-      userInfo.userId,
-      assetKind,
-      {
-        limit: limit ? parseInt(limit, 10) : 20,
-        cursor: cursor || null,
-      },
+    return this.messages.getConversationAssets(
+      query.conversationId,
+      userId,
+      query.kind,
+      query,
     )
   }
 
   @Post('media/presign')
   @RequireLogin()
-  async createMessageUploadUrl(
-    @Body() data: CreateMessageUploadUrlDTO,
-    @UserInfo() userInfo: any,
+  createMessageUploadUrl(
+    @Body() dto: CreateMessageUploadUrlDTO,
+    @UserInfo('userId') userId: string,
   ) {
-    const mapMessageType = (type: 'IMAGE' | 'VIDEO' | 'FILE') => {
-      if (type === 'IMAGE') return MessageType.IMAGE
-      if (type === 'VIDEO') return MessageType.VIDEO
-      return MessageType.FILE
-    }
-
-    return await this.chatService.createMessageUploadUrl({
-      ...data,
-      userId: userInfo.userId,
-      type: mapMessageType(data.type),
-    })
+    return this.messages.createMessageUploadUrl({ ...dto, userId })
   }
 
   @Get('search')
   @RequireLogin()
   async searchConversations(
     @Query('keyword') keyword: string,
-    @UserInfo() userInfo: any,
+    @UserInfo('userId') userId: string,
   ) {
-    const res = await this.chatService.searchConversations(
-      userInfo.userId,
-      keyword,
-    )
-
-    return res.map((conversation) =>
-      ConversationMapper.toSummary(conversation, userInfo.userId),
+    const result = await this.conversations.searchConversations(userId, keyword)
+    return result.map((conversation) =>
+      ConversationMapper.toSummary(conversation, userId),
     )
   }
 
@@ -374,16 +266,13 @@ export class ChatController {
   @RequireLogin()
   async getConversationByFriendId(
     @Query('friendId') friendId: string,
-    @UserInfo() userInfo: any,
+    @UserInfo('userId') userId: string,
   ) {
-    const res = await this.chatService.getConversationByFriendId(
+    const conversation = await this.conversations.getConversationByFriendId(
       friendId,
-      userInfo.userId,
+      userId,
     )
-
-    return {
-      conversation: ConversationMapper.toDetail(res, userInfo.userId),
-    }
+    return ConversationMapper.toDetail(conversation, userId)
   }
 
   // Gateway realtime gọi liên dịch vụ để duyệt quyền gọi thoại 1-1: lời gọi
@@ -391,37 +280,29 @@ export class ChatController {
   // `x-internal-token` (@InternalOnly), không mở ra ngoài qua Kong.
   @Get('internal/call-peer')
   @InternalOnly()
-  async getCallPeer(
+  getCallPeer(
     @Query('conversationId') conversationId: string,
     @Query('userId') userId: string,
   ) {
-    return await this.chatService.getCallPeer({ conversationId, userId })
+    return this.conversations.getCallPeer({ conversationId, userId })
   }
 
   // Gateway realtime duyệt quyền gọi NHÓM: trả danh sách thành viên ACTIVE để
-  // gateway phát chuông và ký token LiveKit. Cùng cơ chế @InternalOnly như
-  // call-peer (không có phiên JWT của người dùng).
+  // gateway phát chuông và ký token LiveKit.
   @Get('internal/call-members')
   @InternalOnly()
-  async getCallMembers(
+  getCallMembers(
     @Query('conversationId') conversationId: string,
     @Query('userId') userId: string,
   ) {
-    return await this.chatService.getCallMembers({ conversationId, userId })
+    return this.conversations.getCallMembers({ conversationId, userId })
   }
 
   // Webhook LiveKit (qua gateway) báo phòng đóng: ghi tin hệ thống tổng kết
   // cuộc gọi nhóm vào hội thoại.
   @Post('internal/group-call-log')
   @InternalOnly()
-  async logGroupCall(@Body() body: GroupCallLogDTO) {
-    return await this.chatService.logGroupCall({
-      conversationId: body.conversationId,
-      participantCount: Number(body.participantCount) || 0,
-      durationSeconds: Number(body.durationSeconds) || 0,
-      callId: body.callId,
-      callType: body.callType as 'audio' | 'video' | undefined,
-      startedBy: body.startedBy,
-    })
+  logGroupCall(@Body() dto: GroupCallLogDTO) {
+    return this.messages.logGroupCall(dto)
   }
 }

@@ -12,7 +12,8 @@ export const FRIEND_REQUESTS_PAGE_SIZE = 20;
 
 interface RequestList {
   items: FriendRequestListItem[];
-  page: number;
+  /** Where the next page starts; null once the list is complete. */
+  nextCursor: string | null;
   hasMore: boolean;
   /** The first page has arrived this session. */
   loaded: boolean;
@@ -24,7 +25,7 @@ interface RequestList {
 
 const emptyList: RequestList = {
   items: [],
-  page: 0,
+  nextCursor: null,
   hasMore: true,
   loaded: false,
   stale: false,
@@ -49,23 +50,21 @@ const initialState: FriendRequestState = {
   sent: emptyList,
 };
 
+/** A page of one list; `cursor: null` (re)loads the first. */
 export const fetchFriendRequests = createAsyncThunk(
   `/friend-requests`,
-  async ({
+  ({
     direction,
-    page,
+    cursor,
   }: {
     direction: FriendRequestDirection;
-    page: number;
-  }) => ({
-    direction,
-    page,
-    items: await getFriendRequestsAPI({
+    cursor: string | null;
+  }) =>
+    getFriendRequestsAPI({
       limit: FRIEND_REQUESTS_PAGE_SIZE,
-      page,
+      cursor,
       direction,
     }),
-  }),
 );
 
 export const friendRequestSlice = createSlice({
@@ -84,28 +83,28 @@ export const friendRequestSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder.addCase(fetchFriendRequests.pending, (state, action) => {
-      if (action.meta.arg.page === 1) {
+      if (action.meta.arg.cursor === null) {
         state[action.meta.arg.direction].status = "loading";
       }
     });
     builder.addCase(fetchFriendRequests.fulfilled, (state, action) => {
-      const list = state[action.payload.direction];
-      const { items, page } = action.payload;
-      if (page === 1) {
+      const { direction, cursor } = action.meta.arg;
+      const list = state[direction];
+      const { items, nextCursor } = action.payload;
+      if (cursor === null) {
         list.items = items;
       } else {
-        // A request arriving mid-paging shifts the pages: drop repeats.
         const known = new Set(list.items.map((item) => item.id));
         list.items.push(...items.filter((item) => !known.has(item.id)));
       }
-      list.page = page;
-      list.hasMore = items.length >= FRIEND_REQUESTS_PAGE_SIZE;
+      list.nextCursor = nextCursor;
+      list.hasMore = nextCursor !== null;
       list.loaded = true;
       list.stale = false;
       list.status = "idle";
     });
     builder.addCase(fetchFriendRequests.rejected, (state, action) => {
-      if (action.meta.arg.page === 1) {
+      if (action.meta.arg.cursor === null) {
         state[action.meta.arg.direction].status = "error";
       }
     });
@@ -113,7 +112,7 @@ export const friendRequestSlice = createSlice({
     // "sent". Either list is refetched the next time it is looked at.
     builder.addCase(addNotification, (state, action) => {
       const type = action.payload.type;
-      if (type === "FRIEND_REQUEST") state.received.stale = true;
+      if (type === "FRIEND_REQUEST_SENT") state.received.stale = true;
       if (
         type === "FRIEND_REQUEST_ACCEPTED" ||
         type === "FRIEND_REQUEST_REJECTED"

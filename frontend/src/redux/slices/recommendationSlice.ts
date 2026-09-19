@@ -1,9 +1,7 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import {
-  getMyRecommendationsAPI,
-  type RecommendationCandidateItem,
-} from "@/apis";
+import { getMyRecommendationsAPI, type SuggestedFriend } from "@/apis";
 import type { RootState } from "../store";
+import { addNotification } from "./notificationSlice";
 import { logoutAPI } from "./userSlice";
 
 /**
@@ -12,8 +10,10 @@ import { logoutAPI } from "./userSlice";
  * something changes it (an accepted request) or the window regains focus.
  */
 interface RecommendationState {
-  items: RecommendationCandidateItem[];
+  items: SuggestedFriend[];
   loaded: boolean;
+  /** A request was accepted since: the list is refetched when next shown. */
+  stale: boolean;
   status: "idle" | "loading" | "error";
   /** When the list last arrived, to throttle focus refreshes. */
   fetchedAt: number;
@@ -24,6 +24,7 @@ interface RecommendationState {
 const initialState: RecommendationState = {
   items: [],
   loaded: false,
+  stale: false,
   status: "idle",
   fetchedAt: 0,
   sentIds: [],
@@ -31,11 +32,11 @@ const initialState: RecommendationState = {
 
 /** `ifOlderThan` (ms): skip the request when the list is fresher than that. */
 export const fetchRecommendations = createAsyncThunk<
-  RecommendationCandidateItem[],
+  SuggestedFriend[],
   { ifOlderThan?: number } | void
 >(
   `/recommendation/me`,
-  async () => (await getMyRecommendationsAPI()).candidates || [],
+  () => getMyRecommendationsAPI(),
   {
     condition: (options, { getState }) => {
       const { status, fetchedAt } = (getState() as RootState).recommendations;
@@ -66,12 +67,16 @@ export const recommendationSlice = createSlice({
     builder.addCase(fetchRecommendations.fulfilled, (state, action) => {
       state.items = action.payload;
       state.loaded = true;
+      state.stale = false;
       state.status = "idle";
       state.fetchedAt = Date.now();
     });
     builder.addCase(fetchRecommendations.rejected, (state) => {
       state.status = "error";
       state.loaded = true;
+    });
+    builder.addCase(addNotification, (state, action) => {
+      if (action.payload.type === "FRIEND_REQUEST_ACCEPTED") state.stale = true;
     });
     builder.addCase(logoutAPI.fulfilled, () => initialState);
   },
@@ -81,6 +86,8 @@ export const selectRecommendations = (state: RootState) =>
   state.recommendations.items;
 export const selectRecommendationsLoaded = (state: RootState) =>
   state.recommendations.loaded;
+export const selectRecommendationsStale = (state: RootState) =>
+  state.recommendations.stale;
 export const selectRecommendationsStatus = (state: RootState) =>
   state.recommendations.status;
 export const selectRecommendationSentIds = (state: RootState) =>

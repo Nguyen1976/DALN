@@ -1,4 +1,4 @@
-import authorizeAxiosInstance from "@/utils/authorizeAxios";
+import { getMessagesAPI } from "@/apis/chat";
 import {
   createAsyncThunk,
   createSelector,
@@ -26,8 +26,12 @@ export interface PollData {
   question: string;
   isMultipleChoice: boolean;
   isClosed: boolean;
-  closedAt?: string | null;
+  closedAt: string | null;
   options: PollOption[];
+  /** People who have voted (one vote can pick several options). */
+  totalVoters: number;
+  /** Your own vote; only on copies the server made for you. */
+  myOptionIds?: string[];
 }
 
 /** Dữ liệu tin tổng kết cuộc gọi (type=CALL) để render thẻ + nút gọi lại. */
@@ -45,7 +49,7 @@ export interface Message {
   id: string;
   conversationId: string;
   senderId: string;
-  text: string;
+  content: string;
   type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL" | "CALL";
   /** Với type=CALL: dữ liệu để render thẻ cuộc gọi + nút Gọi lại/Tham gia lại. */
   callInfo?: CallInfo;
@@ -59,7 +63,7 @@ export interface Message {
     id: string;
     senderId: string;
     senderName: string;
-    text: string;
+    content: string;
     type: string;
     isRevoked: boolean;
     attachmentName?: string;
@@ -86,7 +90,6 @@ export interface Message {
   }[];
   poll?: PollData;
   status?: "sent" | "pending" | "failed";
-  tempMessageId?: string;
 }
 
 export interface MessageState {
@@ -103,7 +106,8 @@ export interface MessageState {
   pagination: Record<
     string,
     {
-      oldestCursor: string | null;
+      /** Where older messages continue, as the server said; null at the start. */
+      nextCursor: string | null;
       hasMore: boolean;
     }
   >;
@@ -126,17 +130,12 @@ export const getMessages = createAsyncThunk(
     limit?: number;
     cursor?: string | null;
   }) => {
-    const response = await authorizeAxiosInstance.get(
-      `/chat/messages/${conversationId}?limit=${limit}${
-        cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
-      }`,
-    );
-    return {
-      ...response.data.data,
+    const { items, nextCursor } = await getMessagesAPI(
       conversationId,
       limit,
-      cursor: cursor || null,
-    };
+      cursor ?? null,
+    );
+    return { messages: items, nextCursor, conversationId, cursor: cursor ?? null };
   },
 );
 
@@ -172,7 +171,6 @@ export const messageSlice = createSlice({
       const index = currentMessages.findIndex(
         (m) =>
           m.id === message.id ||
-          m.id === message.tempMessageId ||
           (message.clientMessageId &&
             m.clientMessageId &&
             m.clientMessageId === message.clientMessageId),
@@ -192,32 +190,22 @@ export const messageSlice = createSlice({
         currentMessages.sort(compareNewestFirst);
       }
     },
+    /** The server saved one of ours: swap the optimistic copy for it. */
     ackMessage: (
       state,
-      action: PayloadAction<{
-        conversationId: string;
-        clientMessageId?: string;
-        serverMessageId: string;
-        message?: Message;
-      }>,
+      action: PayloadAction<{ clientMessageId?: string; message: Message }>,
     ) => {
-      const { conversationId, clientMessageId, serverMessageId, message } =
-        action.payload;
-      const currentMessages = state.messages[conversationId] || [];
-
+      const { clientMessageId, message } = action.payload;
+      if (!clientMessageId) return;
+      const currentMessages = state.messages[message.conversationId] || [];
       const index = currentMessages.findIndex(
-        (m) =>
-          (clientMessageId && m.clientMessageId === clientMessageId) ||
-          m.id === clientMessageId,
+        (m) => m.clientMessageId === clientMessageId,
       );
-
       if (index !== -1) {
         currentMessages[index] = {
           ...currentMessages[index],
-          ...(message || {}),
-          id: serverMessageId,
+          ...message,
           status: "sent",
-          tempMessageId: undefined,
         };
       }
     },
@@ -305,7 +293,7 @@ export const messageSlice = createSlice({
         currentMessages[index] = {
           ...currentMessages[index],
           isRevoked: true,
-          text: "",
+          content: "",
           medias: [],
         };
       }
@@ -331,6 +319,10 @@ export const messageSlice = createSlice({
       delete state.messages[action.payload.conversationId];
       delete state.pagination[action.payload.conversationId];
     },
+    /**
+     * A poll's new state. Events for everyone do not carry your own vote, so
+     * the one already known is kept unless the update brings one.
+     */
     updateMessagePoll: (
       state,
       action: PayloadAction<{
@@ -348,24 +340,16 @@ export const messageSlice = createSlice({
 
       if (!target) return;
 
-      target.poll = poll;
+      target.poll = { ...target.poll, ...poll };
       target.type = "POLL";
-      target.text = poll.question;
+      target.content = poll.question;
     },
   },
   extraReducers: (builder) => {
     builder.addCase(
       getMessages.fulfilled,
-      (
-        state,
-        action: PayloadAction<{
-          messages: Message[];
-          conversationId: string;
-          limit: number;
-          cursor: string | null;
-        }>,
-      ) => {
-        const { messages, conversationId, limit, cursor } = action.payload;
+      (state, action) => {
+        const { messages, nextCursor, conversationId, cursor } = action.payload;
         const current = state.messages[conversationId] || [];
 
         const mergedSource = cursor
@@ -387,17 +371,9 @@ export const messageSlice = createSlice({
         merged.sort(compareNewestFirst);
         state.messages[conversationId] = merged;
 
-        // Same tie-breaker as the conversation list: two messages written in
-        // the same millisecond by the batch writer would otherwise straddle a
-        // page boundary and one of them would never be fetched.
-        const oldest = merged[merged.length - 1];
-        const oldestCursor = oldest?.createdAt
-          ? `${oldest.createdAt}|${oldest.id}`
-          : null;
-
         state.pagination[conversationId] = {
-          oldestCursor,
-          hasMore: messages.length >= limit,
+          nextCursor,
+          hasMore: nextCursor !== null,
         };
       },
     );
@@ -434,7 +410,7 @@ export const selectMessagePagination = createSelector(
     // an empty thread used to be refetched every time it was opened.
     return page
       ? { ...page, loaded: true }
-      : { oldestCursor: null, hasMore: false, loaded: false };
+      : { nextCursor: null, hasMore: false, loaded: false };
   },
 );
 

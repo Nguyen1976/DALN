@@ -71,6 +71,17 @@ export class EmbeddingService {
     return this.tensorToVectors(output, texts.length)
   }
 
+  /** One user's bio into Qdrant; false (and logged) when that failed. */
+  async embedBio(userId: string, bio: string): Promise<boolean> {
+    const result = await this.embedAndSave([{ id: userId, bio, age: 0 }])
+    if (result.status !== 'ok') {
+      this.logger.error(
+        `bio embedding failed userId=${userId}: ${result.message ?? result.status}`,
+      )
+    }
+    return result.status === 'ok'
+  }
+
   async embedAndSave(users: EmbedUserInput[]): Promise<EmbedAndSaveResult> {
     if (!users.length) {
       return { status: 'empty' }

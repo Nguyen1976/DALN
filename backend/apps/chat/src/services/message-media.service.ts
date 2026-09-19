@@ -100,10 +100,6 @@ export class MessageMediaService {
   ) {}
 
   normalizeMessageType(type: unknown): NormalizedMessageType {
-    if (typeof type === 'number') {
-      return ['TEXT', 'IMAGE', 'VIDEO', 'FILE', 'POLL'][type] as NormalizedMessageType
-    }
-
     const normalized = String(type || 'TEXT').toUpperCase()
 
     if (normalized.includes('IMAGE')) return 'IMAGE'

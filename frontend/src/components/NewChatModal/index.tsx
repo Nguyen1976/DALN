@@ -17,6 +17,7 @@ import type { AppDispatch } from "@/redux/store";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createConversation } from "@/redux/slices/conversationSlice";
+import { toast } from "sonner";
 import z from "zod";
 import { useModalExit } from "@/hooks/useModalExit";
 import { staggerStyle } from "@/lib/motion";
@@ -66,30 +67,18 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
     resolver: zodResolver(formConversationScheme),
   });
 
-  const friendsOnStore = useSelector(selectFriend);
-
   const onSubmit = (data: z.infer<typeof formConversationScheme>) => {
     const formData = new FormData();
     if (data.groupAvatar) formData.append("groupAvatar", data.groupAvatar);
     formData.append("groupName", data.groupName);
-    formData.append(
-      "members",
-      JSON.stringify(
-        friendsOnStore
-          .filter((friend) => slectedFriends.includes(friend.id))
-          .map((friend) => ({
-            userId: friend.id,
-            username: friend.username,
-            avatar: friend.avatar,
-            fullName: friend.fullName,
-          })),
-      ),
-    );
+    // Ids only: the server looks up names and avatars (and adds you itself).
+    for (const id of slectedFriends) formData.append("memberIds", id);
     dispatch(createConversation(formData))
       .unwrap()
-      .finally(() => {
-        requestClose();
-      });
+      .then(() => toast.success("Đã tạo cuộc trò chuyện thành công"))
+      // A failed request has already been reported by the axios interceptor.
+      .catch(() => undefined)
+      .finally(requestClose);
   };
 
   useEffect(() => {

@@ -17,14 +17,16 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { UserStatusStore } from './user-status.store'
-import type { EmitToUserPayload } from 'libs/constant/rmq/payload'
+import type {
+  EmitToUserPayload,
+  MessageSendPayload,
+} from 'libs/constant/rmq/payload'
 import * as cookie from 'cookie'
 import { resolveTokens } from '@app/common'
 import { randomUUID } from 'crypto'
 import { buildIceConfig } from './turn-credentials'
 import { CallSession, CallSessionStore, isCallId } from './call-session.store'
 import { CallBusyStore } from './call-busy.store'
-import { fetchCallPeer } from './chat-call-peer.client'
 import {
   conversationIdFromRoom,
   GroupCallMember,
@@ -32,7 +34,11 @@ import {
   GroupCallStore,
   isGroupCallId,
 } from './group-call.store'
-import { fetchCallMembers, postGroupCallLog } from './chat-call-members.client'
+import {
+  fetchCallMembers,
+  fetchCallPeer,
+  postGroupCallLog,
+} from './chat.client'
 import {
   buildGroupCallToken,
   getLivekitUrl,
@@ -220,9 +226,6 @@ export class RealtimeGateway
       this.packetListeners.set(client.id, packetListener)
 
       if (!prevOnline) {
-        //delete lastSeen vì user đã online trở lại
-        await this.redisClient.del(`user:${userId}:lastSeen`)
-
         publishEvent(
           this.amqpConnection,
           EXCHANGE_RMQ.REALTIME_EVENTS,
@@ -283,13 +286,8 @@ export class RealtimeGateway
 
     if (!stillOnline) {
       //trường hợp này là trường hợp user offline thật sự, chứ k phải do lỗi kết nối mạng hay tắt máy đột ngột mà chưa kịp remove connection
+      // The user service stores it on the account (USER_OFFLINE).
       const lastSeen = new Date().toISOString()
-      await this.redisClient.set(
-        `user:${userId}:lastSeen`,
-        lastSeen,
-        'EX',
-        60 * 60 * 24 * 7,
-      ) // lưu lastSeen trong 7 ngày
 
       publishEvent(
         this.amqpConnection,
@@ -346,19 +344,13 @@ export class RealtimeGateway
     client.leave(`conversation:${conversationId}`)
   }
 
-  async checkUserOnline(userId: string): Promise<boolean> {
-    return this.userStatusStore.isOnline(userId)
-  }
-
   @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.REALTIME_EVENTS,
     routingKey: ROUTING_RMQ.EMIT_REALTIME_EVENT,
     queue: QUEUE_RMQ.REALTIME_EMIT_EVENT,
   })
-  async emitToUser({ userIds, event, data }: EmitToUserPayload) {
-    for (const userId of userIds) {
-      this.server.to(`user:${userId}`).emit(event, data)
-    }
+  emitToUser({ userIds, event, data }: EmitToUserPayload) {
+    this.emitToUserSockets(userIds, event, data)
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_CREATE)
@@ -388,23 +380,20 @@ export class RealtimeGateway
       return
     }
 
+    const message: MessageSendPayload = {
+      conversationId: data.conversationId,
+      senderId: client.data.userId,
+      content: data.content,
+      replyToMessageId: data.replyToMessageId,
+      clientMessageId: data.clientMessageId,
+      type: data.type,
+      medias: data.medias ?? [],
+    }
     publishEvent(
       this.amqpConnection,
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.SEND_MESSAGE,
-      {
-        conversationId: data.conversationId,
-        senderId: client.data.userId,
-        text: data.content,
-        replyToMessageId: data.replyToMessageId,
-        tempMessageId: data.clientMessageId,
-        clientMessageId: data.clientMessageId,
-        type: data.type,
-        medias: data.media || data.medias || [],
-        mentionUserIds: Array.isArray(data.mentionUserIds)
-          ? data.mentionUserIds
-          : [],
-      },
+      message,
     )
   }
 

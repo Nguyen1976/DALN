@@ -21,48 +21,10 @@ import {
   revokeMessage,
   updateMessagePoll,
   type Message,
+  type PollData,
 } from "@/redux/slices/messageSlice";
 import { selectUser } from "@/redux/slices/userSlice";
 import type { AppDispatch } from "@/redux/store";
-
-function parseSocketMessage(raw: unknown): Message | null {
-  const source =
-    raw && typeof raw === "object" && "message" in raw
-      ? (raw as { message?: unknown }).message
-      : raw;
-
-  if (!source || typeof source !== "object") return null;
-
-  const message = source as Message;
-  if (!message.id || !message.conversationId) return null;
-  return message;
-}
-
-interface PollSocketPayload {
-  conversationId: string;
-  messageId: string;
-  pollId: string;
-  question: string;
-  isMultipleChoice: boolean;
-  isClosed: boolean;
-  closedAt?: string | null;
-  options: Array<{ id: string; text: string; count: number }>;
-}
-
-function toPollUpdatePayload(payload: PollSocketPayload) {
-  return {
-    conversationId: payload.conversationId,
-    messageId: payload.messageId,
-    poll: {
-      id: payload.pollId,
-      question: payload.question,
-      isMultipleChoice: Boolean(payload.isMultipleChoice),
-      isClosed: Boolean(payload.isClosed),
-      closedAt: payload.closedAt || null,
-      options: payload.options || [],
-    },
-  };
-}
 
 export function useProtectedRouteChatSockets(conversationId?: string) {
   const dispatch = useDispatch<AppDispatch>();
@@ -94,16 +56,10 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       }
 
       try {
-        const response = await getConversationByIdAPI(targetConversationId);
-        if (!response?.conversation) return null;
-
-        dispatch(
-          applyConversationUpdate({
-            conversation: response.conversation as Conversation,
-          }),
-        );
+        const conversation = await getConversationByIdAPI(targetConversationId);
+        dispatch(applyConversationUpdate({ conversation }));
         knownConversationIdsRef.current.add(targetConversationId);
-        return response.conversation;
+        return conversation;
       } catch {
         return null;
       }
@@ -136,35 +92,22 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       }
     };
 
-    const newMessageHandler = (payload: { message: Message }) => {
-      const message = parseSocketMessage(payload);
-      if (!message) return;
+    const newMessageHandler = ({ message }: { message: Message }) => {
       void processIncomingMessage(message);
     };
 
+    /** Our own message, saved: the ack is the stored message itself. */
     const ackHandler = (payload: {
-      conversationId: string;
       clientMessageId?: string;
-      serverMessageId: string;
-      message?: Message;
+      message: Message;
     }) => {
+      dispatch(ackMessage(payload));
       dispatch(
-        ackMessage({
-          conversationId: payload.conversationId,
-          clientMessageId: payload.clientMessageId,
-          serverMessageId: payload.serverMessageId,
-          message: payload.message,
+        updateNewMessage({
+          conversationId: payload.message.conversationId,
+          lastMessage: payload.message,
         }),
       );
-
-      if (payload.message) {
-        dispatch(
-          updateNewMessage({
-            conversationId: payload.conversationId,
-            lastMessage: payload.message,
-          }),
-        );
-      }
     };
 
     const errorHandler = (payload: {
@@ -180,10 +123,7 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       );
     };
 
-    const systemMessageHandler = (payload: { message: Message }) => {
-      const message = parseSocketMessage(payload);
-      if (!message) return;
-
+    const systemMessageHandler = ({ message }: { message: Message }) => {
       dispatch(addMessage(message));
       dispatch(
         updateNewMessage({
@@ -211,28 +151,26 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
         }),
       );
 
-      const isLastMessage =
-        currentConversation?.lastMessageId === payload.messageId ||
-        currentConversation?.lastMessage?.id === payload.messageId;
-
-      if (payload.message && isLastMessage) {
-        const message = parseSocketMessage({ message: payload.message });
-        if (message) {
-          dispatch(
-            updateNewMessage({
-              conversationId: payload.conversationId,
-              lastMessage: message,
-            }),
-          );
-        }
+      if (
+        payload.message &&
+        currentConversation?.lastMessageId === payload.messageId
+      ) {
+        dispatch(
+          updateNewMessage({
+            conversationId: payload.conversationId,
+            lastMessage: payload.message,
+          }),
+        );
       }
     };
 
-    const pollHandler = (payload: PollSocketPayload) => {
-      if (!payload?.conversationId || !payload?.messageId || !payload?.pollId) {
-        return;
-      }
-      dispatch(updateMessagePoll(toPollUpdatePayload(payload)));
+    // A vote or a close by anyone, you included: the whole poll as it is now.
+    const pollHandler = (payload: {
+      conversationId: string;
+      messageId: string;
+      poll: PollData;
+    }) => {
+      dispatch(updateMessagePoll(payload));
     };
 
     const memberAddedHandler = (payload: {
@@ -301,17 +239,8 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
 
     const conversationUpdateHandler = (payload: {
       conversation: Conversation;
-      membershipStatus?: "ACTIVE" | "REMOVED" | "LEFT";
-      canSendMessage?: boolean;
     }) => {
-      if (!payload?.conversation) return;
-      dispatch(
-        applyConversationUpdate({
-          conversation: payload.conversation,
-          membershipStatus: payload.membershipStatus,
-          canSendMessage: payload.canSendMessage,
-        }),
-      );
+      dispatch(applyConversationUpdate(payload));
     };
 
     socket.on(SOCKET_EVENTS.CHAT.MESSAGE_NEW, newMessageHandler);

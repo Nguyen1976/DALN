@@ -1,29 +1,28 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
-import type {
-  UserUpdatedPayload,
-  UserUpdateStatusMakeFriendPayload,
-} from 'libs/constant/rmq/payload'
+import type { UserUpdatedPayload } from 'libs/constant/rmq/payload'
 import { S3StorageService } from '@app/storage-s3/s3-storage.service'
 import {
   ConversationRepository,
   ConversationMemberRepository,
-  MessageRepository,
 } from '../repositories'
 import { ChatErrors } from '../errors/chat.errors'
 import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
-import { Member } from '../http/chat-http.dto'
 import { conversationType } from '../generated'
-import { MessageMapper } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
-import { parseKeysetCursor } from '@app/util'
+import {
+  buildKeysetCursor,
+  isObjectId,
+  parseKeysetCursor,
+  toPage,
+} from '@app/util'
+import { UserDirectoryClient } from '../clients/user-directory.client'
+import { requireGroupManager } from './group-access'
 
-export interface CreateConversationData {
-  members: Member[]
-  type: conversationType
-  createrId?: string
-  groupName?: string
-  groupAvatar?: Buffer
-  groupAvatarFilename?: string
+export interface CreateGroupData {
+  groupName: string
+  /** Everyone to add besides the owner (the owner is added automatically). */
+  memberIds: string[]
+  avatar?: { buffer: Buffer; filename: string }
 }
 
 export interface DeleteConversationRequest {
@@ -41,15 +40,6 @@ export interface CallMembersRequest {
   userId: string
 }
 
-/**
- * Id đến từ query string của gateway. Prisma/Mongo ném lỗi hạ tầng (-> 500) khi
- * gặp ObjectId sai định dạng, nên chặn ngay tại cửa và trả 403 như mọi lý do từ
- * chối khác.
- */
-function isObjectId(value: string): boolean {
-  return /^[a-f\d]{24}$/.test(value.toLowerCase())
-}
-
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name)
@@ -57,197 +47,124 @@ export class ConversationService {
   constructor(
     private readonly conversationRepo: ConversationRepository,
     private readonly memberRepo: ConversationMemberRepository,
-    private readonly messageRepo: MessageRepository,
     private readonly eventsPublisher: ChatEventsPublisher,
     private readonly messageMediaService: MessageMediaService,
     @Inject(S3StorageService)
     private readonly s3StorageService: S3StorageService,
+    private readonly userDirectory: UserDirectoryClient,
   ) {}
 
-  async createConversationWhenAcceptFriend(
-    data: UserUpdateStatusMakeFriendPayload,
-  ) {
-    if (!(data.status === 'ACCEPTED')) return
-    await this.createConversation({
-      type: conversationType.DIRECT,
-      members: data.members,
-    })
-  }
-
-  async createConversation(data: CreateConversationData) {
-    const memberIds = data.members
-      .map((m) => m.userId)
-      .filter((id) => id !== data.createrId)
-
-    if (data.createrId && memberIds.length <= 1) {
+  /**
+   * A new group owned by `ownerId`. Members come as ids only: names and
+   * avatars are taken from the user service, so the owner's own snapshot is
+   * complete (the token carries no profile) and nothing a client sends ends
+   * up stored as someone's profile.
+   */
+  async createGroup(ownerId: string, data: CreateGroupData) {
+    const otherIds = [...new Set(data.memberIds)].filter((id) => id !== ownerId)
+    if (otherIds.length < 2) {
       ChatErrors.conversationNotEnoughMembers()
     }
 
-    let avatarUrl = ''
-    if (data.groupAvatar && data.groupAvatarFilename) {
-      const mime =
-        this.messageMediaService.getMimeType(data.groupAvatarFilename) ||
-        'application/octet-stream'
+    const profiles = await this.userDirectory.getProfiles([ownerId, ...otherIds])
+    if (profiles.length !== otherIds.length + 1) {
+      ChatErrors.invalidMemberAction('Có người dùng không tồn tại')
+    }
 
+    let avatarUrl = ''
+    if (data.avatar) {
+      const mime =
+        this.messageMediaService.getMimeType(data.avatar.filename) ||
+        'application/octet-stream'
       avatarUrl = await this.s3StorageService.upload({
-        buffer: data.groupAvatar as Buffer,
+        buffer: data.avatar.buffer,
         mime,
         folder: 'avatars',
-        ext: data.groupAvatarFilename?.split('.').pop() || 'bin',
+        ext: data.avatar.filename.split('.').pop() || 'bin',
       })
     }
 
-    const uniqueMembers = Array.from(
-      new Map(data.members.map((m) => [m.userId, m])).values(),
-    )
-
     const conversation = await this.conversationRepo.create({
-      type: data.type as conversationType,
+      type: conversationType.GROUP,
       groupName: data.groupName,
       groupAvatar: avatarUrl,
-      memberCount: uniqueMembers.length,
+      memberCount: profiles.length,
     })
-
-    await this.memberRepo.createMany(
-      conversation.id,
-      uniqueMembers,
-      data.createrId as string,
-      data.type as conversationType,
-    )
+    await this.memberRepo.createMany(conversation.id, profiles, {
+      type: 'GROUP',
+      ownerId,
+    })
 
     const res = await this.conversationRepo.findByIdWithMembers(conversation.id)
 
+    // The others learn about the group over the socket; the owner gets it in
+    // the HTTP answer.
     this.eventsPublisher.publishConversationCreated({
       ...res,
-      memberIds,
+      memberIds: otherIds,
     })
-
-    try {
-      const membersToPublish = uniqueMembers || []
-      for (const m of membersToPublish) {
-        this.eventsPublisher.publishUserJoinedGroup({
-          userId: m.userId,
-          groupId: conversation.id,
-          conversationId: conversation.id,
-          groupName: conversation.groupName ?? undefined,
-          createdAt: new Date().toISOString(),
-        })
-      }
-    } catch (e) {
-      this.logger.warn(
-        '[chat-service] publishUserJoinedGroup (createConversation) failed',
-        e,
-      )
+    for (const profile of profiles) {
+      this.eventsPublisher.publishUserJoinedGroup({
+        userId: profile.userId,
+        conversationId: conversation.id,
+        groupName: conversation.groupName ?? undefined,
+        createdAt: new Date().toISOString(),
+      })
     }
 
     return res
   }
 
   async deleteConversation(dto: DeleteConversationRequest) {
-    const conversation = await this.conversationRepo.findById(
+    await requireGroupManager(
+      this.conversationRepo,
+      this.memberRepo,
       dto.conversationId,
+      dto.userId,
     )
-
-    if (!conversation) {
-      ChatErrors.conversationNotFound()
-    }
-
-    if (conversation.type === conversationType.DIRECT) {
-      ChatErrors.userNoPermission()
-    }
-
-    const existingMembers = await this.memberRepo.findByConversationId(
-      dto.conversationId,
-    )
-
-    const actor = existingMembers.find(
-      (member) =>
-        member.userId === dto.userId &&
-        (member.role === 'ADMIN' || member.role === 'OWNER'),
-    )
-
-    if (!actor) {
-      ChatErrors.userNoPermission()
-    }
 
     await this.conversationRepo.deleteConversationById(dto.conversationId)
-
-    return {
-      status: 'SUCCESS',
-    }
   }
 
+  /** The caller's conversations, most recent first (the membership's order). */
   async getConversations(
     userId: string,
-    params: { limit?: number | string; cursor?: string | null },
+    page: { limit: number; cursor?: string },
   ) {
-    const take = Number(params.limit) || 20
-    const cursor = parseKeysetCursor(params.cursor)
-    const conversations = await this.conversationRepo.findByUserIdPaginated(
+    const rows = await this.conversationRepo.findByUserIdPaginated(
       userId,
-      cursor,
-      take,
+      parseKeysetCursor(page.cursor),
+      page.limit + 1,
     )
-    return this.enrichConversationsLastMessage(conversations)
+    const { items, nextCursor } = toPage(rows, page.limit, (row) =>
+      row.lastMessageAt ? buildKeysetCursor(row.lastMessageAt, row.id) : null,
+    )
+    return { items, nextCursor }
   }
 
+  /** Groups by name; the one screen that searches only lists groups. */
   async searchConversations(userId: string, keyword: string) {
     const safeKeyword = keyword?.trim()
-
     if (!safeKeyword) {
       return []
     }
-
-    const conversations = await this.conversationRepo.searchByKeyword(
-      userId,
-      safeKeyword,
-    )
-
-    const converOfFriend =
-      await this.conversationRepo.findDirectConversationOfFriend(
-        userId,
-        safeKeyword,
-      )
-
-    const mergedConversations = [...conversations, ...converOfFriend].filter(
-      (conversation): conversation is NonNullable<typeof conversation> =>
-        conversation != null,
-    )
-
-    const uniqueConversations = Array.from(
-      new Map(
-        mergedConversations.map((conversation) => [
-          conversation.id,
-          conversation,
-        ]),
-      ).values(),
-    ).sort((a, b) => {
-      const bTime = new Date(b.updatedAt ?? b.createdAt).getTime()
-      const aTime = new Date(a.updatedAt ?? a.createdAt).getTime()
-      return bTime - aTime
-    })
-
-    return this.enrichConversationsLastMessage(uniqueConversations)
+    return this.conversationRepo.searchGroups(userId, safeKeyword)
   }
 
+  /** The query only matches conversations the caller is an active member of. */
   async getConversationByFriendId(friendId: string, userId: string) {
-    const conversation: any =
-      await this.conversationRepo.findConversationByFriendId(friendId, userId)
-
+    const conversation = await this.conversationRepo.findConversationByFriendId(
+      friendId,
+      userId,
+    )
     if (!conversation) {
       ChatErrors.conversationNotFound()
     }
-
-    const isMember = conversation.members.find((m) => m.userId === userId)
-    if (!isMember) {
-      ChatErrors.userNotMember()
-    }
-
     return conversation
   }
 
   async getConversationById(conversationId: string, userId: string) {
-    const conversation: any =
+    const conversation =
       await this.conversationRepo.findByIdWithMembers(conversationId)
 
     if (!conversation) {
@@ -259,9 +176,7 @@ export class ConversationService {
       ChatErrors.userNotMember()
     }
 
-    return {
-      conversation,
-    }
+    return conversation
   }
 
   /**
@@ -366,49 +281,6 @@ export class ConversationService {
     await this.memberRepo.updateByUserId(data.userId, {
       avatar: data.avatar,
       fullName: data.fullName,
-    })
-  }
-
-  private async enrichConversationsLastMessage(conversations: any[]) {
-    const missing = conversations.filter(
-      (conversation) =>
-        !conversation?.lastMessageText && !conversation?.lastMessageId,
-    )
-
-    if (!missing.length) return conversations
-
-    const latestMessages = await this.messageRepo.findLatestByConversationIds(
-      missing.map((conversation) => conversation.id),
-    )
-
-    const latestByConversationId = new Map(
-      latestMessages
-        .filter((message): message is NonNullable<typeof message> =>
-          Boolean(message),
-        )
-        .map((message) => [message.conversationId, message]),
-    )
-
-    return conversations.map((conversation) => {
-      if (conversation.lastMessageText || conversation.lastMessageId) {
-        return conversation
-      }
-
-      const latestMessage = latestByConversationId.get(conversation.id)
-      if (!latestMessage) return conversation
-
-      const sender = latestMessage.senderMember
-
-      return {
-        ...conversation,
-        lastMessageId: latestMessage.id,
-        lastMessageAt: latestMessage.createdAt,
-        lastMessageText: MessageMapper.previewText(latestMessage),
-        lastMessageSenderId: latestMessage.senderId,
-        lastMessageSenderName:
-          sender?.fullName || sender?.username || latestMessage.senderId,
-        lastMessageSenderAvatar: sender?.avatar || null,
-      }
     })
   }
 }

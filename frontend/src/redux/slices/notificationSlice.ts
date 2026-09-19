@@ -1,14 +1,27 @@
-import authorizeAxiosInstance from "@/utils/authorizeAxios";
+import {
+  getNotificationsAPI,
+  getUnreadNotificationCountAPI,
+  markAllNotificationsReadAPI,
+  markNotificationReadAPI,
+} from "@/apis/notification";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
 import { logoutAPI } from "./userSlice";
+
+/** The kinds of notification the server sends (same names as in settings). */
+export type NotificationType =
+  | "FRIEND_REQUEST_SENT"
+  | "FRIEND_REQUEST_ACCEPTED"
+  | "FRIEND_REQUEST_REJECTED"
+  | "MENTIONED_IN_CONVERSATION"
+  | "SYSTEM_NOTIFICATION";
 
 export interface Notification {
   id: string;
   userId: string;
   message: string;
   isRead: boolean;
-  type: string;
+  type: NotificationType;
   friendRequestId?: string | undefined;
   createdAt: string;
 }
@@ -32,7 +45,8 @@ export interface NotificationState {
    * another tab, and used to forget which pages it had.
    */
   loaded: boolean;
-  page: number;
+  /** Where the next page starts; null once everything is loaded. */
+  nextCursor: string | null;
   hasMore: boolean;
 }
 
@@ -44,40 +58,26 @@ const initialState: NotificationState = {
   unreadCount: 0,
   unreadCountLoaded: false,
   loaded: false,
-  page: 0,
+  nextCursor: null,
   hasMore: true,
 };
 
+/** A page of the bell's list; `cursor: null` (re)loads the first. */
 export const getNotifications = createAsyncThunk(
   `/notification`,
-  async ({ limit, page }: { limit: number; page: number }) => {
-    const response = await authorizeAxiosInstance.get(
-      `/notification?limit=${limit}&page=${page}`,
-    );
-    return {
-      ...response.data.data,
-      page,
-      limit,
-    };
-  },
+  ({ cursor }: { cursor: string | null }) =>
+    getNotificationsAPI(NOTIFICATIONS_PAGE_SIZE, cursor),
 );
 
 export const fetchUnreadCount = createAsyncThunk(
   `/notification/unread-count`,
-  async () => {
-    const response = await authorizeAxiosInstance.get(
-      "/notification/unread-count",
-      { skipErrorToast: true },
-    );
-    const data = response.data?.data ?? response.data;
-    return Number(data?.unreadCount ?? data?.count ?? 0) || 0;
-  },
+  () => getUnreadNotificationCountAPI(),
 );
 
 export const markNotificationAsRead = createAsyncThunk(
   `/notification/mark-read`,
   async ({ notificationId }: { notificationId: string }) => {
-    await authorizeAxiosInstance.patch(`/notification/${notificationId}/read`);
+    await markNotificationReadAPI(notificationId);
     return { notificationId };
   },
 );
@@ -85,7 +85,7 @@ export const markNotificationAsRead = createAsyncThunk(
 export const markAllNotificationsAsRead = createAsyncThunk(
   `/notification/mark-all-read`,
   async () => {
-    await authorizeAxiosInstance.patch("/notification/read-all");
+    await markAllNotificationsReadAPI();
     return true;
   },
 );
@@ -107,51 +107,38 @@ export const notificationSlice = createSlice({
     },
   },
   extraReducers: (builder) => {
-    builder.addCase(
-      getNotifications.fulfilled,
-      (
-        state,
-        action: PayloadAction<{
-          notifications: Notification[];
-          page: number;
-          limit: number;
-        }>,
-      ) => {
-        const incoming = action.payload.notifications || [];
-        state.loaded = true;
-        state.page = action.payload.page;
-        state.hasMore = incoming.length >= action.payload.limit;
+    builder.addCase(getNotifications.fulfilled, (state, action) => {
+      const { items: incoming, nextCursor } = action.payload;
+      state.loaded = true;
+      state.nextCursor = nextCursor;
+      state.hasMore = nextCursor !== null;
 
-        if (action.payload.page <= 1) {
-          state.items = incoming;
-          return;
-        }
+      if (action.meta.arg.cursor === null) {
+        state.items = incoming;
+        return;
+      }
 
-        for (const notification of incoming) {
-          if (!state.items.some((n) => n.id === notification.id)) {
-            state.items.push(notification);
-          }
+      for (const notification of incoming) {
+        if (!state.items.some((n) => n.id === notification.id)) {
+          state.items.push(notification);
         }
-      },
-    );
+      }
+    });
 
     builder.addCase(fetchUnreadCount.fulfilled, (state, action) => {
       state.unreadCount = action.payload;
       state.unreadCountLoaded = true;
     });
 
-    builder.addCase(
-      markNotificationAsRead.fulfilled,
-      (state, action: PayloadAction<{ notificationId: string }>) => {
-        const target = state.items.find(
-          (n) => n.id === action.payload.notificationId,
-        );
-        if (target && !target.isRead) {
-          target.isRead = true;
-          state.unreadCount = Math.max(0, state.unreadCount - 1);
-        }
-      },
-    );
+    builder.addCase(markNotificationAsRead.fulfilled, (state, action) => {
+      const target = state.items.find(
+        (n) => n.id === action.payload.notificationId,
+      );
+      if (target && !target.isRead) {
+        target.isRead = true;
+        state.unreadCount = Math.max(0, state.unreadCount - 1);
+      }
+    });
 
     builder.addCase(markAllNotificationsAsRead.fulfilled, (state) => {
       state.items.forEach((notification) => {
@@ -177,8 +164,8 @@ export const selectUnreadCountLoaded = (state: WithNotifications) =>
   state.notification.unreadCountLoaded;
 export const selectNotificationsLoaded = (state: WithNotifications) =>
   state.notification.loaded;
-export const selectNotificationsPage = (state: WithNotifications) =>
-  state.notification.page;
+export const selectNotificationsNextCursor = (state: WithNotifications) =>
+  state.notification.nextCursor;
 export const selectNotificationsHasMore = (state: WithNotifications) =>
   state.notification.hasMore;
 

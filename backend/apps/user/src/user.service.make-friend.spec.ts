@@ -112,12 +112,16 @@ describe('UserService.detailMakeFriend', () => {
   }
 
   function setupDetail(found: typeof request | null = request) {
-    const friendRequestRepo = { findById: jest.fn().mockResolvedValue(found) }
-    const userRepo = {
-      findByIdWithSelect: jest
-        .fn()
-        .mockResolvedValue({ ...inviter, email: 'alice@example.test' }),
+    // The sender comes along with the request (a Prisma relation).
+    const friendRequestRepo = {
+      findWithSender: jest.fn().mockResolvedValue(
+        found && {
+          ...found,
+          fromUser: { ...inviter, email: 'alice@example.test' },
+        },
+      ),
     }
+    const userRepo = {}
     const service = new UserService(
       userRepo as any,
       friendRequestRepo as any,
@@ -142,18 +146,17 @@ describe('UserService.detailMakeFriend', () => {
       expect.objectContaining({
         id: 'fr1',
         status: 'PENDING',
-        fromUser: expect.objectContaining({ id: inviter.id }),
+        counterpart: expect.objectContaining({ id: inviter.id }),
       }),
     )
   })
 
   it('tài khoản khác (kể cả người gửi) nhận "không tìm thấy", không lộ người gửi', async () => {
-    const { service, userRepo } = setupDetail()
+    const { service } = setupDetail()
 
     await expect(service.detailMakeFriend('fr1', inviter.id)).rejects.toThrow(
       'Không tìm thấy lời mời kết bạn',
     )
-    expect(userRepo.findByIdWithSelect).not.toHaveBeenCalled()
   })
 
   it('id không tồn tại -> không tìm thấy', async () => {
@@ -162,5 +165,80 @@ describe('UserService.detailMakeFriend', () => {
     await expect(service.detailMakeFriend('nope', invitee.id)).rejects.toThrow(
       'Không tìm thấy lời mời kết bạn',
     )
+  })
+})
+
+describe('UserService.respondToFriendRequest', () => {
+  const request = {
+    id: 'fr1',
+    fromUserId: inviter.id,
+    toUserId: invitee.id,
+    status: 'PENDING',
+  }
+
+  function setupRespond(found: object | null = request) {
+    const friendRequestRepo = {
+      findById: jest.fn().mockResolvedValue(found),
+      decline: jest.fn().mockResolvedValue({ count: 1 }),
+    }
+    const eventsPublisher = { publishUserUpdateStatusMakeFriend: jest.fn() }
+    const prisma = { $transaction: jest.fn() }
+    const service = new UserService(
+      {} as any, // userRepo
+      friendRequestRepo as any,
+      {} as any, // friendShipRepo
+      {} as any, // jwtService
+      {} as any, // utilService
+      eventsPublisher as any,
+      {} as any, // s3StorageService
+      {} as any, // redisService
+      {} as any, // logger
+      prisma as any,
+    )
+    return { service, friendRequestRepo, eventsPublisher, prisma }
+  }
+
+  it('từ chối: đúng lời mời theo id, event mang người gửi lấy từ lời mời', async () => {
+    const { service, friendRequestRepo, eventsPublisher } = setupRespond()
+
+    await service.respondToFriendRequest({
+      requestId: 'fr1',
+      inviteeId: invitee.id,
+      inviteeName: invitee.username,
+      status: 'REJECTED',
+    })
+
+    expect(friendRequestRepo.decline).toHaveBeenCalledWith('fr1')
+    expect(eventsPublisher.publishUserUpdateStatusMakeFriend).toHaveBeenCalledWith(
+      expect.objectContaining({ inviterId: inviter.id, inviteeId: invitee.id }),
+    )
+  })
+
+  it('người không phải người nhận (kể cả người gửi) -> không tìm thấy, không ghi gì', async () => {
+    const { service, friendRequestRepo, prisma } = setupRespond()
+
+    await expect(
+      service.respondToFriendRequest({
+        requestId: 'fr1',
+        inviteeId: inviter.id,
+        inviteeName: inviter.username,
+        status: 'ACCEPTED',
+      }),
+    ).rejects.toThrow('Không tìm thấy lời mời kết bạn')
+    expect(friendRequestRepo.decline).not.toHaveBeenCalled()
+    expect(prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('lời mời đã được trả lời -> báo đã phản hồi', async () => {
+    const { service } = setupRespond({ ...request, status: 'ACCEPTED' })
+
+    await expect(
+      service.respondToFriendRequest({
+        requestId: 'fr1',
+        inviteeId: invitee.id,
+        inviteeName: invitee.username,
+        status: 'REJECTED',
+      }),
+    ).rejects.toThrow()
   })
 })
