@@ -92,6 +92,8 @@ export function LeftNavigation() {
                   onClick={onClick}
                   className={cn(
                     "relative size-11 rounded-xl text-muted-foreground",
+                    // Icon nudges up on hover; the button itself keeps still.
+                    "[&_svg]:transition-transform [&_svg]:duration-(--motion-base) [&_svg]:ease-(--ease-spring) hover:[&_svg]:scale-110",
                     "hover:bg-accent hover:text-accent-foreground",
                     active &&
                       "bg-primary text-primary-foreground hover:bg-primary-hover hover:text-primary-foreground",
@@ -102,7 +104,7 @@ export function LeftNavigation() {
                   {active && (
                     <span
                       aria-hidden="true"
-                      className="absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-primary md:hidden"
+                      className="absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 animate-pop-in rounded-full bg-primary md:hidden"
                     />
                   )}
                 </Button>

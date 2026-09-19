@@ -102,7 +102,14 @@ export function OtpInput({
   };
 
   return (
-    <div className={cn("flex gap-2 sm:gap-2.5", className)}>
+    // A rejected code shakes the whole row once, each time it turns invalid.
+    <div
+      className={cn(
+        "flex gap-2 sm:gap-2.5",
+        invalid && "animate-shake",
+        className,
+      )}
+    >
       {digits.map((digit, index) => (
         <input
           key={index}
@@ -123,7 +130,7 @@ export function OtpInput({
           maxLength={length}
           className={cn(
             "h-13 w-full min-w-0 rounded-xl border border-input bg-card text-center text-xl font-semibold tabular-nums text-foreground shadow-xs",
-            "py-3 transition-[border-color,box-shadow] duration-[--motion-fast]",
+            "py-3 transition-[border-color,box-shadow] duration-(--motion-fast)",
             "outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35",
             "disabled:cursor-not-allowed disabled:opacity-55",
             invalid && "border-destructive ring-2 ring-destructive/25",

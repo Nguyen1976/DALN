@@ -46,7 +46,7 @@ export const SeenStatus: React.FC<SeenStatusProps> = ({ seenUsers }) => {
           {visible.map((user) => (
             <Tooltip key={user.userId}>
               <TooltipTrigger asChild>
-                <Avatar className="size-4 ring-2 ring-chat-bg">
+                <Avatar className="size-4 animate-pop-in ring-2 ring-chat-bg">
                   <AvatarImage
                     src={user.avatar || ""}
                     alt={`${user.username || "Người dùng"} đã xem`}

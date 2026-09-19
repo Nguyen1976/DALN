@@ -12,7 +12,7 @@ const badgeVariants = cva(
     // passes a title/tooltip so the full value is still reachable.
     "whitespace-nowrap",
     "[&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-3.5",
-    "transition-colors duration-[--motion-fast]",
+    "transition-colors duration-(--motion-fast)",
   ].join(" "),
   {
     variants: {
@@ -76,9 +76,11 @@ function CountBadge({
 
   return (
     <span
+      // New key per value: the badge pops whenever the count changes.
+      key={display}
       data-slot="count-badge"
       className={cn(
-        "flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold tabular-nums text-primary-foreground",
+        "flex h-5 min-w-5 animate-pop-in items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold tabular-nums text-primary-foreground",
         className,
       )}
       {...props}
@@ -108,7 +110,7 @@ function Chip({
       aria-pressed={selected}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium",
-        "transition-[background-color,border-color,color,transform] duration-[--motion-fast] ease-[--ease-out]",
+        "transition-[background-color,border-color,color,transform,scale] duration-(--motion-fast) ease-(--ease-out)",
         "active:scale-[0.97]",
         "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         selected

@@ -3,6 +3,7 @@ import { AvatarWithPresence } from "@/components/ui/avatar";
 import { CountBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/feedback";
 import { Skeleton } from "@/components/ui/skeleton";
+import { staggerStyle } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { ModeToggle } from "../ModeToggle";
 import type { AppDispatch } from "@/redux/store";
@@ -37,6 +38,9 @@ const FILTERS = [
 ] as const;
 
 type FilterKey = (typeof FILTERS)[number]["key"];
+
+/** Scrolling to the end loads this many more; each page staggers from the top. */
+const CONVERSATIONS_PAGE_SIZE = 10;
 
 const unreadCountOf = (conversation: Conversation) => {
   const raw = conversation.unreadCount;
@@ -76,9 +80,9 @@ export function ChatSidebar({ className }: { className?: string }) {
 
   useEffect(() => {
     if (conversations.length === 0) {
-      void dispatch(getConversations({ limit: 10, cursor: null })).finally(() =>
-        setInitialLoading(false),
-      );
+      void dispatch(
+        getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor: null }),
+      ).finally(() => setInitialLoading(false));
     } else {
       setInitialLoading(false);
     }
@@ -100,7 +104,7 @@ export function ChatSidebar({ className }: { className?: string }) {
     const cursor = last?.lastMessageAt ? `${last.lastMessageAt}|${last.id}` : null;
     if (!cursor) return;
     isFetchingMoreRef.current = true;
-    dispatch(getConversations({ limit: 10, cursor }));
+    dispatch(getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor }));
   };
 
   useEffect(() => {
@@ -149,7 +153,10 @@ export function ChatSidebar({ className }: { className?: string }) {
 
   const { activeGroupConversationIds } = useCall();
 
-  const renderConversationItem = (conversation: Conversation) => {
+  const renderConversationItem = (
+    conversation: Conversation,
+    index: number,
+  ) => {
     const memberCount =
       conversation.memberCount ?? conversation.members?.length ?? 0;
     const isActive = selectedChatId === conversation.id;
@@ -179,9 +186,12 @@ export function ChatSidebar({ className }: { className?: string }) {
         key={conversation.id}
         onClick={() => navigate(`/chat/${conversation.id}`)}
         aria-current={isActive ? "true" : undefined}
+        // Rows mount once per conversation (keyed), so the stagger plays on the
+        // first load and for a newly arrived conversation, not on reorders.
+        style={staggerStyle(index % CONVERSATIONS_PAGE_SIZE)}
         className={cn(
-          "relative flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
-          "transition-colors duration-[--motion-fast]",
+          "relative flex w-full animate-stagger-in items-center gap-3 rounded-xl p-2.5 text-left",
+          "transition-colors duration-(--motion-fast)",
           "hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
           isActive && "bg-accent",
         )}
@@ -190,7 +200,7 @@ export function ChatSidebar({ className }: { className?: string }) {
         <span
           aria-hidden="true"
           className={cn(
-            "absolute left-0 top-1/2 h-8 w-1 -translate-y-1/2 rounded-r-full bg-primary transition-opacity duration-[--motion-fast]",
+            "absolute left-0 top-1/2 h-8 w-1 -translate-y-1/2 rounded-r-full bg-primary transition-opacity duration-(--motion-fast)",
             isActive ? "opacity-100" : "opacity-0",
           )}
         />
@@ -258,7 +268,7 @@ export function ChatSidebar({ className }: { className?: string }) {
           </div>
           <div className="flex items-center justify-between gap-2">
             {isCalling ? (
-              <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium text-success">
+              <span className="flex min-w-0 animate-fade-in items-center gap-1.5 truncate text-sm font-medium text-success">
                 <Phone className="size-3.5 shrink-0 animate-pulse" aria-hidden="true" />
                 Đang gọi…
               </span>
@@ -331,7 +341,7 @@ export function ChatSidebar({ className }: { className?: string }) {
             aria-label="Tìm cuộc trò chuyện"
             className={cn(
               "h-10 w-full rounded-xl border border-transparent bg-muted pl-9 pr-9 text-sm text-foreground",
-              "transition-[border-color,box-shadow] duration-[--motion-fast]",
+              "transition-[border-color,box-shadow] duration-(--motion-fast)",
               "outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
               "[&::-webkit-search-cancel-button]:hidden",
             )}
@@ -341,7 +351,7 @@ export function ChatSidebar({ className }: { className?: string }) {
               type="button"
               onClick={() => setQuery("")}
               aria-label="Xoá từ khoá tìm kiếm"
-              className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+              className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 animate-pop-in items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
             >
               <X className="size-4" aria-hidden="true" />
             </button>
@@ -360,7 +370,7 @@ export function ChatSidebar({ className }: { className?: string }) {
               aria-selected={filter === key}
               onClick={() => setFilter(key)}
               className={cn(
-                "rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-[--motion-fast]",
+                "rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-(--motion-fast)",
                 "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                 filter === key
                   ? "bg-primary text-primary-foreground"

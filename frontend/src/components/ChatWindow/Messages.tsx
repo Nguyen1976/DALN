@@ -165,6 +165,9 @@ const MessageComponent = ({
   return (
     <>
       {messages.map((message, index) => {
+        // The optimistic copy is swapped for the server id on ack; keying on
+        // the client id keeps the row mounted, so it animates in only once.
+        const rowKey = message.clientMessageId || message.id;
         const prevMessage = messages[index - 1];
         const nextMessage = messages[index + 1];
 
@@ -216,7 +219,7 @@ const MessageComponent = ({
           );
 
           return (
-            <div key={message.id}>
+            <div key={rowKey}>
               {dayDivider}
               <div
                 id={`message-${message.id}`}
@@ -281,8 +284,10 @@ const MessageComponent = ({
                                   percentage so it never relies on width alone. */}
                               <span
                                 aria-hidden="true"
-                                className="absolute inset-y-0 left-0 bg-primary/12"
-                                style={{ width: `${share}%` }}
+                                // scaleX, not width: the bar grows smoothly
+                                // when votes come in, without relayout.
+                                className="absolute inset-0 origin-left animate-grow-x bg-primary/12 transition-transform duration-(--motion-slow) ease-(--ease-out)"
+                                style={{ transform: `scaleX(${share / 100})` }}
                               />
                               <span className="relative flex items-center justify-between gap-2">
                                 <span className="flex min-w-0 items-center gap-1.5">
@@ -310,7 +315,7 @@ const MessageComponent = ({
                       <button
                         type="button"
                         onClick={() => onOpenPoll?.(message)}
-                        className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors duration-[--motion-fast] hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors duration-(--motion-fast) hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                       >
                         {message.poll.isClosed
                           ? "Xem lựa chọn"
@@ -351,7 +356,7 @@ const MessageComponent = ({
               : null;
         if (callInfo) {
           return (
-            <div key={message.id}>
+            <div key={rowKey}>
               {dayDivider}
               <div
                 id={`message-${message.id}`}
@@ -383,7 +388,7 @@ const MessageComponent = ({
         // System records — someone joined or left — are not things anyone typed.
         if (message.isSystem) {
           return (
-            <div key={message.id}>
+            <div key={rowKey}>
               {dayDivider}
               <div
                 id={`message-${message.id}`}
@@ -408,7 +413,7 @@ const MessageComponent = ({
         }
 
         return (
-          <div key={message.id}>
+          <div key={rowKey}>
             {dayDivider}
             <div
               id={`message-${message.id}`}
@@ -446,6 +451,9 @@ const MessageComponent = ({
                 <div
                   className={cn(
                     "group relative max-w-[min(30rem,78%)] px-3.5 py-2 text-sm leading-relaxed shadow-bubble",
+                    // Grows out of its own side of the conversation.
+                    "animate-bubble-in",
+                    isMine ? "origin-bottom-right" : "origin-bottom-left",
                     isMine
                       ? "bg-bubble-out text-bubble-out-foreground"
                       : "bg-bubble-in text-bubble-in-foreground",
@@ -530,7 +538,7 @@ const MessageComponent = ({
                       onClick={() => onJumpToMessage?.(message.replyTo!.id)}
                       className={cn(
                         "mb-1.5 flex w-full items-stretch gap-2 rounded-lg px-2 py-1.5 text-left",
-                        "transition-colors duration-[--motion-fast]",
+                        "transition-colors duration-(--motion-fast)",
                         isMine
                           ? "bg-bubble-out-foreground/12 hover:bg-bubble-out-foreground/20"
                           : "bg-foreground/6 hover:bg-foreground/10",
@@ -600,7 +608,7 @@ const MessageComponent = ({
                         aria-label="Tuỳ chọn tin nhắn"
                         className={cn(
                           "absolute top-1 inline-flex size-8 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm",
-                          "transition-opacity duration-[--motion-fast]",
+                          "transition-opacity duration-(--motion-fast)",
                           // Hover is not the only way in: keyboard focus and an
                           // open menu reveal it too, and on touch (no hover) it
                           // is always visible.
@@ -682,7 +690,7 @@ const MessageComponent = ({
               {isMine && message.status === "failed" && (
                 <div
                   role="alert"
-                  className="mr-1 mt-1 flex flex-wrap items-center justify-end gap-2 text-[11px] text-destructive-text"
+                  className="mr-1 mt-1 flex animate-fade-in flex-wrap items-center justify-end gap-2 text-[11px] text-destructive-text"
                 >
                   <span className="flex items-center gap-1">
                     <AlertCircle className="size-3" aria-hidden="true" />

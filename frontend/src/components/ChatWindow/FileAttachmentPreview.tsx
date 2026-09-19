@@ -61,7 +61,7 @@ export default function FileAttachmentPreview({
         )}
 
         {preview.status === "ready" && preview.kind === "text" && (
-          <pre className="max-h-44 overflow-hidden whitespace-pre-wrap break-all px-3 py-2 font-mono text-[11px] leading-5 text-foreground/90">
+          <pre className="max-h-44 animate-fade-in overflow-hidden whitespace-pre-wrap break-all px-3 py-2 font-mono text-[11px] leading-5 text-foreground/90">
             {preview.content || " "}
           </pre>
         )}
@@ -70,7 +70,7 @@ export default function FileAttachmentPreview({
           <img
             src={preview.src}
             alt={`Xem trước ${displayName}`}
-            className="max-h-52 w-full object-cover object-top"
+            className="max-h-52 w-full animate-fade-in object-cover object-top"
           />
         )}
 

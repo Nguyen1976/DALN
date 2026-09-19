@@ -15,6 +15,7 @@ import {
 } from "@/redux/slices/userSlice";
 import { useDispatch, useSelector } from "react-redux";
 import type { AppDispatch } from "@/redux/store";
+import { staggerStyle } from "@/lib/motion";
 
 const RECOMMENDED_MIN = 3;
 
@@ -162,9 +163,9 @@ export default function InterestOnboardingPage() {
       </div>
 
       <div className="relative z-20 mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col px-5 py-10 sm:px-8">
-        <BrandLockup className="mb-10" />
+        <BrandLockup className="mb-10 animate-stagger-in" />
 
-        <header className="mb-8 space-y-3">
+        <header className="mb-8 animate-stagger-in space-y-3 [--stagger:1]">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">
             <Sparkles className="size-3.5" aria-hidden="true" />
             Bước cuối
@@ -197,8 +198,12 @@ export default function InterestOnboardingPage() {
             </div>
           ) : (
             <div className="space-y-8">
-              {grouped.map(([category, items]) => (
-                <section key={category} className="space-y-3">
+              {grouped.map(([category, items], index) => (
+                <section
+                  key={category}
+                  className="animate-stagger-in space-y-3"
+                  style={staggerStyle(index + 2)}
+                >
                   <h2 className="text-sm font-semibold capitalize text-foreground">
                     {categoryLabel(category)}
                   </h2>
@@ -217,7 +222,10 @@ export default function InterestOnboardingPage() {
                           )}
                           <span>{tag.label}</span>
                           {on && (
-                            <Check className="size-3.5" aria-hidden="true" />
+                            <Check
+                              className="size-3.5 animate-pop-in"
+                              aria-hidden="true"
+                            />
                           )}
                         </Chip>
                       );
@@ -231,11 +239,15 @@ export default function InterestOnboardingPage() {
 
         {/* Sticky action bar: the primary action stays reachable no matter how
             long the tag list gets. */}
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 backdrop-blur">
+        <div className="fixed inset-x-0 bottom-0 z-30 animate-bar-up border-t border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3 px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-8">
             <p className="text-sm text-muted-foreground" aria-live="polite">
               Đã chọn{" "}
-              <span className="font-semibold text-foreground">
+              <span
+                // Re-keyed so the number pops each time the selection changes.
+                key={selected.size}
+                className="inline-block animate-pop-in font-semibold text-foreground"
+              >
                 {selected.size}
               </span>{" "}
               chủ đề

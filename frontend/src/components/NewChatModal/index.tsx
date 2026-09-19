@@ -18,6 +18,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createConversation } from "@/redux/slices/conversationSlice";
 import z from "zod";
+import { useModalExit } from "@/hooks/useModalExit";
+import { staggerStyle } from "@/lib/motion";
+import { cn } from "@/lib/utils";
 
 interface NewChatModalProps {
   onClose: () => void;
@@ -32,6 +35,8 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
   const [search, setSearch] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [slectedFriends, setSelectedFriends] = useState<string[]>([]);
+  const { closing, requestClose, onOverlayAnimationEnd } =
+    useModalExit(onClose);
   const friends = useSelector(selectFriend);
   const page = useSelector(selectFriendPage);
   const dispatch = useDispatch<AppDispatch>();
@@ -77,7 +82,7 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
     dispatch(createConversation(formData))
       .unwrap()
       .finally(() => {
-        onClose();
+        requestClose();
       });
   };
 
@@ -88,9 +93,18 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
   }, [preview]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm animate-fade-in">
+    <div
+      className={cn(
+        "fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm",
+        closing ? "animate-overlay-out" : "animate-overlay-in",
+      )}
+      onAnimationEnd={onOverlayAnimationEnd}
+    >
       <form
-        className="flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-lg"
+        className={cn(
+          "flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-lg",
+          closing ? "animate-dialog-out" : "animate-dialog-in",
+        )}
         onSubmit={handleSubmit(onSubmit)}
       >
         <div className="flex items-start justify-between gap-3 border-b border-border p-5">
@@ -106,7 +120,7 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
             type="button"
             variant="ghost-muted"
             size="icon"
-            onClick={onClose}
+            onClick={requestClose}
             aria-label="Đóng"
             className="-mr-1 -mt-1 shrink-0"
           >
@@ -132,7 +146,7 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
               type="button"
               onClick={() => inputRef.current?.click()}
               aria-label="Chọn ảnh đại diện nhóm"
-              className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-dashed border-input bg-muted text-muted-foreground transition-colors duration-[--motion-fast] hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-dashed border-input bg-muted text-muted-foreground transition-colors duration-(--motion-fast) hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               {!preview ? (
                 <Camera className="size-5" aria-hidden="true" />
@@ -170,11 +184,12 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
           />
 
           <div className="custom-scrollbar max-h-[300px] space-y-1 overflow-y-auto">
-            {friends?.map((user) => (
+            {friends?.map((user, index) => (
               <label
                 key={user.id}
                 htmlFor={`${user.id}`}
-                className="flex w-full cursor-pointer items-center gap-3 rounded-lg p-2.5 transition-colors duration-[--motion-fast] hover:bg-accent has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-[-2px] has-[:focus-visible]:outline-ring"
+                style={staggerStyle(index)}
+                className="flex w-full animate-stagger-in cursor-pointer items-center gap-3 rounded-lg p-2.5 transition-colors duration-(--motion-fast) hover:bg-accent has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-[-2px] has-[:focus-visible]:outline-ring"
               >
                 <Checkbox
                   id={`${user.id}`}
@@ -224,7 +239,7 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
             người
           </p>
           <div className="flex gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <Button type="button" variant="ghost" onClick={requestClose}>
               Huỷ
             </Button>
             <Button

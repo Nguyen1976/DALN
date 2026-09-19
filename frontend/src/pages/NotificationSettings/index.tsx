@@ -175,22 +175,22 @@ export default function NotificationSettingsPage() {
             {data && (
               <>
                 {/* --- Master switch --- */}
-                <section className="rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5">
+                <section className="animate-stagger-in rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex gap-3">
                       <span
                         aria-hidden="true"
                         className={cn(
-                          "flex size-10 shrink-0 items-center justify-center rounded-xl",
+                          "flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors duration-(--motion-base)",
                           data.global.enabled
                             ? "bg-accent text-accent-foreground"
                             : "bg-muted text-muted-foreground",
                         )}
                       >
                         {data.global.enabled ? (
-                          <Bell className="size-5" />
+                          <Bell className="size-5 animate-pop-in" />
                         ) : (
-                          <BellOff className="size-5" />
+                          <BellOff className="size-5 animate-pop-in" />
                         )}
                       </span>
                       <div className="space-y-0.5">
@@ -215,6 +215,7 @@ export default function NotificationSettingsPage() {
                   <div
                     className={cn(
                       "mt-4 grid gap-2 border-t border-border pt-4 sm:grid-cols-3",
+                      "transition-opacity duration-(--motion-base) ease-(--ease-out)",
                       globalOff && "opacity-55",
                     )}
                   >
@@ -249,7 +250,7 @@ export default function NotificationSettingsPage() {
                 </section>
 
                 {/* --- Digest --- */}
-                <section className="rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5">
+                <section className="animate-stagger-in rounded-xl border border-border bg-card p-4 shadow-xs [--stagger:1] sm:p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="space-y-0.5">
                       <p className="font-semibold text-foreground">
@@ -282,7 +283,7 @@ export default function NotificationSettingsPage() {
                 </section>
 
                 {/* --- Per type --- */}
-                <section className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+                <section className="animate-stagger-in overflow-hidden rounded-xl border border-border bg-card shadow-xs [--stagger:2]">
                   <div className="border-b border-border p-4 sm:p-5">
                     <p className="font-semibold text-foreground">
                       Theo từng loại thông báo
@@ -292,7 +293,12 @@ export default function NotificationSettingsPage() {
                     </p>
                   </div>
 
-                  <ul className={cn("divide-y divide-border", globalOff && "opacity-55")}>
+                  <ul
+                    className={cn(
+                      "divide-y divide-border transition-opacity duration-(--motion-base) ease-(--ease-out)",
+                      globalOff && "opacity-55",
+                    )}
+                  >
                     {typeList.map((type) => {
                       const channels = normalizeChannels(data.overrides?.[type]);
                       return (

@@ -375,11 +375,11 @@ export default function GroupCallModal({
       role="dialog"
       aria-modal="true"
       aria-label="Cuộc gọi nhóm"
-      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex animate-overlay-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
     >
       <div
         className={cn(
-          "relative flex w-full flex-col rounded-2xl border p-6 shadow-lg",
+          "relative flex w-full animate-dialog-in flex-col rounded-2xl border p-6 shadow-lg",
           // Sân khấu video dùng nền trung tính tối để tên + điều khiển dễ đọc.
           isVideo
             ? "max-w-3xl border-white/10 bg-neutral-950 text-white"
@@ -444,7 +444,10 @@ export default function GroupCallModal({
                   aria-label="Người trong cuộc gọi"
                 >
                   {stripParticipants.map((participant) => (
-                    <li key={participant.identity} className="w-24 shrink-0">
+                    <li
+                      key={participant.identity}
+                      className="w-24 shrink-0 animate-pop-in"
+                    >
                       <GroupCallVideoTile
                         participant={participant}
                         onTogglePin={() => setPinnedId(participant.identity)}
@@ -463,7 +466,8 @@ export default function GroupCallModal({
               aria-label="Người trong cuộc gọi"
             >
               {displayParticipants.map((participant) => (
-                <li key={participant.identity}>
+                // Someone joining pops into the grid instead of appearing.
+                <li key={participant.identity} className="animate-pop-in">
                   <GroupCallVideoTile
                     participant={participant}
                     onTogglePin={() => setPinnedId(participant.identity)}
@@ -481,7 +485,7 @@ export default function GroupCallModal({
               <li
                 key={participant.identity}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl px-2 py-2 transition-colors",
+                  "flex animate-stagger-in items-center gap-3 rounded-xl px-2 py-2 transition-colors",
                   participant.isSpeaking ? "bg-success/10" : "bg-transparent",
                 )}
               >

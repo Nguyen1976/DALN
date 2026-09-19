@@ -14,6 +14,7 @@ import { formatFullDateTime, formatRelativeTime } from "@/utils/formatDateTime";
 import { showErrorToast } from "@/utils/toastError";
 import { AlertCircle, ChevronRight, Clock, Inbox, Send } from "lucide-react";
 import { EmptyState, Spinner } from "@/components/ui/feedback";
+import { staggerStyle } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
@@ -146,12 +147,12 @@ const ListFriendRequests = () => {
               aria-selected={selected}
               onClick={() => setDirection(tab.key)}
               className={cn(
-                "flex items-center gap-2 rounded-t-lg border-b-2 px-3 py-2.5 text-sm font-medium",
-                "transition-colors duration-[--motion-fast]",
+                "tab-underline flex items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
+                "transition-colors duration-(--motion-fast)",
                 "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
                 selected
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               <Icon className="size-4" aria-hidden="true" />
@@ -163,7 +164,7 @@ const ListFriendRequests = () => {
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-2 p-4 sm:p-6">
-          {requests.map((request) => {
+          {requests.map((request, index) => {
             const person = request.fromUser;
             const Row = isReceived ? "button" : "div";
             return (
@@ -175,10 +176,11 @@ const ListFriendRequests = () => {
                       type: "button" as const,
                     }
                   : {})}
+                style={staggerStyle(index % PAGE_SIZE)}
                 className={cn(
-                  "group flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-xs",
+                  "group flex w-full animate-stagger-in items-center gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-xs",
                   isReceived &&
-                    "transition-[background-color,box-shadow] duration-[--motion-fast] hover:bg-accent hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    "hover-lift hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                 )}
               >
                 <Avatar className="size-12 shrink-0">
@@ -242,7 +244,7 @@ const ListFriendRequests = () => {
           {loadError && !isLoading && (
             <div
               role="alert"
-              className="flex items-center justify-between gap-3 rounded-xl border border-destructive/35 bg-destructive/10 px-4 py-3 text-sm text-destructive-text"
+              className="flex animate-fade-in items-center justify-between gap-3 rounded-xl border border-destructive/35 bg-destructive/10 px-4 py-3 text-sm text-destructive-text"
             >
               <span className="flex items-center gap-2">
                 <AlertCircle className="size-4 shrink-0" aria-hidden="true" />

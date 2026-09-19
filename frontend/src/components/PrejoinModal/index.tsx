@@ -74,9 +74,9 @@ export default function PrejoinModal({
       role="dialog"
       aria-modal="true"
       aria-label="Xem trước cuộc gọi"
-      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex animate-overlay-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
     >
-      <div className="relative flex w-full max-w-md flex-col rounded-2xl border border-white/10 bg-neutral-950 p-6 text-white shadow-lg">
+      <div className="relative flex w-full max-w-md animate-dialog-in flex-col rounded-2xl border border-white/10 bg-neutral-950 p-6 text-white shadow-lg">
         <button
           type="button"
           onClick={onCancel}

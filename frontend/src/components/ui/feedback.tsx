@@ -55,13 +55,13 @@ function EmptyState({
       <div
         aria-hidden="true"
         className={cn(
-          "flex items-center justify-center rounded-2xl bg-accent text-accent-foreground",
+          "flex animate-pop-in items-center justify-center rounded-2xl bg-accent text-accent-foreground",
           compact ? "size-12" : "size-16",
         )}
       >
         <Icon className={compact ? "size-6" : "size-7"} />
       </div>
-      <div className="space-y-1.5">
+      <div className="animate-stagger-in space-y-1.5 [--stagger:1]">
         <p
           className={cn(
             "font-semibold text-foreground",

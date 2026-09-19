@@ -50,6 +50,7 @@ import {
 import type { AppDispatch, RootState } from "@/redux/store";
 import { getFriends, selectFriend } from "@/redux/slices/friendSlice";
 import { selectUser } from "@/redux/slices/userSlice";
+import { staggerStyle } from "@/lib/motion";
 
 type Profile = {
   username?: string;
@@ -349,14 +350,15 @@ export function GroupMemberManager() {
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-4">
             {filteredMembers.length ? (
               <div className="space-y-1">
-                {filteredMembers.map((member) => {
+                {filteredMembers.map((member, index) => {
                   const profile = profiles[member.userId];
                   const name = displayName(member, profile);
                   const isSelf = member.userId === user.id;
                   return (
                     <div
                       key={member.userId}
-                      className="flex min-h-16 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent"
+                      style={staggerStyle(index)}
+                      className="flex min-h-16 animate-stagger-in items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent"
                       data-testid={`member-row-${member.userId}`}
                     >
                       <button
@@ -464,13 +466,14 @@ export function GroupMemberManager() {
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3">
             {availableFriends.length ? (
               <div className="space-y-1">
-                {availableFriends.map((friend) => {
+                {availableFriends.map((friend, index) => {
                   const checked = selectedIds.has(friend.id);
                   const name = friend.fullName || friend.username;
                   return (
                     <label
                       key={friend.id}
-                      className="flex min-h-16 cursor-pointer items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
+                      style={staggerStyle(index)}
+                      className="flex min-h-16 animate-stagger-in cursor-pointer items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
                     >
                       <input
                         type="checkbox"

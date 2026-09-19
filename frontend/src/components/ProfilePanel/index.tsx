@@ -134,7 +134,7 @@ export default function ProfilePanel({
   };
 
   const panelClassName =
-    "fixed inset-0 z-40 flex flex-col bg-sidebar md:static md:z-auto md:w-80 md:shrink-0 md:border-l md:border-border lg:w-96";
+    "fixed inset-0 z-40 flex animate-panel-in flex-col bg-sidebar md:static md:z-auto md:w-80 md:shrink-0 md:border-l md:border-border lg:w-96";
   const header = (
     <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
       <h2 className="text-base font-semibold tracking-[-0.01em] text-foreground">
@@ -182,7 +182,7 @@ export default function ProfilePanel({
       <div className="custom-scrollbar flex-1 overflow-y-auto">
         <div className="space-y-6 p-6">
           {/* Avatar */}
-          <div className="flex flex-col items-center text-center">
+          <div className="flex animate-stagger-in flex-col items-center text-center [--stagger:1]">
             <Avatar className="mb-3 size-24 border border-border">
               <AvatarImage
                 src={conversation.groupAvatar || conversation.displayAvatar || ""}
@@ -201,7 +201,7 @@ export default function ProfilePanel({
           </div>
 
           {/* Settings */}
-          <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+          <div className="animate-stagger-in space-y-3 rounded-xl border border-border bg-card p-4 [--stagger:2]">
             {[
               ["Tắt thông báo cuộc trò chuyện", "chat-mute"],
               ["Tin nhắn tự biến mất", "chat-ephemeral"],
@@ -226,7 +226,7 @@ export default function ProfilePanel({
           {conversation.type === "GROUP" && <GroupMemberManager />}
 
           {/* Media */}
-          <div>
+          <div className="animate-stagger-in [--stagger:3]">
             <h4 className="mb-3 text-sm font-semibold text-foreground">
               Ảnh, liên kết & tài liệu
             </h4>
@@ -252,7 +252,9 @@ export default function ProfilePanel({
               ))}
             </div>
 
-            <div className="space-y-2">
+            {/* Keyed on the tab: switching Ảnh/Liên kết/Tài liệu slides the
+                new list in instead of swapping it in place. */}
+            <div key={assetKind} className="animate-slide-in-up space-y-2">
               {assets.map((message) => {
                 if (assetKind === "MEDIA") {
                   const url = resolveMediaPreviewUrl(message);

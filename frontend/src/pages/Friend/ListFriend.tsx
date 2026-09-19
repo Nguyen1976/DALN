@@ -38,6 +38,10 @@ import { useNavigate } from "react-router";
 import { formatLastSeen } from "@/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { showErrorToast } from "@/utils/toastError";
+import { staggerStyle } from "@/lib/motion";
+
+/** "Tải thêm" appends pages of this size; each page staggers from the top. */
+const FRIENDS_PAGE_SIZE = 20;
 
 const ListFriend = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -110,7 +114,7 @@ const ListFriend = () => {
   const page = useSelector(selectFriendPage);
 
   const loadMoreFriends = () => {
-    dispatch(getFriends({ limit: 20, page: page + 1 }));
+    dispatch(getFriends({ limit: FRIENDS_PAGE_SIZE, page: page + 1 }));
   };
 
   const displayedFriends = debouncedKeyword
@@ -193,7 +197,8 @@ const ListFriend = () => {
     const isOnline = Boolean(selectedFriend?.status);
 
     return (
-      <div className="space-y-6">
+      // Keyed on the friend: switching people replays the entrance.
+      <div key={selectedFriendId} className="animate-stagger-in space-y-6">
         <div className="flex flex-col items-center gap-3 text-center">
           <AvatarWithPresence
             status={isOnline ? "online" : "offline"}
@@ -277,17 +282,18 @@ const ListFriend = () => {
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-1 p-3">
-            {displayedFriends.map((friend: Friend) => (
+            {displayedFriends.map((friend: Friend, index) => (
               <button
                 key={friend.id}
+                style={staggerStyle(index % FRIENDS_PAGE_SIZE)}
                 onClick={() => {
                   void handleSelectFriend(friend);
                   setMobileDetailOpen(true);
                 }}
                 aria-current={selectedFriendId === friend.id ? "true" : undefined}
                 className={cn(
-                  "group flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
-                  "transition-colors duration-[--motion-fast] hover:bg-accent",
+                  "group flex w-full animate-stagger-in items-center gap-3 rounded-xl p-2.5 text-left",
+                  "transition-colors duration-(--motion-fast) hover:bg-accent",
                   "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
                   selectedFriendId === friend.id && "bg-accent",
                 )}
@@ -316,7 +322,7 @@ const ListFriend = () => {
                 </div>
 
                 <MessageCircle
-                  className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                  className="size-4 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-[opacity,translate] duration-(--motion-base) ease-(--ease-out) group-hover:translate-x-0 group-hover:opacity-100"
                   aria-hidden="true"
                 />
               </button>
@@ -372,14 +378,14 @@ const ListFriend = () => {
       {/* Backdrop for mobile detail sheet */}
       {mobileDetailOpen && (
         <div
-          className="fixed inset-0 z-30 bg-foreground/45 backdrop-blur-[2px] lg:hidden"
+          className="fixed inset-0 z-30 animate-overlay-in bg-foreground/45 backdrop-blur-[2px] lg:hidden"
           onClick={() => setMobileDetailOpen(false)}
         />
       )}
 
       <div
         className={cn(
-          "fixed inset-x-0 bottom-0 z-40 flex max-h-[85dvh] flex-col overflow-y-auto rounded-t-2xl border-t border-border bg-background p-6 shadow-2xl transition-transform duration-300",
+          "fixed inset-x-0 bottom-0 z-40 flex max-h-[85dvh] flex-col overflow-y-auto rounded-t-2xl border-t border-border bg-background p-6 shadow-2xl transition-transform duration-(--motion-slow) ease-(--ease-out)",
           mobileDetailOpen ? "translate-y-0" : "translate-y-full",
           "lg:static lg:z-auto lg:max-h-none lg:w-[22rem] lg:translate-y-0 lg:justify-start lg:rounded-none lg:border-l lg:border-t-0 lg:pt-8 lg:shadow-none",
         )}

@@ -50,7 +50,7 @@ function AvatarFallback({
 }
 
 const presenceDotVariants = cva(
-  "block rounded-full ring-2 ring-card transition-colors duration-[--motion-base]",
+  "block rounded-full ring-2 ring-card transition-colors duration-(--motion-base)",
   {
     variants: {
       status: {

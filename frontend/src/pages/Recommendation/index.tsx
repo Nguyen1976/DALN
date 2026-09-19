@@ -31,6 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { socket } from "@/lib/socket";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
 import { showErrorToast } from "@/utils/toastError";
+import { staggerStyle } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 /**
@@ -193,7 +194,7 @@ export default function RecommendationPage() {
 
           {!isLoading && recommendations.length > 0 && (
             <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {recommendations.map((candidate) => {
+              {recommendations.map((candidate, index) => {
                 const profile = candidate.profile;
                 const reasons = buildReasons(candidate);
                 const sent = pendingCandidateIds.includes(
@@ -203,7 +204,8 @@ export default function RecommendationPage() {
                 return (
                   <li
                     key={candidate.candidateId}
-                    className="flex flex-col rounded-xl border border-border bg-card p-4 shadow-xs transition-shadow duration-[--motion-base] hover:shadow-md"
+                    className="hover-lift flex animate-stagger-in flex-col rounded-xl border border-border bg-card p-4 shadow-xs"
+                    style={staggerStyle(index)}
                   >
                     <div className="flex items-start gap-3">
                       <AvatarWithPresence
@@ -261,7 +263,10 @@ export default function RecommendationPage() {
                     >
                       {sent ? (
                         <>
-                          <Check className="size-4" aria-hidden="true" />
+                          <Check
+                            className="size-4 animate-pop-in"
+                            aria-hidden="true"
+                          />
                           Đã gửi lời mời
                         </>
                       ) : (

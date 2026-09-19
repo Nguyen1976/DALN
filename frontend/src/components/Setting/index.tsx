@@ -9,15 +9,31 @@ import {
 } from "@/components/ui/card";
 import { Bell, Lock, Shield, X } from "lucide-react";
 import Profile from "./Profile";
+import { useModalExit } from "@/hooks/useModalExit";
+import { cn } from "@/lib/utils";
 
 interface ProfileSettingsProps {
   onClose: () => void;
 }
 
 export function ProfileSettings({ onClose }: ProfileSettingsProps) {
+  const { closing, requestClose, onOverlayAnimationEnd } =
+    useModalExit(onClose);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/55 p-4 text-foreground backdrop-blur-sm animate-fade-in">
-      <div className="mt-4 flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl sm:mt-8">
+    <div
+      className={cn(
+        "fixed inset-0 z-50 flex items-start justify-center bg-foreground/55 p-4 text-foreground backdrop-blur-sm",
+        closing ? "animate-overlay-out" : "animate-overlay-in",
+      )}
+      onAnimationEnd={onOverlayAnimationEnd}
+    >
+      <div
+        className={cn(
+          "mt-4 flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl sm:mt-8",
+          closing ? "animate-dialog-out" : "animate-dialog-in",
+        )}
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border p-4">
           <h2 className="text-lg font-semibold sm:text-xl">
@@ -26,7 +42,7 @@ export function ProfileSettings({ onClose }: ProfileSettingsProps) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={onClose}
+            onClick={requestClose}
             aria-label="Đóng"
             className="text-muted-foreground hover:text-foreground"
           >

@@ -573,14 +573,14 @@ export default function VoiceCallModal({
       role="dialog"
       aria-modal="true"
       aria-label={isVideoCall ? "Cuộc gọi video" : "Cuộc gọi thoại"}
-      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex animate-overlay-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
     >
       {/* Tiếng của đối phương LUÔN phát ở thẻ audio này (kể cả cuộc gọi video);
           thẻ <video> để muted nên tiếng KHÔNG bị phát hai lần. */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
       {showVideoLayout ? (
-        <div className="relative flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-black shadow-lg">
+        <div className="relative flex w-full max-w-2xl animate-dialog-in flex-col overflow-hidden rounded-2xl border border-border bg-black shadow-lg">
           <div className="relative aspect-video w-full bg-black">
             {/* Video đối phương phủ khung; muted vì tiếng phát ở thẻ audio. */}
             <video
@@ -598,7 +598,7 @@ export default function VoiceCallModal({
 
             {/* Camera đối phương tắt → hiện avatar thay khung video. */}
             {!remoteCameraOn && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+              <div className="absolute inset-0 flex animate-fade-in flex-col items-center justify-center gap-3">
                 <CallRingAvatar
                   displayName={displayName}
                   displayAvatar={displayAvatar}
@@ -628,7 +628,7 @@ export default function VoiceCallModal({
             <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/40 px-3 py-1 text-sm text-white backdrop-blur-sm">
               {!remoteMicOn && (
                 <MicOff
-                  className="size-4 shrink-0 text-white/90"
+                  className="size-4 shrink-0 animate-pop-in text-white/90"
                   aria-label={`${displayName} đã tắt micro`}
                 />
               )}
@@ -708,7 +708,7 @@ export default function VoiceCallModal({
           </div>
         </div>
       ) : (
-      <div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-lg">
+      <div className="relative w-full max-w-sm animate-dialog-in rounded-2xl border border-border bg-card p-8 shadow-lg">
         <div className="flex flex-col items-center text-center">
           <CallRingAvatar
             displayName={displayName}
@@ -739,7 +739,7 @@ export default function VoiceCallModal({
 
           {callStatus === "connected" && (
             <p
-              className="mt-1 text-center text-sm font-medium tabular-nums text-muted-foreground"
+              className="mt-1 animate-fade-in text-center text-sm font-medium tabular-nums text-muted-foreground"
               aria-live="off"
             >
               <span className="sr-only">Thời lượng cuộc gọi </span>
@@ -747,16 +747,18 @@ export default function VoiceCallModal({
             </p>
           )}
 
+          {/* Control rows are keyed per call phase so the new row fades in
+              when the phase changes, instead of React patching the old one. */}
           {callStatus === "unreachable" ? (
-            <div className="flex size-14 items-center justify-center rounded-full bg-warning/15 text-warning-text">
+            <div className="flex size-14 animate-pop-in items-center justify-center rounded-full bg-warning/15 text-warning-text">
               <WifiOff className="size-7" aria-hidden="true" />
             </div>
           ) : showBusyResult || callStatus === "no_answer" ? (
-            <div className="flex size-14 items-center justify-center rounded-full bg-warning/15 text-warning-text">
+            <div className="flex size-14 animate-pop-in items-center justify-center rounded-full bg-warning/15 text-warning-text">
               <UserX className="size-7" aria-hidden="true" />
             </div>
           ) : mode === "incoming" && callStatus === "idle" ? (
-            <div className="flex flex-col items-center gap-3">
+            <div key="incoming" className="flex animate-fade-in flex-col items-center gap-3">
               <div className="flex items-center gap-6">
                 {isVideoCall && (
                   // Cuộc gọi video: cho chọn nhận kèm camera hoặc chỉ nghe/nói.
@@ -802,7 +804,7 @@ export default function VoiceCallModal({
               )}
             </div>
           ) : callStatus === "connected" ? (
-            <div className="flex gap-6">
+            <div key="connected" className="flex animate-fade-in gap-6">
               <Button
                 variant="secondary"
                 size="icon"
@@ -841,7 +843,7 @@ export default function VoiceCallModal({
               </Button>
             </div>
           ) : (
-            <div className="flex gap-6">
+            <div key="outgoing" className="flex animate-fade-in gap-6">
               <Button
                 variant="destructive"
                 size="icon"
