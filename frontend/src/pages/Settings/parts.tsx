@@ -1,8 +1,10 @@
 import { useId } from "react";
+import { useLocation } from "react-router";
 
 import { type AppIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { staggerStyle } from "@/lib/motion";
+import { useFirstVisit } from "@/hooks/useFirstVisit";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,10 +22,15 @@ export function SettingsSection({
   children: React.ReactNode;
 }) {
   const id = useId();
+  // Greets the tab the first time; coming back to it, it is simply there.
+  const first = useFirstVisit(`settings:${useLocation().pathname}:${title}`);
   return (
     <section
       aria-labelledby={id}
-      className="animate-stagger-in space-y-2.5 not-first:mt-8"
+      className={cn(
+        "space-y-2.5 not-first:mt-8",
+        first && "animate-stagger-in",
+      )}
       style={staggerStyle(step)}
     >
       <h2 id={id} className="px-1 text-sm font-semibold text-foreground">

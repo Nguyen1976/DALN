@@ -2,6 +2,12 @@ import { useLayoutEffect, useRef, type RefObject } from "react";
 
 const MOVE = "list-move";
 
+/**
+ * Rows already shown this session, per list. Module scope so that a list
+ * whose screen is left and come back to does not replay its entrance.
+ */
+const seenByList = new Map<string, Set<string>>();
+
 /** Vertical part of the `translate` a running animation is drawing now. */
 function drawnOffsetY(row: HTMLElement) {
   const value = getComputedStyle(row).translate;
@@ -32,15 +38,27 @@ function drawnOffsetY(row: HTMLElement) {
  */
 export function useListMotion(
   listRef: RefObject<HTMLElement | null>,
-  { maxStagger = 14 }: { maxStagger?: number } = {},
+  {
+    id,
+    maxStagger = 14,
+  }: {
+    /** Names the list so its rows are remembered across remounts. */
+    id?: string;
+    maxStagger?: number;
+  } = {},
 ) {
-  const seen = useRef(new Set<string>());
+  const ownSeen = useRef(new Set<string>());
   const tops = useRef(new Map<string, number>());
   const lastOrder = useRef("");
 
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
+    let seen = ownSeen.current;
+    if (id) {
+      seen = seenByList.get(id) ?? new Set<string>();
+      seenByList.set(id, seen);
+    }
 
     const rows = Array.from(
       list.querySelectorAll<HTMLElement>("[data-motion-key]"),
@@ -74,8 +92,8 @@ export function useListMotion(
       const key = row.dataset.motionKey!;
       const top = after.get(key)!;
 
-      if (!seen.current.has(key)) {
-        seen.current.add(key);
+      if (!seen.has(key)) {
+        seen.add(key);
         if (!reduce) {
           row.animate(
             [

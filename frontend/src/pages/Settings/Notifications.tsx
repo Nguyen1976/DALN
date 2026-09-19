@@ -69,10 +69,16 @@ export default function NotificationSettings() {
     selectNotificationPreference,
   );
 
+  // Once per session: both live in redux, and saving a switch updates them
+  // there. They used to be fetched again every time this tab was opened.
+  const typesLoaded = notificationTypes.length > 0;
+  const preferencesLoaded = Boolean(data);
   useEffect(() => {
-    void dispatch(getNotificationTypes());
-    void dispatch(getNotificationPreferences());
-  }, [dispatch]);
+    if (!typesLoaded) void dispatch(getNotificationTypes());
+  }, [dispatch, typesLoaded]);
+  useEffect(() => {
+    if (!preferencesLoaded) void dispatch(getNotificationPreferences());
+  }, [dispatch, preferencesLoaded]);
 
   const typeList = useMemo(() => {
     if (notificationTypes.length > 0) {

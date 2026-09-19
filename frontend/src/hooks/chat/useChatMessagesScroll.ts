@@ -15,6 +15,8 @@ import type { AppDispatch } from "@/redux/store";
 interface MessagePagination {
   oldestCursor: string | null;
   hasMore: boolean;
+  /** The first page has been fetched (possibly empty). */
+  loaded: boolean;
 }
 
 interface UseChatMessagesScrollOptions {
@@ -117,7 +119,14 @@ export function useChatMessagesScroll({
   }, [lastMessageId, isAtBottom, conversationId, scrollListToBottom]);
 
   useEffect(() => {
-    if (!conversationId || !canLoadMessages || messages.length > 0) return;
+    if (
+      !conversationId ||
+      !canLoadMessages ||
+      messages.length > 0 ||
+      pagination.loaded
+    ) {
+      return;
+    }
 
     dispatch(
       getMessages({
@@ -126,7 +135,13 @@ export function useChatMessagesScroll({
         cursor: null,
       }),
     );
-  }, [canLoadMessages, conversationId, dispatch, messages.length]);
+  }, [
+    canLoadMessages,
+    conversationId,
+    dispatch,
+    messages.length,
+    pagination.loaded,
+  ]);
 
   // Chặn gọi chồng: IntersectionObserver và handleScroll (scrollTop <= 24) có
   // thể cùng gọi trong một nhịp, trước khi state isLoadingOlder kịp đổi — hai

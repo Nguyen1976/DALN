@@ -25,7 +25,12 @@ import {
   getNotifications,
   markAllNotificationsAsRead,
   markNotificationAsRead,
+  NOTIFICATIONS_PAGE_SIZE,
   selectNotification,
+  selectNotificationsHasMore,
+  selectNotificationsLoaded,
+  selectNotificationsPage,
+  selectUnreadCountLoaded,
   selectUnreadNotificationCount,
   type Notification,
 } from "@/redux/slices/notificationSlice";
@@ -50,15 +55,24 @@ export function NotificationsDropdown() {
   // From the server, not from `notifications`: the list holds one page, so
   // counting it capped the badge at the page size.
   const unreadCount = useSelector(selectUnreadNotificationCount);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
+  const unreadCountLoaded = useSelector(selectUnreadCountLoaded);
+  // Paging lives in redux: this dropdown sits in the chat sidebar, which
+  // unmounts whenever another tab is open, and must not start over each time.
+  const loaded = useSelector(selectNotificationsLoaded);
+  const page = useSelector(selectNotificationsPage);
+  const hasMore = useSelector(selectNotificationsHasMore);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
-  const limit = 10;
+  const limit = NOTIFICATIONS_PAGE_SIZE;
+  // The badge pops when the count changes, not every time the chat screen
+  // (and this bell with it) comes back into view.
+  const [countOnArrival] = useState(unreadCount);
 
+  // Once per session: afterwards arrivals and reads keep the count right,
+  // and a reconnect re-syncs it (below). It used to be refetched every time
+  // the chat screen came back into view.
   useEffect(() => {
-    // The count is cheap and must stay right even when the list is not open.
-    void dispatch(fetchUnreadCount());
-  }, [dispatch]);
+    if (!unreadCountLoaded) void dispatch(fetchUnreadCount());
+  }, [dispatch, unreadCountLoaded]);
 
   // Re-sync after the realtime channel drops and comes back, so a badge that
   // drifted while disconnected snaps back to the truth.
@@ -70,20 +84,11 @@ export function NotificationsDropdown() {
     };
   }, [dispatch]);
 
+  // First page once per session. Checking `loaded` rather than an empty list:
+  // someone with no notifications at all used to refetch on every visit.
   useEffect(() => {
-    if (notifications.length > 0) return;
-
-    setPage(1);
-    setHasMore(true);
-    void dispatch(getNotifications({ limit, page: 1 }))
-      .unwrap()
-      .then((res) => {
-        setHasMore((res.notifications || []).length >= limit);
-      })
-      .catch(() => {
-        setHasMore(false);
-      });
-  }, [dispatch, notifications.length]);
+    if (!loaded) void dispatch(getNotifications({ limit, page: 1 }));
+  }, [dispatch, loaded, limit]);
 
   const [showFriendRequestModal, setShowFriendRequestModal] = useState("");
 
@@ -112,14 +117,8 @@ export function NotificationsDropdown() {
     hasMore,
     enabled: notifications.length > 0,
     itemCount: notifications.length,
-    loadMore: async () => {
-      const nextPage = page + 1;
-      const res = await dispatch(
-        getNotifications({ limit, page: nextPage }),
-      ).unwrap();
-      setPage(nextPage);
-      setHasMore((res.notifications || []).length >= limit);
-    },
+    loadMore: () =>
+      dispatch(getNotifications({ limit, page: page + 1 })).unwrap(),
   });
 
   return (
@@ -147,7 +146,11 @@ export function NotificationsDropdown() {
                 // Re-keyed per count: a new notification pops the badge.
                 key={unreadCount}
                 aria-hidden="true"
-                className="absolute right-1.5 top-1.5 flex animate-pop-in h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums text-destructive-foreground ring-2 ring-sidebar"
+                className={cn(
+                  "absolute right-1.5 top-1.5 flex h-4 min-w-4",
+                  unreadCount !== countOnArrival && "animate-pop-in",
+                  "items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums text-destructive-foreground ring-2 ring-sidebar",
+                )}
               >
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>

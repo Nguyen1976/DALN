@@ -17,7 +17,16 @@ import {
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { useListMotion } from "@/hooks/useListMotion";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
-import { getFriends, selectFriend } from "@/redux/slices/friendSlice";
+import {
+  getFriends,
+  selectFriend,
+  selectFriendsLoaded,
+} from "@/redux/slices/friendSlice";
+import {
+  markConversationsExhausted,
+  selectConversationsHasMore,
+  selectConversationsLoaded,
+} from "@/redux/slices/conversationPagingSlice";
 import { formatConversationTime } from "@/utils/formatDateTime";
 import { NewChatModal } from "../NewChatModal";
 import { Button } from "@/components/ui/button";
@@ -98,35 +107,30 @@ export function ChatSidebar({ className }: { className?: string }) {
 
   const navigate = useNavigate();
 
-  const [initialLoading, setInitialLoading] = useState(
-    conversations.length === 0,
-  );
+  // Paging state lives in redux: this sidebar unmounts whenever another tab
+  // is open, and coming back must neither refetch nor flash a skeleton.
+  const loaded = useSelector(selectConversationsLoaded);
+  const hasMore = useSelector(selectConversationsHasMore);
+  const friendsLoaded = useSelector(selectFriendsLoaded);
+  const [initialLoading, setInitialLoading] = useState(!loaded);
   const [query, setQuery] = useState("");
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [hasMore, setHasMore] = useState(true);
 
   // Presence dots read from the friend slice, so make sure it is populated
-  // even when the user lands straight on the chat screen.
+  // even when the user lands straight on the chat screen. Once per session:
+  // `loaded`, not "the list is empty", or someone with no friends refetched
+  // on every visit.
   useEffect(() => {
-    if (friends.length === 0) {
-      void dispatch(getFriends({ limit: 50, page: 1 }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatch]);
+    if (!friendsLoaded) void dispatch(getFriends({ limit: 50, page: 1 }));
+  }, [dispatch, friendsLoaded]);
 
   useEffect(() => {
-    if (conversations.length === 0) {
-      void dispatch(
-        getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor: null }),
-      )
-        .unwrap()
-        .then((page) => setHasMore(page.length >= CONVERSATIONS_PAGE_SIZE))
-        .catch(() => {})
-        .finally(() => setInitialLoading(false));
-    } else {
-      setInitialLoading(false);
-    }
+    if (loaded) return;
+    void dispatch(
+      getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor: null }),
+    ).finally(() => setInitialLoading(false));
+    // Only on mount: `loaded` flips when this very request lands.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
@@ -141,13 +145,12 @@ export function ChatSidebar({ className }: { className?: string }) {
     loadMore: async () => {
       const cursor = nextConversationCursor(conversations);
       if (cursor === undefined) {
-        setHasMore(false);
+        dispatch(markConversationsExhausted());
         return;
       }
-      const page = await dispatch(
+      await dispatch(
         getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor }),
       ).unwrap();
-      setHasMore(page.length >= CONVERSATIONS_PAGE_SIZE);
     },
   });
 
@@ -180,7 +183,7 @@ export function ChatSidebar({ className }: { className?: string }) {
   // A chat that gets a message rises to the top: lift it and slide it there
   // rather than letting the list jump (and replay its entrance).
   const listRef = useRef<HTMLDivElement>(null);
-  useListMotion(listRef);
+  useListMotion(listRef, { id: "chats" });
 
   const { activeGroupConversationIds } = useCall();
 

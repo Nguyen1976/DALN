@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
 import { useSearchParams } from "react-router";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { type FriendRequestDirection } from "@/apis";
 import {
-  getFriendRequestsAPI,
-  type FriendRequestDirection,
-  type FriendRequestListItem,
-} from "@/apis";
+  FRIEND_REQUESTS_PAGE_SIZE as PAGE_SIZE,
+  fetchFriendRequests,
+  selectRequestDirection,
+  selectRequestList,
+  setRequestDirection,
+} from "@/redux/slices/friendRequestSlice";
+import type { AppDispatch, RootState } from "@/redux/store";
+import { useListMotion } from "@/hooks/useListMotion";
 import FriendRequestModal from "@/components/FriendRequestModal";
 import { formatFullDateTime, formatRelativeTime } from "@/utils/formatDateTime";
 import { useLiquidUnderline } from "@/hooks/useLiquidUnderline";
-import { showErrorToast } from "@/utils/toastError";
 import {
   AlertCircle,
   ChevronRight,
@@ -24,10 +29,7 @@ import {
 import { EmptyState } from "@/components/ui/feedback";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
-import { staggerStyle } from "@/lib/motion";
 import { cn } from "@/lib/utils";
-
-const PAGE_SIZE = 20;
 
 const TABS: Array<{
   key: FriendRequestDirection;
@@ -74,89 +76,55 @@ function RequestRowsSkeleton({ count }: { count: number }) {
 const ListFriendRequests = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestIdFromUrl = searchParams.get("requestId") || "";
-  const [direction, setDirection] =
-    useState<FriendRequestDirection>("received");
+  const dispatch = useDispatch<AppDispatch>();
+  // Both lists, and which one is open, live in redux: coming back to this tab
+  // shows them as they were, without a refetch. A list is fetched again only
+  // once it is marked stale (a new request arrives, one is answered) — and if
+  // that happens while it is on screen, right away.
+  const direction = useSelector(selectRequestDirection);
+  const list = useSelector((state: RootState) =>
+    selectRequestList(state, direction),
+  );
+  const requests = list.items;
+  const hasMore = list.hasMore;
+  const isLoading = !list.loaded && list.status === "loading";
+  const loadError =
+    list.status === "error" ? "Không thể tải danh sách lời mời kết bạn" : null;
   const { listRef, lineRef, tabRefs } = useLiquidUnderline(
     TABS.findIndex((tab) => tab.key === direction),
   );
-  const [requests, setRequests] = useState<FriendRequestListItem[]>([]);
-  const [page, setPage] = useState(1);
-  const [isLoading, setIsLoading] = useState(false);
-  // Whether the server still has more rows. The load-more button used to be
-  // rendered forever, so the last press always came back with nothing.
-  const [hasMore, setHasMore] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedRequestId, setSelectedRequestId] = useState("");
-
-  // The tab a response belongs to; one arriving after a switch is dropped.
-  const directionRef = useRef(direction);
-  directionRef.current = direction;
 
   /** The first page of a tab, replacing whatever was shown. */
   const fetchRequests = useCallback(
-    async ({ dir }: { dir: FriendRequestDirection }) => {
-      setIsLoading(true);
-      setLoadError(null);
-
-      try {
-        const data = await getFriendRequestsAPI({
-          limit: PAGE_SIZE,
-          page: 1,
-          direction: dir,
-        });
-        if (directionRef.current !== dir) return;
-        setRequests(data);
-        setHasMore(data.length >= PAGE_SIZE);
-        setPage(1);
-      } catch (error) {
-        if (directionRef.current !== dir) return;
-        setLoadError("Không thể tải danh sách lời mời kết bạn");
-        showErrorToast(error, "Không thể tải danh sách lời mời kết bạn");
-      } finally {
-        if (directionRef.current === dir) setIsLoading(false);
-      }
-    },
-    [],
+    ({ dir }: { dir: FriendRequestDirection }) =>
+      dispatch(fetchFriendRequests({ direction: dir, page: 1 })),
+    [dispatch],
   );
+
+  const needsFetch = !list.loaded || list.stale;
+  const fetching = list.status === "loading";
+  useEffect(() => {
+    if (needsFetch && !fetching) void fetchRequests({ dir: direction });
+  }, [needsFetch, fetching, direction, fetchRequests]);
 
   // Later pages, as the list is scrolled. Failures surface in the footer.
   const paging = useInfiniteScroll({
     hasMore,
-    enabled: !isLoading && !loadError && requests.length > 0,
+    enabled: list.loaded && !loadError && requests.length > 0,
     itemCount: requests.length,
-    loadMore: async () => {
-      const dir = direction;
-      const nextPage = page + 1;
-      const data = await getFriendRequestsAPI({
-        limit: PAGE_SIZE,
-        page: nextPage,
-        direction: dir,
-      });
-      if (directionRef.current !== dir) return;
-      setRequests((prev) => {
-        const merged = [...prev, ...data];
-        // De-duplicate by id: a request arriving while page N is in flight
-        // would otherwise appear twice as the pages shift under it.
-        return Array.from(
-          new Map(merged.map((request) => [request.id, request])).values(),
-        );
-      });
-      setHasMore(data.length >= PAGE_SIZE);
-      setPage(nextPage);
-    },
+    loadMore: () =>
+      dispatch(
+        fetchFriendRequests({ direction, page: list.page + 1 }),
+      ).unwrap(),
   });
-  const resetPaging = paging.reset;
 
-  useEffect(() => {
-    resetPaging();
-    void fetchRequests({ dir: direction });
-  }, [direction, fetchRequests, resetPaging]);
+  // Rows fade in the first time they show this session.
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useListMotion(rowsRef, { id: `requests:${direction}` });
 
-  useEffect(() => {
-    if (requestIdFromUrl) {
-      setSelectedRequestId(requestIdFromUrl);
-    }
-  }, [requestIdFromUrl]);
+  // A link like ?requestId= (from an email) opens that request directly.
+  const openRequestId = selectedRequestId || requestIdFromUrl;
 
   const handleCloseModal = () => {
     setSelectedRequestId("");
@@ -165,7 +133,7 @@ const ListFriendRequests = () => {
       nextParams.delete("requestId");
       setSearchParams(nextParams, { replace: true });
     }
-    void fetchRequests({ dir: direction });
+    // Answering a request marks the list stale, which refetches it.
   };
 
   const activeTab = TABS.find((tab) => tab.key === direction) ?? TABS[0];
@@ -174,8 +142,8 @@ const ListFriendRequests = () => {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <FriendRequestModal
-        isOpen={selectedRequestId !== ""}
-        friendRequestId={selectedRequestId}
+        isOpen={openRequestId !== ""}
+        friendRequestId={openRequestId}
         onClose={handleCloseModal}
       />
 
@@ -198,7 +166,11 @@ const ListFriendRequests = () => {
                 role="tab"
                 type="button"
                 aria-selected={selected}
-                onClick={() => setDirection(tab.key)}
+                onClick={() => {
+                  // A failure on one list says nothing about the other.
+                  paging.reset();
+                  dispatch(setRequestDirection(tab.key));
+                }}
                 className={cn(
                   "flex items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
                   "transition-colors duration-(--motion-fast)",
@@ -225,10 +197,11 @@ const ListFriendRequests = () => {
 
       <ScrollArea className="min-h-0 flex-1">
         <div
-          className="space-y-2 p-4 sm:p-6"
+          ref={rowsRef}
+          className="relative space-y-2 p-4 sm:p-6"
           aria-busy={isLoading || paging.status === "loading"}
         >
-          {requests.map((request, index) => {
+          {requests.map((request) => {
             const person = request.fromUser;
             const Row = isReceived ? "button" : "div";
             return (
@@ -240,9 +213,9 @@ const ListFriendRequests = () => {
                       type: "button" as const,
                     }
                   : {})}
-                style={staggerStyle(index % PAGE_SIZE)}
+                data-motion-key={request.id}
                 className={cn(
-                  "group flex w-full animate-stagger-in items-center gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-xs",
+                  "group flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-xs",
                   isReceived &&
                     "hover-lift hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                 )}

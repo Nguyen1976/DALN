@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router";
 
 import { AnimateIcon, type AppIcon } from "@/components/icons";
 import { useLiquidUnderline } from "@/hooks/useLiquidUnderline";
-import MainLayout from "@/layouts/MainLayout";
 import { cn } from "@/lib/utils";
 
 export interface TabbedLayoutTab {
@@ -17,8 +16,8 @@ export interface TabbedLayoutTab {
  * row of underline tabs, then the active section. Friends and Settings both
  * use it, so moving between them feels like the same kind of place.
  *
- * Each tab is its own route, but every route renders this same tree, so React
- * keeps the header mounted across tab changes and the underline can glide.
+ * It is the parent route of its tabs (see App.tsx), so the header stays
+ * mounted across tab changes and the underline can glide.
  */
 export function TabbedLayout({
   title,
@@ -57,66 +56,64 @@ export function TabbedLayout({
   }, [activeIndex, listRef, tabRefs]);
 
   return (
-    <MainLayout>
-      <div className="flex min-h-0 flex-1 flex-col bg-background">
-        <div className="shrink-0 space-y-4 border-b border-border px-4 pb-0 pt-4 md:px-6">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <h1 className="text-lg font-semibold tracking-[-0.01em] text-foreground md:text-xl">
-                {title}
-              </h1>
-              <p className="text-sm text-muted-foreground">{description}</p>
-            </div>
-            {actions}
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <div className="shrink-0 space-y-4 border-b border-border px-4 pb-0 pt-4 md:px-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <h1 className="text-lg font-semibold tracking-[-0.01em] text-foreground md:text-xl">
+              {title}
+            </h1>
+            <p className="text-sm text-muted-foreground">{description}</p>
           </div>
-
-          {/* Underline tabs: the active section is marked by an indicator bar,
-              not by colour alone. -mb-px lays the row over the header's
-              bottom border, so the bar covers that line. */}
-          <div
-            ref={listRef}
-            role="tablist"
-            aria-label={tabsLabel}
-            className="custom-scrollbar relative -mb-px flex gap-1 overflow-x-auto"
-          >
-            {tabs.map(({ path, label, icon: Icon }, index) => {
-              const active = pathname === path;
-              return (
-                <AnimateIcon key={path} asChild animateOnHover>
-                  <button
-                    ref={(node) => {
-                      tabRefs.current[index] = node;
-                    }}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => navigate(path)}
-                    className={cn(
-                      "flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
-                      "transition-colors duration-(--motion-fast)",
-                      "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
-                      active
-                        ? "text-foreground"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="size-4" aria-hidden="true" />
-                    {label}
-                  </button>
-                </AnimateIcon>
-              );
-            })}
-            {/* One shared bar that glides between tabs (useLiquidUnderline). */}
-            <span
-              ref={lineRef}
-              aria-hidden="true"
-              className="pointer-events-none absolute bottom-0 left-0 h-0.5 origin-left rounded-full bg-primary opacity-0"
-            />
-          </div>
+          {actions}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        {/* Underline tabs: the active section is marked by an indicator bar,
+              not by colour alone. -mb-px lays the row over the header's
+              bottom border, so the bar covers that line. */}
+        <div
+          ref={listRef}
+          role="tablist"
+          aria-label={tabsLabel}
+          className="custom-scrollbar relative -mb-px flex gap-1 overflow-x-auto"
+        >
+          {tabs.map(({ path, label, icon: Icon }, index) => {
+            const active = pathname === path;
+            return (
+              <AnimateIcon key={path} asChild animateOnHover>
+                <button
+                  ref={(node) => {
+                    tabRefs.current[index] = node;
+                  }}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => navigate(path)}
+                  className={cn(
+                    "flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
+                    "transition-colors duration-(--motion-fast)",
+                    "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                    active
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-4" aria-hidden="true" />
+                  {label}
+                </button>
+              </AnimateIcon>
+            );
+          })}
+          {/* One shared bar that glides between tabs (useLiquidUnderline). */}
+          <span
+            ref={lineRef}
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 left-0 h-0.5 origin-left rounded-full bg-primary opacity-0"
+          />
+        </div>
       </div>
-    </MainLayout>
+
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+    </div>
   );
 }

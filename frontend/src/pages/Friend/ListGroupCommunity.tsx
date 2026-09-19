@@ -19,6 +19,10 @@ import { useNavigate } from "react-router";
 import { showErrorToast } from "@/utils/toastError";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import {
+  markConversationsExhausted,
+  selectConversationsHasMore,
+} from "@/redux/slices/conversationPagingSlice";
 import { useListMotion } from "@/hooks/useListMotion";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 
@@ -57,8 +61,8 @@ const ListGroupCommunity = () => {
   // keeps only groups. While the groups found so far leave the end of the
   // list in view, the next page is fetched on its own, so someone with many
   // direct chats still sees their groups without scrolling through nothing.
-  // Local on purpose: remounting costs at most one empty request.
-  const [hasMore, setHasMore] = useState(true);
+  // Shared with the chat sidebar through redux, so neither starts over.
+  const hasMore = useSelector(selectConversationsHasMore);
   const paging = useInfiniteScroll({
     hasMore,
     enabled: !debouncedKeyword,
@@ -66,13 +70,12 @@ const ListGroupCommunity = () => {
     loadMore: async () => {
       const cursor = nextConversationCursor(conversations);
       if (cursor === undefined) {
-        setHasMore(false);
+        dispatch(markConversationsExhausted());
         return;
       }
-      const page = await dispatch(
+      await dispatch(
         getConversations({ limit: GROUPS_PAGE_SIZE, cursor }),
       ).unwrap();
-      setHasMore(page.length >= GROUPS_PAGE_SIZE);
     },
   });
 
@@ -138,7 +141,7 @@ const ListGroupCommunity = () => {
 
   // Groups reorder as they get messages; see useListMotion.
   const listRef = useRef<HTMLDivElement>(null);
-  useListMotion(listRef);
+  useListMotion(listRef, { id: "groups" });
 
   const renderGroupItem = (group: Conversation | SearchConversationItem) => {
     const memberCount = group.memberCount ?? group.members?.length ?? 0;

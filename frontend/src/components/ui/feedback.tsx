@@ -3,6 +3,7 @@ import { AnimateIcon, type AppIcon } from "@/components/icons";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { useFirstVisit } from "@/hooks/useFirstVisit";
 
 /**
  * Busy indicator.
@@ -44,6 +45,10 @@ function EmptyState({
   className?: string;
   compact?: boolean;
 }) {
+  // Animates the first time this state shows in a session. The chat screen's
+  // "pick a conversation" and similar placeholders appear on every return to
+  // their tab, and replaying the pop each time read as a flicker.
+  const first = useFirstVisit(`empty:${title}`);
   return (
     <div
       className={cn(
@@ -55,15 +60,21 @@ function EmptyState({
       <div
         aria-hidden="true"
         className={cn(
-          "flex animate-pop-in items-center justify-center rounded-2xl bg-accent text-accent-foreground",
+          "flex items-center justify-center rounded-2xl bg-accent text-accent-foreground",
+          first && "animate-pop-in",
           compact ? "size-12" : "size-16",
         )}
       >
-        <AnimateIcon animateOnView className="flex">
+        <AnimateIcon animateOnView={first} className="flex">
           <Icon className={compact ? "size-6" : "size-7"} />
         </AnimateIcon>
       </div>
-      <div className="animate-stagger-in space-y-1.5 [--stagger:1]">
+      <div
+        className={cn(
+          "space-y-1.5",
+          first && "animate-stagger-in [--stagger:1]",
+        )}
+      >
         <p
           className={cn(
             "font-semibold text-foreground",

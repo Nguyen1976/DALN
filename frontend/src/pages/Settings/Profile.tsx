@@ -19,11 +19,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import {
-  fetchUserByIdAPI,
-  selectUser,
-  updateProfileAPI,
-} from "@/redux/slices/userSlice";
+import { selectUser, updateProfileAPI } from "@/redux/slices/userSlice";
 import type { AppDispatch } from "@/redux/store";
 import { SettingsCard, SettingsSection } from "./parts";
 
@@ -117,10 +113,6 @@ export default function ProfileSettings() {
     control: form.control,
     name: ["fullName", "bio"],
   });
-
-  useEffect(() => {
-    if (user.id) void dispatch(fetchUserByIdAPI(user.id));
-  }, [user.id, dispatch]);
 
   // Adopt fresh data from the server, unless the person is mid-edit.
   useEffect(() => {
