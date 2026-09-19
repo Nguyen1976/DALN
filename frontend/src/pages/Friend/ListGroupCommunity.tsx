@@ -13,13 +13,13 @@ import {
 import type { AppDispatch } from "@/redux/store";
 import { ChevronRight, SearchX, UsersRound } from "@/components/icons";
 import { EmptyState } from "@/components/ui/feedback";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
 import { showErrorToast } from "@/utils/toastError";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { staggerStyle } from "@/lib/motion";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useListMotion } from "@/hooks/useListMotion";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 
 /** Groups load in pages of this size; each page staggers from the top. */
@@ -136,18 +136,19 @@ const ListGroupCommunity = () => {
     });
   };
 
-  const renderGroupItem = (
-    group: Conversation | SearchConversationItem,
-    index: number,
-  ) => {
+  // Groups reorder as they get messages; see useListMotion.
+  const listRef = useRef<HTMLDivElement>(null);
+  useListMotion(listRef);
+
+  const renderGroupItem = (group: Conversation | SearchConversationItem) => {
     const memberCount = group.memberCount ?? group.members?.length ?? 0;
 
     return (
       <button
         key={group.id}
         onClick={() => openConversation(group)}
-        style={staggerStyle(index % GROUPS_PAGE_SIZE)}
-        className="group flex w-full animate-stagger-in items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+        data-motion-key={group.id}
+        className="group flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
       >
         <div className="relative shrink-0">
           <Avatar className="size-12">
@@ -193,7 +194,11 @@ const ListGroupCommunity = () => {
       {/* flex-1, not h-full: h-full made the list as tall as the whole tab,
           pushing its last rows (now the loading footer) below the fold. */}
       <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-1 p-3" aria-busy={paging.status === "loading"}>
+        <div
+          ref={listRef}
+          className="relative space-y-1 p-3"
+          aria-busy={paging.status === "loading"}
+        >
           {displayedGroups.map(renderGroupItem)}
 
           {isSearching && <GroupRowsSkeleton />}

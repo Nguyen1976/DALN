@@ -3,12 +3,11 @@ import { AvatarWithPresence } from "@/components/ui/avatar";
 import { CountBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/feedback";
 import { Skeleton } from "@/components/ui/skeleton";
-import { staggerStyle } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { ModeToggle } from "../ModeToggle";
 import type { AppDispatch } from "@/redux/store";
 import { useDispatch, useSelector } from "react-redux";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getConversations,
   nextConversationCursor,
@@ -16,6 +15,7 @@ import {
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useListMotion } from "@/hooks/useListMotion";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { getFriends, selectFriend } from "@/redux/slices/friendSlice";
 import { formatConversationTime } from "@/utils/formatDateTime";
@@ -55,8 +55,12 @@ const FILTERS = [
 
 type FilterKey = (typeof FILTERS)[number]["key"];
 
-/** Scrolling to the end loads this many more; each page staggers from the top. */
-const CONVERSATIONS_PAGE_SIZE = 10;
+/**
+ * Conversations per page. At least a screenful: with 10, a tall sidebar
+ * fetched a second page straight away and its rows joined the entrance wave
+ * late and out of step.
+ */
+const CONVERSATIONS_PAGE_SIZE = 20;
 
 /** Placeholder rows shaped like a conversation row. */
 function ConversationRowsSkeleton({ count }: { count: number }) {
@@ -173,12 +177,14 @@ export function ChatSidebar({ className }: { className?: string }) {
     });
   }, [conversations, filter, query]);
 
+  // A chat that gets a message rises to the top: lift it and slide it there
+  // rather than letting the list jump (and replay its entrance).
+  const listRef = useRef<HTMLDivElement>(null);
+  useListMotion(listRef);
+
   const { activeGroupConversationIds } = useCall();
 
-  const renderConversationItem = (
-    conversation: Conversation,
-    index: number,
-  ) => {
+  const renderConversationItem = (conversation: Conversation) => {
     const memberCount =
       conversation.memberCount ?? conversation.members?.length ?? 0;
     const isActive = selectedChatId === conversation.id;
@@ -208,11 +214,10 @@ export function ChatSidebar({ className }: { className?: string }) {
         key={conversation.id}
         onClick={() => navigate(`/chat/${conversation.id}`)}
         aria-current={isActive ? "true" : undefined}
-        // Rows mount once per conversation (keyed), so the stagger plays on the
-        // first load and for a newly arrived conversation, not on reorders.
-        style={staggerStyle(index % CONVERSATIONS_PAGE_SIZE)}
+        // Entrance and reordering are animated by useListMotion.
+        data-motion-key={conversation.id}
         className={cn(
-          "relative flex w-full animate-stagger-in items-center gap-3 rounded-xl p-2.5 text-left",
+          "relative flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
           "transition-colors duration-(--motion-fast)",
           "hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
           isActive && "bg-accent",
@@ -426,7 +431,9 @@ export function ChatSidebar({ className }: { className?: string }) {
       </div>
 
       <div
-        className="custom-scrollbar flex-1 space-y-0.5 overflow-y-auto p-2"
+        ref={listRef}
+        // relative: rows measure their place against this box, not the page.
+        className="custom-scrollbar relative flex-1 space-y-0.5 overflow-y-auto p-2 [--list-surface:var(--sidebar)]"
         aria-busy={initialLoading || paging.status === "loading"}
       >
         {initialLoading ? (
