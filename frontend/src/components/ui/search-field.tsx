@@ -65,7 +65,7 @@ function SearchField({
         aria-label={accessibleName}
         autoFocus={autoFocus}
         className={cn(
-          "h-10 w-full rounded-xl border border-input bg-card pl-9 pr-9 text-sm text-foreground",
+          "h-10 w-full rounded-xl border border-input bg-field pl-9 pr-9 text-sm text-foreground",
           "placeholder:text-muted-foreground",
           "transition-[border-color,box-shadow] duration-(--motion-fast)",
           "outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",

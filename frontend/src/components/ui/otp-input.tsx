@@ -129,7 +129,7 @@ export function OtpInput({
           aria-label={`Chữ số ${index + 1} trên ${length}`}
           maxLength={length}
           className={cn(
-            "h-13 w-full min-w-0 rounded-xl border border-input bg-card text-center text-xl font-semibold tabular-nums text-foreground shadow-xs",
+            "h-13 w-full min-w-0 rounded-xl border border-input bg-field text-center text-xl font-semibold tabular-nums text-foreground shadow-xs",
             "py-3 transition-[border-color,box-shadow] duration-(--motion-fast)",
             "outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35",
             "disabled:cursor-not-allowed disabled:opacity-55",

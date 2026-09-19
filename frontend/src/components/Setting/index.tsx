@@ -23,7 +23,7 @@ export function ProfileSettings({ onClose }: ProfileSettingsProps) {
   return (
     <div
       className={cn(
-        "fixed inset-0 z-50 flex items-start justify-center bg-foreground/55 p-4 text-foreground backdrop-blur-sm",
+        "fixed inset-0 z-50 flex items-start justify-center bg-scrim p-4 text-foreground backdrop-blur-sm",
         closing ? "animate-overlay-out" : "animate-overlay-in",
       )}
       onAnimationEnd={onOverlayAnimationEnd}
@@ -146,7 +146,7 @@ export function ProfileSettings({ onClose }: ProfileSettingsProps) {
                         Kiểm soát ai có thể xem thông tin hồ sơ của bạn
                       </p>
                     </div>
-                    <select className="px-3 py-1 bg-input border border-border rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+                    <select className="px-3 py-1 bg-field border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
                       <option>Mọi người</option>
                       <option>Chỉ bạn bè</option>
                       <option>Riêng tư</option>

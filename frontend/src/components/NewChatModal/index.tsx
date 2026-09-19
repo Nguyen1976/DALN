@@ -95,7 +95,7 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
   return (
     <div
       className={cn(
-        "fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm",
+        "fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 backdrop-blur-sm",
         closing ? "animate-overlay-out" : "animate-overlay-in",
       )}
       onAnimationEnd={onOverlayAnimationEnd}

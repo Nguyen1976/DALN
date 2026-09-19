@@ -87,6 +87,9 @@
   --border: oklch(0.885 0.01 272); /* decorative separator */
   --input: oklch(0.65 0.022 272); /* field border — 3.06:1 vs card */
   --placeholder: oklch(0.545 0.022 272); /* 4.9:1 on card */
+  --field: oklch(1 0 0); /* form field fill: the card itself on light */
+  /* Backdrop behind dialogs and sheets: dims the page, never lightens it. */
+  --scrim: oklch(0.2 0.02 272 / 0.55);
   --ring: oklch(0.52 0.19 272);
 
   /* ---- Charts ---- */
@@ -180,8 +183,13 @@
   --warning-text: oklch(0.8 0.14 80);
 
   --border: oklch(0.315 0.014 272);
-  --input: oklch(0.545 0.02 272); /* 3.61:1 vs card */
+  /* Softer than light mode's 3:1 border (a bright outline glares on a dark
+     surface); dark fields are also told apart by their recessed fill. */
+  --input: oklch(0.42 0.018 272);
   --placeholder: oklch(0.66 0.02 272); /* 5.75:1 on card */
+  --field: oklch(0.18 0.013 272); /* a step below the card */
+  /* A light scrim (the old foreground/60) washed dark mode out to grey. */
+  --scrim: oklch(0.08 0.01 272 / 0.66);
   --ring: oklch(0.68 0.17 272);
 
   --chart-1: oklch(0.68 0.17 272);
@@ -252,6 +260,8 @@
   --color-warning-text: var(--warning-text);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-field: var(--field);
+  --color-scrim: var(--scrim);
   --color-placeholder: var(--placeholder);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);

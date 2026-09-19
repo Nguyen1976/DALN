@@ -16,11 +16,24 @@ import {
 } from "@/redux/slices/conversationSlice";
 import { getFriends, selectFriend } from "@/redux/slices/friendSlice";
 import { formatConversationTime } from "@/utils/formatDateTime";
-import MenuCustome from "./Menu";
+import { NewChatModal } from "../NewChatModal";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { NotificationsDropdown } from "../NotificationDropdown";
 import { useNavigate, useParams } from "react-router";
 import { selectUser } from "@/redux/slices/userSlice";
-import { MessagesSquare, SearchX, Search, X, Phone } from "lucide-react";
+import {
+  MessagesSquare,
+  SearchX,
+  Search,
+  SquarePen,
+  X,
+  Phone,
+} from "lucide-react";
 import { useCall } from "@/contexts/callContext";
 
 /** Vietnamese-friendly search: strips diacritics so "hoa" matches "Hoà". */
@@ -65,6 +78,7 @@ export function ChatSidebar({ className }: { className?: string }) {
     conversations.length === 0,
   );
   const [query, setQuery] = useState("");
+  const [showNewGroup, setShowNewGroup] = useState(false);
   const [filter, setFilter] = useState<FilterKey>("all");
   const isFetchingMoreRef = useRef(false);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -309,6 +323,9 @@ export function ChatSidebar({ className }: { className?: string }) {
         className,
       )}
     >
+      {showNewGroup && (
+        <NewChatModal onClose={() => setShowNewGroup(false)} />
+      )}
       <div className="shrink-0 space-y-3 border-b border-sidebar-border px-3 pb-3 pt-3">
         <div className="flex items-center justify-between gap-2 pl-1">
           <div className="flex items-baseline gap-2">
@@ -324,7 +341,20 @@ export function ChatSidebar({ className }: { className?: string }) {
           <div className="flex items-center gap-0.5">
             <ModeToggle />
             <NotificationsDropdown />
-            <MenuCustome />
+            {/* The list's own "compose" action, where chat apps put it. */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="soft"
+                  size="icon"
+                  aria-label="Tạo nhóm mới"
+                  onClick={() => setShowNewGroup(true)}
+                >
+                  <SquarePen className="size-[18px]" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Tạo nhóm mới</TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
@@ -403,6 +433,16 @@ export function ChatSidebar({ className }: { className?: string }) {
             title="Chưa có cuộc trò chuyện"
             description="Bắt đầu nhắn tin với bạn bè hoặc tạo một nhóm mới."
             compact
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowNewGroup(true)}
+              >
+                <SquarePen aria-hidden="true" />
+                Tạo nhóm mới
+              </Button>
+            }
           />
         ) : visibleConversations.length === 0 ? (
           <EmptyState

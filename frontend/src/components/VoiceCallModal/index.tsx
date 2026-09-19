@@ -573,7 +573,7 @@ export default function VoiceCallModal({
       role="dialog"
       aria-modal="true"
       aria-label={isVideoCall ? "Cuộc gọi video" : "Cuộc gọi thoại"}
-      className="fixed inset-0 z-50 flex animate-overlay-in items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex animate-overlay-in items-center justify-center bg-scrim p-4 backdrop-blur-sm"
     >
       {/* Tiếng của đối phương LUÔN phát ở thẻ audio này (kể cả cuộc gọi video);
           thẻ <video> để muted nên tiếng KHÔNG bị phát hai lần. */}

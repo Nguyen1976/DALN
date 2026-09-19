@@ -128,7 +128,7 @@ const Profile = () => {
               </label>
               <Input
                 placeholder="Nhập họ và tên"
-                className="bg-input border-border"
+                className="bg-field"
                 {...formProfile.register("fullName")}
               />
             </div>
@@ -138,7 +138,7 @@ const Profile = () => {
               <Input
                 type="email"
                 placeholder="Nhập email"
-                className="bg-input border-border"
+                className="bg-field"
                 {...formProfile.register("email")}
               />
             </div>
@@ -147,7 +147,7 @@ const Profile = () => {
               <label className="block text-sm font-medium mb-2">Tiểu sử</label>
               <textarea
                 placeholder="Giới thiệu ngắn về bạn"
-                className="w-full px-3 py-2 bg-input border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                className="w-full px-3 py-2 bg-field border border-input rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                 rows={4}
                 {...formProfile.register("bio")}
               />

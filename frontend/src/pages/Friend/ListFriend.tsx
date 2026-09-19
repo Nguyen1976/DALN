@@ -378,7 +378,7 @@ const ListFriend = () => {
       {/* Backdrop for mobile detail sheet */}
       {mobileDetailOpen && (
         <div
-          className="fixed inset-0 z-30 animate-overlay-in bg-foreground/45 backdrop-blur-[2px] lg:hidden"
+          className="fixed inset-0 z-30 animate-overlay-in bg-scrim backdrop-blur-[2px] lg:hidden"
           onClick={() => setMobileDetailOpen(false)}
         />
       )}
