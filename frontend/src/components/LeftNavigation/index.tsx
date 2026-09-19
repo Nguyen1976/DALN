@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import { Users, MessageSquare, LogOut, Settings, Sparkles } from "@/components/icons";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Users, MessageSquare, LogOut, Settings } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -11,16 +11,20 @@ import {
 import { cn } from "@/lib/utils";
 import ProfileSetting from "../ChatSidebar/ProfileSetting";
 import { useLocation, useNavigate } from "react-router";
-import type { AppDispatch } from "@/redux/store";
-import { useDispatch } from "react-redux";
+import type { AppDispatch, RootState } from "@/redux/store";
+import { useDispatch, useSelector } from "react-redux";
 import { logoutAPI } from "@/redux/slices/userSlice";
+import {
+  rememberPath,
+  sectionOf,
+  type NavSection,
+} from "@/redux/slices/navigationSlice";
 import { BrandMark } from "@/components/Brand";
-import { ProfileSettings } from "@/components/Setting";
 
 /**
- * Which tab the rail's highlight sat on last. Every screen renders its own
- * MainLayout, so this component remounts on each route change and cannot keep
- * that in state; module scope survives the remount.
+ * Which tab the rail's highlight sat on last. Module scope, so the highlight
+ * glides rather than appears when the rail is mounted again (after signing
+ * out and back in).
  */
 let lastActiveIndex: number | null = null;
 
@@ -149,13 +153,28 @@ function useGooeyHighlight(activeIndex: number) {
 
 export function LeftNavigation() {
   const navigate = useNavigate();
-  const pathname = useLocation().pathname;
-
   const dispatch = useDispatch<AppDispatch>();
+  const { pathname } = useLocation();
+  const lastPaths = useSelector((state: RootState) => state.navigation);
+
+  // Note where each section is left, so coming back reopens that spot. The
+  // path only: a query like ?requestId= opens a dialog, which should not
+  // pop up again on the way back.
+  useEffect(() => {
+    dispatch(rememberPath(pathname));
+  }, [dispatch, pathname]);
+
+  /**
+   * A section's button returns to where that section was left (the open
+   * conversation, the Friends or Settings tab). Pressed again while already
+   * there, it goes to the section's first page.
+   */
+  const goTo = (section: NavSection, root: string) =>
+    navigate(sectionOf(pathname) === section ? root : lastPaths[section]);
+
   // The logout button sits at the bottom of the rail, right where a stray
   // click lands; it used to sign out on the spot and drop unsent drafts.
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const handleLogout = () => {
     setConfirmLogout(false);
     dispatch(logoutAPI());
@@ -166,23 +185,25 @@ export function LeftNavigation() {
     {
       label: "Trò chuyện",
       icon: MessageSquare,
-      onClick: () => navigate("/"),
+      onClick: () => goTo("chat", "/"),
       active: pathname === "/" || pathname.startsWith("/chat"),
     },
     {
       label: "Bạn bè",
       icon: Users,
-      onClick: () => navigate("/friends"),
+      onClick: () => goTo("friends", "/friends"),
+      // Suggestions live in the Friends screen as one of its tabs.
       active:
         pathname === "/friends" ||
         pathname === "/groups" ||
-        pathname === "/friend_requests",
+        pathname === "/friend_requests" ||
+        pathname === "/recommendations",
     },
     {
-      label: "Gợi ý bạn bè",
-      icon: Sparkles,
-      onClick: () => navigate("/recommendations"),
-      active: pathname === "/recommendations",
+      label: "Cài đặt",
+      icon: Settings,
+      onClick: () => goTo("settings", "/settings"),
+      active: pathname.startsWith("/settings"),
     },
   ];
 
@@ -291,25 +312,8 @@ export function LeftNavigation() {
           ))}
         </div>
 
-        {/* Account-level actions sit at the foot of the rail, away from the
-            screens above them: settings first, sign-out last. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Cài đặt"
-              onClick={() => setShowSettings(true)}
-              className="size-11 rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground md:mt-auto"
-            >
-              <Settings className="size-5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right" className="hidden md:block">
-            Cài đặt
-          </TooltipContent>
-        </Tooltip>
-
+        {/* Sign-out sits alone at the foot of the rail, away from the
+            screens above it. */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -317,7 +321,7 @@ export function LeftNavigation() {
               size="icon"
               aria-label="Đăng xuất"
               onClick={() => setConfirmLogout(true)}
-              className="size-11 rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive-text"
+              className="size-11 rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive-text md:mt-auto"
             >
               <LogOut className="size-5" />
             </Button>
@@ -327,10 +331,6 @@ export function LeftNavigation() {
           </TooltipContent>
         </Tooltip>
       </nav>
-
-      {showSettings && (
-        <ProfileSettings onClose={() => setShowSettings(false)} />
-      )}
 
       <ConfirmDialog
         open={confirmLogout}

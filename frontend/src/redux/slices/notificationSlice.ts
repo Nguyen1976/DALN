@@ -24,11 +24,28 @@ export interface NotificationState {
    * server and is adjusted locally on read/arrival, then re-synced.
    */
   unreadCount: number;
+  /** Set once the badge count has been fetched this session. */
+  unreadCountLoaded: boolean;
+  /**
+   * Paging of the bell's list, kept here rather than in the dropdown: the
+   * dropdown lives in the chat sidebar, which unmounts on every trip to
+   * another tab, and used to forget which pages it had.
+   */
+  loaded: boolean;
+  page: number;
+  hasMore: boolean;
 }
+
+/** Notifications per page in the bell's list. */
+export const NOTIFICATIONS_PAGE_SIZE = 10;
 
 const initialState: NotificationState = {
   items: [],
   unreadCount: 0,
+  unreadCountLoaded: false,
+  loaded: false,
+  page: 0,
+  hasMore: true,
 };
 
 export const getNotifications = createAsyncThunk(
@@ -60,9 +77,7 @@ export const fetchUnreadCount = createAsyncThunk(
 export const markNotificationAsRead = createAsyncThunk(
   `/notification/mark-read`,
   async ({ notificationId }: { notificationId: string }) => {
-    await authorizeAxiosInstance.patch(
-      `/notification/${notificationId}/read`,
-    );
+    await authorizeAxiosInstance.patch(`/notification/${notificationId}/read`);
     return { notificationId };
   },
 );
@@ -103,6 +118,9 @@ export const notificationSlice = createSlice({
         }>,
       ) => {
         const incoming = action.payload.notifications || [];
+        state.loaded = true;
+        state.page = action.payload.page;
+        state.hasMore = incoming.length >= action.payload.limit;
 
         if (action.payload.page <= 1) {
           state.items = incoming;
@@ -119,6 +137,7 @@ export const notificationSlice = createSlice({
 
     builder.addCase(fetchUnreadCount.fulfilled, (state, action) => {
       state.unreadCount = action.payload;
+      state.unreadCountLoaded = true;
     });
 
     builder.addCase(
@@ -152,6 +171,16 @@ export const selectNotification = (state: {
 export const selectUnreadNotificationCount = (state: {
   notification: NotificationState;
 }) => state.notification.unreadCount;
+
+type WithNotifications = { notification: NotificationState };
+export const selectUnreadCountLoaded = (state: WithNotifications) =>
+  state.notification.unreadCountLoaded;
+export const selectNotificationsLoaded = (state: WithNotifications) =>
+  state.notification.loaded;
+export const selectNotificationsPage = (state: WithNotifications) =>
+  state.notification.page;
+export const selectNotificationsHasMore = (state: WithNotifications) =>
+  state.notification.hasMore;
 
 export const { addNotification } = notificationSlice.actions;
 export default notificationSlice.reducer;

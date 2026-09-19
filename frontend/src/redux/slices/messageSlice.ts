@@ -429,19 +429,12 @@ export const selectMessagePagination = createSelector(
     (_: RootState, conversationId?: string) => conversationId,
   ],
   (paginationMap, conversationId) => {
-    if (!conversationId) {
-      return {
-        oldestCursor: null,
-        hasMore: false,
-      };
-    }
-
-    return (
-      paginationMap[conversationId] || {
-        oldestCursor: null,
-        hasMore: false,
-      }
-    );
+    const page = conversationId ? paginationMap[conversationId] : undefined;
+    // `loaded`: the first page has been fetched, even if it held nothing —
+    // an empty thread used to be refetched every time it was opened.
+    return page
+      ? { ...page, loaded: true }
+      : { oldestCursor: null, hasMore: false, loaded: false };
   },
 );
 

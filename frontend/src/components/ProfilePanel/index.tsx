@@ -21,9 +21,24 @@ import {
 } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useClearConversationHistory } from "@/hooks/chat/useChatMessageActions";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { GroupMemberManager } from "./GroupMemberManager";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
+
+const ASSET_PAGE_SIZE = 18;
+
+/** Placeholder rows shaped like an asset row. */
+function AssetRowsSkeleton({ count }: { count: number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: count }).map((_, index) => (
+        <Skeleton key={index} className="h-14 w-full rounded-lg" />
+      ))}
+    </div>
+  );
+}
 
 interface ProfilePanelProps {
   conversationId: string;
@@ -38,7 +53,6 @@ export default function ProfilePanel({
 }: ProfilePanelProps) {
   const [assetKind, setAssetKind] = useState<"MEDIA" | "LINK" | "DOC">("MEDIA");
   const [assets, setAssets] = useState<ConversationAssetMessage[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -70,52 +84,69 @@ export default function ProfilePanel({
   if (loadedToken !== resetToken) {
     setLoadedToken(resetToken);
     setAssets([]);
-    setCursor(null);
     setNextCursor(null);
     setHasMore(canAccessConversationData);
   }
 
+  // A page that lands after the tab or conversation changed is dropped.
+  const tokenRef = useRef(resetToken);
   useEffect(() => {
-    if (
-      !conversationId ||
-      !canAccessConversationData ||
-      !hasMore ||
-      isLoading
-    ) {
-      return;
-    }
+    tokenRef.current = resetToken;
+  }, [resetToken]);
+
+  // First page of the chosen tab.
+  useEffect(() => {
+    if (!conversationId || !canAccessConversationData) return;
+    let cancelled = false;
 
     setIsLoading(true);
     getConversationAssetsAPI({
       conversationId,
       kind: assetKind,
-      cursor,
-      limit: 18,
+      cursor: null,
+      limit: ASSET_PAGE_SIZE,
     })
       .then((response) => {
-        const nextMessages = response.messages || [];
-        setAssets((prev) => {
-          const merged = [...prev, ...nextMessages];
-          return merged.filter(
-            (message, index, array) =>
-              index === array.findIndex((item) => item.id === message.id),
-          );
-        });
+        if (cancelled) return;
+        setAssets(response.messages || []);
         setNextCursor(response.nextCursor || null);
         setHasMore(Boolean(response.nextCursor));
       })
       .catch(() => {
-        setHasMore(false);
+        if (!cancelled) setHasMore(false);
       })
-      .finally(() => setIsLoading(false));
-  }, [
-    conversationId,
-    assetKind,
-    cursor,
-    hasMore,
-    loadedToken,
-    canAccessConversationData,
-  ]);
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, assetKind, canAccessConversationData]);
+
+  // Later pages, as the panel is scrolled down to the end of the list.
+  const assetPaging = useInfiniteScroll({
+    hasMore: hasMore && Boolean(nextCursor),
+    enabled: !isLoading && assets.length > 0,
+    itemCount: assets.length,
+    loadMore: async () => {
+      const token = resetToken;
+      const response = await getConversationAssetsAPI({
+        conversationId,
+        kind: assetKind,
+        cursor: nextCursor,
+        limit: ASSET_PAGE_SIZE,
+      });
+      if (tokenRef.current !== token) return;
+      const nextMessages = response.messages || [];
+      setAssets((prev) => {
+        const known = new Set(prev.map((item) => item.id));
+        return [...prev, ...nextMessages.filter((item) => !known.has(item.id))];
+      });
+      setNextCursor(response.nextCursor || null);
+      setHasMore(Boolean(response.nextCursor));
+    },
+  });
 
   const resolveMediaPreviewUrl = (message: ConversationAssetMessage) => {
     const media = message.medias?.[0];
@@ -198,7 +229,9 @@ export default function ProfilePanel({
           <div className="flex animate-stagger-in flex-col items-center text-center [--stagger:1]">
             <Avatar className="mb-3 size-24 border border-border">
               <AvatarImage
-                src={conversation.groupAvatar || conversation.displayAvatar || ""}
+                src={
+                  conversation.groupAvatar || conversation.displayAvatar || ""
+                }
                 alt={`Ảnh đại diện ${title}`}
               />
               <AvatarFallback className="text-2xl">{title?.[0]}</AvatarFallback>
@@ -219,7 +252,10 @@ export default function ProfilePanel({
               ["Tắt thông báo cuộc trò chuyện", "chat-mute"],
               ["Tin nhắn tự biến mất", "chat-ephemeral"],
             ].map(([label, key]) => (
-              <div key={key} className="flex items-center justify-between gap-3">
+              <div
+                key={key}
+                className="flex items-center justify-between gap-3"
+              >
                 <span className="flex items-center gap-2 text-sm text-muted-foreground">
                   {label}
                   <Badge variant="secondary" size="sm">
@@ -238,8 +274,38 @@ export default function ProfilePanel({
 
           {conversation.type === "GROUP" && <GroupMemberManager />}
 
-          {/* Media */}
-          <div className="animate-stagger-in [--stagger:3]">
+          {/* Above the media list rather than at the foot: that list now
+              keeps loading as it is scrolled, so anything below it would be
+              pushed further away with every page. */}
+          {canAccessConversationData && (
+            <section className="animate-stagger-in space-y-3 [--stagger:3]">
+              <h4 className="text-sm font-semibold text-foreground">
+                Quyền riêng tư & hỗ trợ
+              </h4>
+              <AnimateIcon asChild animateOnHover>
+                <button
+                  type="button"
+                  onClick={() => setConfirmClear(true)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border/70 p-3 text-left transition-colors duration-(--motion-fast) hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive-text">
+                    <Trash2 className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-destructive-text">
+                      Xóa lịch sử trò chuyện
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      Chỉ ẩn ở phía bạn, người khác vẫn thấy tin nhắn.
+                    </span>
+                  </span>
+                </button>
+              </AnimateIcon>
+            </section>
+          )}
+
+          {/* Media: last, so it can grow as it is scrolled. */}
+          <div className="animate-stagger-in [--stagger:4]">
             <h4 className="mb-3 text-sm font-semibold text-foreground">
               Ảnh, liên kết & tài liệu
             </h4>
@@ -328,13 +394,7 @@ export default function ProfilePanel({
                 );
               })}
 
-              {isLoading && (
-                <div className="space-y-2">
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <Skeleton key={index} className="h-14 w-full rounded-lg" />
-                  ))}
-                </div>
-              )}
+              {isLoading && <AssetRowsSkeleton count={3} />}
 
               {!isLoading && assets.length === 0 && (
                 <p className="py-6 text-center text-xs text-muted-foreground">
@@ -344,51 +404,17 @@ export default function ProfilePanel({
                 </p>
               )}
 
-              {!isLoading && hasMore && assets.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => {
-                    if (!isLoading && nextCursor) {
-                      setCursor(nextCursor);
-                    }
-                  }}
-                >
-                  Tải thêm
-                </Button>
+              {!isLoading && assets.length > 0 && (
+                <InfiniteListFooter
+                  sentinelRef={assetPaging.sentinelRef}
+                  status={assetPaging.status}
+                  hasMore={hasMore && Boolean(nextCursor)}
+                  onRetry={assetPaging.retry}
+                  loading={<AssetRowsSkeleton count={2} />}
+                />
               )}
             </div>
           </div>
-
-          {/* Last, as in most chat apps: actions that remove things sit at the
-              foot of the details, away from everyday settings. */}
-          {canAccessConversationData && (
-            <section className="animate-stagger-in space-y-3 [--stagger:4]">
-              <h4 className="text-sm font-semibold text-foreground">
-                Quyền riêng tư & hỗ trợ
-              </h4>
-              <AnimateIcon asChild animateOnHover>
-                <button
-                  type="button"
-                  onClick={() => setConfirmClear(true)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border/70 p-3 text-left transition-colors duration-(--motion-fast) hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive-text">
-                    <Trash2 className="size-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-destructive-text">
-                      Xóa lịch sử trò chuyện
-                    </span>
-                    <span className="block text-xs text-muted-foreground">
-                      Chỉ ẩn ở phía bạn, người khác vẫn thấy tin nhắn.
-                    </span>
-                  </span>
-                </button>
-              </AnimateIcon>
-            </section>
-          )}
         </div>
       </div>
 

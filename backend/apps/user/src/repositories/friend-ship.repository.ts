@@ -16,6 +16,9 @@ export class FriendShipRepository {
   async findFriendsByUserId(userId: string, limit: number, page: number) {
     return await this.prisma.friendship.findMany({
       where: { userId },
+      // skip/take need a fixed order, or a page can repeat or miss friends.
+      // _id grows with insertion, so this is the order the list always had.
+      orderBy: { id: 'asc' },
       take: limit,
       skip: (page - 1) * limit,
       select: { friendId: true },

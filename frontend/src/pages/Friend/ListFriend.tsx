@@ -25,8 +25,6 @@ import {
   getConversationByFriendIdAPI,
   searchUsersAPI,
   type SearchFriendItem,
-  getUserProfileByIdAPI,
-  type UserProfileByIdResponse,
 } from "@/apis";
 import {
   addConversation,
@@ -34,23 +32,45 @@ import {
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import {
-  getFriends,
+  FRIENDS_PAGE_SIZE,
+  fetchFriendProfile,
+  getMoreFriends,
   selectFriend,
-  selectFriendPage,
+  selectFriendHasMore,
+  selectFriendProfile,
+  selectFriendProfileStatus,
+  selectSelectedFriendId,
+  setSelectedFriend,
   type Friend,
 } from "@/redux/slices/friendSlice";
-import type { AppDispatch } from "@/redux/store";
+import type { AppDispatch, RootState } from "@/redux/store";
 import { selectUser } from "@/redux/slices/userSlice";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
 import { formatLastSeen } from "@/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { showErrorToast } from "@/utils/toastError";
-import { staggerStyle } from "@/lib/motion";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useListMotion } from "@/hooks/useListMotion";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 
-/** "Tải thêm" appends pages of this size; each page staggers from the top. */
-const FRIENDS_PAGE_SIZE = 20;
+/** Placeholder rows shaped like a friend row, while a page loads. */
+function FriendRowsSkeleton({ count = 4 }: { count?: number }) {
+  return (
+    <div className="space-y-1">
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 p-3">
+          <Skeleton className="size-12 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-2/3" />
+            <Skeleton className="h-3 w-1/3" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const ListFriend = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -58,31 +78,27 @@ const ListFriend = () => {
   const friends = useSelector(selectFriend);
   const user = useSelector(selectUser);
   const conversations = useSelector(selectConversation);
-  const [selectedFriendId, setSelectedFriendId] = useState<string | null>(null);
-  const [selectedProfile, setSelectedProfile] =
-    useState<UserProfileByIdResponse | null>(null);
-  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
+  // Who is open in the detail panel, and their profile, come from redux: the
+  // choice survives a trip to another tab, and a profile fetched once is not
+  // fetched again. Nobody is selected until the person picks someone.
+  const selectedFriendId = useSelector(selectSelectedFriendId);
+  const selectedProfile = useSelector((state: RootState) =>
+    selectFriendProfile(state, selectedFriendId),
+  );
+  const profileStatus = useSelector((state: RootState) =>
+    selectFriendProfileStatus(state, selectedFriendId),
+  );
+  const isLoadingProfile =
+    Boolean(selectedFriendId) && !selectedProfile && profileStatus !== "error";
+  // The detail animates in when a friend is picked, not when the tab is
+  // simply shown again with the same friend.
+  const [shownOnArrival] = useState(selectedFriendId);
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [keyword, setKeyword] = useState("");
   const debouncedKeyword = useDebouncedValue(keyword);
   const [searchResults, setSearchResults] = useState<SearchFriendItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
-
-  useEffect(() => {
-    //fetch friends từ redux store hoặc API
-    if (friends.length === 0) {
-      dispatch(getFriends({ limit: 100, page: 1 }));
-    }
-  }, [dispatch, friends.length]);
-
-  useEffect(() => {
-    if (friends.length > 0 && !selectedFriendId) {
-      const firstFriend = friends[0];
-      setSelectedFriendId(firstFriend.id);
-      void handleSelectFriend(firstFriend);
-    }
-  }, [friends, selectedFriendId]);
 
   useEffect(() => {
     if (!debouncedKeyword) {
@@ -99,11 +115,6 @@ const ListFriend = () => {
         const results = await searchUsersAPI(debouncedKeyword);
         if (cancelled) return;
         setSearchResults(results);
-
-        if (results.length > 0 && !selectedFriendId) {
-          setSelectedFriendId(results[0].id);
-          await handleSelectFriend(results[0] as Friend);
-        }
       } catch (error) {
         if (!cancelled) {
           showErrorToast(error, "Không thể tìm kiếm bạn bè");
@@ -118,30 +129,30 @@ const ListFriend = () => {
     return () => {
       cancelled = true;
     };
-  }, [debouncedKeyword, selectedFriendId]);
+  }, [debouncedKeyword]);
 
-  const page = useSelector(selectFriendPage);
-
-  const loadMoreFriends = () => {
-    dispatch(getFriends({ limit: FRIENDS_PAGE_SIZE, page: page + 1 }));
-  };
+  // Pages load as the list scrolls; the first one too, when nothing is
+  // loaded yet. Searching shows server results, so paging pauses meanwhile.
+  const hasMore = useSelector(selectFriendHasMore);
+  const paging = useInfiniteScroll({
+    hasMore,
+    enabled: !debouncedKeyword,
+    loadMore: () => dispatch(getMoreFriends()).unwrap(),
+  });
 
   const displayedFriends = debouncedKeyword
     ? (searchResults as Friend[])
     : friends;
 
-  const handleSelectFriend = async (friend: Friend) => {
-    try {
-      setSelectedFriendId(friend.id);
-      setIsLoadingProfile(true);
-      const profile = await getUserProfileByIdAPI(friend.id);
-      setSelectedProfile(profile);
-    } catch (error) {
-      showErrorToast(error, "Không lấy được thông tin người dùng");
-    } finally {
-      setIsLoadingProfile(false);
-    }
+  /** Open a friend; their profile is fetched only the first time. */
+  const handleSelectFriend = (friend: Friend) => {
+    dispatch(setSelectedFriend(friend.id));
+    void dispatch(fetchFriendProfile(friend.id));
   };
+
+  // Rows fade in the first time they show this session, not on every visit.
+  const listRef = useRef<HTMLDivElement>(null);
+  useListMotion(listRef, { id: "friends" });
 
   const handleChatWithFriend = async () => {
     if (!selectedFriendId || !user?.id) return;
@@ -176,9 +187,11 @@ const ListFriend = () => {
     }
   };
 
-  const selectedFriend = friends.find(
-    (friend) => friend.id === selectedFriendId,
-  );
+  const selectedFriend =
+    friends.find((friend) => friend.id === selectedFriendId) ??
+    (searchResults as Friend[]).find(
+      (friend) => friend.id === selectedFriendId,
+    );
 
   const renderProfileDetail = () => {
     if (!selectedFriendId) {
@@ -188,6 +201,31 @@ const ListFriend = () => {
           title="Chưa chọn ai"
           description="Chọn một người bạn ở danh sách bên trái để xem thông tin."
           compact
+        />
+      );
+    }
+
+    if (profileStatus === "error" && !selectedProfile) {
+      return (
+        <EmptyState
+          icon={UserRound}
+          title="Không tải được thông tin"
+          description="Kiểm tra kết nối rồi thử lại."
+          compact
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                // Drop the failed attempt so the thunk may run again.
+                if (selectedFriendId) {
+                  void dispatch(fetchFriendProfile(selectedFriendId));
+                }
+              }}
+            >
+              Thử lại
+            </Button>
+          }
         />
       );
     }
@@ -206,8 +244,14 @@ const ListFriend = () => {
     const isOnline = Boolean(selectedFriend?.status);
 
     return (
-      // Keyed on the friend: switching people replays the entrance.
-      <div key={selectedFriendId} className="animate-stagger-in space-y-6">
+      // Keyed on the friend: picking someone else replays the entrance.
+      <div
+        key={selectedFriendId}
+        className={cn(
+          "space-y-6",
+          selectedFriendId !== shownOnArrival && "animate-stagger-in",
+        )}
+      >
         <div className="flex flex-col items-center gap-3 text-center">
           <AvatarWithPresence
             status={isOnline ? "online" : "offline"}
@@ -290,18 +334,24 @@ const ListFriend = () => {
         </div>
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-1 p-3">
-            {displayedFriends.map((friend: Friend, index) => (
+          <div
+            ref={listRef}
+            className="relative space-y-1 p-3"
+            aria-busy={paging.status === "loading"}
+          >
+            {displayedFriends.map((friend: Friend) => (
               <AnimateIcon key={friend.id} asChild animateOnHover>
                 <button
-                  style={staggerStyle(index % FRIENDS_PAGE_SIZE)}
+                  data-motion-key={friend.id}
                   onClick={() => {
-                    void handleSelectFriend(friend);
+                    handleSelectFriend(friend);
                     setMobileDetailOpen(true);
                   }}
-                  aria-current={selectedFriendId === friend.id ? "true" : undefined}
+                  aria-current={
+                    selectedFriendId === friend.id ? "true" : undefined
+                  }
                   className={cn(
-                    "group flex w-full animate-stagger-in items-center gap-3 rounded-xl p-2.5 text-left",
+                    "group flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
                     "transition-colors duration-(--motion-fast) hover:bg-accent",
                     "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
                     selectedFriendId === friend.id && "bg-accent",
@@ -338,48 +388,40 @@ const ListFriend = () => {
               </AnimateIcon>
             ))}
 
-            {isSearching && (
-              <div className="space-y-1">
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <div key={index} className="flex items-center gap-3 p-3">
-                    <Skeleton className="size-12 shrink-0 rounded-full" />
-                    <div className="flex-1 space-y-2">
-                      <Skeleton className="h-3.5 w-2/3" />
-                      <Skeleton className="h-3 w-1/3" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {isSearching && <FriendRowsSkeleton />}
 
-            {displayedFriends.length === 0 && !isSearching && (
-              <EmptyState
-                icon={debouncedKeyword ? SearchX : Users}
-                title={
-                  debouncedKeyword
-                    ? "Không tìm thấy ai phù hợp"
-                    : "Chưa có bạn bè nào"
+            {displayedFriends.length === 0 &&
+              !isSearching &&
+              (debouncedKeyword || !hasMore) && (
+                <EmptyState
+                  icon={debouncedKeyword ? SearchX : Users}
+                  title={
+                    debouncedKeyword
+                      ? "Không tìm thấy ai phù hợp"
+                      : "Chưa có bạn bè nào"
+                  }
+                  description={
+                    debouncedKeyword
+                      ? `Không có kết quả cho “${debouncedKeyword}”.`
+                      : "Hãy xem mục Gợi ý kết bạn để tìm những người có thể bạn quen."
+                  }
+                  compact
+                />
+              )}
+
+            {!debouncedKeyword && (
+              <InfiniteListFooter
+                sentinelRef={paging.sentinelRef}
+                status={paging.status}
+                hasMore={hasMore}
+                onRetry={paging.retry}
+                loading={<FriendRowsSkeleton count={friends.length ? 3 : 6} />}
+                endLabel={
+                  friends.length > FRIENDS_PAGE_SIZE
+                    ? `Đã hiển thị tất cả ${friends.length} bạn bè`
+                    : undefined
                 }
-                description={
-                  debouncedKeyword
-                    ? `Không có kết quả cho “${debouncedKeyword}”.`
-                    : "Hãy xem mục Gợi ý kết bạn để tìm những người có thể bạn quen."
-                }
-                compact
               />
-            )}
-
-            {!debouncedKeyword && displayedFriends.length > 0 && (
-              <div className="my-3 flex items-center justify-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="interceptor-loading"
-                  onClick={loadMoreFriends}
-                >
-                  Tải thêm
-                </Button>
-              </div>
             )}
           </div>
         </ScrollArea>

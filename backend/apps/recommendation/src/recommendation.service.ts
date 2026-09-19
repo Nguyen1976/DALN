@@ -26,6 +26,16 @@ type UserProfileRow = {
   interests?: string[]
 }
 
+type MutualFriendPreview = {
+  userId: string
+  username: string
+  fullName: string
+  avatar: string | null
+}
+
+/** How many mutual friends each card shows as avatars. */
+const MUTUAL_FRIEND_PREVIEW = 2
+
 type RecommendationFeatureRow = {
   candidateId: string
   score?: number
@@ -535,6 +545,58 @@ export class RecommendationService {
       userId,
       friendIds,
     )
+
+    const response = await this.readRecommendationList(userId, friendIds)
+    return {
+      ...response,
+      candidates: await this.withMutualFriends(response.candidates, friendIds),
+    }
+  }
+
+  /**
+   * Who the viewer and each candidate both know: how many, plus the first few
+   * (those with a photo first) for the stacked avatars on the card. Read live
+   * rather than stored with the list, because friendships change during the
+   * day while the list itself is only rebuilt nightly.
+   */
+  private async withMutualFriends<T extends { candidateId: string }>(
+    candidates: T[],
+    friendIds: string[],
+  ) {
+    const empty = { count: 0, preview: [] as MutualFriendPreview[] }
+    let mutualIds = new Map<string, string[]>()
+    try {
+      mutualIds = await this.friendGraph.getMutualFriendIds(
+        friendIds,
+        candidates.map((candidate) => candidate.candidateId),
+      )
+    } catch (e) {
+      // The list is still useful without the "N mutual friends" line.
+      this.logger.warn('[recommendation] mutual friends failed', e)
+    }
+    if (!mutualIds.size) {
+      return candidates.map((candidate) => ({ ...candidate, mutualFriends: empty }))
+    }
+
+    const allIds = Array.from(new Set(Array.from(mutualIds.values()).flat()))
+    const people = await this.prisma.userSnapshot.findMany({
+      where: { userId: { in: allIds } },
+      select: { userId: true, username: true, fullName: true, avatar: true },
+    })
+    const personById = new Map(people.map((person) => [person.userId, person]))
+
+    return candidates.map((candidate) => {
+      const ids = mutualIds.get(candidate.candidateId) ?? []
+      const preview = ids
+        .map((id) => personById.get(id))
+        .filter((person): person is MutualFriendPreview => Boolean(person))
+        .sort((a, b) => Number(Boolean(b.avatar)) - Number(Boolean(a.avatar)))
+        .slice(0, MUTUAL_FRIEND_PREVIEW)
+      return { ...candidate, mutualFriends: { count: ids.length, preview } }
+    })
+  }
+
+  private async readRecommendationList(userId: string, friendIds: string[]) {
 
     const result = await this.prisma.recommendationResult.findUnique({
       where: { userId },

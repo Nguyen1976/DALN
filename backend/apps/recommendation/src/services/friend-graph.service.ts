@@ -107,6 +107,29 @@ export class FriendGraphService {
     }
   }
 
+  /**
+   * For each candidate, which of `friendIds` (the viewer's friends) are also
+   * friends with them. Only the shared edges are read, not whole friend lists.
+   */
+  async getMutualFriendIds(
+    friendIds: string[],
+    candidateIds: string[],
+  ): Promise<Map<string, string[]>> {
+    const mutual = new Map<string, string[]>()
+    if (!friendIds.length || !candidateIds.length) return mutual
+
+    const rows = await this.prisma.friendship.findMany({
+      where: { userId: { in: candidateIds }, friendId: { in: friendIds } },
+      select: { userId: true, friendId: true },
+    })
+    for (const row of rows) {
+      const list = mutual.get(row.userId) ?? []
+      list.push(row.friendId)
+      mutual.set(row.userId, list)
+    }
+    return mutual
+  }
+
   /** All undirected friendship edges (u < v) for offline dataset building. */
   async getAllFriendEdges(): Promise<Array<{ user1: string; user2: string }>> {
     const rows = await this.prisma.friendship.findMany({

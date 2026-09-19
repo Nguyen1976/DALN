@@ -384,62 +384,38 @@ export class MessageRepository {
     take: number,
     cursor?: KeysetCursor | null,
   ) {
+    // Which messages count as this kind of asset.
+    const kindWhere = {
+      MEDIA: {
+        OR: [
+          { type: { in: ['IMAGE', 'VIDEO'] } },
+          { medias: { some: { mediaType: { in: ['IMAGE', 'VIDEO'] } } } },
+        ],
+      },
+      DOC: {
+        OR: [{ type: 'FILE' }, { medias: { some: { mediaType: 'FILE' } } }],
+      },
+      LINK: {
+        OR: [
+          { content: { contains: 'http' } },
+          { content: { contains: 'www.' } },
+        ],
+      },
+    }[kind]
+
     const where: any = {
       conversationId,
       isDeleted: false,
-      // Same tie-safe cursor as the message list: several attachments sent
-      // together share a timestamp, and a bare `lt` drops the ones that fell
-      // on the page boundary.
-      ...olderThanCursor('createdAt', cursor ?? null),
-    }
-
-    if (kind === 'MEDIA') {
-      where.OR = [
-        {
-          type: {
-            in: ['IMAGE', 'VIDEO'],
-          },
-        },
-        {
-          medias: {
-            some: {
-              mediaType: {
-                in: ['IMAGE', 'VIDEO'],
-              },
-            },
-          },
-        },
-      ]
-    }
-
-    if (kind === 'DOC') {
-      where.OR = [
-        {
-          type: 'FILE',
-        },
-        {
-          medias: {
-            some: {
-              mediaType: 'FILE',
-            },
-          },
-        },
-      ]
-    }
-
-    if (kind === 'LINK') {
-      where.OR = [
-        {
-          content: {
-            contains: 'http',
-          },
-        },
-        {
-          content: {
-            contains: 'www.',
-          },
-        },
-      ]
+      // Both filters are an OR of their own, so they meet under AND. Spreading
+      // the cursor in and then assigning `where.OR` for the kind overwrote the
+      // cursor's OR: every "next page" came back as the first page again.
+      AND: [
+        // Same tie-safe cursor as the message list: several attachments sent
+        // together share a timestamp, and a bare `lt` drops the ones that fell
+        // on the page boundary.
+        olderThanCursor('createdAt', cursor ?? null),
+        kindWhere,
+      ],
     }
 
     return await this.prisma.message.findMany({

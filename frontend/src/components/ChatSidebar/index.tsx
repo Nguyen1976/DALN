@@ -3,7 +3,6 @@ import { AvatarWithPresence } from "@/components/ui/avatar";
 import { CountBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/feedback";
 import { Skeleton } from "@/components/ui/skeleton";
-import { staggerStyle } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { ModeToggle } from "../ModeToggle";
 import type { AppDispatch } from "@/redux/store";
@@ -11,10 +10,23 @@ import { useDispatch, useSelector } from "react-redux";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getConversations,
+  nextConversationCursor,
   selectConversation,
   type Conversation,
 } from "@/redux/slices/conversationSlice";
-import { getFriends, selectFriend } from "@/redux/slices/friendSlice";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useListMotion } from "@/hooks/useListMotion";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
+import {
+  getFriends,
+  selectFriend,
+  selectFriendsLoaded,
+} from "@/redux/slices/friendSlice";
+import {
+  markConversationsExhausted,
+  selectConversationsHasMore,
+  selectConversationsLoaded,
+} from "@/redux/slices/conversationPagingSlice";
 import { formatConversationTime } from "@/utils/formatDateTime";
 import { NewChatModal } from "../NewChatModal";
 import { Button } from "@/components/ui/button";
@@ -52,8 +64,29 @@ const FILTERS = [
 
 type FilterKey = (typeof FILTERS)[number]["key"];
 
-/** Scrolling to the end loads this many more; each page staggers from the top. */
-const CONVERSATIONS_PAGE_SIZE = 10;
+/**
+ * Conversations per page. At least a screenful: with 10, a tall sidebar
+ * fetched a second page straight away and its rows joined the entrance wave
+ * late and out of step.
+ */
+const CONVERSATIONS_PAGE_SIZE = 20;
+
+/** Placeholder rows shaped like a conversation row. */
+function ConversationRowsSkeleton({ count }: { count: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 p-2.5">
+          <Skeleton className="size-12 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-2/3" />
+            <Skeleton className="h-3 w-4/5" />
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
 
 const unreadCountOf = (conversation: Conversation) => {
   const raw = conversation.unreadCount;
@@ -74,70 +107,52 @@ export function ChatSidebar({ className }: { className?: string }) {
 
   const navigate = useNavigate();
 
-  const [initialLoading, setInitialLoading] = useState(
-    conversations.length === 0,
-  );
+  // Paging state lives in redux: this sidebar unmounts whenever another tab
+  // is open, and coming back must neither refetch nor flash a skeleton.
+  const loaded = useSelector(selectConversationsLoaded);
+  const hasMore = useSelector(selectConversationsHasMore);
+  const friendsLoaded = useSelector(selectFriendsLoaded);
+  const [initialLoading, setInitialLoading] = useState(!loaded);
   const [query, setQuery] = useState("");
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [filter, setFilter] = useState<FilterKey>("all");
-  const isFetchingMoreRef = useRef(false);
-  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Presence dots read from the friend slice, so make sure it is populated
-  // even when the user lands straight on the chat screen.
+  // even when the user lands straight on the chat screen. Once per session:
+  // `loaded`, not "the list is empty", or someone with no friends refetched
+  // on every visit.
   useEffect(() => {
-    if (friends.length === 0) {
-      void dispatch(getFriends({ limit: 50, page: 1 }));
-    }
+    if (!friendsLoaded) void dispatch(getFriends({ limit: 50, page: 1 }));
+  }, [dispatch, friendsLoaded]);
+
+  useEffect(() => {
+    if (loaded) return;
+    void dispatch(
+      getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor: null }),
+    ).finally(() => setInitialLoading(false));
+    // Only on mount: `loaded` flips when this very request lands.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
-  useEffect(() => {
-    if (conversations.length === 0) {
-      void dispatch(
-        getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor: null }),
-      ).finally(() => setInitialLoading(false));
-    } else {
-      setInitialLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatch]);
-
-  // Reset the in-flight guard whenever new conversations arrive so the next
-  // page can be requested; when nothing new arrives we stop loading more.
-  useEffect(() => {
-    isFetchingMoreRef.current = false;
-  }, [conversations.length]);
-
-  const loadMoreConversations = () => {
-    if (isFetchingMoreRef.current) return;
-    const last = conversations[conversations.length - 1];
-    // The id rides along as a tie-breaker: several conversations can share the
-    // same lastMessageAt (the friendship saga stamps them together), and a
-    // timestamp-only cursor skips whichever ones fell on the page boundary.
-    const cursor = last?.lastMessageAt ? `${last.lastMessageAt}|${last.id}` : null;
-    if (!cursor) return;
-    isFetchingMoreRef.current = true;
-    dispatch(getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor }));
-  };
-
-  useEffect(() => {
-    const sentinel = loadMoreSentinelRef.current;
-    if (!sentinel) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          loadMoreConversations();
-        }
-      },
-      { rootMargin: "200px" },
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversations.length]);
+  // Older conversations page in as the list nears its end. The old observer
+  // watched the viewport, so its look-ahead margin was clipped by this list's
+  // own scroll box and loading only began at the very bottom; it also fired
+  // again on every new message once the list was exhausted.
+  const paging = useInfiniteScroll({
+    hasMore,
+    enabled: !initialLoading,
+    itemCount: conversations.length,
+    loadMore: async () => {
+      const cursor = nextConversationCursor(conversations);
+      if (cursor === undefined) {
+        dispatch(markConversationsExhausted());
+        return;
+      }
+      await dispatch(
+        getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor }),
+      ).unwrap();
+    },
+  });
 
   /** userId -> online, so a direct chat can show the peer's presence. */
   const presenceByUserId = useMemo(() => {
@@ -165,12 +180,14 @@ export function ChatSidebar({ className }: { className?: string }) {
     });
   }, [conversations, filter, query]);
 
+  // A chat that gets a message rises to the top: lift it and slide it there
+  // rather than letting the list jump (and replay its entrance).
+  const listRef = useRef<HTMLDivElement>(null);
+  useListMotion(listRef, { id: "chats" });
+
   const { activeGroupConversationIds } = useCall();
 
-  const renderConversationItem = (
-    conversation: Conversation,
-    index: number,
-  ) => {
+  const renderConversationItem = (conversation: Conversation) => {
     const memberCount =
       conversation.memberCount ?? conversation.members?.length ?? 0;
     const isActive = selectedChatId === conversation.id;
@@ -200,11 +217,10 @@ export function ChatSidebar({ className }: { className?: string }) {
         key={conversation.id}
         onClick={() => navigate(`/chat/${conversation.id}`)}
         aria-current={isActive ? "true" : undefined}
-        // Rows mount once per conversation (keyed), so the stagger plays on the
-        // first load and for a newly arrived conversation, not on reorders.
-        style={staggerStyle(index % CONVERSATIONS_PAGE_SIZE)}
+        // Entrance and reordering are animated by useListMotion.
+        data-motion-key={conversation.id}
         className={cn(
-          "relative flex w-full animate-stagger-in items-center gap-3 rounded-xl p-2.5 text-left",
+          "relative flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
           "transition-colors duration-(--motion-fast)",
           "hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
           isActive && "bg-accent",
@@ -283,7 +299,10 @@ export function ChatSidebar({ className }: { className?: string }) {
           <div className="flex items-center justify-between gap-2">
             {isCalling ? (
               <span className="flex min-w-0 animate-fade-in items-center gap-1.5 truncate text-sm font-medium text-success">
-                <Phone className="size-3.5 shrink-0 animate-pulse" aria-hidden="true" />
+                <Phone
+                  className="size-3.5 shrink-0 animate-pulse"
+                  aria-hidden="true"
+                />
                 Đang gọi…
               </span>
             ) : (
@@ -323,9 +342,7 @@ export function ChatSidebar({ className }: { className?: string }) {
         className,
       )}
     >
-      {showNewGroup && (
-        <NewChatModal onClose={() => setShowNewGroup(false)} />
-      )}
+      {showNewGroup && <NewChatModal onClose={() => setShowNewGroup(false)} />}
       <div className="shrink-0 space-y-3 border-b border-sidebar-border px-3 pb-3 pt-3">
         <div className="flex items-center justify-between gap-2 pl-1">
           <div className="flex items-baseline gap-2">
@@ -416,17 +433,14 @@ export function ChatSidebar({ className }: { className?: string }) {
         </div>
       </div>
 
-      <div className="custom-scrollbar flex-1 space-y-0.5 overflow-y-auto p-2">
+      <div
+        ref={listRef}
+        // relative: rows measure their place against this box, not the page.
+        className="custom-scrollbar relative flex-1 space-y-0.5 overflow-y-auto p-2 [--list-surface:var(--sidebar)]"
+        aria-busy={initialLoading || paging.status === "loading"}
+      >
         {initialLoading ? (
-          Array.from({ length: 7 }).map((_, index) => (
-            <div key={index} className="flex items-center gap-3 p-2.5">
-              <Skeleton className="size-12 shrink-0 rounded-full" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-3.5 w-2/3" />
-                <Skeleton className="h-3 w-4/5" />
-              </div>
-            </div>
-          ))
+          <ConversationRowsSkeleton count={7} />
         ) : conversations.length === 0 ? (
           <EmptyState
             icon={MessagesSquare}
@@ -458,7 +472,13 @@ export function ChatSidebar({ className }: { className?: string }) {
         ) : (
           <>
             {visibleConversations.map(renderConversationItem)}
-            <div ref={loadMoreSentinelRef} className="h-px w-full" />
+            <InfiniteListFooter
+              sentinelRef={paging.sentinelRef}
+              status={paging.status}
+              hasMore={hasMore}
+              onRetry={paging.retry}
+              loading={<ConversationRowsSkeleton count={3} />}
+            />
           </>
         )}
       </div>

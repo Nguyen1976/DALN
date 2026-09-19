@@ -5,7 +5,6 @@ import { EmptyState } from "@/components/ui/feedback";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import ProfilePanel from "@/components/ProfilePanel";
-import MainLayout from "@/layouts/MainLayout";
 import { useNavigate, useParams } from "react-router";
 import { selectConversationById } from "@/redux/slices/conversationSlice";
 import type { RootState } from "@/redux/store";
@@ -36,8 +35,9 @@ export default function ChatPage() {
     }
   };
 
+  // Inside the app shell (see App.tsx): this renders only the chat area.
   return (
-    <MainLayout>
+    <>
       <ChatSidebar className={selectedChatId ? "hidden md:flex" : "flex"} />
 
       {selectedChatId ? (
@@ -70,6 +70,6 @@ export default function ChatPage() {
           }}
         />
       )}
-    </MainLayout>
+    </>
   );
 }

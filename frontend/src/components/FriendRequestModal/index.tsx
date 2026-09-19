@@ -16,6 +16,7 @@ import {
 } from "@/apis";
 import { useDispatch, useSelector } from "react-redux";
 import { getFriends } from "@/redux/slices/friendSlice";
+import { markRequestsStale } from "@/redux/slices/friendRequestSlice";
 import { selectUser } from "@/redux/slices/userSlice";
 import type { AppDispatch } from "@/redux/store";
 import { showErrorToast } from "@/utils/toastError";
@@ -105,6 +106,8 @@ const FriendRequestModal = ({
       });
 
       await dispatch(getFriends({ limit: 100, page: 1 })).unwrap();
+      // The request is answered: the received list is out of date.
+      dispatch(markRequestsStale("received"));
 
       toast.success(`Đã kết bạn với ${fromUser.username}`);
       onClose();
@@ -133,6 +136,7 @@ const FriendRequestModal = ({
         inviteeName: user?.username || "",
         status: "REJECTED",
       });
+      dispatch(markRequestsStale("received"));
       toast.success("Đã từ chối lời mời kết bạn");
       onClose();
     } catch (error) {
@@ -171,7 +175,10 @@ const FriendRequestModal = ({
             role="alert"
             className="flex animate-fade-in items-start gap-2.5 rounded-lg border border-destructive/35 bg-destructive/10 px-3.5 py-3 text-sm text-destructive-text"
           >
-            <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <AlertCircle
+              className="mt-0.5 size-4 shrink-0"
+              aria-hidden="true"
+            />
             <span>{loadError}</span>
           </div>
         ) : (

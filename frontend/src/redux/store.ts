@@ -11,6 +11,10 @@ import messageReducer from "./slices/messageSlice";
 import notificationPreferenceReducer from "./slices/notificationPreferenceSlice";
 import typingIndicatorReducer from "./slices/typingIndicatorSlice";
 import seenStatusReducer from "./slices/seenStatusSlice";
+import conversationPagingReducer from "./slices/conversationPagingSlice";
+import friendRequestReducer from "./slices/friendRequestSlice";
+import recommendationReducer from "./slices/recommendationSlice";
+import navigationReducer from "./slices/navigationSlice";
 
 const rootPersistConfig = {
   key: "root",
@@ -24,6 +28,10 @@ const rootPersistConfig = {
     "message",
     "typingIndicator",
     "seenStatus",
+    "conversationPaging",
+    "friendRequests",
+    "recommendations",
+    "navigation",
   ], //những slice k lưu trữ ở storage
 };
 
@@ -36,6 +44,10 @@ const reducers = combineReducers({
   notificationPreference: notificationPreferenceReducer,
   typingIndicator: typingIndicatorReducer,
   seenStatus: seenStatusReducer,
+  conversationPaging: conversationPagingReducer,
+  friendRequests: friendRequestReducer,
+  recommendations: recommendationReducer,
+  navigation: navigationReducer,
 });
 
 const persistedReducer = persistReducer(rootPersistConfig, reducers);

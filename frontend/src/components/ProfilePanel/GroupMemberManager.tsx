@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import {
   ChevronRight,
   LogOut,
@@ -48,7 +48,13 @@ import {
   type ConversationMember,
 } from "@/redux/slices/conversationSlice";
 import type { AppDispatch, RootState } from "@/redux/store";
-import { getFriends, selectFriend } from "@/redux/slices/friendSlice";
+import {
+  getMoreFriends,
+  selectFriend,
+  selectFriendHasMore,
+} from "@/redux/slices/friendSlice";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { selectUser } from "@/redux/slices/userSlice";
 import { staggerStyle } from "@/lib/motion";
 
@@ -101,9 +107,14 @@ export function GroupMemberManager() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [groupActionPending, setGroupActionPending] = useState(false);
 
-  useEffect(() => {
-    if (!friends.length) void dispatch(getFriends({ limit: 50, page: 1 }));
-  }, [dispatch, friends.length]);
+  // Friends page in while the "add members" list is open and scrolled —
+  // it used to stop at the first 50, so anyone past that could not be added.
+  const friendsHasMore = useSelector(selectFriendHasMore);
+  const friendPaging = useInfiniteScroll({
+    hasMore: friendsHasMore,
+    enabled: addOpen,
+    loadMore: () => dispatch(getMoreFriends()).unwrap(),
+  });
 
   const filteredMembers = useMemo(() => {
     const query = deferredMemberSearch.trim().toLocaleLowerCase("vi");
@@ -463,7 +474,10 @@ export function GroupMemberManager() {
               autoFocus
             />
           </div>
-          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+          <div
+            className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3"
+            aria-busy={friendPaging.status === "loading"}
+          >
             {availableFriends.length ? (
               <div className="space-y-1">
                 {availableFriends.map((friend, index) => {
@@ -472,7 +486,7 @@ export function GroupMemberManager() {
                   return (
                     <label
                       key={friend.id}
-                      style={staggerStyle(index)}
+                      style={staggerStyle(index % 20)}
                       className="flex min-h-16 animate-stagger-in cursor-pointer items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
                     >
                       <input
@@ -508,12 +522,21 @@ export function GroupMemberManager() {
                 })}
               </div>
             ) : (
-              <div className="flex h-40 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-                {friendSearch
-                  ? "Không tìm thấy bạn bè phù hợp"
-                  : "Tất cả bạn bè đã có trong nhóm"}
-              </div>
+              // Only a verdict once every friend has been looked at.
+              !friendsHasMore && (
+                <div className="flex h-40 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                  {friendSearch
+                    ? "Không tìm thấy bạn bè phù hợp"
+                    : "Tất cả bạn bè đã có trong nhóm"}
+                </div>
+              )
             )}
+            <InfiniteListFooter
+              sentinelRef={friendPaging.sentinelRef}
+              status={friendPaging.status}
+              hasMore={friendsHasMore}
+              onRetry={friendPaging.retry}
+            />
           </div>
           <DialogFooter className="border-t border-border bg-card px-4 py-3">
             <Button variant="ghost" onClick={() => setAddOpen(false)}>

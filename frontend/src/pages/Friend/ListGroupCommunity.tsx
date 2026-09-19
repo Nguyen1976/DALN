@@ -1,5 +1,4 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchField } from "@/components/ui/search-field";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -7,21 +6,45 @@ import { searchConversationsAPI, type SearchConversationItem } from "@/apis";
 import {
   applyConversationUpdate,
   getConversations,
+  nextConversationCursor,
   selectConversation,
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import type { AppDispatch } from "@/redux/store";
 import { ChevronRight, SearchX, UsersRound } from "@/components/icons";
 import { EmptyState } from "@/components/ui/feedback";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
 import { showErrorToast } from "@/utils/toastError";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { staggerStyle } from "@/lib/motion";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import {
+  markConversationsExhausted,
+  selectConversationsHasMore,
+} from "@/redux/slices/conversationPagingSlice";
+import { useListMotion } from "@/hooks/useListMotion";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 
 /** Groups load in pages of this size; each page staggers from the top. */
 const GROUPS_PAGE_SIZE = 20;
+
+/** Placeholder rows shaped like a group row, while a page loads. */
+function GroupRowsSkeleton({ count = 4 }: { count?: number }) {
+  return (
+    <div className="space-y-1">
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 p-3">
+          <Skeleton className="size-12 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-1/2" />
+            <Skeleton className="h-3 w-1/4" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const ListGroupCommunity = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -34,11 +57,27 @@ const ListGroupCommunity = () => {
   );
   const [isSearching, setIsSearching] = useState(false);
 
-  useEffect(() => {
-    if (conversations.length === 0) {
-      dispatch(getConversations({ limit: GROUPS_PAGE_SIZE, cursor: null }));
-    }
-  }, [dispatch, conversations.length]);
+  // The server pages every conversation, direct chats included; this tab
+  // keeps only groups. While the groups found so far leave the end of the
+  // list in view, the next page is fetched on its own, so someone with many
+  // direct chats still sees their groups without scrolling through nothing.
+  // Shared with the chat sidebar through redux, so neither starts over.
+  const hasMore = useSelector(selectConversationsHasMore);
+  const paging = useInfiniteScroll({
+    hasMore,
+    enabled: !debouncedKeyword,
+    itemCount: conversations.length,
+    loadMore: async () => {
+      const cursor = nextConversationCursor(conversations);
+      if (cursor === undefined) {
+        dispatch(markConversationsExhausted());
+        return;
+      }
+      await dispatch(
+        getConversations({ limit: GROUPS_PAGE_SIZE, cursor }),
+      ).unwrap();
+    },
+  });
 
   useEffect(() => {
     if (!debouncedKeyword) {
@@ -79,13 +118,6 @@ const ListGroupCommunity = () => {
 
   const displayedGroups = debouncedKeyword ? searchResults : groups;
 
-  const loadMoreGroups = () => {
-    const last = conversations[conversations.length - 1];
-    const cursor = last?.lastMessageAt ? `${last.lastMessageAt}|${last.id}` : null;
-
-    dispatch(getConversations({ limit: GROUPS_PAGE_SIZE, cursor }));
-  };
-
   const openConversation = (
     conversation: Conversation | SearchConversationItem,
   ) => {
@@ -107,18 +139,19 @@ const ListGroupCommunity = () => {
     });
   };
 
-  const renderGroupItem = (
-    group: Conversation | SearchConversationItem,
-    index: number,
-  ) => {
+  // Groups reorder as they get messages; see useListMotion.
+  const listRef = useRef<HTMLDivElement>(null);
+  useListMotion(listRef, { id: "groups" });
+
+  const renderGroupItem = (group: Conversation | SearchConversationItem) => {
     const memberCount = group.memberCount ?? group.members?.length ?? 0;
 
     return (
       <button
         key={group.id}
         onClick={() => openConversation(group)}
-        style={staggerStyle(index % GROUPS_PAGE_SIZE)}
-        className="group flex w-full animate-stagger-in items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+        data-motion-key={group.id}
+        className="group flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
       >
         <div className="relative shrink-0">
           <Avatar className="size-12">
@@ -152,7 +185,7 @@ const ListGroupCommunity = () => {
   };
 
   return (
-    <div className="h-full min-h-0 flex-1">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="border-b border-border p-4">
         <SearchField
           value={keyword}
@@ -161,51 +194,50 @@ const ListGroupCommunity = () => {
         />
       </div>
 
-      <ScrollArea className="h-full">
-        <div className="space-y-1 p-3">
+      {/* flex-1, not h-full: h-full made the list as tall as the whole tab,
+          pushing its last rows (now the loading footer) below the fold. */}
+      <ScrollArea className="min-h-0 flex-1">
+        <div
+          ref={listRef}
+          className="relative space-y-1 p-3"
+          aria-busy={paging.status === "loading"}
+        >
           {displayedGroups.map(renderGroupItem)}
 
-          {isSearching && (
-            <div className="space-y-1">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <div key={index} className="flex items-center gap-3 p-3">
-                  <Skeleton className="size-12 shrink-0 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-3.5 w-1/2" />
-                    <Skeleton className="h-3 w-1/4" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {isSearching && <GroupRowsSkeleton />}
 
-          {displayedGroups.length === 0 && !isSearching && (
-            <EmptyState
-              icon={debouncedKeyword ? SearchX : UsersRound}
-              title={
-                debouncedKeyword
-                  ? "Không tìm thấy nhóm nào"
-                  : "Chưa tham gia nhóm nào"
-              }
-              description={
-                debouncedKeyword
-                  ? `Không có nhóm nào khớp với “${debouncedKeyword}”.`
-                  : "Tạo nhóm mới từ menu ở màn hình trò chuyện để bắt đầu."
+          {/* "No groups" is only true once every conversation was checked. */}
+          {displayedGroups.length === 0 &&
+            !isSearching &&
+            (debouncedKeyword || !hasMore) && (
+              <EmptyState
+                icon={debouncedKeyword ? SearchX : UsersRound}
+                title={
+                  debouncedKeyword
+                    ? "Không tìm thấy nhóm nào"
+                    : "Chưa tham gia nhóm nào"
+                }
+                description={
+                  debouncedKeyword
+                    ? `Không có nhóm nào khớp với “${debouncedKeyword}”.`
+                    : "Tạo nhóm mới từ menu ở màn hình trò chuyện để bắt đầu."
+                }
+              />
+            )}
+
+          {!debouncedKeyword && (
+            <InfiniteListFooter
+              sentinelRef={paging.sentinelRef}
+              status={paging.status}
+              hasMore={hasMore}
+              onRetry={paging.retry}
+              loading={<GroupRowsSkeleton count={groups.length ? 3 : 6} />}
+              endLabel={
+                groups.length > GROUPS_PAGE_SIZE
+                  ? `Đã hiển thị tất cả ${groups.length} nhóm`
+                  : undefined
               }
             />
-          )}
-
-          {!debouncedKeyword && displayedGroups.length > 0 && (
-            <div className="my-3 flex items-center justify-center">
-              <Button
-                variant="outline"
-                size="sm"
-                className="interceptor-loading"
-                onClick={loadMoreGroups}
-              >
-                Tải thêm
-              </Button>
-            </div>
           )}
         </div>
       </ScrollArea>

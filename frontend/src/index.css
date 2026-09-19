@@ -616,6 +616,19 @@
   }
 }
 
+/* The lifted row's shadow: in with the lift, out as it lands. */
+@keyframes liftShadow {
+  0% {
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 /* Result bars grow from empty to the transform set inline on the element. */
 @keyframes growX {
   from {
@@ -739,6 +752,28 @@
   .animate-bar-up {
     animation: barUp var(--motion-slow) var(--ease-out) backwards;
     animation-delay: calc(3 * var(--stagger-step));
+  }
+
+  /* A list row lifted while it travels to a new place (useListMotion): above
+     its neighbours, on the list's own surface so text it passes over is
+     hidden, with a shadow that swells and fades — opacity only. */
+  .list-lift {
+    position: relative;
+    z-index: 1;
+  }
+
+  .list-lift:not([aria-current]) {
+    background-color: var(--list-surface, var(--background));
+  }
+
+  .list-lift::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: var(--shadow-md);
+    pointer-events: none;
+    animation: liftShadow 480ms var(--ease-in-out) both;
   }
 
   .animate-shake {
