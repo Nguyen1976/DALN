@@ -30,6 +30,8 @@
   --motion-fast: 140ms;
   --motion-base: 200ms;
   --motion-slow: 320ms;
+  /* Theme switch: the new theme spreads over the whole page from the toggle. */
+  --motion-reveal: 450ms;
   --ease-out: cubic-bezier(0.22, 0.9, 0.28, 1);
   --ease-in-out: cubic-bezier(0.6, 0, 0.35, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
@@ -809,6 +811,30 @@
     white-space: nowrap;
     border-width: 0;
   }
+}
+
+/* ==========================================================================
+   Theme reveal (lib/themeReveal.ts) — only while data-theme-reveal is set,
+   so any other view transition keeps the browser's default crossfade.
+   ========================================================================== */
+
+html[data-theme-reveal]::view-transition-old(root),
+html[data-theme-reveal]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html[data-theme-reveal]::view-transition-new(root) {
+  clip-path: var(--theme-reveal-from);
+}
+
+/* The circle is the transition. Colour transitions would otherwise replay
+   inside the revealed area, fading buttons from their old-theme colours.
+   The toggle's own sun/moon swap is the one exception. */
+html[data-theme-reveal] *:not([data-theme-toggle] > svg),
+html[data-theme-reveal] *::before,
+html[data-theme-reveal] *::after {
+  transition: none !important;
 }
 
 /* ==========================================================================

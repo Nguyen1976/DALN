@@ -12,11 +12,11 @@ import { useTheme } from "@/components/ThemeProvider";
 const Toaster = ({ ...props }: ToasterProps) => {
   // Follows the app's own theme provider — next-themes is not mounted here,
   // so reading from it would pin every toast to the system scheme.
-  const { resolvedTheme } = useTheme();
+  const { theme } = useTheme();
 
   return (
     <Sonner
-      theme={resolvedTheme}
+      theme={theme}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4 text-success-text" />,
