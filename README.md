@@ -129,14 +129,23 @@ Accepting a friend request touches three services and there is no distributed tr
 - Every consumer runs inside `consumeIdempotent`: the message id goes into an inbox with a unique index, so a redelivered message hits `P2002` and is skipped.
 - Failures compensate in reverse: notify is retried three times, then the conversation is deleted and the friendship reverted.
 
-### 3. Auth that survives expired tokens, on HTTP and WebSocket
+### 3. Audio and video calls: signaling on the socket, media peer to peer
+
+![Calls: browsers signal through the realtime gateway over Socket.IO; 1-1 audio and video go peer to peer or through coturn, group calls through LiveKit](docs/diagrams/call-flow.png)
+
+- **1-1 calls are WebRTC peer to peer.** Offer, answer and ICE candidates ride the existing Socket.IO connection, so the gateway relays signaling but never carries audio or video. When NAT blocks the direct path, media goes through coturn with short-lived TURN credentials (`call.ice_config`).
+- **The gateway decides who may ring whom.** It asks the chat service whether both users share the 1-1 conversation, takes a per-user busy lock in Redis and stores the session under a `callId`. The first tab to answer wins; the others get `call.claimed` and stop ringing.
+- **Group calls go through a LiveKit SFU.** The gateway checks membership, signs a room token and rings the members; LiveKit webhooks report who joined and left.
+- **Calls leave a trace.** Rejected and ended 1-1 calls publish `CALL_ENDED` to RabbitMQ, and the chat service writes a call-log message into the conversation.
+
+### 4. Auth that survives expired tokens, on HTTP and WebSocket
 
 - A 15-minute access token and a 7-day refresh token, both in httpOnly cookies.
 - One `resolveTokens()` decides for both the HTTP guard and the Socket.IO handshake. HTTP silently re-issues the access cookie; the socket accepts a still-valid refresh token.
 - A rejected socket first receives a machine-readable `auth:error` code. The client retries with bounded exponential backoff (at most 5 attempts) instead of going silent until the page is reloaded.
 - Covered by [`testing/e2e/socket-auth.spec.js`](testing/e2e/socket-auth.spec.js), which was checked to fail against the previous gateway.
 
-### 4. Friend suggestions from a trained model
+### 5. Friend suggestions from a trained model
 
 Offline, [`training/`](training) builds a link-prediction dataset from the Brightkite social graph in Neo4j and compares five models:
 
@@ -150,7 +159,7 @@ Offline, [`training/`](training) builds a link-prediction dataset from the Brigh
 
 Online, the recommendation service ranks candidates with the exported Gradient Boosting model. Candidates come from friends-of-friends and shared groups in MongoDB, plus bio similarity from multilingual MiniLM embeddings in Qdrant. A separate worker process runs the training queue (BullMQ) and the nightly recompute, so the API stays responsive.
 
-### 5. Shipping: one workflow, one server
+### 6. Shipping: one workflow, one server
 
 - [`ci-cd.yml`](.github/workflows/ci-cd.yml): pull requests to `main` run backend typecheck and unit tests plus frontend lint and build; merging deploys.
 - The deploy key can only deploy. An SSH forced command accepts a 40-character SHA that must already be on `main`, takes a lock, resets to it and runs [`deploy/deploy.sh`](deploy/deploy.sh).
