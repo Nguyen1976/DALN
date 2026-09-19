@@ -44,6 +44,7 @@ export default function ChatPage() {
         <ChatWindow
           conversationId={selectedChatId || undefined}
           onToggleProfile={() => setShowProfile(!showProfile)}
+          profileOpen={showProfile}
           onVoiceCall={() => handleCall("audio")}
           onVideoCall={() => handleCall("video")}
           onBack={() => navigate("/")}

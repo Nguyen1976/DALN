@@ -46,6 +46,8 @@ import { MessageSquareText as AnimatedMessageSquareText } from "@/components/ani
 import { Minimize as AnimatedMinimize } from "@/components/animate-ui/icons/minimize";
 import { Moon as AnimatedMoon } from "@/components/animate-ui/icons/moon";
 import { Paperclip as AnimatedPaperclip } from "@/components/animate-ui/icons/paperclip";
+import { PanelRightClose as AnimatedPanelRightClose } from "@/components/animate-ui/icons/panel-right-close";
+import { PanelRightOpen as AnimatedPanelRightOpen } from "@/components/animate-ui/icons/panel-right-open";
 import { PhoneCall as AnimatedPhoneCall } from "@/components/animate-ui/icons/phone-call";
 import { Pin as AnimatedPin } from "@/components/animate-ui/icons/pin";
 import { PinOff as AnimatedPinOff } from "@/components/animate-ui/icons/pin-off";
@@ -122,6 +124,8 @@ export const UsersRound = Users2;
 export const Volume2 = lucideLike(AnimatedVolume2);
 export const X = lucideLike(AnimatedX);
 export const XIcon = X;
+export const PanelRightOpen = lucideLike(AnimatedPanelRightOpen);
+export const PanelRightClose = lucideLike(AnimatedPanelRightClose);
 export const Phone = lucideLike(AnimatedPhoneCall);
 export const SquarePen = lucideLike(AnimatedMessageSquarePlus);
 export const Maximize2 = lucideLike(AnimatedMaximize);

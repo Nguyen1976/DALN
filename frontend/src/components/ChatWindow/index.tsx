@@ -5,17 +5,18 @@ import {
   AvatarWithPresence,
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { EmptyState, Spinner } from "@/components/ui/feedback";
 import { FILE_INPUT_ACCEPT, formatFileSize } from "@/utils/mediaLimits";
 import {
   Phone,
   Video,
-  MoreVertical,
+  PanelRightClose,
+  PanelRightOpen,
   Paperclip,
   Smile,
   Send,
   ChevronDown,
-  Trash2,
   Plus,
   X,
   Settings,
@@ -64,13 +65,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { AppDispatch } from "@/redux/store";
 import {
@@ -87,6 +81,8 @@ import {
 interface ChatWindowProps {
   conversationId?: string;
   onToggleProfile: () => void;
+  /** Whether the details panel is showing, so its toggle can say so. */
+  profileOpen?: boolean;
   onVoiceCall: () => void;
   onVideoCall?: () => void;
   onBack?: () => void;
@@ -97,6 +93,7 @@ interface ChatWindowProps {
 export default function ChatWindow({
   conversationId,
   onToggleProfile,
+  profileOpen = false,
   onVoiceCall,
   onVideoCall,
   onBack,
@@ -105,7 +102,6 @@ export default function ChatWindow({
 }: ChatWindowProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const [showClearHistoryDialog, setShowClearHistoryDialog] = useState(false);
   const [internalJumpId, setInternalJumpId] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -197,7 +193,7 @@ export default function ChatWindow({
     scrollToBottom,
   });
 
-  const { handleRevokeMessage, handleDeleteMessageForMe, handleClearHistory } =
+  const { handleRevokeMessage, handleDeleteMessageForMe } =
     useChatMessageActions({ conversationId, messages });
 
   // Thu hồi với mọi người và xoá phía mình đều không hoàn tác được, mà trước
@@ -334,11 +330,6 @@ export default function ChatWindow({
     node.style.height = `${Math.min(node.scrollHeight, 128)}px`;
   }, [msg]);
 
-  const onConfirmClearHistory = async () => {
-    const success = await handleClearHistory();
-    if (success) setShowClearHistoryDialog(false);
-  };
-
   // A conversation that cannot be loaded needs to say so. Falling through to
   // the normal shell left an empty thread with no explanation.
   if (loadError && !effectiveConversation) {
@@ -446,32 +437,26 @@ export default function ChatWindow({
             <Video className="size-5" />
           </Button>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Tùy chọn cuộc trò chuyện"
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <MoreVertical className="size-5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuGroup>
-                <DropdownMenuItem onClick={onToggleProfile}>
-                  Xem chi tiết đoạn chat
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => setShowClearHistoryDialog(true)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Xóa toàn bộ lịch sử
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Straight to the details panel; clearing the history lives in
+              there, next to the rest of what you can do with this chat. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleProfile}
+            title="Thông tin cuộc trò chuyện"
+            aria-label="Thông tin cuộc trò chuyện"
+            aria-pressed={profileOpen}
+            className={cn(
+              "text-muted-foreground hover:text-foreground",
+              profileOpen && "bg-accent text-accent-foreground",
+            )}
+          >
+            {profileOpen ? (
+              <PanelRightClose className="size-5" />
+            ) : (
+              <PanelRightOpen className="size-5" />
+            )}
+          </Button>
         </div>
       </div>
 
@@ -913,35 +898,6 @@ export default function ChatWindow({
             : handleDeleteMessageForMe(action.message));
         }}
       />
-
-      <Dialog
-        open={showClearHistoryDialog}
-        onOpenChange={setShowClearHistoryDialog}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Xóa toàn bộ lịch sử trò chuyện?</DialogTitle>
-            <DialogDescription>
-              Hành động này chỉ ẩn lịch sử ở phía bạn và không thể hoàn tác.
-              Người khác vẫn nhìn thấy tin nhắn bình thường.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowClearHistoryDialog(false)}
-            >
-              Hủy
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => void onConfirmClearHistory()}
-            >
-              Xóa lịch sử
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={poll.showCreatePollDialog}

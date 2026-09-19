@@ -11,7 +11,16 @@ import type {
   Conversation,
   ConversationState,
 } from "@/redux/slices/conversationSlice";
-import { FileText, ImageIcon, Link2, X } from "@/components/icons";
+import {
+  AnimateIcon,
+  FileText,
+  ImageIcon,
+  Link2,
+  Trash2,
+  X,
+} from "@/components/icons";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useClearConversationHistory } from "@/hooks/chat/useChatMessageActions";
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { GroupMemberManager } from "./GroupMemberManager";
@@ -46,6 +55,10 @@ export default function ProfilePanel({
   const canAccessConversationData =
     conversation?.membershipStatus !== "REMOVED" &&
     conversation?.membershipStatus !== "LEFT";
+
+  const clearHistory = useClearConversationHistory(conversationId);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   // Reset when the conversation or the tab changes.
   //
@@ -347,8 +360,53 @@ export default function ProfilePanel({
               )}
             </div>
           </div>
+
+          {/* Last, as in most chat apps: actions that remove things sit at the
+              foot of the details, away from everyday settings. */}
+          {canAccessConversationData && (
+            <section className="animate-stagger-in space-y-3 [--stagger:4]">
+              <h4 className="text-sm font-semibold text-foreground">
+                Quyền riêng tư & hỗ trợ
+              </h4>
+              <AnimateIcon asChild animateOnHover>
+                <button
+                  type="button"
+                  onClick={() => setConfirmClear(true)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border/70 p-3 text-left transition-colors duration-(--motion-fast) hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive-text">
+                    <Trash2 className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-destructive-text">
+                      Xóa lịch sử trò chuyện
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      Chỉ ẩn ở phía bạn, người khác vẫn thấy tin nhắn.
+                    </span>
+                  </span>
+                </button>
+              </AnimateIcon>
+            </section>
+          )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Xóa toàn bộ lịch sử trò chuyện?"
+        description="Lịch sử chỉ bị ẩn ở phía bạn và không thể khôi phục. Người khác vẫn nhìn thấy tin nhắn bình thường."
+        confirmLabel="Xóa lịch sử"
+        pendingLabel="Đang xóa…"
+        isPending={clearing}
+        onConfirm={async () => {
+          setClearing(true);
+          const done = await clearHistory();
+          setClearing(false);
+          if (done) setConfirmClear(false);
+        }}
+      />
     </div>
   );
 }
