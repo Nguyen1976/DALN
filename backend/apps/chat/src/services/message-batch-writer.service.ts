@@ -10,6 +10,8 @@ export type BatchMessageInput = {
   replyToMessageId?: string | null
   isSystem?: boolean
   mentionUserIds?: string[]
+  /** Nhãn từng lượt nhắc để client tô sáng chính xác. */
+  mentions?: unknown
 }
 
 /** Hình dạng trả về khớp với `messageRepo.create()` để bên gọi không phải đổi. */
@@ -29,6 +31,7 @@ export type BatchedMessage = {
   medias: unknown[]
   poll: null
   mentionUserIds: string[]
+  mentions?: unknown
 }
 
 type Pending = {
@@ -90,6 +93,7 @@ export class MessageBatchWriter implements OnModuleDestroy {
       medias: [],
       poll: null,
       mentionUserIds: input.mentionUserIds || [],
+      mentions: input.mentions ?? undefined,
     }
 
     return new Promise<BatchedMessage>((resolve, reject) => {
@@ -128,6 +132,7 @@ export class MessageBatchWriter implements OnModuleDestroy {
           replyToMessageId: item.doc.replyToMessageId,
           isSystem: item.doc.isSystem,
           mentionUserIds: item.doc.mentionUserIds,
+          mentions: (item.doc.mentions ?? undefined) as never,
           isRevoked: false,
           isDeleted: false,
           createdAt: item.doc.createdAt,

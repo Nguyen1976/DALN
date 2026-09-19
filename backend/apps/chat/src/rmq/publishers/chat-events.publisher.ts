@@ -316,4 +316,26 @@ export class ChatEventsPublisher {
       this.logger.warn('[chat-events] publishUserLeftGroup failed', e)
     }
   }
+
+  /**
+   * Báo cho notification service biết có người vừa bị nhắc (@) trong tin nhắn,
+   * để hiện thông báo — trước đây bị tag mà không mở app thì không hay biết gì.
+   */
+  publishMentioned(payload: {
+    conversationId: string
+    messageId: string
+    senderId: string
+    senderName: string
+    userIds: string[]
+    preview: string
+  }): void {
+    if (!payload.userIds.length) return
+    publishEvent(
+      this.amqpConnection,
+      EXCHANGE_RMQ.CHAT_EVENTS,
+      ROUTING_RMQ.CHAT_MENTION,
+      payload,
+    )
+  }
+
 }

@@ -19,6 +19,7 @@ import {
 import { ChatErrors } from '../errors/chat.errors'
 import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
 import { ConversationAssetKind } from '../http/chat-http.dto'
+import { resolveMentions } from '../domain/mention.resolver'
 import { MessageMapper } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
 import { buildKeysetCursor, parseKeysetCursor } from '@app/util'
@@ -102,8 +103,13 @@ export class MessageService {
 
     const content = data.text?.trim() || null
     const medias = data.medias || []
-    const mentionUserIds = [...new Set(data.mentionUserIds || [])].filter(
-      (id) => id !== data.senderId && memberIds.includes(id),
+    // Nguồn sự thật là NỘI DUNG tin, KHÔNG phải id client gửi lên: xoá chữ
+    // "@Alice" khỏi ô soạn thì Alice không còn bị nhắc, gõ tay "@alice" vẫn
+    // tính, tên có dấu/có khoảng trắng đều khớp, và `@all` nhắc cả nhóm.
+    const { userIds: mentionUserIds, mentions } = resolveMentions(
+      content,
+      conversationMembers,
+      data.senderId,
     )
 
     // A message needs to carry something: text, attachments, or both. It used
@@ -176,6 +182,7 @@ export class MessageService {
       replyToMessageId: data.replyToMessageId,
       medias,
       mentionUserIds,
+      mentions,
     })
 
     if (!message) {
@@ -187,11 +194,24 @@ export class MessageService {
     )
     message.senderMember = senderMember
     ;(message as any).mentionUserIds = mentionUserIds
+    ;(message as any).mentions = mentions
     if (mentionUserIds.length) {
       await this.memberRepo.markMention(
         data.conversationId,
         mentionUserIds,
         String(message.id),
+      )
+      // Thông báo cho người bị nhắc (badge trong chat chỉ thấy khi đang mở app).
+      this.safePublish(() =>
+        this.eventsPublisher.publishMentioned({
+          conversationId: data.conversationId,
+          messageId: String(message.id),
+          senderId: data.senderId,
+          senderName:
+            senderMember?.fullName || senderMember?.username || 'Ai đó',
+          userIds: mentionUserIds,
+          preview: (content || '').slice(0, 120),
+        }),
       )
     }
 

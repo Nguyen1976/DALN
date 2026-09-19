@@ -78,6 +78,11 @@ import {
   type ConversationMember,
 } from "@/redux/slices/conversationSlice";
 import { clearConversationMentionsAPI } from "@/apis";
+import {
+  mentionedUserIds,
+  removeMentionFromText,
+  resolveMentionsInText,
+} from "@/utils/mention";
 
 interface ChatWindowProps {
   conversationId?: string;
@@ -181,7 +186,6 @@ export default function ChatWindow({
     addFiles,
     removeAttachment,
     isUploading,
-    mentionUserIds,
     setMentionUserIds,
   } = useChatComposer({
     conversationId,
@@ -205,37 +209,105 @@ export default function ChatWindow({
 
   const poll = useChatPoll({ conversationId, messages });
   const isGroupConversation = effectiveConversation?.type === "GROUP";
-  const mentionCandidates = useMemo(() => {
-    if (!isGroupConversation || mentionQuery === null) return [];
-    const needle = mentionQuery.toLocaleLowerCase("vi");
-    return (effectiveConversation?.members || [])
-      .filter((member) => member.userId !== user.id)
-      .filter((member) => `${member.fullName || ""} ${member.username || ""}`.toLocaleLowerCase("vi").includes(needle))
-      .slice(0, 8);
-  }, [effectiveConversation?.members, isGroupConversation, mentionQuery, user.id]);
+  /** Một mục trong danh sách gợi ý: một thành viên, hoặc "@all" cho cả nhóm. */
+  type MentionOption =
+    | { kind: "all"; label: string }
+    | { kind: "member"; label: string; member: ConversationMember };
 
+  // Gợi ý mở cho CẢ 1-1 lẫn nhóm (trước đây chỉ nhóm). Khớp đầu tên xếp trước
+  // khớp giữa tên, nên gõ vài chữ là ra đúng người.
+  const mentionCandidates = useMemo<MentionOption[]>(() => {
+    if (mentionQuery === null) return [];
+    const needle = mentionQuery.toLocaleLowerCase("vi").trim();
+
+    const ranked = (effectiveConversation?.members || [])
+      .filter((member) => member.userId !== user.id)
+      .map((member) => {
+        const name = (member.fullName || "").toLocaleLowerCase("vi");
+        const uname = (member.username || "").toLocaleLowerCase("vi");
+        if (!needle) return { member, rank: 2 };
+        if (uname.startsWith(needle) || name.startsWith(needle))
+          return { member, rank: 0 };
+        if (uname.includes(needle) || name.includes(needle))
+          return { member, rank: 1 };
+        return null;
+      })
+      .filter((item): item is { member: ConversationMember; rank: number } =>
+        Boolean(item),
+      )
+      .sort((a, b) => a.rank - b.rank)
+      .slice(0, 8)
+      .map<MentionOption>(({ member }) => ({
+        kind: "member",
+        label: member.username || member.fullName || "",
+        member,
+      }))
+      .filter((option) => option.label.length > 0);
+
+    // "@all" chỉ có nghĩa trong nhóm.
+    const options: MentionOption[] = [];
+    if (isGroupConversation && ("all".startsWith(needle) || !needle)) {
+      options.push({ kind: "all", label: "all" });
+    }
+    return [...options, ...ranked];
+  }, [
+    effectiveConversation?.members,
+    isGroupConversation,
+    mentionQuery,
+    user.id,
+  ]);
+
+  // Cho phép khoảng trắng trong từ khoá để gõ được HỌ TÊN đầy đủ; không khớp ai
+  // thì danh sách rỗng và dropdown tự ẩn.
   const updateMentionQuery = (value: string, caret: number) => {
-    const match = value.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
+    const match = value.slice(0, caret).match(/(?:^|\s)@([^@\n]{0,40})$/);
     setMentionQuery(match ? match[1] : null);
     setMentionIndex(0);
   };
 
-  const chooseMention = (member: ConversationMember) => {
+  const chooseMention = (option: MentionOption) => {
     const node = composerRef.current;
     if (!node) return;
     const caret = node.selectionStart;
-    const match = msg.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
+    const match = msg.slice(0, caret).match(/(?:^|\s)@([^@\n]{0,40})$/);
     if (!match) return;
     const start = caret - match[0].length + (match[0].startsWith(" ") ? 1 : 0);
-    const token = `@${member.username || member.fullName?.replace(/\s+/g, "_") || "thanh_vien"}`;
+    // Chèn ĐÚNG tên (kể cả có dấu / có khoảng trắng) — server dò lại theo tên
+    // thật nên không cần thay khoảng trắng bằng gạch dưới như trước.
+    const token = `@${option.label}`;
     setMsg(`${msg.slice(0, start)}${token} ${msg.slice(caret)}`);
-    setMentionUserIds((ids) => [...new Set([...ids, member.userId])]);
     setMentionQuery(null);
     requestAnimationFrame(() => {
       node.focus();
       node.setSelectionRange(start + token.length + 1, start + token.length + 1);
     });
   };
+
+  // Ai ĐANG thật sự được nhắc, suy từ chính nội dung đang gõ. Nhờ vậy xoá chữ
+  // "@Alice" đi là Alice hết được nhắc (trước đây id vẫn kẹt trong state nên
+  // vẫn bị ping), và gõ tay cũng được tính.
+  const activeMentions = useMemo(
+    () =>
+      resolveMentionsInText(
+        msg,
+        effectiveConversation?.members || [],
+        user.id,
+      ),
+    [msg, effectiveConversation?.members, user.id],
+  );
+
+  useEffect(() => {
+    const ids = mentionedUserIds(
+      activeMentions,
+      effectiveConversation?.members || [],
+      user.id,
+    );
+    setMentionUserIds((prev) =>
+      prev.length === ids.length && prev.every((id) => ids.includes(id))
+        ? prev
+        : ids,
+    );
+  }, [activeMentions, effectiveConversation?.members, setMentionUserIds, user.id]);
 
   const jumpToMention = async () => {
     const messageId = effectiveConversation?.lastMentionMessageId;
@@ -464,6 +536,7 @@ export default function ChatWindow({
           }}
           onJumpToMessage={setInternalJumpId}
           isGroup={isGroupConversation}
+          members={effectiveConversation?.members || []}
         />
         <TypingIndicator userNames={typingUserNames} />
         <div ref={bottomRef} />
@@ -651,23 +724,54 @@ export default function ChatWindow({
           <div className="relative flex min-h-10 min-w-0 flex-1 items-center">
           {mentionCandidates.length > 0 && (
             <div role="listbox" aria-label="Chọn thành viên để nhắc" className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-full min-w-64 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl">
-              {mentionCandidates.map((member, index) => (
+              {mentionCandidates.map((option, index) => (
                 <button
-                  key={member.userId}
+                  key={option.kind === "all" ? "@all" : option.member.userId}
                   type="button"
                   role="option"
                   aria-selected={index === mentionIndex}
-                  onMouseDown={(event) => { event.preventDefault(); chooseMention(member); }}
+                  onMouseDown={(event) => { event.preventDefault(); chooseMention(option); }}
                   className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${index === mentionIndex ? "bg-accent" : "hover:bg-accent"}`}
                 >
-                  <Avatar className="size-8"><AvatarImage src={member.avatar || ""} /><AvatarFallback>{(member.fullName || member.username || "T")[0]}</AvatarFallback></Avatar>
-                  <span className="min-w-0"><span className="block truncate font-medium">{member.fullName || member.username}</span><span className="block truncate text-xs text-muted-foreground">@{member.username}</span></span>
+                  {option.kind === "all" ? (
+                    <>
+                      <span className="flex size-8 items-center justify-center rounded-full bg-brand/15 text-brand">
+                        <AtSign className="size-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">Cả nhóm</span>
+                        <span className="block truncate text-xs text-muted-foreground">@all — nhắc mọi thành viên</span>
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Avatar className="size-8"><AvatarImage src={option.member.avatar || ""} /><AvatarFallback>{(option.member.fullName || option.member.username || "T")[0]}</AvatarFallback></Avatar>
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{option.member.fullName || option.member.username}</span>
+                        <span className="block truncate text-xs text-muted-foreground">@{option.label}</span>
+                      </span>
+                    </>
+                  )}
                 </button>
               ))}
             </div>
           )}
-          {mentionUserIds.length > 0 && (
-            <div className="pointer-events-none absolute -top-5 left-2 text-[11px] font-semibold text-brand">Đang nhắc {mentionUserIds.length} thành viên</div>
+          {activeMentions.length > 0 && (
+            <div className="absolute -top-7 left-1 flex max-w-full flex-wrap items-center gap-1">
+              {activeMentions.map((mention) => (
+                <button
+                  key={"all" in mention ? "@all" : mention.userId}
+                  type="button"
+                  onClick={() => setMsg(removeMentionFromText(msg, mention.label))}
+                  aria-label={`Bỏ nhắc @${mention.label}`}
+                  title="Bỏ nhắc"
+                  className="flex max-w-40 items-center gap-1 rounded-full bg-brand/15 px-2 py-0.5 text-[11px] font-semibold text-brand hover:bg-brand/25"
+                >
+                  <span className="truncate">@{mention.label}</span>
+                  <X className="size-3 shrink-0" />
+                </button>
+              ))}
+            </div>
           )}
           <textarea
             ref={composerRef}

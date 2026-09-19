@@ -21,6 +21,7 @@ enum NotificationType {
   USER_ADDED_TO_GROUP
   FRIEND_REQUEST
   NORMAL_NOTIFICATION
+  MENTIONED_IN_CONVERSATION
 }
 
 enum NotificationChannel {

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/redux/slices/messageSlice";
 import { selectUser } from "@/redux/slices/userSlice";
@@ -22,25 +23,70 @@ import {
   User,
 } from "lucide-react";
 import { SeenStatus } from "@/components/SeenStatus";
+import {
+  buildMentionSegments,
+  resolveMentionsInText,
+  type MentionMember,
+} from "@/utils/mention";
 
-function renderMentionText(text: string, hasMentions: boolean, isMine = false) {
-  if (!hasMentions) return text;
-  return text.split(/(@[\w.-]+)/g).map((part, index) =>
-    part.startsWith("@") ? (
-      <span
-        key={`${part}-${index}`}
-        className={cn(
-          "font-semibold underline decoration-current/35 decoration-1 underline-offset-2",
-          isMine
-            ? "text-mention-out"
-            : "text-mention-in",
-        )}
-      >
-        {part}
-      </span>
-    ) : part,
+function MentionText({
+  text,
+  message,
+  members,
+  selfId,
+  isMine = false,
+}: {
+  text: string;
+  message: Message;
+  members: MentionMember[];
+  selfId: string;
+  isMine?: boolean;
+}) {
+  // Tin mới mang sẵn `mentions` (server resolve, nhãn đúng như trong text). Tin
+  // CŨ chưa có thì suy lại từ danh sách thành viên — nhờ vậy tên tiếng Việt có
+  // dấu / có khoảng trắng cũng tô đúng, và `@chữ` không phải mention thì KHÔNG
+  // bị tô nhầm như bản regex trước đây.
+  const mentions = useMemo(() => {
+    if (message.mentions?.length) return message.mentions;
+    if (!message.mentionUserIds?.length) return [];
+    return resolveMentionsInText(text, members, "");
+  }, [message.mentions, message.mentionUserIds, text, members]);
+
+  const segments = useMemo(
+    () => buildMentionSegments(text, mentions),
+    [text, mentions],
+  );
+
+  if (!mentions.length) return <>{text}</>;
+
+  return (
+    <>
+      {segments.map((segment, index) => {
+        if (!segment.mention) return <span key={index}>{segment.text}</span>;
+        // Nhắc CHÍNH MÌNH thì nổi hẳn lên (như Messenger/Zalo), nhắc người khác
+        // chỉ cần khác màu là đủ.
+        const isMe =
+          "all" in segment.mention || segment.mention.userId === selfId;
+        return (
+          <span
+            key={index}
+            className={cn(
+              "rounded px-0.5 font-semibold",
+              isMe
+                ? "bg-brand/20 text-brand"
+                : isMine
+                  ? "text-mention-out"
+                  : "text-mention-in",
+            )}
+          >
+            {segment.text}
+          </span>
+        );
+      })}
+    </>
   );
 }
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,6 +121,7 @@ const MessageComponent = ({
   onReplyMessage,
   onJumpToMessage,
   isGroup = false,
+  members = [],
 }: {
   messages: Message[];
   /** Sender names are only shown in group threads. */
@@ -92,6 +139,8 @@ const MessageComponent = ({
   onDiscardMessage?: (message: Message) => void;
   onReplyMessage?: (message: Message) => void;
   onJumpToMessage?: (messageId: string) => void;
+  /** Dùng để tô đúng mention của tin CŨ (chưa có `mentions` kèm theo). */
+  members?: MentionMember[];
 }) => {
   const user = useSelector(selectUser);
 
@@ -344,7 +393,7 @@ const MessageComponent = ({
                 )}
               >
                 <p className="max-w-[85%] rounded-full bg-muted px-3 py-1 text-center text-xs leading-relaxed text-muted-foreground">
-                  {renderMentionText(message.text, Boolean(message.mentionUserIds?.length))}
+                  <MentionText text={message.text} message={message} members={members} selfId={user.id} />
                   <time
                     dateTime={message.createdAt}
                     title={formatFullDateTime(message.createdAt)}
@@ -540,7 +589,7 @@ const MessageComponent = ({
                     </p>
                   ) : message.text ? (
                     <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
-                      {renderMentionText(message.text, Boolean(message.mentionUserIds?.length), isMine)}
+                      <MentionText text={message.text} message={message} members={members} selfId={user.id} isMine={isMine} />
                     </p>
                   ) : null}
 
