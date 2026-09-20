@@ -416,6 +416,19 @@
 }
 
 /* ==========================================================================
+   Gooey tabs
+   ========================================================================== */
+
+/* The drop behind the tabs paints the active pill, so the trigger itself
+   stays flat. Unlayered on purpose: it has to win over the utilities that
+   give a plain tab list its active background. */
+[data-slot="tabs-list"][data-gooey]
+  [data-slot="tabs-trigger"][data-state="active"] {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* ==========================================================================
    Scrollbars
    ========================================================================== */
 

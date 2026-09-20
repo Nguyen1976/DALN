@@ -30,7 +30,10 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
         onValueChange={(v) => onModeChange(v as "login" | "register")}
         className="w-full"
       >
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList
+          className="grid w-full grid-cols-2"
+          gooey={{ id: "auth-mode-goo", activeIndex: isLogin ? 0 : 1 }}
+        >
           <TabsTrigger value="login">Đăng nhập</TabsTrigger>
           <TabsTrigger value="register">Đăng ký</TabsTrigger>
         </TabsList>
