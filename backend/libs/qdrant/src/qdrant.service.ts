@@ -40,7 +40,11 @@ export class QdrantService implements OnModuleInit {
    * Upsert one bio vector. Point `id` must be the **Qdrant point id** (uuid v5 of mongo ObjectId),
    * same as `UtilService.mongoIdToUuid`, with `payload.mongoId` for filters — not the raw mongo id.
    */
-  async upsertVector(qdrantPointId: string, vector: number[], payload: any) {
+  async upsertVector(
+    qdrantPointId: string,
+    vector: number[],
+    payload: Record<string, unknown>,
+  ) {
     return this.client.upsert(this.COLLECTION_NAME, {
       wait: true,
       points: [

@@ -8,7 +8,9 @@ import type {
 
 @Injectable()
 export class RecommendationGroupMembershipService {
-  private readonly logger = new Logger(RecommendationGroupMembershipService.name)
+  private readonly logger = new Logger(
+    RecommendationGroupMembershipService.name,
+  )
 
   constructor(
     private readonly friendGraph: FriendGraphService,

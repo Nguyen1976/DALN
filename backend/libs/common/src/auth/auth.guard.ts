@@ -48,7 +48,7 @@ export class AuthGuard implements CanActivate {
     private reflector: Reflector,
   ) {}
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  canActivate(context: ExecutionContext): boolean {
     if (context.getType() !== 'http') {
       return true
     }
@@ -81,11 +81,13 @@ export class AuthGuard implements CanActivate {
 
     if (withoutLogin) return true
 
+    // cookie-parser fills `cookies` where it is mounted; the raw header is
+    // the fallback where it is not.
+    const cookies = (request.cookies ?? {}) as Partial<Record<string, string>>
     const accessToken =
-      request.cookies?.accessToken ||
-      readCookie(request.headers?.cookie, 'accessToken')
+      cookies.accessToken || readCookie(request.headers?.cookie, 'accessToken')
     const refreshToken =
-      request.cookies?.refreshToken ||
+      cookies.refreshToken ||
       readCookie(request.headers?.cookie, 'refreshToken')
     const resolved = resolveTokens(this.jwtService, accessToken, refreshToken)
 

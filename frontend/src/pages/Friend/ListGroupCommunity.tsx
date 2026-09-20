@@ -130,7 +130,7 @@ const ListGroupCommunity = () => {
         key={group.id}
         onClick={() => openConversation(group)}
         data-motion-key={group.id}
-        className="group flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+        className="group flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
       >
         <div className="relative shrink-0">
           <Avatar className="size-12">

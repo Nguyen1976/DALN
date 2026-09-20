@@ -9,7 +9,9 @@ import {
 } from '../ml/gradient-boosting'
 
 /** A candidate and its model features; missing ones count as -1. */
-export type RankingCandidateInput = { candidateId: string } & Partial<PairFeatureRow>
+export type RankingCandidateInput = {
+  candidateId: string
+} & Partial<PairFeatureRow>
 
 export type RankedCandidate = RankingCandidateInput & { score: number }
 

@@ -17,7 +17,9 @@ const entry = path.join('/app/dist/apps', service, 'main.js')
 const source = fs.readFileSync(entry, 'utf8')
 
 const modules = new Set()
-for (const match of source.matchAll(/\b(?:require|import)\(\s*"([^"./][^"]*)"\s*\)/g)) {
+for (const match of source.matchAll(
+  /\b(?:require|import)\(\s*"([^"./][^"]*)"\s*\)/g,
+)) {
   if (!match[1].startsWith('node:')) modules.add(match[1])
 }
 
@@ -31,9 +33,15 @@ const missing = [...modules].filter((name) => {
 })
 
 if (missing.length) {
-  console.error(`[check-externals] ${service}: thiếu module lúc chạy: ${missing.join(', ')}`)
-  console.error('[check-externals] Kiểm tra docker/prune-prod-deps.sh có xoá nhầm package không.')
+  console.error(
+    `[check-externals] ${service}: thiếu module lúc chạy: ${missing.join(', ')}`,
+  )
+  console.error(
+    '[check-externals] Kiểm tra docker/prune-prod-deps.sh có xoá nhầm package không.',
+  )
   process.exit(1)
 }
 
-console.log(`[check-externals] ${service}: đủ ${modules.size} module ngoài bundle`)
+console.log(
+  `[check-externals] ${service}: đủ ${modules.size} module ngoài bundle`,
+)

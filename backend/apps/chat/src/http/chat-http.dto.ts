@@ -4,15 +4,12 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
-  IsInt,
   IsMongoId,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
-  Max,
   MaxLength,
-  Min,
 } from 'class-validator'
 import { Transform } from 'class-transformer'
 import { PageQueryDto } from '@app/common/http/page-query.dto'

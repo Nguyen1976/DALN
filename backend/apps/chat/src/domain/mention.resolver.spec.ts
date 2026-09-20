@@ -46,11 +46,15 @@ describe('resolveMentions', () => {
 
   it('gõ tay (không chọn dropdown) vẫn tính là mention', () => {
     // client không gửi id nào — server tự suy từ text
-    expect(resolveMentions('@binh.tran ơi', members, ME).userIds).toEqual([BINH])
+    expect(resolveMentions('@binh.tran ơi', members, ME).userIds).toEqual([
+      BINH,
+    ])
   })
 
   it('KHÔNG ăn nhầm trong email', () => {
-    expect(resolveMentions('mail me@alice.com nhé', members, ME).userIds).toEqual([])
+    expect(
+      resolveMentions('mail me@alice.com nhé', members, ME).userIds,
+    ).toEqual([])
   })
 
   it('KHÔNG khớp một phần (prefix) của tên', () => {

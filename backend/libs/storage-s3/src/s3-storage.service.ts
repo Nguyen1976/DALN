@@ -121,11 +121,15 @@ export class S3StorageService {
         }),
       )
       return true
-    } catch (error: any) {
+    } catch (error) {
+      const failure = error as {
+        name?: string
+        $metadata?: { httpStatusCode?: number }
+      } | null
       if (
         error instanceof NotFound ||
-        error?.name === 'NotFound' ||
-        error?.$metadata?.httpStatusCode === 404
+        failure?.name === 'NotFound' ||
+        failure?.$metadata?.httpStatusCode === 404
       ) {
         return false
       }

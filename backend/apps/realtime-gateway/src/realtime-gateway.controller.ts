@@ -28,7 +28,7 @@ export class RealtimeGatewayController {
     const apiSecret = process.env.LIVEKIT_API_SECRET?.trim()
     if (!apiKey || !apiSecret) return { ok: false }
 
-    const body = (req as Request & { body?: unknown }).body
+    const body: unknown = req.body
     const rawBody = Buffer.isBuffer(body)
       ? body.toString('utf8')
       : typeof body === 'string'

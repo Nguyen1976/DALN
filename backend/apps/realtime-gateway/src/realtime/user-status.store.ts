@@ -1,3 +1,5 @@
+import type Redis from 'ioredis'
+
 /** Set chỉ mục các user đang online — thay cho việc quét KEYS 'user:*:sockets'. */
 const ONLINE_USERS_KEY = 'online:users'
 
@@ -6,7 +8,7 @@ export class UserStatusStore {
   private readonly socketTtlSeconds = 90
   private readonly userSetTtlSeconds = 300
 
-  constructor(private redisClient: any) {}
+  constructor(private redisClient: Redis) {}
   private getKey(userId: string) {
     return `user:${userId}:sockets`
   }
@@ -65,13 +67,14 @@ export class UserStatusStore {
   ): Promise<string[]> {
     if (!sockets.length) return []
 
-    const res: [Error | null, unknown][] = await this.redisClient
-      .pipeline(sockets.map((id) => ['exists', `socket:${id}`]))
-      .exec()
+    const res =
+      (await this.redisClient
+        .pipeline(sockets.map((id) => ['exists', `socket:${id}`]))
+        .exec()) ?? []
 
     const alive: string[] = []
     const dead: string[] = []
-    sockets.forEach((id, i) => (res?.[i]?.[1] ? alive : dead).push(id))
+    sockets.forEach((id, i) => (res[i]?.[1] ? alive : dead).push(id))
 
     // srem nhận nhiều phần tử -> 1 lệnh thay vì 1 lệnh mỗi zombie
     if (dead.length) await this.redisClient.srem(userKey, ...dead)
@@ -81,7 +84,7 @@ export class UserStatusStore {
 
   async isOnline(userId: string): Promise<boolean> {
     const userKey = this.getKey(userId)
-    const sockets: string[] = await this.redisClient.smembers(userKey)
+    const sockets = await this.redisClient.smembers(userKey)
     if (!sockets.length) return false
 
     const alive = await this.filterAliveSockets(userKey, sockets)

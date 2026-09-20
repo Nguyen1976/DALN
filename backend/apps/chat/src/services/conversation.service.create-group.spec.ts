@@ -21,7 +21,12 @@ function setup(
       .fn()
       .mockResolvedValue({ id: 'c1', type: 'GROUP' }),
   }
-  const memberRepo = { createMany: jest.fn() }
+  const memberRepo = {
+    createMany: jest.fn<
+      Promise<void>,
+      [string, ReturnType<typeof profile>[], { type: string; ownerId: string }]
+    >(),
+  }
   const eventsPublisher = {
     publishConversationCreated: jest.fn(),
     publishUserJoinedGroup: jest.fn(),

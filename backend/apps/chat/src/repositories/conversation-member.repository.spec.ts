@@ -317,7 +317,12 @@ describe('ConversationMemberRepository.updateUnreadCount', () => {
       unreadCount: 0,
       lastReadMessageId: null,
     },
-    { userId: 'chua-doc-lan-nao', isActive: true, unreadCount: 0, lastReadMessageId: null },
+    {
+      userId: 'chua-doc-lan-nao',
+      isActive: true,
+      unreadCount: 0,
+      lastReadMessageId: null,
+    },
     {
       userId: 'da-roi',
       isActive: false,

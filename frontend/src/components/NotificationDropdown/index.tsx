@@ -157,7 +157,7 @@ export function NotificationsDropdown() {
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="w-[22rem] overflow-hidden p-0"
+          className="w-88 overflow-hidden p-0"
           align="end"
           sideOffset={8}
         >
@@ -200,7 +200,7 @@ export function NotificationsDropdown() {
                         className={cn(
                           "flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left last:border-0",
                           "transition-colors duration-(--motion-fast) hover:bg-accent",
-                          "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                          "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
                           !n.isRead && "bg-accent/45",
                         )}
                         onClick={() => handleClickNotification(n)}

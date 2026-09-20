@@ -27,9 +27,7 @@ import { PrismaService } from 'apps/user/prisma/prisma.service'
 export class UserSagaSubscriber {
   private readonly logger = new Logger(UserSagaSubscriber.name)
 
-  constructor(
-    @Inject(PrismaService) private readonly prisma: PrismaService,
-  ) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   /**
    * Compensation: rollback friendship đã tạo ở bước đồng bộ (HTTP) khi saga thất bại.

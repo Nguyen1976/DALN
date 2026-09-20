@@ -10,11 +10,15 @@ import {
 
 export class UserErrors {
   static cannotFriendSelf(): never {
-    throw new BadRequestException('Bạn không thể tự gửi lời mời kết bạn cho chính mình')
+    throw new BadRequestException(
+      'Bạn không thể tự gửi lời mời kết bạn cho chính mình',
+    )
   }
 
   static friendRequestAlreadyPending(): never {
-    throw new ConflictException('Bạn đã gửi lời mời cho người này và đang chờ phản hồi')
+    throw new ConflictException(
+      'Bạn đã gửi lời mời cho người này và đang chờ phản hồi',
+    )
   }
 
   static friendRequestAwaitingYourResponse(): never {
@@ -36,7 +40,9 @@ export class UserErrors {
   }
 
   static accountNotActivated(): never {
-    throw new BadRequestException('Tài khoản chưa kích hoạt. Vui lòng xác thực OTP')
+    throw new BadRequestException(
+      'Tài khoản chưa kích hoạt. Vui lòng xác thực OTP',
+    )
   }
 
   static otpResendTooSoon(retryAfterSeconds: number): never {

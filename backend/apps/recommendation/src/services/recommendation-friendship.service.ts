@@ -64,10 +64,7 @@ export class RecommendationFriendshipService {
   }
 
   /** Both users should no longer see each other in cached RCM after accept. */
-  async onFriendshipAccepted(
-    userAId: string,
-    userBId: string,
-  ): Promise<void> {
+  async onFriendshipAccepted(userAId: string, userBId: string): Promise<void> {
     // Đồ thị bạn bè của cả hai vừa đổi -> gợi ý cần tính lại ở lượt cron sau.
     await this.dirty.markDirty(userAId, userBId)
 

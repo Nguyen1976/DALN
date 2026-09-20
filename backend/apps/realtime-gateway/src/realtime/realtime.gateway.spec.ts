@@ -1,11 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { JwtService } from '@nestjs/jwt'
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
+import type { Server } from 'socket.io'
 import { EVENT_TYPE_HEADER, EVENT_VERSION_HEADER } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
-import { RealtimeGateway } from './realtime.gateway'
+import { CallAck, RealtimeGateway } from './realtime.gateway'
 import { GroupCallStore, isGroupCallId } from './group-call.store'
+import type { ClientSocket } from './socket.types'
 
 /**
  * Redis giả trong bộ nhớ, đủ cho GroupCallStore trong test gọi nhóm: string
@@ -16,49 +18,60 @@ class FakeRedis {
   private hashes = new Map<string, Map<string, string>>()
   private sets = new Map<string, Set<string>>()
 
-  async get(key: string) {
-    return this.strings.has(key) ? this.strings.get(key)! : null
+  get(key: string) {
+    return Promise.resolve(this.strings.get(key) ?? null)
   }
-  async set(key: string, value: string, ...args: unknown[]) {
-    const nx = args.some((a) => String(a).toUpperCase() === 'NX')
-    if (nx && this.strings.has(key)) return null
+  set(key: string, value: string, ...args: unknown[]) {
+    const nx = args.some((a) => a === 'NX')
+    if (nx && this.strings.has(key)) return Promise.resolve(null)
     this.strings.set(key, value)
-    return 'OK'
+    return Promise.resolve('OK')
   }
-  async del(...keys: string[]) {
+  del(...keys: string[]) {
     let removed = 0
     for (const key of keys) {
       if (this.strings.delete(key)) removed++
       this.hashes.delete(key)
       this.sets.delete(key)
     }
-    return removed
+    return Promise.resolve(removed)
   }
-  async expire() {
-    return 1
+  expire() {
+    return Promise.resolve(1)
   }
-  async hset(key: string, field: string, value: string) {
+  hset(key: string, field: string, value: string) {
     const hash = this.hashes.get(key) ?? new Map<string, string>()
     hash.set(field, value)
     this.hashes.set(key, hash)
-    return 1
+    return Promise.resolve(1)
   }
-  async hdel(key: string, field: string) {
-    return this.hashes.get(key)?.delete(field) ? 1 : 0
+  hdel(key: string, field: string) {
+    return Promise.resolve(this.hashes.get(key)?.delete(field) ? 1 : 0)
   }
-  async hgetall(key: string) {
-    return Object.fromEntries(this.hashes.get(key) ?? new Map())
+  hgetall(key: string) {
+    return Promise.resolve(Object.fromEntries(this.hashes.get(key) ?? []))
   }
-  async sadd(key: string, member: string) {
+  sadd(key: string, member: string) {
     const set = this.sets.get(key) ?? new Set<string>()
     const had = set.has(member)
     set.add(member)
     this.sets.set(key, set)
-    return had ? 0 : 1
+    return Promise.resolve(had ? 0 : 1)
   }
-  async smembers(key: string) {
-    return Array.from(this.sets.get(key) ?? [])
+  smembers(key: string) {
+    return Promise.resolve(Array.from(this.sets.get(key) ?? []))
   }
+}
+
+/** A socket as the handlers see it: the authenticated user and `emit`. */
+function socketOf(userId?: string, emit = jest.fn()): ClientSocket {
+  return { data: { userId }, emit } as unknown as ClientSocket
+}
+
+/** The body of a successful ack; an error ack fails the test with its code. */
+function expectOk(ack: CallAck) {
+  if (!ack.ok) throw new Error(`${ack.code}: ${ack.message}`)
+  return ack
 }
 
 /**
@@ -71,7 +84,11 @@ class FakeRedis {
 describe('RealtimeGateway', () => {
   let gateway: RealtimeGateway
 
-  const amqpStub = { publish: jest.fn() }
+  const amqpStub = {
+    publish: jest
+      .fn<Promise<boolean>, [string, string, unknown, unknown]>()
+      .mockResolvedValue(true),
+  }
   const redisStub = {
     smembers: jest.fn().mockResolvedValue([]),
     sadd: jest.fn(),
@@ -85,6 +102,26 @@ describe('RealtimeGateway', () => {
       .mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }),
   }
 
+  /** What the chat service answers, as `internalFetch` reads it. */
+  const fetchMock = jest.fn<
+    Promise<Pick<Response, 'ok' | 'status' | 'text'>>,
+    [string, RequestInit?]
+  >()
+  const respond = (status: number, body?: unknown) =>
+    fetchMock.mockResolvedValue({
+      ok: status >= 200 && status < 300,
+      status,
+      text: () =>
+        Promise.resolve(body === undefined ? '' : JSON.stringify(body)),
+    })
+
+  /** Every room the server emitted to, and what it emitted. */
+  let to: jest.Mock
+  let emitted: jest.Mock
+
+  const publishedTo = (routingKey: string) =>
+    amqpStub.publish.mock.calls.filter(([, key]) => key === routingKey)
+
   beforeEach(async () => {
     jest.clearAllMocks()
     const module: TestingModule = await Test.createTestingModule({
@@ -97,6 +134,13 @@ describe('RealtimeGateway', () => {
     }).compile()
 
     gateway = module.get<RealtimeGateway>(RealtimeGateway)
+
+    emitted = jest.fn()
+    to = jest.fn().mockReturnValue({ emit: emitted })
+    gateway.server = { to } as unknown as Server
+    fetchMock.mockReset()
+    global.fetch = fetchMock as unknown as typeof fetch
+    process.env.INTERNAL_API_TOKEN = 'test-token'
   })
 
   /**
@@ -106,7 +150,6 @@ describe('RealtimeGateway', () => {
    */
   describe('gọi thoại 1-1', () => {
     const CALL_ID = '11111111-2222-4333-8444-555555555555'
-    let emitted: jest.Mock
 
     const session = (overrides: Record<string, unknown> = {}) =>
       JSON.stringify({
@@ -120,29 +163,19 @@ describe('RealtimeGateway', () => {
         ...overrides,
       })
 
-    beforeEach(() => {
-      emitted = jest.fn()
-      gateway.server = {
-        to: jest.fn().mockReturnValue({ emit: emitted }),
-      } as any
-      global.fetch = jest.fn()
-      process.env.INTERNAL_API_TOKEN = 'test-token'
-    })
+    // The client still sends who it wants to ring; the gateway must not care.
+    const ringVictim = {
+      conversationId: 'conv-1',
+      offer: { sdp: 'x' },
+      targetUserId: 'victim',
+    }
 
     it('chat service từ chối (403) -> ack CALL_FORBIDDEN, không ai đổ chuông', async () => {
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: false,
-        status: 403,
-        text: async () => '',
-      })
+      respond(403)
 
       const ack = await gateway.handleIncomingCall(
-        {
-          conversationId: 'conv-1',
-          offer: { sdp: 'x' },
-          targetUserId: 'victim',
-        },
-        { data: { userId: 'stranger' }, emit: jest.fn() } as any,
+        ringVictim,
+        socketOf('stranger'),
       )
 
       expect(ack).toEqual(
@@ -153,24 +186,14 @@ describe('RealtimeGateway', () => {
     })
 
     it('đổ chuông người nhận do chat service trả, bỏ qua targetUserId của client', async () => {
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ peerId: 'callee' }),
-      })
+      respond(200, { peerId: 'callee' })
 
-      const ack: any = await gateway.handleIncomingCall(
-        {
-          conversationId: 'conv-1',
-          offer: { sdp: 'x' },
-          targetUserId: 'victim',
-        },
-        { data: { userId: 'caller' }, emit: jest.fn() } as any,
+      const ack = expectOk(
+        await gateway.handleIncomingCall(ringVictim, socketOf('caller')),
       )
 
-      expect(ack.ok).toBe(true)
-      expect(gateway.server.to).toHaveBeenCalledWith('user:callee')
-      expect(gateway.server.to).not.toHaveBeenCalledWith('user:victim')
+      expect(to).toHaveBeenCalledWith('user:callee')
+      expect(to).not.toHaveBeenCalledWith('user:victim')
       expect(emitted).toHaveBeenCalledWith(
         'call.incoming_call',
         expect.objectContaining({ callId: ack.callId, callerId: 'caller' }),
@@ -178,17 +201,13 @@ describe('RealtimeGateway', () => {
     })
 
     it('người nhận đang bận -> CALLEE_BUSY, không đổ chuông', async () => {
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ peerId: 'callee' }),
-      })
+      respond(200, { peerId: 'callee' })
       // acquire(caller) thắng SET NX; isBusy(callee) đọc thấy cuộc gọi khác.
       redisStub.get.mockResolvedValueOnce('another-call-id')
 
       const ack = await gateway.handleIncomingCall(
         { conversationId: 'conv-1', offer: { sdp: 'x' } },
-        { data: { userId: 'caller' }, emit: jest.fn() } as any,
+        socketOf('caller'),
       )
 
       expect(ack).toEqual(
@@ -198,18 +217,14 @@ describe('RealtimeGateway', () => {
     })
 
     it('người gọi đang bận -> BUSY, không tạo phiên', async () => {
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ peerId: 'callee' }),
-      })
+      respond(200, { peerId: 'callee' })
       // acquire(caller): SET NX thất bại rồi GET thấy callId khác -> đang bận.
       redisStub.set.mockResolvedValueOnce(null)
       redisStub.get.mockResolvedValueOnce('another-call-id')
 
       const ack = await gateway.handleIncomingCall(
         { conversationId: 'conv-1', offer: { sdp: 'x' } },
-        { data: { userId: 'caller' }, emit: jest.fn() } as any,
+        socketOf('caller'),
       )
 
       expect(ack).toEqual(expect.objectContaining({ ok: false, code: 'BUSY' }))
@@ -221,7 +236,7 @@ describe('RealtimeGateway', () => {
 
       const ack = await gateway.handleIceCandidate(
         { callId: CALL_ID, candidate: { candidate: 'a' } },
-        { data: { userId: 'caller' }, emit: jest.fn() } as any,
+        socketOf('caller'),
       )
 
       expect(ack).toEqual(
@@ -235,7 +250,7 @@ describe('RealtimeGateway', () => {
 
       const ack = await gateway.handleIceCandidate(
         { callId: CALL_ID, candidate: { candidate: 'a' } },
-        { data: { userId: 'stranger' }, emit: jest.fn() } as any,
+        socketOf('stranger'),
       )
 
       expect(ack).toEqual(
@@ -249,7 +264,7 @@ describe('RealtimeGateway', () => {
 
       const ack = await gateway.handleCallAccepted(
         { callId: CALL_ID, answer: { sdp: 'y' } },
-        { data: { userId: 'caller' }, emit: jest.fn() } as any,
+        socketOf('caller'),
       )
 
       expect(ack).toEqual(
@@ -270,19 +285,17 @@ describe('RealtimeGateway', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0)
 
-      await gateway.handleCallEnded(
-        { callId: CALL_ID, conversationId: 'conv-KHAC', durationSeconds: 9999 },
-        { data: { userId: 'caller' }, emit: jest.fn() } as any,
-      )
+      // Client gửi kèm hội thoại và thời lượng tự bịa: phải bị bỏ qua.
+      const forged = {
+        callId: CALL_ID,
+        conversationId: 'conv-KHAC',
+        durationSeconds: 9999,
+      }
+      await gateway.handleCallEnded(forged, socketOf('caller'))
       // Bên kia cũng phát `call.ended` — lần này DEL trả 0 nên không ghi nữa.
-      await gateway.handleCallEnded({ callId: CALL_ID }, {
-        data: { userId: 'callee' },
-        emit: jest.fn(),
-      } as any)
+      await gateway.handleCallEnded({ callId: CALL_ID }, socketOf('callee'))
 
-      const calls = amqpStub.publish.mock.calls.filter(
-        ([, routingKey]) => routingKey === ROUTING_RMQ.CALL_ENDED,
-      )
+      const calls = publishedTo(ROUTING_RMQ.CALL_ENDED)
       expect(calls).toHaveLength(1)
       expect(calls[0][2]).toEqual(
         expect.objectContaining({
@@ -299,14 +312,9 @@ describe('RealtimeGateway', () => {
       redisStub.get.mockResolvedValue(session())
       redisStub.del.mockResolvedValueOnce(1)
 
-      await gateway.handleCallEnded({ callId: CALL_ID }, {
-        data: { userId: 'caller' },
-        emit: jest.fn(),
-      } as any)
+      await gateway.handleCallEnded({ callId: CALL_ID }, socketOf('caller'))
 
-      const [, , payload] = amqpStub.publish.mock.calls.find(
-        ([, routingKey]) => routingKey === ROUTING_RMQ.CALL_ENDED,
-      )!
+      const [[, , payload]] = publishedTo(ROUTING_RMQ.CALL_ENDED)
       expect(payload).toEqual(expect.objectContaining({ outcome: 'MISSED' }))
     })
 
@@ -316,12 +324,10 @@ describe('RealtimeGateway', () => {
 
       await gateway.handleCallEnded(
         { callId: CALL_ID, reason: 'unreachable' },
-        { data: { userId: 'caller' }, emit: jest.fn() } as any,
+        socketOf('caller'),
       )
 
-      const [, , payload] = amqpStub.publish.mock.calls.find(
-        ([, routingKey]) => routingKey === ROUTING_RMQ.CALL_ENDED,
-      )!
+      const [[, , payload]] = publishedTo(ROUTING_RMQ.CALL_ENDED)
       expect(payload).toEqual(
         expect.objectContaining({ outcome: 'UNREACHABLE' }),
       )
@@ -334,8 +340,8 @@ describe('RealtimeGateway', () => {
    * người khi được phép, và webhook room_finished ghi log + đóng phiên.
    */
   describe('gọi nhóm', () => {
-    let emitted: jest.Mock
     const OLD_ENV = process.env
+    let store: GroupCallStore
 
     beforeEach(() => {
       process.env = { ...OLD_ENV }
@@ -345,13 +351,9 @@ describe('RealtimeGateway', () => {
       process.env.INTERNAL_API_TOKEN = 'test-token'
       process.env.CHAT_SERVICE_URL = 'http://chat:3003'
 
-      emitted = jest.fn()
-      gateway.server = {
-        to: jest.fn().mockReturnValue({ emit: emitted }),
-      } as any
-      global.fetch = jest.fn()
       // Store thật trên Redis giả: kiểm cả logic phiên chứ không chỉ handler.
-      ;(gateway as any).groupCallStore = new GroupCallStore(new FakeRedis())
+      store = new GroupCallStore(new FakeRedis() as never)
+      Object.assign(gateway, { groupCallStore: store })
     })
 
     afterAll(() => {
@@ -364,15 +366,11 @@ describe('RealtimeGateway', () => {
     ]
 
     it('chat trả 403 -> ack NOT_MEMBER, không ai đổ chuông', async () => {
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: false,
-        status: 403,
-        text: async () => '',
-      })
+      respond(403)
 
       const ack = await gateway.handleGroupCallStart(
         { conversationId: 'conv-1' },
-        { data: { userId: 'stranger' } } as any,
+        socketOf('stranger'),
       )
 
       expect(ack).toEqual(
@@ -384,15 +382,11 @@ describe('RealtimeGateway', () => {
     it('fail-closed: chat trả thành viên nhưng type khác GROUP -> NOT_GROUP', async () => {
       // Client tự gửi group_call.start cho hội thoại DIRECT: dù có thành viên
       // hợp lệ, thiếu type=GROUP thì không được cấp phòng nữa.
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ members, type: 'DIRECT' }),
-      })
+      respond(200, { members, type: 'DIRECT' })
 
       const ack = await gateway.handleGroupCallStart(
         { conversationId: 'conv-1' },
-        { data: { userId: 'alice' } } as any,
+        socketOf('alice'),
       )
 
       expect(ack).toEqual(
@@ -402,15 +396,13 @@ describe('RealtimeGateway', () => {
     })
 
     it('callType video: lưu vào phiên, đi kèm chuông và ack', async () => {
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ members, type: 'GROUP' }),
-      })
+      respond(200, { members, type: 'GROUP' })
 
-      const ack: any = await gateway.handleGroupCallStart(
-        { conversationId: 'conv-1', callType: 'video' },
-        { data: { userId: 'alice' } } as any,
+      const ack = expectOk(
+        await gateway.handleGroupCallStart(
+          { conversationId: 'conv-1', callType: 'video' },
+          socketOf('alice'),
+        ),
       )
 
       expect(ack.callType).toBe('video')
@@ -419,34 +411,33 @@ describe('RealtimeGateway', () => {
         expect.objectContaining({ callType: 'video' }),
       )
       // Phòng đã mở giữ callType: bấm audio sau đó vẫn vào phòng video.
-      const audioAck: any = await gateway.handleGroupCallStart(
-        { conversationId: 'conv-1', callType: 'audio' },
-        { data: { userId: 'bob' } } as any,
+      const audioAck = expectOk(
+        await gateway.handleGroupCallStart(
+          { conversationId: 'conv-1', callType: 'audio' },
+          socketOf('bob'),
+        ),
       )
       expect(audioAck.callType).toBe('video')
     })
 
     it('được phép -> tạo phiên, đổ chuông thành viên khác, ack có token/room/url', async () => {
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ members, type: 'GROUP' }),
-      })
+      respond(200, { members, type: 'GROUP' })
 
-      const ack: any = await gateway.handleGroupCallStart(
-        { conversationId: 'conv-1' },
-        { data: { userId: 'alice' } } as any,
+      const ack = expectOk(
+        await gateway.handleGroupCallStart(
+          { conversationId: 'conv-1' },
+          socketOf('alice'),
+        ),
       )
 
-      expect(ack.ok).toBe(true)
       expect(isGroupCallId(ack.callId)).toBe(true)
       expect(ack.roomName).toBe('conv_conv-1')
       expect(ack.url).toBe('ws://localhost:7880')
       expect(typeof ack.token).toBe('string')
 
       // Đổ chuông Bob, không tự đổ chuông người gọi (Alice).
-      expect(gateway.server.to).toHaveBeenCalledWith('user:bob')
-      expect(gateway.server.to).not.toHaveBeenCalledWith('user:alice')
+      expect(to).toHaveBeenCalledWith('user:bob')
+      expect(to).not.toHaveBeenCalledWith('user:alice')
       expect(emitted).toHaveBeenCalledWith(
         'group_call.incoming',
         expect.objectContaining({
@@ -460,15 +451,11 @@ describe('RealtimeGateway', () => {
 
     it('LiveKit chưa cấu hình -> ack LIVEKIT_UNCONFIGURED', async () => {
       delete process.env.LIVEKIT_API_SECRET
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ members, type: 'GROUP' }),
-      })
+      respond(200, { members, type: 'GROUP' })
 
       const ack = await gateway.handleGroupCallStart(
         { conversationId: 'conv-1' },
-        { data: { userId: 'alice' } } as any,
+        socketOf('alice'),
       )
 
       expect(ack).toEqual(
@@ -477,30 +464,27 @@ describe('RealtimeGateway', () => {
     })
 
     it('accept: thành viên -> cấp token; người ngoài -> NOT_MEMBER', async () => {
-      const created = await (gateway as any).groupCallStore.getOrCreate({
+      const created = await store.getOrCreate({
         conversationId: 'conv-1',
         startedBy: 'alice',
         members,
       })
 
       // accept giờ revalidate quyền hiện tại qua chat -> mock trả members.
-      ;(global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ members, type: 'GROUP' }),
-      })
+      respond(200, { members, type: 'GROUP' })
 
-      const ok: any = await gateway.handleGroupCallAccept(
-        { callId: created.callId },
-        { data: { userId: 'bob' } } as any,
+      const ok = expectOk(
+        await gateway.handleGroupCallAccept(
+          { callId: created.callId },
+          socketOf('bob'),
+        ),
       )
-      expect(ok.ok).toBe(true)
       expect(typeof ok.token).toBe('string')
       expect(ok.url).toBe('ws://localhost:7880')
 
       const denied = await gateway.handleGroupCallAccept(
         { callId: created.callId },
-        { data: { userId: 'stranger' } } as any,
+        socketOf('stranger'),
       )
       expect(denied).toEqual(
         expect.objectContaining({ ok: false, code: 'NOT_MEMBER' }),
@@ -508,7 +492,6 @@ describe('RealtimeGateway', () => {
     })
 
     it('webhook room_finished: ghi group-call-log, phát ended, xoá phiên', async () => {
-      const store = (gateway as any).groupCallStore as GroupCallStore
       const created = await store.getOrCreate({
         conversationId: 'conv-1',
         startedBy: 'alice',
@@ -516,19 +499,21 @@ describe('RealtimeGateway', () => {
       })
       await store.addParticipant('conv-1', { id: 'alice', username: 'Alice' })
       await store.addParticipant('conv-1', { id: 'bob', username: 'Bob' })
-      ;(global.fetch as jest.Mock).mockResolvedValue({ ok: true, status: 200 })
+      respond(200)
 
       await gateway.applyLivekitWebhook({
         event: 'room_finished',
         room: { name: 'conv_conv-1' },
       })
 
-      const logCall = (global.fetch as jest.Mock).mock.calls.find(([url]) =>
-        String(url).includes('/chat/internal/group-call-log'),
+      const logCall = fetchMock.mock.calls.find(([url]) =>
+        url.includes('/chat/internal/group-call-log'),
       )
-      expect(logCall).toBeDefined()
-      expect(logCall[1].method).toBe('POST')
-      const body = JSON.parse(logCall[1].body)
+      expect(logCall?.[1]?.method).toBe('POST')
+      const body = JSON.parse(logCall?.[1]?.body as string) as Record<
+        string,
+        unknown
+      >
       expect(body).toEqual(
         expect.objectContaining({
           conversationId: 'conv-1',
@@ -552,27 +537,25 @@ describe('RealtimeGateway', () => {
     expect(gateway).toBeDefined()
   })
 
-  it('không cho gửi tin nhắn khi socket chưa xác thực', async () => {
-    const client: any = { data: {}, emit: jest.fn() }
+  it('không cho gửi tin nhắn khi socket chưa xác thực', () => {
+    const emit = jest.fn()
 
-    await gateway.handleCreateMessage(
+    gateway.handleCreateMessage(
       { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'xin chao' },
-      client,
+      socketOf(undefined, emit),
     )
 
     expect(amqpStub.publish).not.toHaveBeenCalled()
-    expect(client.emit).toHaveBeenCalledWith(
+    expect(emit).toHaveBeenCalledWith(
       expect.stringContaining('error'),
       expect.objectContaining({ code: 'UNAUTHORIZED' }),
     )
   })
 
-  it('socket đã xác thực -> publish SEND_MESSAGE kèm header version, body giữ nguyên', async () => {
-    const client: any = { data: { userId: 'u1' }, emit: jest.fn() }
-
-    await gateway.handleCreateMessage(
+  it('socket đã xác thực -> publish SEND_MESSAGE kèm header version, body giữ nguyên', () => {
+    gateway.handleCreateMessage(
       { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'xin chao' },
-      client,
+      socketOf('u1'),
     )
 
     expect(amqpStub.publish).toHaveBeenCalledWith(

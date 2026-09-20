@@ -1,4 +1,5 @@
 import { displayNameOf } from '@app/util'
+import type { message, messageMedia, poll } from '../generated'
 
 /**
  * A poll as clients receive it — the same shape inside a message, in answer
@@ -17,16 +18,18 @@ export interface PollDto {
   myOptionIds?: string[]
 }
 
+/** The poll counts that depend on who is asking (see PollDto). */
+export interface PollState {
+  totalVoters?: number
+  myOptionIds?: string[]
+}
+
 export function toPollDto(
-  poll: {
-    id: string
-    question: string
-    isMultipleChoice: boolean
-    isClosed: boolean
-    closedAt: Date | null
-    options: { id: string; text: string; count: number }[]
-  },
-  state: { totalVoters?: number; myOptionIds?: string[] } = {},
+  poll: Pick<
+    poll,
+    'id' | 'question' | 'isMultipleChoice' | 'isClosed' | 'closedAt' | 'options'
+  >,
+  state: PollState = {},
 ): PollDto {
   return {
     id: poll.id,
@@ -47,13 +50,55 @@ type Person = {
   avatar?: string | null
 }
 
+/** A message another one quotes, as MessageRepository.findQuotedByIds reads it. */
+type QuotedMessage = Pick<
+  message,
+  'id' | 'senderId' | 'content' | 'type' | 'isRevoked'
+> & {
+  senderMember?: Person | null
+  medias?: Pick<messageMedia, 'fileName'>[]
+}
+
+/**
+ * A message row, with whatever came along with it. Only the columns are
+ * certain: a fresh text message has no relations loaded (it went through
+ * the batch writer), a thread page has them all.
+ */
+export type MessageRow = Pick<
+  message,
+  'id' | 'conversationId' | 'senderId' | 'createdAt'
+> &
+  Partial<
+    Pick<
+      message,
+      | 'content'
+      | 'type'
+      | 'mentionUserIds'
+      | 'replyToMessageId'
+      | 'isRevoked'
+      | 'isSystem'
+      | 'isDeleted'
+    >
+  > & {
+    /** Stored as JSON, and passed on to clients as it was stored. */
+    mentions?: unknown
+    callInfo?: unknown
+    senderMember?: Person | null
+    replyTo?: QuotedMessage | null
+    medias?: Omit<messageMedia, 'messageId' | 'createdAt'>[]
+    poll?: Parameters<typeof toPollDto>[0] | null
+    pollState?: PollState
+    /** Only on the sender's own copy, to match it with the optimistic one. */
+    clientMessageId?: string
+  }
+
 export class MessageMapper {
   /**
    * The message as clients receive it. What is real work here: BigInt sizes
    * become strings (JSON has no BigInt), a revoked message loses its text,
    * and the quoted message is flattened to what a reply bubble shows.
    */
-  static toResponse(message: any) {
+  static toResponse(message: MessageRow) {
     return {
       id: String(message.id),
       conversationId: String(message.conversationId),
@@ -61,12 +106,12 @@ export class MessageMapper {
       content: message.isRevoked ? '' : (message.content ?? '').trim(),
       type: message.type || 'TEXT',
       /** Resolved from the content by the server. */
-      mentionUserIds: (message.mentionUserIds ?? []) as string[],
+      mentionUserIds: message.mentionUserIds ?? [],
       mentions: message.mentions ?? undefined,
       // Tin type=CALL: dữ liệu để client render thẻ cuộc gọi + nút gọi lại.
       callInfo: message.callInfo ?? undefined,
       /** Only on the sender's own copy, to match it with the optimistic one. */
-      clientMessageId: (message.clientMessageId as string | undefined) ?? undefined,
+      clientMessageId: message.clientMessageId,
       replyToMessageId: message.replyToMessageId || undefined,
       // Quoted message, flattened to exactly what a reply bubble needs. Sending
       // only the id would force the client to have the original already loaded,
@@ -93,7 +138,7 @@ export class MessageMapper {
       senderMember: message.senderMember
         ? toSender(message.senderMember)
         : undefined,
-      medias: (message.medias ?? []).map((media: any) => ({
+      medias: (message.medias ?? []).map((media) => ({
         id: media.id,
         mediaType: media.mediaType,
         objectKey: media.objectKey,
@@ -107,7 +152,9 @@ export class MessageMapper {
         fileName: media.fileName ?? undefined,
         sortOrder: media.sortOrder ?? undefined,
       })),
-      poll: message.poll ? toPollDto(message.poll, message.pollState) : undefined,
+      poll: message.poll
+        ? toPollDto(message.poll, message.pollState)
+        : undefined,
     }
   }
 

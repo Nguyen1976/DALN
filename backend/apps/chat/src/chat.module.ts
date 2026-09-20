@@ -1,7 +1,14 @@
 import { Module } from '@nestjs/common'
 import { ScheduleModule } from '@nestjs/schedule'
 import { ChatController } from './chat.controller'
-import { MessageService, MessageMediaService, PollService, ConversationMemberService, ConversationService, MessageBatchWriter } from './services'
+import {
+  MessageService,
+  MessageMediaService,
+  PollService,
+  ConversationMemberService,
+  ConversationService,
+  MessageBatchWriter,
+} from './services'
 import { UtilModule } from '@app/util'
 import { UserDirectoryClient } from './clients/user-directory.client'
 import {

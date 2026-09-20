@@ -1,9 +1,6 @@
 import { DynamicModule, Module } from '@nestjs/common'
 import { S3StorageService } from './s3-storage.service'
-import {
-  S3_STORAGE_CONFIG,
-  type S3StorageConfig,
-} from './s3-storage.constants'
+import { S3_STORAGE_CONFIG, type S3StorageConfig } from './s3-storage.constants'
 
 export { S3_STORAGE_CONFIG, type S3StorageConfig } from './s3-storage.constants'
 

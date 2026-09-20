@@ -140,7 +140,11 @@ export class ModelTrainingService {
       const XTestScaled = bundle.scaler.transform(XTest)
       const metricsSplit = this.evaluateSplit(bundle.model, XTestScaled, yTest)
       const XTrainScaled = bundle.scaler.transform(XTrain)
-      const trainMetrics = this.evaluateSplit(bundle.model, XTrainScaled, yTrain)
+      const trainMetrics = this.evaluateSplit(
+        bundle.model,
+        XTrainScaled,
+        yTrain,
+      )
 
       return {
         status: 'ok',

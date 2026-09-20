@@ -13,7 +13,8 @@ const RENAMES: Array<[from: string, to: string]> = [
 
 const migration: Migration = {
   id: '0001-unify-notification-types',
-  description: 'Đổi FRIEND_REQUEST/NORMAL_NOTIFICATION sang tên loại trong cài đặt',
+  description:
+    'Đổi FRIEND_REQUEST/NORMAL_NOTIFICATION sang tên loại trong cài đặt',
   mode: 'deploy',
   async up({ db, dryRun, log }) {
     const notifications = db.collection('notification')

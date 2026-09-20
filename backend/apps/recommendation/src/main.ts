@@ -25,4 +25,4 @@ async function bootstrap() {
   const port = Number(process.env.PORT ?? process.env.port ?? 3005)
   await app.listen(port, '0.0.0.0')
 }
-bootstrap()
+void bootstrap()

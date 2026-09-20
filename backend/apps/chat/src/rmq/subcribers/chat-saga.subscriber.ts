@@ -105,7 +105,9 @@ export class ChatSagaSubscriber {
         if (conversation) {
           this.eventsPublisher.publishConversationCreated(conversation)
         }
-        this.logger.log(`Saga ${envelope.sagaId}: đã tạo conversation ${result}`)
+        this.logger.log(
+          `Saga ${envelope.sagaId}: đã tạo conversation ${result}`,
+        )
       }
     } catch (error) {
       await this.replyFailed(envelope, (error as Error)?.message)
@@ -177,6 +179,8 @@ export class ChatSagaSubscriber {
         })
       },
     )
-    this.logger.warn(`Saga ${envelope.sagaId}: createConversation FAILED: ${error}`)
+    this.logger.warn(
+      `Saga ${envelope.sagaId}: createConversation FAILED: ${error}`,
+    )
   }
 }

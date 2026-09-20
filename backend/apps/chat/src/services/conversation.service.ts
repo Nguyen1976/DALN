@@ -66,7 +66,10 @@ export class ConversationService {
       ChatErrors.conversationNotEnoughMembers()
     }
 
-    const profiles = await this.userDirectory.getProfiles([ownerId, ...otherIds])
+    const profiles = await this.userDirectory.getProfiles([
+      ownerId,
+      ...otherIds,
+    ])
     if (profiles.length !== otherIds.length + 1) {
       ChatErrors.invalidMemberAction('Có người dùng không tồn tại')
     }
@@ -96,6 +99,7 @@ export class ConversationService {
     })
 
     const res = await this.conversationRepo.findByIdWithMembers(conversation.id)
+    if (!res) ChatErrors.conversationNotFound()
 
     // The others learn about the group over the socket; the owner gets it in
     // the HTTP answer.
@@ -235,9 +239,7 @@ export class ConversationService {
    * trên membership (như findByConversationId phục vụ mọi API tên thành viên
    * khác), lùi về fullName rồi userId để gateway luôn có tên đặt cho LiveKit.
    */
-  async getCallMembers(
-    dto: CallMembersRequest,
-  ): Promise<{
+  async getCallMembers(dto: CallMembersRequest): Promise<{
     members: { id: string; username: string }[]
     type: conversationType
   }> {

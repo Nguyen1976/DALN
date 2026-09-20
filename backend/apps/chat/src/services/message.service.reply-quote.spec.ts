@@ -1,4 +1,5 @@
 import { MessageService } from './message.service'
+import type { MessageDto } from '../domain/message.mapper'
 
 const CONV = '6a35000000000000000c0001'
 const SENDER = '6a35000000000000000a0001'
@@ -12,7 +13,7 @@ const OTHER = '6a35000000000000000a0002'
  */
 describe('MessageService — reply quotes survive the realtime path', () => {
   it('publishes the quoted sender name and attachment untouched', () => {
-    const publishMessageSent = jest.fn()
+    const publishMessageSent = jest.fn<void, [MessageDto, string[]]>()
     const service = new MessageService(
       {} as never,
       {} as never,

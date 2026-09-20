@@ -13,7 +13,6 @@ import {
   type RankedCandidate,
   type RankingCandidateInput,
 } from './services/gb-ranker.service'
-import * as _ from 'lodash'
 import { toGeoPoint } from '@app/util'
 
 type NearbyUser = {
@@ -146,13 +145,13 @@ export class RecommendationService {
     return out
   }
 
-  private dedupeByCandidateId<T extends { candidateId?: unknown }>(
+  private dedupeByCandidateId<T extends { candidateId?: string }>(
     rows: T[],
   ): T[] {
     const seen = new Set<string>()
     const out: T[] = []
     for (const row of rows) {
-      const candidateId = String(row?.candidateId ?? '')
+      const candidateId = row?.candidateId ?? ''
       if (!candidateId || seen.has(candidateId)) continue
       seen.add(candidateId)
       out.push(row)
@@ -238,7 +237,7 @@ export class RecommendationService {
     if (Array.isArray(raw) && raw.length && typeof raw[0] === 'number') {
       return raw as number[]
     }
-    if (raw && typeof raw === 'object' && 'default' in (raw as object)) {
+    if (raw && typeof raw === 'object' && 'default' in raw) {
       const inner = (raw as { default?: unknown }).default
       if (
         Array.isArray(inner) &&
@@ -421,7 +420,8 @@ export class RecommendationService {
       ? (stored.candidates as RecommendationFeatureRow[])
       : []
     const visibleRows = storedRows.filter(
-      (row) => typeof row?.candidateId === 'string' && !exclude.has(row.candidateId),
+      (row) =>
+        typeof row?.candidateId === 'string' && !exclude.has(row.candidateId),
     )
     if (stored && visibleRows.length !== storedRows.length) {
       await this.prisma.recommendationResult.update({
@@ -484,11 +484,18 @@ export class RecommendationService {
     const people = previewIds.length
       ? await this.prisma.userSnapshot.findMany({
           where: { userId: { in: previewIds } },
-          select: { userId: true, username: true, fullName: true, avatar: true },
+          select: {
+            userId: true,
+            username: true,
+            fullName: true,
+            avatar: true,
+          },
         })
       : []
     const personById = new Map(people.map((person) => [person.userId, person]))
-    const profileById = new Map(profiles.map((profile) => [profile.userId, profile]))
+    const profileById = new Map(
+      profiles.map((profile) => [profile.userId, profile]),
+    )
 
     return candidateIds.flatMap((candidateId) => {
       const profile = profileById.get(candidateId)
@@ -548,7 +555,8 @@ export class RecommendationService {
       const userIds = await this.dirty.take(TAKE_PER_ROUND)
       if (!userIds.length) break
 
-      for (const chunk of _.chunk(userIds, CHUNK_SIZE)) {
+      for (let start = 0; start < userIds.length; start += CHUNK_SIZE) {
+        const chunk = userIds.slice(start, start + CHUNK_SIZE)
         // allSettled: một user lỗi không được làm hỏng cả lô 50 như Promise.all
         const results = await Promise.allSettled(
           chunk.map((userId) => this.recommendationHelper(userId)),
@@ -598,7 +606,6 @@ export class RecommendationService {
   }
 
   async recommendationHelper(userId: string) {
-
     // 1. Bạn bè từ MongoDB (cold start: có thể không có dữ liệu)
     let friendIds: string[] = []
     try {
@@ -626,13 +633,19 @@ export class RecommendationService {
     const commonFriends =
       settled[0].status === 'fulfilled' ? settled[0].value : []
     if (settled[0].status === 'rejected') {
-      this.logger.warn('[recommendation] commonFriends failed', settled[0].reason)
+      this.logger.warn(
+        '[recommendation] commonFriends failed',
+        settled[0].reason,
+      )
     }
 
     const commonGroups =
       settled[1].status === 'fulfilled' ? settled[1].value : []
     if (settled[1].status === 'rejected') {
-      this.logger.warn('[recommendation] commonGroups failed', settled[1].reason)
+      this.logger.warn(
+        '[recommendation] commonGroups failed',
+        settled[1].reason,
+      )
     }
 
     const qdrantRes = settled[2].status === 'fulfilled' ? settled[2].value : []
@@ -672,7 +685,7 @@ export class RecommendationService {
             { $limit: 220 },
             { $project: { userId: 1, username: 1, fullName: 1, dist: 1 } },
           ],
-        })) as any
+        })) as unknown as NearbyUser[]
       } catch (e) {
         this.logger.warn('[recommendation] MongoDB GeoNear failed', e)
       }
@@ -738,7 +751,7 @@ export class RecommendationService {
       ]),
     )
 
-    let vectorPoints: any[] = []
+    let vectorPoints: Awaited<ReturnType<QdrantService['getVectorsBatch']>> = []
     try {
       vectorPoints = await this.qdrantService.getVectorsBatch([
         ...uuidToMongoId.keys(),
@@ -753,7 +766,6 @@ export class RecommendationService {
         bioVectorsByUserId.set(mongoId, point.vector as number[])
       }
     }
-
 
     // Giai đoạn 7a: Fetch từ Redis cache (batch)
     const cachedFeatures =
@@ -826,11 +838,11 @@ export class RecommendationService {
       degreesByUserId.set(userId, 0)
     }
 
-
     // Giai đoạn 7d.5: Fetch groups của current user + candidates từ MongoDB
     let groupsByUserId = new Map<string, Set<string>>()
     try {
-      groupsByUserId = await this.friendGraph.getGroupsBatch(userIdsForNeighbors)
+      groupsByUserId =
+        await this.friendGraph.getGroupsBatch(userIdsForNeighbors)
     } catch (e) {
       this.logger.warn('[recommendation] groups batch failed', e)
     }
@@ -840,10 +852,8 @@ export class RecommendationService {
       }
     }
 
-
-
     const profileByCandidateId = new Map(
-      (candidateProfiles as UserProfileRow[]).map((u) => [u.userId, u]),
+      candidateProfiles.map((u) => [u.userId, u]),
     )
     const qdrantScoreById = new Map(
       qdrantRes
@@ -936,7 +946,9 @@ export class RecommendationService {
     // distanceKm đã được tính batch từ location, không ghi đè bằng geonear ở bước này.
 
     const stripColdMeta = (c: Record<string, unknown>) => {
-      const { interest_jaccard: _i, cold_prior: _cp, ...rest } = c
+      const rest = { ...c }
+      delete rest.interest_jaccard
+      delete rest.cold_prior
       return rest
     }
 
@@ -948,7 +960,9 @@ export class RecommendationService {
       .filter(
         (candidate): candidate is RankingCandidateInput =>
           typeof candidate?.candidateId === 'string' &&
-          SAFE_FEATURES.every((name) => Number.isFinite(Number(candidate[name]))),
+          SAFE_FEATURES.every((name) =>
+            Number.isFinite(Number(candidate[name])),
+          ),
       )
 
     let topKCandidates =

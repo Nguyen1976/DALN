@@ -59,7 +59,7 @@ const lazyPage =
 /** Opening the interests step directly (F5, a link): nothing else to show. */
 function ScreenFallback() {
   return (
-    <div className="flex min-h-[100dvh] w-full items-center justify-center">
+    <div className="flex min-h-dvh w-full items-center justify-center">
       <Spinner label="Đang tải màn hình" />
     </div>
   );

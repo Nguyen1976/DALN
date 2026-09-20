@@ -1,3 +1,4 @@
+import type Redis from 'ioredis'
 import { randomUUID } from 'crypto'
 
 /**
@@ -73,7 +74,7 @@ export class GroupCallStore {
   /** Phòng nhóm có thể mở lâu; 12h là lưới dọn rác, không phải hạn cuộc gọi. */
   private readonly ttlSeconds = 12 * 60 * 60
 
-  constructor(private readonly redisClient: any) {}
+  constructor(private readonly redisClient: Redis) {}
 
   private key(conversationId: string) {
     return `groupcall:${conversationId}`
@@ -116,7 +117,7 @@ export class GroupCallStore {
     const participants: Record<string, GroupCallMember> = {}
     for (const [id, value] of Object.entries(rawParticipants || {})) {
       try {
-        participants[id] = JSON.parse(value as string) as GroupCallMember
+        participants[id] = JSON.parse(value) as GroupCallMember
       } catch {
         // Bỏ qua bản ghi hỏng thay vì làm hỏng cả roster.
       }

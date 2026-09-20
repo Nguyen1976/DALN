@@ -282,7 +282,7 @@ const MessageComponent = ({
                                 aria-hidden="true"
                                 // scaleX, not width: the bar grows smoothly
                                 // when votes come in, without relayout.
-                                className="absolute inset-0 origin-left animate-grow-x bg-primary/12 transition-transform duration-(--motion-slow) ease-(--ease-out)"
+                                className="absolute inset-0 origin-left animate-grow-x bg-primary/12 transition-transform duration-(--motion-slow) ease-out"
                                 style={{ transform: `scaleX(${share / 100})` }}
                               />
                               <span className="relative flex items-center justify-between gap-2">
@@ -496,7 +496,7 @@ const MessageComponent = ({
                             decoding="async"
                             // Reserving a box keeps the thread from jumping
                             // when the image finally decodes.
-                            className="mb-2 max-h-80 w-full max-w-[17rem] rounded-xl bg-muted object-cover"
+                            className="mb-2 max-h-80 w-full max-w-68 rounded-xl bg-muted object-cover"
                           />
                         );
                       }
@@ -508,7 +508,7 @@ const MessageComponent = ({
                             src={media.url}
                             controls
                             preload="metadata"
-                            className="mb-2 max-h-80 w-full max-w-[18rem] rounded-xl bg-muted"
+                            className="mb-2 max-h-80 w-full max-w-72 rounded-xl bg-muted"
                           />
                         );
                       }

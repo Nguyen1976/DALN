@@ -21,8 +21,8 @@ export class StandardScaler {
   fit(X: number[][]): void {
     if (!X.length) return
     const dims = X[0].length
-    this.mean = new Array(dims).fill(0)
-    this.std = new Array(dims).fill(1)
+    this.mean = new Array<number>(dims).fill(0)
+    this.std = new Array<number>(dims).fill(1)
 
     for (let j = 0; j < dims; j++) {
       let sum = 0
@@ -75,7 +75,7 @@ export class GradientBoostingClassifier {
     const p = Math.max(1e-15, Math.min(1 - 1e-15, positives / y.length))
     this.initialLogOdds = Math.log(p / (1 - p))
 
-    const scores = new Array(y.length).fill(this.initialLogOdds)
+    const scores = new Array<number>(y.length).fill(this.initialLogOdds)
     this.trees = []
 
     for (let t = 0; t < this.nEstimators; t++) {
@@ -89,7 +89,7 @@ export class GradientBoostingClassifier {
         minNumSamples: 3,
       })
       tree.train(X, residuals)
-      const treePred = tree.predict(X) as number[]
+      const treePred = tree.predict(X)
 
       for (let i = 0; i < scores.length; i++) {
         scores[i] += this.learningRate * Number(treePred[i] ?? 0)
@@ -101,7 +101,7 @@ export class GradientBoostingClassifier {
   rawScores(X: number[][]): number[] {
     const scores = X.map(() => this.initialLogOdds)
     for (const tree of this.trees) {
-      const preds = tree.predict(X) as number[]
+      const preds = tree.predict(X)
       for (let i = 0; i < scores.length; i++) {
         scores[i] += this.learningRate * Number(preds[i] ?? 0)
       }
@@ -116,7 +116,10 @@ export class GradientBoostingClassifier {
     })
   }
 
-  toJSON(featureNames: string[], scaler: StandardScaler): GradientBoostingModelJson {
+  toJSON(
+    featureNames: string[],
+    scaler: StandardScaler,
+  ): GradientBoostingModelJson {
     return {
       type: 'GradientBoostingClassifier',
       featureNames: [...featureNames],
@@ -132,15 +135,13 @@ export class GradientBoostingClassifier {
     scaler: StandardScaler
   } {
     if (payload.type !== 'GradientBoostingClassifier') {
-      throw new Error(`Unsupported model type: ${payload.type}`)
+      throw new Error(`Unsupported model type: ${String(payload.type)}`)
     }
 
     const model = new GradientBoostingClassifier()
     model.learningRate = payload.learningRate
     model.initialLogOdds = payload.initialLogOdds
-    model.trees = payload.trees.map((tree) =>
-      DecisionTreeRegression.load(tree),
-    )
+    model.trees = payload.trees.map((tree) => DecisionTreeRegression.load(tree))
     model.nEstimators = model.trees.length
 
     return {

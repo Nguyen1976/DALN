@@ -19,4 +19,4 @@ async function bootstrap() {
   app.useWebSocketAdapter(redisIoAdapter)
   await app.listen(process.env.port ?? 3001)
 }
-bootstrap()
+void bootstrap()

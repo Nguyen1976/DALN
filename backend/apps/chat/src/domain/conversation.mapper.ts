@@ -1,11 +1,39 @@
 import { displayNameOf } from '@app/util'
+import type { conversation, conversationMember } from '../generated'
 
-type Person = {
-  userId: string
-  username?: string | null
-  fullName?: string | null
-  avatar?: string | null
-}
+type Person = Pick<conversationMember, 'userId'> &
+  Partial<Pick<conversationMember, 'username' | 'fullName' | 'avatar'>>
+
+/** The viewer's own counters, off their membership row. */
+type ViewerState = Pick<
+  conversationMember,
+  'unreadCount' | 'unreadMentionCount' | 'lastMentionMessageId'
+>
+
+/** What a member row brings to a conversation's detail. */
+export type MemberView = ViewerState &
+  Pick<
+    conversationMember,
+    | 'userId'
+    | 'role'
+    | 'username'
+    | 'fullName'
+    | 'avatar'
+    | 'lastReadAt'
+    | 'lastReadMessageId'
+    | 'lastMessageAt'
+  >
+
+/** A row of the viewer's list: their membership flattened onto it. */
+export type ConversationListRow = conversation &
+  ViewerState &
+  Pick<
+    conversationMember,
+    'peerUserId' | 'peerUsername' | 'peerFullName' | 'peerAvatar'
+  >
+
+/** A conversation with its active members (detail, events). */
+export type ConversationWithMembers = conversation & { members: MemberView[] }
 
 /**
  * A conversation as one viewer sees it. It comes in two shapes:
@@ -19,22 +47,18 @@ type Person = {
  * the rows that predate it).
  */
 export class ConversationMapper {
-  static toSummary(conversation: any, viewerId: string) {
-    const members: any[] | undefined = conversation.members
-    const mine = members?.find((m) => m.userId === viewerId) ?? conversation
+  static toSummary(
+    conversation: ConversationListRow | ConversationWithMembers,
+    viewerId: string,
+  ) {
+    const members = 'members' in conversation ? conversation.members : null
+    // Someone just removed, or leaving, is no longer among the members.
+    const mine: Partial<ViewerState> =
+      'members' in conversation
+        ? (conversation.members.find((m) => m.userId === viewerId) ?? {})
+        : conversation
     const isDirect = conversation.type === 'DIRECT'
-    const peer: Person | null = !isDirect
-      ? null
-      : members
-        ? (members.find((m) => m.userId !== viewerId) ?? null)
-        : conversation.peerUserId
-          ? {
-              userId: conversation.peerUserId,
-              username: conversation.peerUsername,
-              fullName: conversation.peerFullName,
-              avatar: conversation.peerAvatar,
-            }
-          : null
+    const peer = isDirect ? peerOf(conversation, viewerId) : null
 
     return {
       id: conversation.id,
@@ -82,7 +106,7 @@ export class ConversationMapper {
   }
 
   static toDetail(
-    conversation: any,
+    conversation: ConversationListRow | ConversationWithMembers,
     viewerId: string,
     options?: {
       membershipStatus?: 'ACTIVE' | 'REMOVED' | 'LEFT'
@@ -94,5 +118,22 @@ export class ConversationMapper {
       membershipStatus: options?.membershipStatus ?? 'ACTIVE',
       canSendMessage: options?.canSendMessage ?? true,
     }
+  }
+}
+
+/** The other side of a direct conversation, from whichever shape it came. */
+function peerOf(
+  conversation: ConversationListRow | ConversationWithMembers,
+  viewerId: string,
+): Person | null {
+  if ('members' in conversation) {
+    return conversation.members.find((m) => m.userId !== viewerId) ?? null
+  }
+  if (!conversation.peerUserId) return null
+  return {
+    userId: conversation.peerUserId,
+    username: conversation.peerUsername,
+    fullName: conversation.peerFullName,
+    avatar: conversation.peerAvatar,
   }
 }

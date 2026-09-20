@@ -179,7 +179,7 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
           />
 
           <div
-            className="custom-scrollbar max-h-[300px] space-y-1 overflow-y-auto"
+            className="custom-scrollbar max-h-75 space-y-1 overflow-y-auto"
             aria-busy={paging.status === "loading"}
           >
             {shownFriends.map((user, index) => (
@@ -187,7 +187,7 @@ export function NewChatModal({ onClose }: NewChatModalProps) {
                 key={user.id}
                 htmlFor={`${user.id}`}
                 style={staggerStyle(index % 20)}
-                className="flex w-full animate-stagger-in cursor-pointer items-center gap-3 rounded-lg p-2.5 transition-colors duration-(--motion-fast) hover:bg-accent has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-[-2px] has-[:focus-visible]:outline-ring"
+                className="flex w-full animate-stagger-in cursor-pointer items-center gap-3 rounded-lg p-2.5 transition-colors duration-(--motion-fast) hover:bg-accent has-focus-visible:outline has-focus-visible:outline-2 has-focus-visible:-outline-offset-2 has-focus-visible:outline-ring"
               >
                 <Checkbox
                   id={`${user.id}`}

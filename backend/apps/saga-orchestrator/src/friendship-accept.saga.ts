@@ -112,7 +112,7 @@ export class FriendshipAcceptSaga {
 
         const ok = envelope.status === 'OK'
 
-        switch (envelope.step as SagaStep) {
+        switch (envelope.step) {
           case SAGA_STEP.CREATE_CONVERSATION:
             await this.onCreateConversationReply(tx, saga, envelope, ok)
             break
@@ -130,7 +130,7 @@ export class FriendshipAcceptSaga {
             })
             break
           default:
-            this.logger.warn(`Reply step lạ: ${envelope.step}`)
+            this.logger.warn(`Reply step lạ: ${String(envelope.step)}`)
         }
       },
     )

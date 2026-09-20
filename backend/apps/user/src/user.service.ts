@@ -249,7 +249,7 @@ export class UserService {
         : {}),
       ...(user.avatar ? { avatar: user.avatar } : {}),
       ...(user.bio != null && String(user.bio).trim() !== ''
-        ? { bio: user.bio as string }
+        ? { bio: user.bio }
         : {}),
       location: toGeoPoint(user.location) ?? undefined,
     })
@@ -698,7 +698,7 @@ export class UserService {
         lookup(data.avatarFilename || '') || 'application/octet-stream'
 
       avatarUrl = await this.s3StorageService.upload({
-        buffer: data.avatar as Buffer,
+        buffer: data.avatar,
         mime: mime,
         folder: 'avatars',
         ext: data.avatarFilename?.split('.').pop() || 'bin',
@@ -758,7 +758,9 @@ export class UserService {
   }
 }
 
-function toRequestPerson(user: Parameters<typeof toUserSummary>[0]): RequestPerson {
+function toRequestPerson(
+  user: Parameters<typeof toUserSummary>[0],
+): RequestPerson {
   const { id, email, username, fullName, avatar } = toUserSummary(user)
   return { id, email, username, fullName, avatar }
 }

@@ -49,13 +49,13 @@ export default function FileAttachmentPreview({
       target="_blank"
       rel="noreferrer"
       className={cn(
-        "mb-2 block w-full max-w-[280px] overflow-hidden rounded-xl border border-border/60 bg-background/50 transition-colors hover:bg-background/80",
+        "mb-2 block w-full max-w-70 overflow-hidden rounded-xl border border-border/60 bg-background/50 transition-colors hover:bg-background/80",
         className,
       )}
     >
-      <div className="relative min-h-[120px] bg-muted/30">
+      <div className="relative min-h-30 bg-muted/30">
         {preview.status === "loading" && (
-          <div className="flex min-h-[120px] items-center justify-center">
+          <div className="flex min-h-30 items-center justify-center">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         )}
@@ -75,13 +75,13 @@ export default function FileAttachmentPreview({
         )}
 
         {preview.status === "ready" && preview.kind === "fallback" && (
-          <div className="flex min-h-[120px] items-center justify-center px-4 py-6">
+          <div className="flex min-h-30 items-center justify-center px-4 py-6">
             <FileExtensionBadge ext={ext} />
           </div>
         )}
 
         {preview.status === "error" && (
-          <div className="flex min-h-[120px] items-center justify-center px-4 py-6">
+          <div className="flex min-h-30 items-center justify-center px-4 py-6">
             <FileExtensionBadge ext={ext} />
           </div>
         )}

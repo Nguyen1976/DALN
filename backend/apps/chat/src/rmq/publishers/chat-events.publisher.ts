@@ -11,7 +11,10 @@ import {
 } from 'libs/constant/rmq/payload'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
-import { ConversationMapper } from '../../domain/conversation.mapper'
+import {
+  ConversationMapper,
+  type ConversationWithMembers,
+} from '../../domain/conversation.mapper'
 import { type MessageDto } from '../../domain/message.mapper'
 
 @Injectable()
@@ -57,11 +60,13 @@ export class ChatEventsPublisher {
     }
   }
 
-  publishConversationCreated(conversation: any): void {
+  /** To `memberIds` when given (the creator has it already), else everyone. */
+  publishConversationCreated(
+    conversation: ConversationWithMembers & { memberIds?: string[] },
+  ): void {
     const memberIds =
-      conversation.memberIds ||
-      conversation.members?.map((member: any) => member.userId) ||
-      []
+      conversation.memberIds ??
+      conversation.members.map((member) => member.userId)
 
     this.emitToUsers(
       memberIds,
@@ -88,10 +93,15 @@ export class ChatEventsPublisher {
     })
   }
 
-  publishMemberAddedToConversation(payload: any): void {
-    const allMemberIds = payload.members?.map((m: any) => m.userId) || []
-    const newMembers = (payload.members || []).filter((member: any) =>
-      (payload.newMemberIds || []).includes(member.userId),
+  publishMemberAddedToConversation(
+    payload: ConversationWithMembers & {
+      actorId: string
+      newMemberIds: string[]
+    },
+  ): void {
+    const allMemberIds = payload.members.map((m) => m.userId)
+    const newMembers = payload.members.filter((member) =>
+      payload.newMemberIds.includes(member.userId),
     )
 
     this.emit(allMemberIds, SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_ADDED, {
@@ -102,7 +112,7 @@ export class ChatEventsPublisher {
     })
 
     this.emitToUsers(
-      payload.newMemberIds || [],
+      payload.newMemberIds,
       SOCKET_EVENTS.CHAT.CONVERSATION_UPDATE,
       (userId) => ({
         conversation: ConversationMapper.toDetail(payload, userId, {
@@ -113,9 +123,8 @@ export class ChatEventsPublisher {
     )
   }
 
-  publishConversationUpdated(conversation: any): void {
-    const memberIds =
-      conversation.members?.map((member: any) => member.userId) || []
+  publishConversationUpdated(conversation: ConversationWithMembers): void {
+    const memberIds = conversation.members.map((member) => member.userId)
     this.emitToUsers(
       memberIds,
       SOCKET_EVENTS.CHAT.CONVERSATION_UPDATE,
@@ -126,7 +135,7 @@ export class ChatEventsPublisher {
   }
 
   publishConversationMemberRemoved(payload: {
-    conversation: any
+    conversation: ConversationWithMembers
     actorId: string
     targetUserId: string
     remainingMemberIds: string[]
@@ -156,7 +165,7 @@ export class ChatEventsPublisher {
   }
 
   publishConversationMemberLeft(payload: {
-    conversation: any
+    conversation: ConversationWithMembers
     actorId: string
     remainingMemberIds: string[]
     promotedUserId?: string

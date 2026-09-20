@@ -22,10 +22,10 @@ import { PageQueryDto } from '@app/common/http/page-query.dto'
  * phải là cùng một tài khoản. Chuẩn hoá ngay ở đầu vào (ValidationPipe đang bật
  * `transform`) để mọi tầng phía sau — tra cứu, lưu, khoá OTP — thấy một dạng duy nhất.
  */
-const toNormalizedEmail = ({ value }: TransformFnParams) =>
+const toNormalizedEmail = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim().toLowerCase() : value
 
-const toTrimmed = ({ value }: TransformFnParams) =>
+const toTrimmed = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim() : value
 
 export class RegisterLocationDto {
@@ -84,7 +84,7 @@ export class VerifyOtpDto {
   @Transform(toNormalizedEmail)
   @IsEmail()
   @IsNotEmpty({ message: 'Email must not be empty' })
-  email  : string
+  email: string
 
   @IsNotEmpty({ message: 'OTP must not be empty' })
   @IsString()

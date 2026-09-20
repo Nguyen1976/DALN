@@ -102,7 +102,9 @@ export class UserSnapshotHydrateService {
       const col = await this.getUserCollection()
       const doc = await col.findOne({ _id: new ObjectId(userId) })
       if (!doc) {
-        this.logger.warn(`[hydrate] user not found in user-service DB: ${userId}`)
+        this.logger.warn(
+          `[hydrate] user not found in user-service DB: ${userId}`,
+        )
         return false
       }
       await this.upsertFromMongoUser(doc)
@@ -125,14 +127,19 @@ export class UserSnapshotHydrateService {
 
     try {
       const col = await this.getUserCollection()
-      const docs = await col.find({ isActive: { $ne: false } }).limit(500).toArray()
+      const docs = await col
+        .find({ isActive: { $ne: false } })
+        .limit(500)
+        .toArray()
       let n = 0
       for (const doc of docs) {
         await this.upsertFromMongoUser(doc)
         n++
       }
       if (n > 0) {
-        this.logger.log(`[hydrate] upserted ${n} user snapshot(s) from user-service`)
+        this.logger.log(
+          `[hydrate] upserted ${n} user snapshot(s) from user-service`,
+        )
       }
       return n
     } catch (e) {

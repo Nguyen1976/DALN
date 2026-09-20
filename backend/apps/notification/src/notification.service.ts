@@ -14,7 +14,7 @@ import type {
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
-import type { notification } from './generated'
+import type { notification, userNotificationPreference } from './generated'
 import {
   channelsFrom,
   NOTIFICATION_TYPES,
@@ -45,12 +45,17 @@ type NotificationPreferenceDocument = {
   updatedAt?: string
 }
 
-
 const DEFAULT_CHANNELS: NotificationChannelToggle = {
   IN_APP: true,
   EMAIL: true,
   REALTIME: true,
 }
+
+/** A stored preference; its JSON columns may lack anything older builds wrote. */
+type StoredPreference = Pick<
+  userNotificationPreference,
+  'globalSettings' | 'overrides' | 'digestSettings' | 'version' | 'updatedAt'
+>
 
 const DEFAULT_DIGEST_SETTINGS = {
   enabled: true,
@@ -105,10 +110,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
 
     // Someone away from the app hears about it by mail, unless they switched
     // mail off: the "Tắt email thông báo" link in it leads to these switches.
-    if (
-      channels.email &&
-      !(await this.redisService.isOnline(data.inviteeId))
-    ) {
+    if (channels.email && !(await this.redisService.isOnline(data.inviteeId))) {
       await this.mailerService.sendMakeFriendNotification({
         senderName: data.inviterName,
         friendEmail: data.inviteeEmail,
@@ -274,11 +276,18 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private normalizePreference(raw: any): NotificationPreferenceDocument {
+  private normalizePreference(
+    raw: StoredPreference,
+  ): NotificationPreferenceDocument {
     const defaults = this.buildDefaultPreference()
-    const globalSettings = (raw?.globalSettings ?? {}) as any
-    const digestSettings = (raw?.digestSettings ?? {}) as any
-    const overrides = (raw?.overrides ?? {}) as Record<
+    const globalSettings = (raw.globalSettings ?? {}) as {
+      enabled?: boolean
+      channels?: Partial<NotificationChannelToggle>
+    }
+    const digestSettings = (raw.digestSettings ?? {}) as Partial<
+      NotificationPreferenceDocument['digest']
+    >
+    const overrides = (raw.overrides ?? {}) as Record<
       string,
       Partial<NotificationChannelToggle>
     >
@@ -311,10 +320,8 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
         lastDigestAt:
           digestSettings.lastDigestAt ?? defaults.digest.lastDigestAt,
       },
-      version: raw?.version || defaults.version,
-      updatedAt: raw?.updatedAt
-        ? new Date(raw.updatedAt).toISOString()
-        : undefined,
+      version: raw.version || defaults.version,
+      updatedAt: raw.updatedAt.toISOString(),
     }
   }
 

@@ -68,7 +68,7 @@ export interface UserLeftGroupPayload {
 export interface EmitToUserPayload {
   userIds: string[]
   event: string
-  data: any
+  data: unknown
 }
 
 /**

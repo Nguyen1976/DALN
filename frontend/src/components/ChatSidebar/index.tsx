@@ -204,7 +204,7 @@ export function ChatSidebar({ className }: { className?: string }) {
         className={cn(
           "relative flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
           "transition-colors duration-(--motion-fast)",
-          "hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+          "hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
           isActive && "bg-accent",
         )}
       >
@@ -320,7 +320,7 @@ export function ChatSidebar({ className }: { className?: string }) {
     <aside
       aria-label="Danh sách cuộc trò chuyện"
       className={cn(
-        "w-full flex-col border-r border-sidebar-border bg-sidebar md:flex md:w-80 lg:w-[22rem]",
+        "w-full flex-col border-r border-sidebar-border bg-sidebar md:flex md:w-80 lg:w-88",
         className,
       )}
     >
@@ -349,7 +349,7 @@ export function ChatSidebar({ className }: { className?: string }) {
                   aria-label="Tạo nhóm mới"
                   onClick={() => setShowNewGroup(true)}
                 >
-                  <SquarePen className="size-[18px]" />
+                  <SquarePen className="size-4.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">Tạo nhóm mới</TooltipContent>

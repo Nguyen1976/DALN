@@ -39,7 +39,10 @@ export class EmbeddingService {
         const modelName =
           process.env.EMBEDDING_MODEL_NAME?.trim() ||
           'Xenova/paraphrase-multilingual-MiniLM-L12-v2'
-        return pipeline('feature-extraction', modelName) as Promise<FeatureExtractionPipeline>
+        return pipeline(
+          'feature-extraction',
+          modelName,
+        ) as Promise<FeatureExtractionPipeline>
       })()
     }
     return this.extractorPromise
@@ -53,9 +56,10 @@ export class EmbeddingService {
     output: { data: Float32Array; dims: number[] },
     batchSize: number,
   ): number[][] {
-    const [rows, dims] = output.dims.length === 2
-      ? output.dims
-      : [batchSize, output.data.length / batchSize]
+    const [rows, dims] =
+      output.dims.length === 2
+        ? output.dims
+        : [batchSize, output.data.length / batchSize]
     const vectors: number[][] = []
     for (let i = 0; i < rows; i++) {
       const start = i * dims

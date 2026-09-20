@@ -220,7 +220,7 @@ export function LeftNavigation() {
           "z-30 flex w-full shrink-0 flex-row items-center justify-around gap-1 border-t border-sidebar-border bg-sidebar px-2 py-1.5",
           "pb-[max(0.375rem,env(safe-area-inset-bottom))]",
           // Desktop: slim rail.
-          "md:h-full md:w-[76px] md:flex-col md:justify-start md:gap-2 md:border-r md:border-t-0 md:px-0 md:py-4 md:pb-4",
+          "md:h-full md:w-19 md:flex-col md:justify-start md:gap-2 md:border-r md:border-t-0 md:px-0 md:py-4 md:pb-4",
         )}
       >
         <div className="hidden md:mb-1 md:flex md:flex-col md:items-center md:gap-4">
@@ -228,7 +228,7 @@ export function LeftNavigation() {
             aria-hidden="true"
             className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground"
           >
-            <BrandMark className="size-[22px]" />
+            <BrandMark className="size-5.5" />
           </span>
           <ProfileSetting />
         </div>
@@ -288,7 +288,7 @@ export function LeftNavigation() {
                   className={cn(
                     "relative size-11 rounded-full text-muted-foreground",
                     // Icon nudges up on hover; the button itself keeps still.
-                    "[&_svg]:transition-transform [&_svg]:duration-(--motion-base) [&_svg]:ease-(--ease-spring) hover:[&_svg]:scale-110",
+                    "[&_svg]:transition-transform [&_svg]:duration-(--motion-base) [&_svg]:ease-spring hover:[&_svg]:scale-110",
                     "hover:bg-accent hover:text-accent-foreground",
                     // The fill comes from the shared highlight behind the tabs.
                     active &&

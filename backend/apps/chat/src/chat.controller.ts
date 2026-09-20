@@ -9,7 +9,6 @@ import {
   UseInterceptors,
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express/multer/interceptors/file.interceptor'
-import type { Multer } from 'multer'
 import {
   InternalOnly,
   RequireLogin,
@@ -35,6 +34,7 @@ import {
 } from './http/chat-http.dto'
 import { ConversationMapper } from './domain/conversation.mapper'
 import { PageQueryDto } from '@app/common/http/page-query.dto'
+import type { MultipartFile } from '@app/common/http/multipart-file'
 import {
   ConversationMemberService,
   ConversationService,
@@ -73,7 +73,7 @@ export class ChatController {
   async createConversation(
     @Body() dto: CreateConversationDTO,
     @UserInfo('userId') userId: string,
-    @UploadedFile() groupAvatar?: Multer.File,
+    @UploadedFile() groupAvatar?: MultipartFile,
   ) {
     const conversation = await this.conversations.createGroup(userId, {
       groupName: dto.groupName,

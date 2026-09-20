@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
-import { conversationType, type Prisma } from 'apps/chat/src/generated'
+import type { Prisma } from 'apps/chat/src/generated'
 import { RedisService } from '@app/redis'
 import { isObjectId } from '@app/util'
 import { buildMemberRow } from '../domain/member-row'

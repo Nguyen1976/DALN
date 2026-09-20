@@ -16,57 +16,57 @@ class FakeRedis {
   private hashes = new Map<string, Map<string, string>>()
   private sets = new Map<string, Set<string>>()
 
-  async get(key: string) {
-    return this.strings.has(key) ? this.strings.get(key)! : null
+  get(key: string) {
+    return Promise.resolve(this.strings.get(key) ?? null)
   }
 
-  async set(key: string, value: string, ...args: unknown[]) {
+  set(key: string, value: string, ...args: unknown[]) {
     // ...'EX', ttl, 'NX' — chỉ mô phỏng NX (bỏ qua TTL trong test).
     const nx = args.some((a) => String(a).toUpperCase() === 'NX')
-    if (nx && this.strings.has(key)) return null
+    if (nx && this.strings.has(key)) return Promise.resolve(null)
     this.strings.set(key, value)
-    return 'OK'
+    return Promise.resolve('OK')
   }
 
-  async del(...keys: string[]) {
+  del(...keys: string[]) {
     let removed = 0
     for (const key of keys) {
       if (this.strings.delete(key)) removed++
       this.hashes.delete(key)
       this.sets.delete(key)
     }
-    return removed
+    return Promise.resolve(removed)
   }
 
-  async expire() {
-    return 1
+  expire() {
+    return Promise.resolve(1)
   }
 
-  async hset(key: string, field: string, value: string) {
+  hset(key: string, field: string, value: string) {
     const hash = this.hashes.get(key) ?? new Map<string, string>()
     hash.set(field, value)
     this.hashes.set(key, hash)
-    return 1
+    return Promise.resolve(1)
   }
 
-  async hdel(key: string, field: string) {
-    return this.hashes.get(key)?.delete(field) ? 1 : 0
+  hdel(key: string, field: string) {
+    return Promise.resolve(this.hashes.get(key)?.delete(field) ? 1 : 0)
   }
 
-  async hgetall(key: string) {
-    return Object.fromEntries(this.hashes.get(key) ?? new Map())
+  hgetall(key: string) {
+    return Promise.resolve(Object.fromEntries(this.hashes.get(key) ?? []))
   }
 
-  async sadd(key: string, member: string) {
+  sadd(key: string, member: string) {
     const set = this.sets.get(key) ?? new Set<string>()
     const had = set.has(member)
     set.add(member)
     this.sets.set(key, set)
-    return had ? 0 : 1
+    return Promise.resolve(had ? 0 : 1)
   }
 
-  async smembers(key: string) {
-    return Array.from(this.sets.get(key) ?? [])
+  smembers(key: string) {
+    return Promise.resolve(Array.from(this.sets.get(key) ?? []))
   }
 }
 
@@ -79,7 +79,7 @@ describe('group-call.store', () => {
   ]
 
   beforeEach(() => {
-    store = new GroupCallStore(new FakeRedis())
+    store = new GroupCallStore(new FakeRedis() as never)
   })
 
   it('roomName ổn định theo hội thoại, và giải ngược được', () => {

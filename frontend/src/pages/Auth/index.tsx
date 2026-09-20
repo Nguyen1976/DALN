@@ -30,7 +30,7 @@ export default function AuthPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
 
   return (
-    <div className="relative min-h-[100dvh] w-full bg-background lg:grid lg:grid-cols-[1.05fr_1fr]">
+    <div className="relative min-h-dvh w-full bg-background lg:grid lg:grid-cols-[1.05fr_1fr]">
       {/* Theme switch belongs to the page, not to the form card — it stays put
           while the form grows and shrinks between login and register. */}
       <div className="absolute right-4 top-4 z-30">
@@ -44,8 +44,8 @@ export default function AuthPage() {
           className="pointer-events-none absolute inset-0 opacity-90"
         >
           <div className="absolute -left-24 -top-32 size-96 rounded-full bg-white/10 blur-3xl" />
-          <div className="absolute -bottom-40 -right-24 size-[26rem] rounded-full bg-black/20 blur-3xl" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.14)_1px,transparent_0)] [background-size:26px_26px]" />
+          <div className="absolute -bottom-40 -right-24 size-104 rounded-full bg-black/20 blur-3xl" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.14)_1px,transparent_0)] bg-size-[26px_26px]" />
         </div>
 
         <div className="relative flex animate-stagger-in items-center gap-2.5">
@@ -78,7 +78,7 @@ export default function AuthPage() {
                   aria-hidden="true"
                   className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/15"
                 >
-                  <Icon className="size-[18px]" />
+                  <Icon className="size-4.5" />
                 </span>
                 <div className="space-y-0.5">
                   <p className="font-medium">{title}</p>
@@ -97,9 +97,9 @@ export default function AuthPage() {
       </aside>
 
       {/* ---- Form column ---- */}
-      <main className="flex min-h-[100dvh] items-center justify-center px-5 py-12 sm:px-8 lg:min-h-0">
+      <main className="flex min-h-dvh items-center justify-center px-5 py-12 sm:px-8 lg:min-h-0">
         <div
-          className="w-full max-w-[26rem] animate-stagger-in"
+          className="w-full max-w-104 animate-stagger-in"
           style={staggerStyle(1)}
         >
           <BrandLockup className="mb-8 lg:hidden" />

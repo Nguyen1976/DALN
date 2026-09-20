@@ -110,7 +110,7 @@ function Chip({
       aria-pressed={selected}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium",
-        "transition-[background-color,border-color,color,transform,scale] duration-(--motion-fast) ease-(--ease-out)",
+        "transition-[background-color,border-color,color,transform,scale] duration-(--motion-fast) ease-out",
         "active:scale-[0.97]",
         "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         selected

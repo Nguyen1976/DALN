@@ -11,8 +11,20 @@ import {
 describe('livekit-token', () => {
   const OLD_ENV = process.env
 
+  /** The claims LiveKit checks, read straight off the token. */
+  interface Claims {
+    sub: string
+    name: string
+    iss: string
+    exp: number
+    nbf: number
+    video: Record<string, unknown> & { canPublishSources: string[] }
+  }
+
   const decode = (jwt: string) =>
-    JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'))
+    JSON.parse(
+      Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'),
+    ) as Claims
 
   beforeEach(() => {
     process.env = { ...OLD_ENV }

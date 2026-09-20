@@ -99,8 +99,8 @@ export class MessageMediaService {
     private readonly s3StorageService: S3StorageService,
   ) {}
 
-  normalizeMessageType(type: unknown): NormalizedMessageType {
-    const normalized = String(type || 'TEXT').toUpperCase()
+  normalizeMessageType(type?: string | null): NormalizedMessageType {
+    const normalized = (type || 'TEXT').toUpperCase()
 
     if (normalized.includes('IMAGE')) return 'IMAGE'
     if (normalized.includes('VIDEO')) return 'VIDEO'
@@ -191,14 +191,14 @@ export class MessageMediaService {
     const aliasedReported =
       this.browserMimeAliases[normalizedReported] || normalizedReported
 
-    if (aliasedReported.startsWith('image/') || aliasedReported.startsWith('video/')) {
+    if (
+      aliasedReported.startsWith('image/') ||
+      aliasedReported.startsWith('video/')
+    ) {
       return aliasedReported
     }
 
-    if (
-      !aliasedReported ||
-      this.genericBrowserMimeTypes.has(aliasedReported)
-    ) {
+    if (!aliasedReported || this.genericBrowserMimeTypes.has(aliasedReported)) {
       return extensionMime
     }
 
@@ -249,7 +249,10 @@ export class MessageMediaService {
         ? this.inferMessageTypeFromMime(resolvedMime, fileName)
         : normalizedType
 
-    if (!this.uploadLimitByType[effectiveType] || !this.mimeAllowListByType[effectiveType]) {
+    if (
+      !this.uploadLimitByType[effectiveType] ||
+      !this.mimeAllowListByType[effectiveType]
+    ) {
       ChatErrors.invalidMediaType()
     }
 

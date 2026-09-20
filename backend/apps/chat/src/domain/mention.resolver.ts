@@ -32,7 +32,14 @@ export interface ResolvedMentions {
 }
 
 /** Các cách viết được hiểu là "nhắc cả nhóm". */
-const ALL_TOKENS = ['everyone', 'tất cả', 'tatca', 'mọi người', 'moi nguoi', 'all']
+const ALL_TOKENS = [
+  'everyone',
+  'tất cả',
+  'tatca',
+  'mọi người',
+  'moi nguoi',
+  'all',
+]
 
 const lower = (value: string) => value.toLocaleLowerCase('vi')
 

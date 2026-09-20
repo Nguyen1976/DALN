@@ -23,7 +23,10 @@ export class MessageSubscriber {
     routingKey: ROUTING_RMQ.USER_OFFLINE,
     queue: QUEUE_RMQ.USER_OFFLINE,
   })
-  async handleUserOffline(data: { userId: string, lastSeen: string }): Promise<void> {
+  async handleUserOffline(data: {
+    userId: string
+    lastSeen: string
+  }): Promise<void> {
     await this.userService.handleUserOffline(data.userId, data.lastSeen)
   }
 }

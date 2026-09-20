@@ -22,7 +22,7 @@ import { ChatErrors } from '../errors/chat.errors'
 import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
 import type { AssetKind, UploadType } from '../http/chat-http.dto'
 import { resolveMentions } from '../domain/mention.resolver'
-import { MessageMapper } from '../domain/message.mapper'
+import { MessageMapper, type MessageRow } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
 import {
   buildKeysetCursor,
@@ -75,16 +75,7 @@ const systemSender = (userId: string): Sender => ({
   avatar: null,
 })
 
-type OutboundMessage = {
-  id?: string
-  createdAt: Date
-  content?: string | null
-  type?: string
-  poll?: { question?: string } | null
-  isRevoked?: boolean
-  senderMember?: Sender
-  [key: string]: unknown
-}
+type OutboundMessage = MessageRow
 
 @Injectable()
 export class MessageService {
@@ -145,7 +136,10 @@ export class MessageService {
 
     if (medias.length) {
       const normalizedMedias = medias.map((media) => {
-        const fileName = String(media.objectKey || '').split('/').pop() || ''
+        const fileName =
+          String(media.objectKey || '')
+            .split('/')
+            .pop() || ''
         const resolvedMimeType = this.messageMediaService.resolveMimeType(
           fileName,
           media.mimeType,
@@ -165,7 +159,10 @@ export class MessageService {
 
       await Promise.all(
         normalizedMedias.map(async (media) => {
-          const fileName = String(media.objectKey || '').split('/').pop() || ''
+          const fileName =
+            String(media.objectKey || '')
+              .split('/')
+              .pop() || ''
           // 'TEXT' makes the validator infer the kind per attachment, so a
           // mixed batch is checked against the right allow-list and size cap
           // for each file rather than for whatever the message as a whole is.
@@ -234,7 +231,10 @@ export class MessageService {
       ])
       // Only quote something from this same conversation: the id arrives from
       // the client and must not become a way to read another thread.
-      if (quoted && String(quoted.conversationId) === String(data.conversationId)) {
+      if (
+        quoted &&
+        String(quoted.conversationId) === String(data.conversationId)
+      ) {
         message.replyTo = quoted
       }
     }
@@ -331,7 +331,11 @@ export class MessageService {
    * as soon as the thread is scrolled.
    */
   private async attachQuotedMessages(
-    messages: { replyToMessageId: string | null; conversationId: string; replyTo?: unknown }[],
+    messages: {
+      replyToMessageId: string | null
+      conversationId: string
+      replyTo?: unknown
+    }[],
   ) {
     const ids = messages
       .map((m) => m.replyToMessageId)
@@ -345,7 +349,10 @@ export class MessageService {
     for (const message of messages) {
       if (!message.replyToMessageId) continue
       const original = byId.get(String(message.replyToMessageId))
-      if (original && String(original.conversationId) === String(message.conversationId)) {
+      if (
+        original &&
+        String(original.conversationId) === String(message.conversationId)
+      ) {
         message.replyTo = original
       }
     }
@@ -731,7 +738,6 @@ export class MessageService {
     return dto
   }
 
-
   /**
    * Tích luỹ số tin chưa đọc + tin nhắn cuối vào Redis; cron sẽ gom xuống Mongo.
    *
@@ -771,7 +777,7 @@ export class MessageService {
     // không kéo lùi. Đặt TRƯỚC HINCRBY: nếu lượt claim của cron lỡ chen vào
     // giữa pipeline (hiếm — Redis thường chạy liền cả gói), thà đếm dư một tin
     // (lần đọc sau tự lành) còn hơn đếm thiếu (người nhận mất badge).
-    const messageId = String(message.id ?? '').toLowerCase()
+    const messageId = message.id.toLowerCase()
     if (isObjectId(messageId)) {
       commands.push([
         'eval',

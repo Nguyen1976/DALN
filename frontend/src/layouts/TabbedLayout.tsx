@@ -92,7 +92,7 @@ export function TabbedLayout({
                   className={cn(
                     "flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
                     "transition-colors duration-(--motion-fast)",
-                    "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                    "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
                     active
                       ? "text-foreground"
                       : "text-muted-foreground hover:text-foreground",

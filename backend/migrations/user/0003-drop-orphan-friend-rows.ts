@@ -32,7 +32,9 @@ const migration: Migration = {
           .find({}, { projection: { _id: 1, [fields[0]]: 1, [fields[1]]: 1 } })
           .toArray()
       )
-        .filter((row) => fields.some((field) => missing(row[field])))
+        .filter((row) =>
+          (fields as readonly string[]).some((field) => missing(row[field])),
+        )
         .map((row) => row._id)
 
       if (dryRun || !orphans.length) {

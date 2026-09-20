@@ -834,9 +834,9 @@ export default function ChatWindow({
             onClick={handleSendMessage}
           >
             {isUploading ? (
-              <Loader2 className="size-[18px] animate-spin" aria-hidden="true" />
+              <Loader2 className="size-4.5 animate-spin" aria-hidden="true" />
             ) : (
-              <Send className="size-[18px]" />
+              <Send className="size-4.5" />
             )}
           </Button>
         </div>

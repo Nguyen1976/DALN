@@ -281,7 +281,7 @@ const ListFriend = () => {
                   className={cn(
                     "group flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
                     "transition-colors duration-(--motion-fast) hover:bg-accent",
-                    "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                    "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
                     selectedFriendId === friend.id && "bg-accent",
                   )}
                 >
@@ -309,7 +309,7 @@ const ListFriend = () => {
                   </div>
 
                   <MessageCircle
-                    className="size-4 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-[opacity,translate] duration-(--motion-base) ease-(--ease-out) group-hover:translate-x-0 group-hover:opacity-100"
+                    className="size-4 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-[opacity,translate] duration-(--motion-base) ease-out group-hover:translate-x-0 group-hover:opacity-100"
                     aria-hidden="true"
                   />
                 </button>
@@ -365,9 +365,9 @@ const ListFriend = () => {
 
       <div
         className={cn(
-          "fixed inset-x-0 bottom-0 z-40 flex max-h-[85dvh] flex-col overflow-y-auto rounded-t-2xl border-t border-border bg-background p-6 shadow-2xl transition-transform duration-(--motion-slow) ease-(--ease-out)",
+          "fixed inset-x-0 bottom-0 z-40 flex max-h-[85dvh] flex-col overflow-y-auto rounded-t-2xl border-t border-border bg-background p-6 shadow-2xl transition-transform duration-(--motion-slow) ease-out",
           mobileDetailOpen ? "translate-y-0" : "translate-y-full",
-          "lg:static lg:z-auto lg:max-h-none lg:w-[22rem] lg:translate-y-0 lg:justify-start lg:rounded-none lg:border-l lg:border-t-0 lg:pt-8 lg:shadow-none",
+          "lg:static lg:z-auto lg:max-h-none lg:w-88 lg:translate-y-0 lg:justify-start lg:rounded-none lg:border-l lg:border-t-0 lg:pt-8 lg:shadow-none",
         )}
       >
         <div className="mb-4 flex items-center justify-end lg:hidden">

@@ -9,7 +9,6 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common'
-import type { Multer } from 'multer'
 import type { Response } from 'express'
 import { FileInterceptor } from '@nestjs/platform-express'
 import { UserService } from '../user.service'
@@ -36,6 +35,7 @@ import {
   ProfileQueryDto,
 } from './user-http.dto'
 import { PageQueryDto } from '@app/common/http/page-query.dto'
+import type { MultipartFile } from '@app/common/http/multipart-file'
 import type { JwtPayload } from '@app/common/auth/resolve-tokens'
 import {
   ACCESS_TOKEN_MAX_AGE_MS,
@@ -217,10 +217,7 @@ export class UserHttpController {
 
   @Get('list-friends')
   @RequireLogin()
-  listFriends(
-    @UserInfo('userId') userId: string,
-    @Query() page: PageQueryDto,
-  ) {
+  listFriends(@UserInfo('userId') userId: string, @Query() page: PageQueryDto) {
     return this.userService.listFriends(userId, page)
   }
 
@@ -263,7 +260,7 @@ export class UserHttpController {
   updateProfile(
     @Body() dto: UpdateProfileDto,
     @UserInfo('userId') userId: string,
-    @UploadedFile() avatar?: Multer.File,
+    @UploadedFile() avatar?: MultipartFile,
   ) {
     return this.userService.updateProfile({
       ...dto,

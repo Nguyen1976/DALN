@@ -45,7 +45,7 @@ export class ErrorBoundary extends Component<Props, State> {
     return (
       <div
         role="alert"
-        className="flex min-h-[100dvh] w-full animate-page-in flex-col items-center justify-center gap-5 bg-background px-6 text-center"
+        className="flex min-h-dvh w-full animate-page-in flex-col items-center justify-center gap-5 bg-background px-6 text-center"
       >
         <span
           aria-hidden="true"

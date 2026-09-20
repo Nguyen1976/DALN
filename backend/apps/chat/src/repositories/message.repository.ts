@@ -3,6 +3,7 @@ import { messageType, Prisma } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { MessageBatchWriter } from '../services/message-batch-writer.service'
 import { olderThanCursor, type KeysetCursor } from '@app/util'
+import { isUniqueConstraintError } from '@app/saga'
 import type { MessageMediaInput } from 'libs/constant/rmq/payload'
 
 const SENDER_SELECT = {
@@ -48,7 +49,7 @@ export class MessageRepository {
         replyToMessageId: data.replyToMessageId,
         isSystem: data.isSystem,
         mentionUserIds: data.mentionUserIds,
-        mentions: data.mentions as any,
+        mentions: data.mentions,
       })
     }
 
@@ -57,12 +58,12 @@ export class MessageRepository {
       data: {
         conversationId: data.conversationId,
         senderId: data.senderId,
-        type: data.type as any, // Ép kiểu messageType
+        type: data.type,
         content: data.content || null,
         replyToMessageId: data.replyToMessageId || null,
         pollId: data.pollId || null,
         mentionUserIds: data.mentionUserIds || [],
-        mentions: (data.mentions ?? undefined) as any,
+        mentions: (data.mentions ?? undefined) as Prisma.InputJsonValue,
 
         // Khởi tạo Medias luôn (Prisma tự động làm Transaction ngầm)
         medias: data.medias?.length
@@ -95,11 +96,14 @@ export class MessageRepository {
       },
     })
 
+    // Giữ nguyên hình dạng trả về để bên gọi không phải đổi.
+    const loaded = created as Partial<
+      Prisma.messageGetPayload<{ include: { medias: true; poll: true } }>
+    >
     return {
       ...created,
-      // Giữ nguyên hình dạng trả về để bên gọi không phải đổi.
-      medias: (created as { medias?: unknown[] }).medias ?? [],
-      poll: (created as { poll?: unknown }).poll ?? null,
+      medias: loaded.medias ?? [],
+      poll: loaded.poll ?? null,
     }
   }
 
@@ -118,9 +122,9 @@ export class MessageRepository {
       data: {
         conversationId: data.conversationId,
         senderId: data.senderId,
-        type: 'CALL' as any,
+        type: messageType.CALL,
         content: data.content,
-        callInfo: data.callInfo as any,
+        callInfo: data.callInfo as Prisma.InputJsonObject,
         isSystem: true,
       },
     })
@@ -213,8 +217,8 @@ export class MessageRepository {
           userId,
         },
       })
-    } catch (error: any) {
-      if (error?.code === 'P2002') {
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
         return null
       }
 

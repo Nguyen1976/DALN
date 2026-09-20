@@ -2,7 +2,10 @@ import { channelsFrom } from './notification-types'
 
 describe('channelsFrom', () => {
   const on = { IN_APP: true, EMAIL: true, REALTIME: true }
-  const preference = (overrides = {}, global = { enabled: true, channels: on }) => ({
+  const preference = (
+    overrides = {},
+    global = { enabled: true, channels: on },
+  ) => ({
     global,
     overrides,
   })
@@ -16,7 +19,9 @@ describe('channelsFrom', () => {
   })
 
   it('a type switched off in app: neither stored nor pushed, mail untouched', () => {
-    const pref = preference({ MENTIONED_IN_CONVERSATION: { ...on, IN_APP: false } })
+    const pref = preference({
+      MENTIONED_IN_CONVERSATION: { ...on, IN_APP: false },
+    })
     expect(channelsFrom(pref, 'MENTIONED_IN_CONVERSATION')).toEqual({
       inApp: false,
       realtime: false,

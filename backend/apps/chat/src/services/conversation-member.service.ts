@@ -87,6 +87,7 @@ export class ConversationMemberService {
     )
 
     const res = await this.conversationRepo.findByIdWithMembers(conversation.id)
+    if (!res) ChatErrors.conversationNotFound()
     this.eventsPublisher.publishMemberAddedToConversation({
       ...res,
       actorId: dto.userId,

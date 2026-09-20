@@ -156,10 +156,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       if (events.length === 0) {
         // Rảnh: giãn dần chu kỳ (1,5s -> 3 -> 6 -> 12 -> 15) để không phải
         // truy vấn Mongo 40 lần/phút/service khi hệ thống không có việc gì.
-        this.currentDelayMs = Math.min(
-          this.currentDelayMs * 2,
-          this.maxIdleMs,
-        )
+        this.currentDelayMs = Math.min(this.currentDelayMs * 2, this.maxIdleMs)
         return
       }
 

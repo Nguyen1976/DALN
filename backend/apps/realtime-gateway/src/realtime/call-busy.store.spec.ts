@@ -7,26 +7,26 @@ import { CallBusyStore } from './call-busy.store'
 class FakeRedis {
   private m = new Map<string, string>()
 
-  async set(key: string, value: string, ...args: unknown[]) {
+  set(key: string, value: string, ...args: unknown[]) {
     const nx = args.some((a) => String(a).toUpperCase() === 'NX')
-    if (nx && this.m.has(key)) return null
+    if (nx && this.m.has(key)) return Promise.resolve(null)
     this.m.set(key, value)
-    return 'OK'
+    return Promise.resolve('OK')
   }
-  async get(key: string) {
-    return this.m.has(key) ? this.m.get(key)! : null
+  get(key: string) {
+    return Promise.resolve(this.m.get(key) ?? null)
   }
-  async eval(script: string, _numkeys: number, key: string, arg: string) {
+  eval(script: string, _numkeys: number, key: string, arg: string) {
     const matches = this.m.get(key) === arg
     if (script.includes('del')) {
       if (matches) {
         this.m.delete(key)
-        return 1
+        return Promise.resolve(1)
       }
-      return 0
+      return Promise.resolve(0)
     }
-    if (script.includes('expire')) return matches ? 1 : 0
-    return 0
+    if (script.includes('expire')) return Promise.resolve(matches ? 1 : 0)
+    return Promise.resolve(0)
   }
 }
 
@@ -34,7 +34,7 @@ describe('call-busy.store', () => {
   let store: CallBusyStore
 
   beforeEach(() => {
-    store = new CallBusyStore(new FakeRedis())
+    store = new CallBusyStore(new FakeRedis() as never)
   })
 
   it('acquire: lần đầu được, cùng callId idempotent, callId khác thì bận', async () => {

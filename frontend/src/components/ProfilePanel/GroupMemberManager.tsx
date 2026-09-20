@@ -456,7 +456,7 @@ export function GroupMemberManager() {
                     <label
                       key={friend.id}
                       style={staggerStyle(index % 20)}
-                      className="flex min-h-16 animate-stagger-in cursor-pointer items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
+                      className="flex min-h-16 animate-stagger-in cursor-pointer items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring"
                     >
                       <input
                         type="checkbox"

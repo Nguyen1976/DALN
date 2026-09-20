@@ -62,5 +62,4 @@ export class NotificationSubscriber {
   async handleChatMention(data: ChatMentionPayload): Promise<void> {
     await this.notificationService.handleChatMention(data)
   }
-
 }

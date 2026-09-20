@@ -70,7 +70,9 @@ export class DatasetBuilderService {
     maxDepth: number,
   ): Map<string, number> {
     const distances = new Map<string, number>()
-    const queue: Array<{ node: string; depth: number }> = [{ node: source, depth: 0 }]
+    const queue: Array<{ node: string; depth: number }> = [
+      { node: source, depth: 0 },
+    ]
     const visited = new Set<string>([source])
 
     while (queue.length) {
@@ -239,7 +241,10 @@ export class DatasetBuilderService {
 
     let attempts = 0
     const maxAttempts = Math.max(targetNegativeCount * 200, 1000)
-    while (sampledNegatives.length < targetNegativeCount && attempts < maxAttempts) {
+    while (
+      sampledNegatives.length < targetNegativeCount &&
+      attempts < maxAttempts
+    ) {
       attempts++
       const a = allUsers[Math.floor(rand() * allUsers.length)]
       const b = allUsers[Math.floor(rand() * allUsers.length)]
@@ -248,7 +253,11 @@ export class DatasetBuilderService {
       if (positiveSet.has(key) || sampledNegatives.includes(key)) continue
       if (components.get(a) !== components.get(b)) continue
       if (neighbors.get(a)?.has(b)) continue
-      const hop = this.bfsDistances(neighbors, a, Math.max(...hardNegativeHops)).get(b)
+      const hop = this.bfsDistances(
+        neighbors,
+        a,
+        Math.max(...hardNegativeHops),
+      ).get(b)
       if (!hop || !hardNegativeHops.includes(hop)) continue
       sampledNegatives.push(key)
     }

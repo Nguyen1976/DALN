@@ -172,7 +172,7 @@ export default function NotificationSettings() {
           {/* Channels grey out, but keep their state, while all is off. */}
           <div
             className={cn(
-              "divide-y divide-border transition-opacity duration-(--motion-base) ease-(--ease-out)",
+              "divide-y divide-border transition-opacity duration-(--motion-base) ease-out",
               globalOff && "opacity-55",
             )}
           >
@@ -229,7 +229,7 @@ export default function NotificationSettings() {
       <SettingsSection title="Theo từng loại" step={2}>
         <SettingsCard
           className={cn(
-            "@container transition-opacity duration-(--motion-base) ease-(--ease-out)",
+            "@container transition-opacity duration-(--motion-base) ease-out",
             globalOff && "opacity-55",
           )}
         >

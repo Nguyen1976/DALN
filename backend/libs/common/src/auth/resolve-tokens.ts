@@ -61,7 +61,7 @@ export function resolveTokens(
   try {
     return {
       ok: true,
-      payload: jwtService.verify(accessToken) as JwtPayload,
+      payload: jwtService.verify(accessToken),
       usedRefresh: false,
     }
   } catch (err) {
@@ -87,7 +87,7 @@ function resolveFromRefresh(
   try {
     return {
       ok: true,
-      payload: jwtService.verify(refreshToken) as JwtPayload,
+      payload: jwtService.verify(refreshToken),
       usedRefresh: true,
     }
   } catch {

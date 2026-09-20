@@ -1,3 +1,5 @@
+import type Redis from 'ioredis'
+
 /**
  * Phiên cuộc gọi trong Redis.
  *
@@ -42,7 +44,7 @@ export class CallSessionStore {
   /** Đã nghe máy thì phiên phải sống hết cuộc gọi — TTL chỉ là lưới dọn rác. */
   private readonly connectedTtlSeconds = 4 * 60 * 60
 
-  constructor(private readonly redisClient: any) {}
+  constructor(private readonly redisClient: Redis) {}
 
   private key(callId: string) {
     return `call:${callId}`

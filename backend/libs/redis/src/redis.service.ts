@@ -1,17 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common'
 import type Redis from 'ioredis'
-// import Redis, { Redis as RedisClient, RedisOptions } from 'ioredis'
+
+/** What the recommendation feature cache holds per user (setUserFeaturesBatch). */
+export interface CachedFeatures {
+  bio: string | null
+  location: unknown
+  interests: string[]
+}
 
 /** Set chỉ mục các user đang online — phải khớp với UserStatusStore. */
 const ONLINE_USERS_KEY = 'online:users'
 
 @Injectable()
 export class RedisService {
-  //   static create(options?: RedisOptions): RedisClient {
-  //     const client: RedisClient = new Redis(options as RedisOptions)
-  //     return client
-  //   }
-  constructor(@Inject('REDIS_CLIENT') private readonly redisClient) {}
+  constructor(@Inject('REDIS_CLIENT') private readonly redisClient: Redis) {}
 
   private getKey(userId: string) {
     return `user:${userId}:sockets`
@@ -19,16 +21,16 @@ export class RedisService {
 
   async isOnline(userId: string): Promise<boolean> {
     const userKey = this.getKey(userId)
-    const sockets: string[] = await this.redisClient.smembers(userKey)
+    const sockets = await this.redisClient.smembers(userKey)
 
     if (!sockets.length) return false
 
     // Gộp N lệnh EXISTS vào 1 pipeline: 1 round-trip thay vì N.
-    const res: [Error | null, unknown][] = await this.redisClient
-      .pipeline(sockets.map((id) => ['exists', `socket:${id}`]))
-      .exec()
+    const res = await this.pipeline(
+      sockets.map((id) => ['exists', `socket:${id}`]),
+    )
 
-    const dead = sockets.filter((_, i) => !res?.[i]?.[1])
+    const dead = sockets.filter((_, i) => !res[i]?.[1])
     if (dead.length) await this.redisClient.srem(userKey, ...dead)
 
     if (dead.length === sockets.length) {
@@ -52,31 +54,27 @@ export class RedisService {
     const result = new Map<string, boolean>(userIds.map((id) => [id, false]))
     if (!userIds.length) return result
 
-    const sets: [Error | null, string[]][] = await this.redisClient
-      .pipeline(userIds.map((id) => ['smembers', this.getKey(id)]))
-      .exec()
+    const sets = await this.pipeline(
+      userIds.map((id) => ['smembers', this.getKey(id)]),
+    )
 
     const probes: { userId: string; socketId: string }[] = []
     userIds.forEach((userId, i) => {
-      for (const socketId of sets?.[i]?.[1] ?? []) {
+      for (const socketId of (sets[i]?.[1] as string[] | undefined) ?? []) {
         probes.push({ userId, socketId })
       }
     })
     if (!probes.length) return result
 
-    const alive: [Error | null, unknown][] = await this.redisClient
-      .pipeline(probes.map((p) => ['exists', `socket:${p.socketId}`]))
-      .exec()
+    const alive = await this.pipeline(
+      probes.map((p) => ['exists', `socket:${p.socketId}`]),
+    )
 
     probes.forEach((p, i) => {
-      if (alive?.[i]?.[1]) result.set(p.userId, true)
+      if (alive[i]?.[1]) result.set(p.userId, true)
     })
 
     return result
-  }
-
-  async hincrby(redisKey: string, field: string, increment: number) {
-    await this.redisClient.hincrby(redisKey, field, increment)
   }
 
   async sadd(key: string, ...members: string[]): Promise<number> {
@@ -101,18 +99,6 @@ export class RedisService {
     const res = await this.redisClient.spop(key, count)
     if (!res) return []
     return Array.isArray(res) ? res : [res]
-  }
-
-  /**
-   * @deprecated KEYS duyệt toàn bộ keyspace và CHẶN Redis (đơn luồng) —
-   * đo được 45,7ms ở 1 triệu key. Dùng Set chỉ mục + {@link spop} thay thế.
-   */
-  async keys(pattern: string): Promise<string[]> {
-    return await this.redisClient.keys(pattern)
-  }
-
-  async hgetall(key: string): Promise<Record<string, string>> {
-    return await this.redisClient.hgetall(key)
   }
 
   async del(key: string): Promise<void> {
@@ -142,7 +128,7 @@ export class RedisService {
     commands: (string | number)[][],
   ): Promise<[Error | null, unknown][]> {
     if (!commands.length) return []
-    return await this.redisClient.pipeline(commands).exec()
+    return (await this.redisClient.pipeline(commands).exec()) ?? []
   }
 
   /**
@@ -155,8 +141,7 @@ export class RedisService {
     keys: string[],
     args: (string | number)[] = [],
   ): Promise<unknown> {
-    const client = this.redisClient as Redis
-    return await client.eval(script, keys.length, ...keys, ...args)
+    return await this.redisClient.eval(script, keys.length, ...keys, ...args)
   }
 
   private getRegistrationOtpKey(email: string): string {
@@ -190,9 +175,18 @@ export class RedisService {
    * two concurrent requests cannot both win it. Enforcing this server side is
    * the point: the countdown in the browser is a courtesy, not a control.
    */
-  async claimOtpResendSlot(email: string, cooldownSeconds = 30): Promise<number> {
+  async claimOtpResendSlot(
+    email: string,
+    cooldownSeconds = 30,
+  ): Promise<number> {
     const key = this.getOtpResendKey(email)
-    const won = await this.redisClient.set(key, '1', 'EX', cooldownSeconds, 'NX')
+    const won = await this.redisClient.set(
+      key,
+      '1',
+      'EX',
+      cooldownSeconds,
+      'NX',
+    )
     if (won) return 0
     const ttl = await this.redisClient.ttl(key)
     return ttl > 0 ? ttl : cooldownSeconds
@@ -219,34 +213,21 @@ export class RedisService {
     return `user:${userId}:features`
   }
 
-  async getUserFeatures(userId: string): Promise<Record<string, any> | null> {
-    try {
-      const key = this.getFeaturesKey(userId)
-      const data = await this.redisClient.hgetall(key)
-      if (!data || Object.keys(data).length === 0) return null
-      return data
-    } catch (err) {
-      console.error(`[RedisService] Error getting features for ${userId}:`, err)
-      return null
-    }
-  }
-
   async getUserFeaturesBatch(
     userIds: string[],
-  ): Promise<Record<string, Record<string, any>>> {
+  ): Promise<Record<string, CachedFeatures>> {
     try {
       const keys = userIds.map((id) => this.getFeaturesKey(id))
       const results = await this.redisClient.mget(...keys)
 
-      const featuresByUserId: Record<string, Record<string, any>> = {}
+      const featuresByUserId: Record<string, CachedFeatures> = {}
       for (let i = 0; i < userIds.length; i++) {
         const data = results[i]
-        if (data) {
-          try {
-            featuresByUserId[userIds[i]] = JSON.parse(data)
-          } catch {
-            featuresByUserId[userIds[i]] = data
-          }
+        if (!data) continue
+        try {
+          featuresByUserId[userIds[i]] = JSON.parse(data) as CachedFeatures
+        } catch {
+          // Unreadable entry: treat as a cache miss.
         }
       }
       return featuresByUserId
@@ -256,37 +237,11 @@ export class RedisService {
     }
   }
 
-  async setUserFeatures(
-    userId: string,
-    features: { bio?: string; location?: any; interests?: string[] },
-    ttl = 86400,
-  ): Promise<void> {
-    try {
-      const key = this.getFeaturesKey(userId)
-      const serialized = JSON.stringify(features)
-      await this.redisClient.set(key, serialized, 'EX', ttl)
-    } catch (err) {
-      console.error(`[RedisService] Error setting features for ${userId}:`, err)
-    }
-  }
-
-  async deleteUserFeatures(userId: string): Promise<void> {
-    try {
-      const key = this.getFeaturesKey(userId)
-      await this.redisClient.del(key)
-    } catch (err) {
-      console.error(
-        `[RedisService] Error deleting features for ${userId}:`,
-        err,
-      )
-    }
-  }
-
   async setUserFeaturesBatch(
     profiles: Array<{
       id: string
       bio?: string | null
-      location?: any
+      location?: unknown
       interests?: string[]
     }>,
     ttl = 86400,
