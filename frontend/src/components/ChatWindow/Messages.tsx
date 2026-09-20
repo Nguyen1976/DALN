@@ -17,6 +17,7 @@ import {
   Check,
   ChevronRight,
   Loader2,
+  Maximize2,
   MoreVertical,
   RotateCcw,
   Trash2,
@@ -98,6 +99,11 @@ import {
 import FileAttachmentPreview from "./FileAttachmentPreview";
 import CallLogMessage from "./CallLogMessage";
 import QuotedMessagePreview from "./QuotedMessagePreview";
+import {
+  mediaItemsOf,
+  resolveMediaKind,
+} from "@/utils/conversationMedia";
+import type { LightboxAnchor } from "@/components/MediaLightbox";
 import { parseLegacyCallInfo } from "@/utils/callLog";
 
 const MessageComponent = ({
@@ -111,6 +117,7 @@ const MessageComponent = ({
   onDiscardMessage,
   onReplyMessage,
   onJumpToMessage,
+  onOpenMedia,
   isGroup = false,
   members = [],
 }: {
@@ -129,28 +136,12 @@ const MessageComponent = ({
   onDiscardMessage?: (message: Message) => void;
   onReplyMessage?: (message: Message) => void;
   onJumpToMessage?: (messageId: string) => void;
+  /** Mở trình xem ảnh, bắt đầu từ tấm được bấm. */
+  onOpenMedia?: (anchor: LightboxAnchor) => void;
   /** Dùng để tô đúng mention của tin CŨ (chưa có `mentions` kèm theo). */
   members?: MentionMember[];
 }) => {
   const user = useSelector(selectUser);
-
-  const resolveMediaKind = (media: {
-    mediaType?: string;
-    mimeType?: string;
-  }): "IMAGE" | "VIDEO" | "FILE" => {
-    const mediaType = String(media.mediaType || "").toUpperCase();
-    const mimeType = String(media.mimeType || "").toLowerCase();
-
-    if (mediaType.includes("IMAGE") || mimeType.startsWith("image/")) {
-      return "IMAGE";
-    }
-
-    if (mediaType.includes("VIDEO") || mimeType.startsWith("video/")) {
-      return "VIDEO";
-    }
-
-    return "FILE";
-  };
 
   return (
     <>
@@ -204,6 +195,10 @@ const MessageComponent = ({
           fileMedias.length > 0;
         const showSenderLabel = Boolean(
           !isMine && isGroup && showAvatar && senderName,
+        );
+        const mediaSeed = showBareMedia ? mediaItemsOf(message) : [];
+        const canOpenMedia = Boolean(
+          onOpenMedia && message.status !== "pending" && mediaSeed.length > 0,
         );
         const selectedPollOptions = message.poll?.myOptionIds ?? [];
 
@@ -498,43 +493,89 @@ const MessageComponent = ({
                     >
                       {visualMedias.map((media, mediaIndex) => {
                         const mediaKind = resolveMediaKind(media);
-                        const frame = isMediaGrid
-                          ? "h-32 w-full rounded-lg"
-                          : "max-h-80 w-full max-w-72 rounded-2xl";
+                        const frame = cn(
+                          "block overflow-hidden border border-border/50 bg-muted",
+                          isMediaGrid
+                            ? "h-32 w-full rounded-lg"
+                            : "w-full max-w-72 rounded-2xl",
+                        );
+                        const seedItem = mediaSeed[mediaIndex];
+                        const openThis = () =>
+                          seedItem &&
+                          onOpenMedia?.({
+                            seed: mediaSeed,
+                            currentKey: seedItem.key,
+                          });
 
                         if (mediaKind === "IMAGE") {
                           return (
-                            <img
+                            <button
                               key={`${message.id}-${mediaIndex}`}
-                              src={media.url}
-                              alt={
-                                media.fileName
-                                  ? `Ảnh: ${media.fileName}`
-                                  : `Ảnh do ${senderName || "người dùng"} gửi`
-                              }
-                              loading="lazy"
-                              decoding="async"
-                              // Reserving a box keeps the thread from jumping
-                              // when the image finally decodes.
+                              type="button"
+                              // Tin chưa gửi xong mới chỉ có blob tạm trong máy;
+                              // mở trình xem lúc này là xem một bức ảnh chưa tồn
+                              // tại ở đâu cả.
+                              disabled={!canOpenMedia}
+                              onClick={openThis}
                               className={cn(
                                 frame,
-                                "border border-border/50 bg-muted object-cover",
+                                "transition-[filter] duration-(--motion-fast)",
+                                canOpenMedia &&
+                                  "cursor-zoom-in hover:brightness-95",
+                                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                               )}
-                            />
+                            >
+                              <img
+                                src={media.url}
+                                alt={
+                                  media.fileName
+                                    ? `Ảnh: ${media.fileName}`
+                                    : `Ảnh do ${senderName || "người dùng"} gửi`
+                                }
+                                loading="lazy"
+                                decoding="async"
+                                // Reserving a box keeps the thread from jumping
+                                // when the image finally decodes.
+                                className={cn(
+                                  "block object-cover",
+                                  isMediaGrid
+                                    ? "size-full"
+                                    : "max-h-80 w-full",
+                                )}
+                              />
+                            </button>
                           );
                         }
 
                         return (
-                          <video
+                          <div
                             key={`${message.id}-${mediaIndex}`}
-                            src={media.url}
-                            controls
-                            preload="metadata"
-                            className={cn(
-                              frame,
-                              "border border-border/50 bg-muted object-cover",
+                            className={cn(frame, "relative")}
+                          >
+                            <video
+                              src={media.url}
+                              controls
+                              preload="metadata"
+                              className={cn(
+                                "block object-cover",
+                                isMediaGrid ? "size-full" : "max-h-80 w-full",
+                              )}
+                            />
+                            {/* Thẻ video đã nuốt cú bấm cho nút phát của nó, nên
+                                lối vào trình xem là một nút riêng ở góc — không
+                                lồng nút trong nút. */}
+                            {canOpenMedia && (
+                              <button
+                                type="button"
+                                aria-label="Xem toàn màn hình"
+                                title="Xem toàn màn hình"
+                                onClick={openThis}
+                                className="absolute right-1.5 top-1.5 inline-flex size-8 items-center justify-center rounded-lg bg-black/55 text-white transition-colors duration-(--motion-fast) hover:bg-black/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                              >
+                                <Maximize2 className="size-4" />
+                              </button>
                             )}
-                          />
+                          </div>
                         );
                       })}
                     </div>

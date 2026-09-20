@@ -315,6 +315,9 @@ export class MessageRepository {
       where: {
         conversationId,
         isDeleted: false,
+        // Thu hồi với mọi người mà bức ảnh vẫn nằm trong tab Ảnh/Video và mở
+        // được đầy màn hình thì không phải là thu hồi.
+        isRevoked: false,
         // Both filters are an OR of their own, so they meet under AND.
         // Spreading the cursor in and then assigning `where.OR` for the kind
         // overwrote the cursor's OR: every "next page" came back as the first

@@ -4,6 +4,12 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getConversationAssetsAPI } from "@/apis";
+import {
+  mediaItemsOf,
+  mergeMediaItems,
+  type MediaItem,
+} from "@/utils/conversationMedia";
+import type { LightboxAnchor } from "@/components/MediaLightbox";
 import type { Message } from "@/redux/slices/messageSlice";
 import { selectConversationById } from "@/redux/slices/conversationSlice";
 import type { RootState } from "@/redux/store";
@@ -17,7 +23,7 @@ import {
 } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useClearConversationHistory } from "@/hooks/chat/useChatMessageActions";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { GroupMemberManager } from "./GroupMemberManager";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
@@ -40,12 +46,15 @@ interface ProfilePanelProps {
   conversationId: string;
   onClose: () => void;
   onJumpToMessage: (messageId: string) => void;
+  /** Mở trình xem ảnh — cùng hành vi như bấm ảnh trong luồng chat. */
+  onOpenMedia?: (anchor: LightboxAnchor) => void;
 }
 
 export default function ProfilePanel({
   conversationId,
   onClose,
   onJumpToMessage,
+  onOpenMedia,
 }: ProfilePanelProps) {
   const [assetKind, setAssetKind] = useState<"MEDIA" | "LINK" | "DOC">("MEDIA");
   const [assets, setAssets] = useState<Message[]>([]);
@@ -145,14 +154,15 @@ export default function ProfilePanel({
     },
   });
 
-  const resolveMediaPreviewUrl = (message: Message) => {
-    const media = message.medias?.[0];
-    if (media?.url) return media.url;
-
-    const content = message.content;
-    if (content.startsWith("http")) return content;
-    return "";
-  };
+  // Trước đây tab này chỉ lấy `medias[0]`, nên một tin ba ảnh chỉ đếm là một —
+  // và hai bức còn lại không có cách nào mở tới.
+  const mediaItems: MediaItem[] = useMemo(
+    () =>
+      assetKind === "MEDIA"
+        ? mergeMediaItems([], assets.flatMap(mediaItemsOf))
+        : [],
+    [assetKind, assets],
+  );
 
   // Files uploaded before names were stored fall back to the URL's last part.
   const resolveFileName = (message: Message) => {
@@ -326,33 +336,38 @@ export default function ProfilePanel({
             {/* Keyed on the tab: switching Ảnh/Liên kết/Tài liệu slides the
                 new list in instead of swapping it in place. */}
             <div key={assetKind} className="animate-slide-in-up space-y-2">
+              {assetKind === "MEDIA" &&
+                mediaItems.map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() =>
+                      onOpenMedia
+                        ? onOpenMedia({
+                            seed: mediaItems,
+                            currentKey: item.key,
+                          })
+                        : onJumpToMessage(item.messageId)
+                    }
+                    className="w-full rounded-lg border border-border p-2 text-left transition-colors hover:bg-accent"
+                  >
+                    <div className="flex items-center gap-2">
+                      <ImageIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <img
+                        src={item.thumbnailUrl || item.url}
+                        alt=""
+                        aria-hidden="true"
+                        loading="lazy"
+                        className="size-12 rounded-md object-cover"
+                      />
+                      <p className="truncate text-xs text-muted-foreground">
+                        {item.fileName ||
+                          (item.kind === "VIDEO" ? "Video" : "Hình ảnh")}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+
               {assets.map((message) => {
-                if (assetKind === "MEDIA") {
-                  const url = resolveMediaPreviewUrl(message);
-                  if (!url) return null;
-
-                  return (
-                    <button
-                      key={message.id}
-                      onClick={() => onJumpToMessage(message.id)}
-                      className="w-full rounded-lg border border-border p-2 text-left transition-colors hover:bg-accent"
-                    >
-                      <div className="flex items-center gap-2">
-                        <ImageIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <img
-                          src={url}
-                          alt={message.content || "Tệp phương tiện đã gửi"}
-                          loading="lazy"
-                          className="size-12 rounded-md object-cover"
-                        />
-                        <p className="truncate text-xs text-muted-foreground">
-                          {message.content || "Tệp phương tiện"}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                }
-
                 if (assetKind === "LINK") {
                   const link = resolvePrimaryLink(message);
                   if (!link) return null;
