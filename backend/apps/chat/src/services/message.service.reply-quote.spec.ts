@@ -57,4 +57,60 @@ describe('MessageService — reply quotes survive the realtime path', () => {
     // The HTTP answer and the socket event carry the same object.
     expect(published).toBe(message)
   })
+
+  /**
+   * Replying to a photo used to quote the file name — "IMG_3946.jpeg" — because
+   * the quote carried nothing but `fileName`. The bubble needs the picture
+   * itself, so the flattened quote passes the media's URL along too.
+   */
+  it('publishes the quoted media so a reply can show the picture', () => {
+    const publishMessageSent = jest.fn<void, [MessageDto, string[]]>()
+    const service = new MessageService(
+      {} as never,
+      {} as never,
+      { publishMessageSent } as never,
+      {} as never,
+      { pipeline: jest.fn().mockResolvedValue([]) } as never,
+      {} as never, // pollRepo
+    )
+
+    service.notifyMessageCreated({
+      conversationId: CONV,
+      senderId: SENDER,
+      message: {
+        id: '6a350000000000000000ab04',
+        conversationId: CONV,
+        senderId: SENDER,
+        content: 'ok',
+        type: 'TEXT',
+        createdAt: new Date('2026-09-01T10:00:00Z'),
+        replyToMessageId: '6a350000000000000000ab03',
+        replyTo: {
+          id: '6a350000000000000000ab03',
+          senderId: OTHER,
+          content: '',
+          type: 'IMAGE',
+          senderMember: { userId: OTHER, fullName: 'Bình', username: 'binh' },
+          medias: [
+            {
+              mediaType: 'IMAGE',
+              fileName: 'IMG_3946.jpeg',
+              url: 'https://cdn.test/IMG_3946.jpeg',
+              mimeType: 'image/jpeg',
+              thumbnailUrl: null,
+            },
+          ],
+        },
+      } as never,
+      senderMember: { userId: SENDER, fullName: 'Alice' },
+      memberIds: [SENDER, OTHER],
+      clientMessageId: 'tmp-2',
+    })
+
+    expect(publishMessageSent.mock.calls[0][0].replyTo).toMatchObject({
+      attachmentType: 'IMAGE',
+      attachmentUrl: 'https://cdn.test/IMG_3946.jpeg',
+      attachmentName: 'IMG_3946.jpeg',
+    })
+  })
 })

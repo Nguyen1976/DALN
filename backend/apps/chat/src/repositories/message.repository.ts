@@ -268,7 +268,20 @@ export class MessageRepository {
         isDeleted: true,
         createdAt: true,
         senderMember: SENDER_SELECT,
-        medias: { select: { mediaType: true, fileName: true }, take: 1 },
+        // The first attachment only — a reply bubble shows one thumbnail.
+        // Ordered, because `take: 1` on an unordered relation picked an
+        // arbitrary image out of a multi-photo message.
+        medias: {
+          select: {
+            mediaType: true,
+            fileName: true,
+            url: true,
+            mimeType: true,
+            thumbnailUrl: true,
+          },
+          orderBy: { sortOrder: 'asc' },
+          take: 1,
+        },
       },
     })
   }

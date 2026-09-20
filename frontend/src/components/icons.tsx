@@ -160,6 +160,7 @@ export {
   PencilLine,
   PhoneMissed,
   PhoneOff,
+  Play,
   Quote,
   Reply,
   Save,

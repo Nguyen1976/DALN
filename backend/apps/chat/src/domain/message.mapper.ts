@@ -56,7 +56,10 @@ type QuotedMessage = Pick<
   'id' | 'senderId' | 'content' | 'type' | 'isRevoked'
 > & {
   senderMember?: Person | null
-  medias?: Pick<messageMedia, 'fileName'>[]
+  medias?: Pick<
+    messageMedia,
+    'mediaType' | 'fileName' | 'url' | 'mimeType' | 'thumbnailUrl'
+  >[]
 }
 
 /**
@@ -91,6 +94,24 @@ export type MessageRow = Pick<
     /** Only on the sender's own copy, to match it with the optimistic one. */
     clientMessageId?: string
   }
+
+/**
+ * What a reply bubble needs of the quoted message's first attachment. Kept
+ * flat (rather than a nested object) so the fields that already shipped —
+ * `attachmentName` — stay where clients look for them.
+ */
+function quotedAttachmentOf(
+  media: NonNullable<QuotedMessage['medias']>[number] | undefined,
+) {
+  if (!media) return {}
+  return {
+    attachmentName: media.fileName || undefined,
+    attachmentType: media.mediaType || undefined,
+    attachmentUrl: media.url || undefined,
+    attachmentMimeType: media.mimeType || undefined,
+    attachmentThumbnailUrl: media.thumbnailUrl || undefined,
+  }
+}
 
 export class MessageMapper {
   /**
@@ -128,7 +149,12 @@ export class MessageMapper {
               : (message.replyTo.content ?? '').trim(),
             type: message.replyTo.type || 'TEXT',
             isRevoked: Boolean(message.replyTo.isRevoked),
-            attachmentName: message.replyTo.medias?.[0]?.fileName || undefined,
+            // The first attachment, flattened: a reply to a photo shows the
+            // photo, not its file name, so the URL travels with the quote.
+            // Revoked originals send nothing — there is no picture any more.
+            ...(message.replyTo.isRevoked
+              ? {}
+              : quotedAttachmentOf(message.replyTo.medias?.[0])),
           }
         : undefined,
       isRevoked: Boolean(message.isRevoked),

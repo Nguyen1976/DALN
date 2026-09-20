@@ -14,6 +14,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
+  Play,
   Smile,
   Send,
   ChevronDown,
@@ -186,6 +187,23 @@ export default function ChatWindow({
     stopTyping,
     scrollToBottom,
   });
+
+  // Ảnh/video đầu tiên của tin đang trả lời, để thanh trích dẫn vẽ được nó.
+  const replyQuoteThumbnail = useMemo(() => {
+    const media = replyingTo?.medias?.[0];
+    if (!media) return null;
+    const isImage =
+      media.mediaType === "IMAGE" || media.mimeType?.startsWith("image/");
+    const isVideo =
+      media.mediaType === "VIDEO" || media.mimeType?.startsWith("video/");
+    if (isImage) return { src: media.url, isVideo: false };
+    // Video chỉ vẽ được khi server đã sinh poster; không có thì thanh trích
+    // dẫn về lại dạng chữ.
+    if (isVideo && media.thumbnailUrl) {
+      return { src: media.thumbnailUrl, isVideo: true };
+    }
+    return null;
+  }, [replyingTo]);
 
   const { handleRevokeMessage, handleDeleteMessageForMe } =
     useChatMessageActions({ conversationId, messages });
@@ -637,6 +655,26 @@ export default function ChatWindow({
                   : MessageMapper.previewText(replyingTo)}
               </p>
             </div>
+            {/* Cùng lý do như khối trích dẫn trong luồng chat: trả lời một bức
+                ảnh thì phải thấy bức ảnh, không phải tên tệp. */}
+            {!replyingTo.isRevoked && replyQuoteThumbnail && (
+              <span className="relative size-10 shrink-0 self-center overflow-hidden rounded-md bg-muted">
+                <img
+                  src={replyQuoteThumbnail.src}
+                  alt=""
+                  aria-hidden="true"
+                  className="size-full object-cover"
+                />
+                {replyQuoteThumbnail.isVideo && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-0 flex items-center justify-center bg-black/35 text-white"
+                  >
+                    <Play className="size-3.5 fill-current" />
+                  </span>
+                )}
+              </span>
+            )}
             <Button
               variant="ghost-muted"
               size="icon-sm"

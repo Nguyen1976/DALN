@@ -405,6 +405,17 @@ export function useChatComposer({
               content: quoted.content,
               type: String(quoted.type ?? "TEXT"),
               isRevoked: Boolean(quoted.isRevoked),
+              // Kèm luôn ảnh của tin gốc, nếu không bản tạm hiện chữ "Hình
+              // ảnh" rồi mới nháy sang thumbnail khi máy chủ trả lời.
+              ...(quoted.medias?.[0]
+                ? {
+                    attachmentName: quoted.medias[0].fileName,
+                    attachmentType: quoted.medias[0].mediaType,
+                    attachmentUrl: quoted.medias[0].url,
+                    attachmentMimeType: quoted.medias[0].mimeType,
+                    attachmentThumbnailUrl: quoted.medias[0].thumbnailUrl,
+                  }
+                : {}),
             },
           }
         : {}),
