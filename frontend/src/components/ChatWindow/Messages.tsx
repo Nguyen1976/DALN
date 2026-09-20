@@ -6,6 +6,7 @@ import {
   formatDateTime,
   formatDayDivider,
   formatFullDateTime,
+  hasTimeGap,
   isNewDay,
 } from "@/utils/formatDateTime";
 import { useSelector } from "react-redux";
@@ -157,15 +158,20 @@ const MessageComponent = ({
         // A day divider also breaks the visual grouping — the first message
         // after a new day always shows its avatar and sender again.
         const startsNewDay = isNewDay(message.createdAt, prevMessage?.createdAt);
-        const nextStartsNewDay = isNewDay(
-          nextMessage?.createdAt,
-          message.createdAt,
-        );
+
+        // Khoảng lặng cũng ngắt nhóm như sang ngày mới. Nhóm tin CHỈ theo người
+        // gửi thì mười tin rải suốt buổi chiều dán thành một khối liền, đọc
+        // không ra lúc nào là lúc nào — và đó là bức tường ở ảnh người dùng gửi.
+        const startsNewBlock =
+          startsNewDay || hasTimeGap(message.createdAt, prevMessage?.createdAt);
+        const nextStartsNewBlock =
+          isNewDay(nextMessage?.createdAt, message.createdAt) ||
+          hasTimeGap(nextMessage?.createdAt, message.createdAt);
 
         const isSameAsPrev =
-          prevMessage?.senderId === message.senderId && !startsNewDay;
+          prevMessage?.senderId === message.senderId && !startsNewBlock;
         const isSameAsNext =
-          nextMessage?.senderId === message.senderId && !nextStartsNewDay;
+          nextMessage?.senderId === message.senderId && !nextStartsNewBlock;
 
         const showAvatar = !isSameAsPrev;
         const isRevoked = Boolean(message.isRevoked);
@@ -202,13 +208,25 @@ const MessageComponent = ({
         );
         const selectedPollOptions = message.poll?.myOptionIds ?? [];
 
-        const dayDivider = startsNewDay ? (
+        // Sang ngày mới thì cần cả ngày; trong cùng một ngày chỉ cần giờ, nên
+        // nhãn giờ nhẹ hơn hẳn vạch ngày — không gạch ngang, không nền.
+        const blockDivider = startsNewDay ? (
           <div className="my-4 flex items-center gap-3" role="separator">
             <span className="h-px flex-1 bg-border" />
             <span className="rounded-full bg-muted px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               {formatDayDivider(message.createdAt)}
             </span>
             <span className="h-px flex-1 bg-border" />
+          </div>
+        ) : startsNewBlock ? (
+          <div className="my-3 flex justify-center" role="separator">
+            <time
+              dateTime={message.createdAt}
+              title={formatFullDateTime(message.createdAt)}
+              className="text-[11px] font-medium tabular-nums text-muted-foreground"
+            >
+              {formatDateTime(message.createdAt)}
+            </time>
           </div>
         ) : null;
 
@@ -220,7 +238,7 @@ const MessageComponent = ({
 
           return (
             <div key={rowKey}>
-              {dayDivider}
+              {blockDivider}
               <div
                 id={`message-${message.id}`}
                 className={cn(
@@ -356,7 +374,7 @@ const MessageComponent = ({
         if (callInfo) {
           return (
             <div key={rowKey}>
-              {dayDivider}
+              {blockDivider}
               <div
                 id={`message-${message.id}`}
                 className={cn(
@@ -388,7 +406,7 @@ const MessageComponent = ({
         if (message.isSystem) {
           return (
             <div key={rowKey}>
-              {dayDivider}
+              {blockDivider}
               <div
                 id={`message-${message.id}`}
                 className={cn(
@@ -413,12 +431,15 @@ const MessageComponent = ({
 
         return (
           <div key={rowKey}>
-            {dayDivider}
+            {blockDivider}
             <div
               id={`message-${message.id}`}
               className={cn(
                 "scroll-mt-24 rounded-lg transition-colors duration-300",
-                isSameAsNext ? "mb-0.5" : "mb-2",
+                // Bong bóng chữ liền nhau đọc như một đoạn văn nên sát nhau là
+                // đúng; ảnh trần thì không — xếp sát, ảnh này chồng lên khối
+                // trích dẫn của ảnh kia thành một mảng đặc.
+                isSameAsNext ? (showBareMedia ? "mb-2" : "mb-0.5") : "mb-4",
                 highlightMessageId === message.id && "bg-accent",
               )}
             >
