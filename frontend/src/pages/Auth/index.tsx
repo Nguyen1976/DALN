@@ -1,5 +1,4 @@
 import { MessagesSquare, ShieldCheck, Sparkles } from "@/components/icons";
-import { useState } from "react";
 
 import { AuthForm } from "@/components/AuthForm";
 import { BrandLockup, BrandMark } from "@/components/Brand";
@@ -27,8 +26,6 @@ const HIGHLIGHTS = [
 ];
 
 export default function AuthPage() {
-  const [mode, setMode] = useState<"login" | "register">("login");
-
   return (
     <div className="relative min-h-dvh w-full bg-background lg:grid lg:grid-cols-[1.05fr_1fr]">
       {/* Theme switch belongs to the page, not to the form card — it stays put
@@ -103,7 +100,7 @@ export default function AuthPage() {
           style={staggerStyle(1)}
         >
           <BrandLockup className="mb-8 lg:hidden" />
-          <AuthForm mode={mode} onModeChange={setMode} />
+          <AuthForm />
         </div>
       </main>
     </div>
