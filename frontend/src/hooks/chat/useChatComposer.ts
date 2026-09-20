@@ -6,11 +6,8 @@ import {
   type MessageMediaInput,
 } from "@/apis";
 import { socket } from "@/lib/socket";
-import {
-  addConversation,
-  updateNewMessage,
-  type Conversation,
-} from "@/redux/slices/conversationSlice";
+import { displayNameOf } from "@/utils/displayName";
+import { updateNewMessage } from "@/redux/slices/conversationSlice";
 import {
   addMessage,
   discardMessage,
@@ -32,8 +29,6 @@ interface UseChatComposerOptions {
   conversationId?: string;
   user: UserState;
   canSendMessage: boolean;
-  conversation?: Conversation;
-  effectiveConversation?: Conversation;
   stopTyping: () => void;
   /** Cuộn danh sách tin xuống đáy — chỉ danh sách, không kéo cả trang. */
   scrollToBottom: () => void;
@@ -59,13 +54,10 @@ export function useChatComposer({
   conversationId,
   user,
   canSendMessage,
-  conversation,
-  effectiveConversation,
   stopTyping,
   scrollToBottom,
 }: UseChatComposerOptions) {
   const dispatch = useDispatch<AppDispatch>();
-  const [mentionUserIds, setMentionUserIds] = useState<string[]>([]);
   /**
    * The composer text lives in the store, keyed by conversation.
    *
@@ -114,29 +106,12 @@ export function useChatComposer({
     [conversationId, dispatch],
   );
 
-  const ensureConversationInStore = useCallback(
-    (lastMessage: Message) => {
-      if (!conversationId || conversation || !effectiveConversation) return;
-
-      dispatch(
-        addConversation({
-          conversation: {
-            ...effectiveConversation,
-            lastMessage,
-            updatedAt: lastMessage.createdAt || effectiveConversation.updatedAt,
-          },
-        }),
-      );
-    },
-    [conversation, conversationId, dispatch, effectiveConversation],
-  );
-
   const createTempMessage = useCallback(
     (partial: Partial<Message> & Pick<Message, "id" | "type">): Message => ({
       id: partial.id,
       conversationId: conversationId || "",
       senderId: user.id,
-      text: partial.text ?? "",
+      content: partial.content ?? "",
       type: partial.type,
       medias: partial.medias,
       clientMessageId: partial.clientMessageId,
@@ -167,13 +142,11 @@ export function useChatComposer({
       content,
       clientMessageId,
       replyToMessageId,
-      mentionUserIds: mentions,
     }: {
       conversationId: string;
       content: string;
       clientMessageId: string;
       replyToMessageId?: string;
-      mentionUserIds?: string[];
     }) => {
       if (!socket.connected) {
         dispatch(failMessage({ conversationId: cid, clientMessageId }));
@@ -186,8 +159,7 @@ export function useChatComposer({
         content,
         clientMessageId,
         replyToMessageId,
-        media: [],
-        mentionUserIds: mentions || [],
+        medias: [],
       });
 
       window.setTimeout(() => {
@@ -206,10 +178,9 @@ export function useChatComposer({
       dispatch(retryMessage({ conversationId, clientMessageId }));
       emitMessage({
         conversationId,
-        content: message.text || "",
+        content: message.content,
         clientMessageId,
         replyToMessageId: message.replyToMessageId,
-        mentionUserIds: message.mentionUserIds,
       });
     },
     [conversationId, dispatch, emitMessage],
@@ -316,7 +287,7 @@ export function useChatComposer({
 
   /** Uploads every queued file, then sends one message carrying all of them. */
   const sendWithAttachments = useCallback(
-    async (pending: PendingAttachment[], text: string, quoted: Message | null) => {
+    async (pending: PendingAttachment[], content: string, quoted: Message | null) => {
       if (!conversationId) return;
 
       const clientMessageId = createClientMessageId("temp-media");
@@ -336,7 +307,7 @@ export function useChatComposer({
       const tempMessage = createTempMessage({
         id: clientMessageId,
         type: messageType,
-        text,
+        content,
         medias: tempMedias,
         clientMessageId,
         ...(quoted ? { replyToMessageId: quoted.id } : {}),
@@ -344,7 +315,6 @@ export function useChatComposer({
 
       dispatch(addMessage(tempMessage));
       dispatch(updateNewMessage({ conversationId, lastMessage: tempMessage }));
-      ensureConversationInStore(tempMessage);
 
       setIsUploading(true);
       try {
@@ -379,17 +349,15 @@ export function useChatComposer({
         socket.emit("message:create", {
           conversationId,
           type: messageType,
-          content: text.trim() || null,
+          content: content.trim() || null,
           clientMessageId,
           replyToMessageId: quoted?.id,
-          media: uploaded,
-          mentionUserIds,
+          medias: uploaded,
         });
 
         clearAttachments();
         setMsg("");
         setReplyingTo(null);
-        setMentionUserIds([]);
       } catch (error) {
         showErrorToast(error, "Không thể tải tệp lên");
         dispatch(failMessage({ conversationId, clientMessageId }));
@@ -402,8 +370,6 @@ export function useChatComposer({
       conversationId,
       createTempMessage,
       dispatch,
-      ensureConversationInStore,
-      mentionUserIds,
       setMsg,
       setReplyingTo,
     ],
@@ -424,9 +390,8 @@ export function useChatComposer({
     const tempMessage = createTempMessage({
       id: clientMessageId,
       type: "TEXT",
-      text: msg,
+      content: msg,
       clientMessageId,
-      mentionUserIds,
       // Hiển thị trích dẫn ngay ở bản tạm, không đợi máy chủ dựng lại.
       ...(quoted
         ? {
@@ -434,11 +399,10 @@ export function useChatComposer({
             replyTo: {
               id: quoted.id,
               senderId: quoted.senderId,
-              senderName:
-                quoted.senderMember?.fullName ||
-                quoted.senderMember?.username ||
-                "",
-              text: quoted.text || "",
+              senderName: quoted.senderMember
+                ? displayNameOf(quoted.senderMember)
+                : "",
+              content: quoted.content,
               type: String(quoted.type ?? "TEXT"),
               isRevoked: Boolean(quoted.isRevoked),
             },
@@ -448,19 +412,16 @@ export function useChatComposer({
 
     dispatch(addMessage(tempMessage));
     dispatch(updateNewMessage({ conversationId, lastMessage: tempMessage }));
-    ensureConversationInStore(tempMessage);
 
     emitMessage({
       conversationId,
       content: msg,
       clientMessageId,
       replyToMessageId: quoted?.id,
-      mentionUserIds,
     });
 
     stopTyping();
     setMsg("");
-    setMentionUserIds([]);
     setReplyingTo(null);
 
     requestAnimationFrame(() => {
@@ -473,11 +434,9 @@ export function useChatComposer({
     createTempMessage,
     dispatch,
     emitMessage,
-    ensureConversationInStore,
     msg,
     attachments,
     isUploading,
-    mentionUserIds,
     replyingTo,
     sendWithAttachments,
     setMsg,
@@ -497,7 +456,5 @@ export function useChatComposer({
     addFiles,
     removeAttachment,
     isUploading,
-    mentionUserIds,
-    setMentionUserIds,
   };
 }

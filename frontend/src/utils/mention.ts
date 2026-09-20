@@ -82,26 +82,6 @@ export function resolveMentionsInText(
   return out;
 }
 
-/** Id những người thật sự được nhắc trong text (đã tính cả `@all`). */
-export function mentionedUserIds(
-  mentions: ResolvedMention[],
-  members: MentionMember[],
-  selfId: string,
-): string[] {
-  const ids = new Set<string>();
-  let all = false;
-  for (const mention of mentions) {
-    if ("all" in mention) all = true;
-    else ids.add(mention.userId);
-  }
-  if (all) {
-    for (const member of members) {
-      if (member.userId && member.userId !== selfId) ids.add(member.userId);
-    }
-  }
-  return [...ids];
-}
-
 /** Xoá đúng một lượt nhắc khỏi text (dùng cho nút × trên chip). */
 export function removeMentionFromText(text: string, label: string): string {
   const token = `@${label}`;

@@ -21,9 +21,7 @@ import { NonRetryableError } from './non-retryable.error'
  * Phía consumer, handler nào cần chắc chắn hiểu đúng payload thì gọi
  * `assertSupportedVersion(raw, [1])`, với `raw` là tham số thứ 2 golevelup
  * truyền vào handler (ConsumeMessage). Version lạ -> NonRetryableError ->
- * `retryThenDeadLetter` đẩy thẳng sang dead-letter thay vì xử lý sai. Gọi NGOÀI
- * `safeExecute` — nó bọc lỗi không phải HttpException thành 500 và làm mất tính
- * non-retryable.
+ * `retryThenDeadLetter` đẩy thẳng sang dead-letter thay vì xử lý sai.
  */
 
 /** Header AMQP mang version schema của payload (số nguyên >= 1). */

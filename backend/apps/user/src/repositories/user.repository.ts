@@ -1,6 +1,17 @@
 import { PrismaService } from 'apps/user/prisma/prisma.service'
 import { Inject, Injectable, Logger } from '@nestjs/common'
 
+/** Another user as a list row shows them. */
+export const SUMMARY_SELECT = {
+  id: true,
+  email: true,
+  username: true,
+  fullName: true,
+  avatar: true,
+  bio: true,
+  lastSeen: true,
+} as const
+
 @Injectable()
 export class UserRepository {
   private readonly logger = new Logger(UserRepository.name)
@@ -9,7 +20,9 @@ export class UserRepository {
 
   private toGeoPoint(location?: { lat: number; lon: number }) {
     if (!location) {
-      this.logger.debug('[user.repository] toGeoPoint skipped: no location payload')
+      this.logger.debug(
+        '[user.repository] toGeoPoint skipped: no location payload',
+      )
       return undefined
     }
 
@@ -44,17 +57,10 @@ export class UserRepository {
     })
   }
 
-  async findByIdWithSelect(id: string) {
+  async findSummaryById(id: string) {
     return await this.prisma.user.findUnique({
       where: { id },
-      select: {
-        id: true,
-        fullName: true,
-        username: true,
-        email: true,
-        bio: true,
-        avatar: true,
-      },
+      select: SUMMARY_SELECT,
     })
   }
 
@@ -121,38 +127,11 @@ export class UserRepository {
     })
   }
 
-  async findManyByIds(userIds: string[]) {
+  /** Just what another service needs to show these users. */
+  async findProfilesByIds(userIds: string[]) {
     return await this.prisma.user.findMany({
-      where: {
-        id: { in: userIds },
-      },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        avatar: true,
-        fullName: true,
-        lastSeen: true,
-      },
-    })
-  }
-
-  async findManyByIdsAndUsername(userIds: string[], keyword: string) {
-    return await this.prisma.user.findMany({
-      where: {
-        id: { in: userIds },
-        username: {
-          startsWith: keyword,
-          mode: 'insensitive',
-        },
-      },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        avatar: true,
-        fullName: true,
-      },
+      where: { id: { in: userIds } },
+      select: { id: true, username: true, fullName: true, avatar: true },
     })
   }
 

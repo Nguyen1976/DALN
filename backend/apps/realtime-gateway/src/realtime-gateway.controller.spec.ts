@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { RealtimeGatewayController } from './realtime-gateway.controller'
-import { RealtimeGatewayService } from './realtime-gateway.service'
 import { RealtimeGateway } from './realtime/realtime.gateway'
 
 describe('RealtimeGatewayController', () => {
@@ -10,9 +9,7 @@ describe('RealtimeGatewayController', () => {
     const app: TestingModule = await Test.createTestingModule({
       controllers: [RealtimeGatewayController],
       providers: [
-        RealtimeGatewayService,
-        // Controller giờ ủy thác webhook LiveKit cho gateway; test này chỉ chạm
-        // route root nên một stub là đủ.
+        // Controller ủy thác webhook LiveKit cho gateway; một stub là đủ.
         {
           provide: RealtimeGateway,
           useValue: { applyLivekitWebhook: jest.fn() },
@@ -25,9 +22,7 @@ describe('RealtimeGatewayController', () => {
     )
   })
 
-  describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(realtimeGatewayController.getHello()).toBe('Hello World!')
-    })
+  it('khởi tạo được', () => {
+    expect(realtimeGatewayController).toBeDefined()
   })
 })

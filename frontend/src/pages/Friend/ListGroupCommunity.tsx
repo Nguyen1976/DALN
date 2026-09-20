@@ -2,11 +2,10 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchField } from "@/components/ui/search-field";
 import { Skeleton } from "@/components/ui/skeleton";
-import { searchConversationsAPI, type SearchConversationItem } from "@/apis";
+import { searchConversationsAPI } from "@/apis";
 import {
   applyConversationUpdate,
   getConversations,
-  nextConversationCursor,
   selectConversation,
   type Conversation,
 } from "@/redux/slices/conversationSlice";
@@ -20,8 +19,8 @@ import { showErrorToast } from "@/utils/toastError";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import {
-  markConversationsExhausted,
   selectConversationsHasMore,
+  selectConversationsNextCursor,
 } from "@/redux/slices/conversationPagingSlice";
 import { useListMotion } from "@/hooks/useListMotion";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
@@ -52,7 +51,7 @@ const ListGroupCommunity = () => {
   const conversations = useSelector(selectConversation);
   const [keyword, setKeyword] = useState("");
   const debouncedKeyword = useDebouncedValue(keyword);
-  const [searchResults, setSearchResults] = useState<SearchConversationItem[]>(
+  const [searchResults, setSearchResults] = useState<Conversation[]>(
     [],
   );
   const [isSearching, setIsSearching] = useState(false);
@@ -63,20 +62,15 @@ const ListGroupCommunity = () => {
   // direct chats still sees their groups without scrolling through nothing.
   // Shared with the chat sidebar through redux, so neither starts over.
   const hasMore = useSelector(selectConversationsHasMore);
+  const nextCursor = useSelector(selectConversationsNextCursor);
   const paging = useInfiniteScroll({
     hasMore,
     enabled: !debouncedKeyword,
     itemCount: conversations.length,
-    loadMore: async () => {
-      const cursor = nextConversationCursor(conversations);
-      if (cursor === undefined) {
-        dispatch(markConversationsExhausted());
-        return;
-      }
-      await dispatch(
-        getConversations({ limit: GROUPS_PAGE_SIZE, cursor }),
-      ).unwrap();
-    },
+    loadMore: () =>
+      dispatch(
+        getConversations({ limit: GROUPS_PAGE_SIZE, cursor: nextCursor }),
+      ).unwrap(),
   });
 
   useEffect(() => {
@@ -93,9 +87,7 @@ const ListGroupCommunity = () => {
         setIsSearching(true);
         const results = await searchConversationsAPI(debouncedKeyword);
         if (cancelled) return;
-        setSearchResults(
-          results.filter((conversation) => conversation.type !== "DIRECT"),
-        );
+        setSearchResults(results);
       } catch (error) {
         if (!cancelled) {
           showErrorToast(error, "Không thể tìm kiếm cuộc trò chuyện");
@@ -118,48 +110,35 @@ const ListGroupCommunity = () => {
 
   const displayedGroups = debouncedKeyword ? searchResults : groups;
 
-  const openConversation = (
-    conversation: Conversation | SearchConversationItem,
-  ) => {
-    const existing = conversations.find((item) => item.id === conversation.id);
-
-    if (existing) {
-      navigate(`/chat/${existing.id}`);
-      return;
+  /** A search hit may not be loaded yet: it goes into the store first. */
+  const openConversation = (conversation: Conversation) => {
+    if (!conversations.some((item) => item.id === conversation.id)) {
+      dispatch(applyConversationUpdate({ conversation }));
     }
-
-    dispatch(
-      applyConversationUpdate({
-        conversation: conversation as Conversation,
-      }),
-    );
-
-    navigate(`/chat/${conversation.id}`, {
-      state: { conversation },
-    });
+    navigate(`/chat/${conversation.id}`);
   };
 
   // Groups reorder as they get messages; see useListMotion.
   const listRef = useRef<HTMLDivElement>(null);
   useListMotion(listRef, { id: "groups" });
 
-  const renderGroupItem = (group: Conversation | SearchConversationItem) => {
-    const memberCount = group.memberCount ?? group.members?.length ?? 0;
+  const renderGroupItem = (group: Conversation) => {
+    const { memberCount } = group;
 
     return (
       <button
         key={group.id}
         onClick={() => openConversation(group)}
         data-motion-key={group.id}
-        className="group flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+        className="group flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-(--motion-fast) hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
       >
         <div className="relative shrink-0">
           <Avatar className="size-12">
             <AvatarImage
-              src={(group.groupAvatar as string) || group.displayAvatar || ""}
-              alt={`Ảnh đại diện nhóm ${group.displayName || ""}`}
+              src={group.displayAvatar}
+              alt={`Ảnh đại diện nhóm ${group.displayName}`}
             />
-            <AvatarFallback>{(group.displayName || "G")[0]}</AvatarFallback>
+            <AvatarFallback>{group.displayName[0]}</AvatarFallback>
           </Avatar>
           <span className="absolute -bottom-0.5 -right-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-secondary px-1 text-[10px] font-semibold tabular-nums text-secondary-foreground ring-2 ring-background">
             {memberCount > 99 ? "99+" : memberCount}
@@ -169,7 +148,7 @@ const ListGroupCommunity = () => {
 
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-foreground">
-            {group.displayName || "Nhóm chưa đặt tên"}
+            {group.displayName}
           </p>
           <p className="text-xs text-muted-foreground">
             {memberCount} thành viên

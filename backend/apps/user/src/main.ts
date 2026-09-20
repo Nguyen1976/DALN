@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core'
 import { UserModule } from './user.module'
 import { ValidationPipe } from '@nestjs/common'
-import { AppHttpExceptionFilter, ResponseInterceptor, validationExceptionFactory } from '@app/common'
+import { AppHttpExceptionFilter, validationExceptionFactory } from '@app/common'
 import cookieParser from 'cookie-parser'
 
 async function bootstrap() {
@@ -18,7 +18,6 @@ async function bootstrap() {
     }),
   )
   app.useGlobalFilters(new AppHttpExceptionFilter())
-  app.useGlobalInterceptors(new ResponseInterceptor())
   app.enableCors({
     origin: true,
     credentials: true,
@@ -26,4 +25,4 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3002)
 }
-bootstrap()
+void bootstrap()

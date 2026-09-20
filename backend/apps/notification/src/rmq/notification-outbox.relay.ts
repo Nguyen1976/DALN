@@ -6,6 +6,6 @@ import { PrismaService } from '../../prisma/prisma.service'
 @Injectable()
 export class NotificationOutboxRelay extends OutboxRelay {
   constructor(prisma: PrismaService, amqp: AmqpConnection) {
-    super(prisma as any, amqp, { name: 'NotificationOutboxRelay' })
+    super(prisma, amqp, { name: 'NotificationOutboxRelay' })
   }
 }

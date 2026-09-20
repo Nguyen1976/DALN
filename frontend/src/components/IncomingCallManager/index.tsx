@@ -14,8 +14,12 @@ import { CALL_RING_TIMEOUT_MS } from "@/constants/call";
 import { useIncomingCallRingtone } from "@/hooks/useIncomingCallRingtone";
 import { describeGroupCallError } from "@/utils/groupCallError";
 import { selectFriend } from "@/redux/slices/friendSlice";
-import type { Conversation } from "@/redux/slices/conversationSlice";
+import {
+  findDirectConversationWith,
+  type Conversation,
+} from "@/redux/slices/conversationSlice";
 import type { RootState } from "@/redux/store";
+import { displayNameOf } from "@/utils/displayName";
 
 type CallType = "audio" | "video";
 
@@ -75,12 +79,7 @@ function findConversationByCaller(
     if (byId) return byId;
   }
 
-  return conversations.find(
-    (item) =>
-      item.type === "DIRECT" &&
-      (item.peerUserId === callerId ||
-        item.members?.some((member) => member.userId === callerId)),
-  );
+  return findDirectConversationWith(conversations, callerId);
 }
 
 export default function IncomingCallManager() {
@@ -180,7 +179,7 @@ export default function IncomingCallManager() {
       );
       const friend = from ? friends.find((item) => item.id === from.id) : undefined;
       const callerName =
-        from?.username || friend?.fullName || friend?.username || "Ai đó";
+        (friend && displayNameOf(friend)) || from?.username || "Ai đó";
 
       setIncomingGroupCall({
         callId,

@@ -1,3 +1,5 @@
+import type Redis from 'ioredis'
+
 /**
  * Khoá "đang bận" theo người dùng: một người chỉ ở trong MỘT cuộc gọi tại một thời
  * điểm (dù 1-1 hay nhóm, dù mở ở nhiều tab).
@@ -13,7 +15,7 @@ export class CallBusyStore {
   private readonly ringingTtlSeconds = 60
   private readonly connectedTtlSeconds = 4 * 60 * 60
 
-  constructor(private readonly redisClient: any) {}
+  constructor(private readonly redisClient: Redis) {}
 
   private key(userId: string) {
     return `callbusy:${userId}`

@@ -1,6 +1,8 @@
 import { PrismaService } from 'apps/user/prisma/prisma.service'
 import { Inject, Injectable } from '@nestjs/common'
-import { Status } from 'apps/user/src/generated';
+import { Status } from 'apps/user/src/generated'
+import { olderThanCursor, type KeysetCursor } from '@app/util'
+import { SUMMARY_SELECT } from './user.repository'
 
 @Injectable()
 export class FriendRequestRepository {
@@ -12,15 +14,6 @@ export class FriendRequestRepository {
         fromUserId: data.fromUserId,
         toUserId: data.toUserId,
         status: Status.PENDING,
-      },
-    })
-  }
-
-  async findByUsers(fromUserId: string, toUserId: string) {
-    return await this.prisma.friendRequest.findMany({
-      where: {
-        fromUserId,
-        toUserId,
       },
     })
   }
@@ -38,17 +31,30 @@ export class FriendRequestRepository {
     })
   }
 
-  async findPendingByFromUserId(fromUserId: string, limit: number, page: number) {
+  /**
+   * Pending requests `userId` sent or received, newest first, by keyset, with
+   * both people on them.
+   */
+  async findPending(
+    direction: 'sent' | 'received',
+    userId: string,
+    take: number,
+    cursor: KeysetCursor | null,
+  ) {
     return await this.prisma.friendRequest.findMany({
       where: {
-        fromUserId,
+        ...(direction === 'sent'
+          ? { fromUserId: userId }
+          : { toUserId: userId }),
         status: Status.PENDING,
+        ...olderThanCursor('createdAt', cursor),
       },
-      orderBy: {
-        createdAt: 'desc',
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take,
+      include: {
+        fromUser: { select: SUMMARY_SELECT },
+        toUser: { select: SUMMARY_SELECT },
       },
-      take: limit,
-      skip: (page - 1) * limit,
     })
   }
 
@@ -58,32 +64,19 @@ export class FriendRequestRepository {
     })
   }
 
-  async findPendingByToUserId(toUserId: string, limit: number, page: number) {
-    return await this.prisma.friendRequest.findMany({
-      where: {
-        toUserId,
-        status: Status.PENDING,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      take: limit,
-      skip: (page - 1) * limit,
+  /** A request with the person who sent it. */
+  async findWithSender(id: string) {
+    return await this.prisma.friendRequest.findUnique({
+      where: { id },
+      include: { fromUser: { select: SUMMARY_SELECT } },
     })
   }
 
-  async updateStatus(fromUserId: string, toUserId: string, status: Status) {
+  /** Decline a request that is still waiting; a late duplicate changes nothing. */
+  async decline(requestId: string) {
     return await this.prisma.friendRequest.updateMany({
-      where: {
-        fromUserId,
-        toUserId,
-        // Only a request still waiting can be answered; without this a late
-        // duplicate could overwrite a decision that was already made.
-        status: Status.PENDING,
-      },
-      data: {
-        status,
-      },
+      where: { id: requestId, status: Status.PENDING },
+      data: { status: Status.REJECTED },
     })
   }
 }

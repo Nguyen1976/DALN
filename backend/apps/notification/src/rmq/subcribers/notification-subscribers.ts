@@ -10,7 +10,6 @@ import type {
 } from 'libs/constant/rmq/payload'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
-import { safeExecute } from '@app/common/rpc/safe-execute'
 import { NotificationService } from '../../notification.service'
 
 @Injectable()
@@ -23,7 +22,7 @@ export class NotificationSubscriber {
     queue: QUEUE_RMQ.NOTIFICATION_USER_CREATED,
   })
   async handleUserRegistered(data: UserCreatedPayload): Promise<void> {
-    await safeExecute(() => this.notificationService.handleUserRegistered(data))
+    await this.notificationService.handleUserRegistered(data)
   }
 
   @RabbitSubscribeWithRetry({
@@ -32,9 +31,7 @@ export class NotificationSubscriber {
     queue: QUEUE_RMQ.NOTIFICATION_USER_REGISTER_OTP,
   })
   async handleUserRegisterOtp(data: UserRegisterOtpPayload): Promise<void> {
-    await safeExecute(() =>
-      this.notificationService.handleUserRegisterOtp(data),
-    )
+    await this.notificationService.handleUserRegisterOtp(data)
   }
 
   @RabbitSubscribeWithRetry({
@@ -43,7 +40,7 @@ export class NotificationSubscriber {
     queue: QUEUE_RMQ.NOTIFICATION_USER_MAKE_FRIEND,
   })
   async handleMakeFriend(data: UserMakeFriendPayload): Promise<void> {
-    await safeExecute(() => this.notificationService.handleMakeFriend(data))
+    await this.notificationService.handleMakeFriend(data)
   }
 
   @RabbitSubscribeWithRetry({
@@ -54,9 +51,7 @@ export class NotificationSubscriber {
   async handleUpdateStatusMakeFriend(
     data: UserUpdateStatusMakeFriendPayload,
   ): Promise<void> {
-    await safeExecute(() =>
-      this.notificationService.handleUpdateStatusMakeFriend(data),
-    )
+    await this.notificationService.handleUpdateStatusMakeFriend(data)
   }
 
   @RabbitSubscribeWithRetry({
@@ -65,7 +60,6 @@ export class NotificationSubscriber {
     queue: QUEUE_RMQ.NOTIFICATION_CHAT_MENTION,
   })
   async handleChatMention(data: ChatMentionPayload): Promise<void> {
-    await safeExecute(() => this.notificationService.handleChatMention(data))
+    await this.notificationService.handleChatMention(data)
   }
-
 }

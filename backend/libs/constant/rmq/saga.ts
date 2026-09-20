@@ -1,4 +1,5 @@
 import { v4 as uuid } from 'uuid'
+import type { MemberProfile } from '../member-profile'
 
 // ============================================================================
 // Hợp đồng message cho Saga Orchestration (luồng chấp nhận kết bạn).
@@ -66,12 +67,8 @@ export const SAGA_CONSUMER = {
   USER_REVERT_FRIENDSHIP: 'user:revertFriendship',
 } as const
 
-export interface SagaMember {
-  userId: string
-  username: string
-  avatar: string
-  fullName: string
-}
+/** A person on the conversation the saga creates. */
+export type SagaMember = MemberProfile
 
 // Envelope chung cho mọi message saga.
 export interface SagaEnvelope<T = unknown> {
@@ -151,8 +148,9 @@ export function buildReply(
   }
 }
 
-/** Tạo TRIGGER envelope để bắt đầu một saga. */
-export function buildTrigger<T>(
+/** A message that starts a saga (TRIGGER) or drives one of its steps. */
+export function buildMessage<T>(
+  kind: Exclude<SagaMessageKind, 'REPLY'>,
   sagaId: string,
   sagaType: SagaType,
   step: SagaStep,
@@ -164,9 +162,18 @@ export function buildTrigger<T>(
     sagaId,
     sagaType,
     step,
-    kind: 'TRIGGER',
+    kind,
     payload,
     correlationId,
     occurredAt: new Date().toISOString(),
   }
 }
+
+/** Tạo TRIGGER envelope để bắt đầu một saga. */
+export const buildTrigger = <T>(
+  sagaId: string,
+  sagaType: SagaType,
+  step: SagaStep,
+  payload: T,
+  correlationId?: string,
+) => buildMessage('TRIGGER', sagaId, sagaType, step, payload, correlationId)

@@ -52,4 +52,11 @@ export default tseslint.config(
       'prettier/prettier': ['error', { ...prettierConfig, endOfLine: 'auto' }],
     },
   },
+  {
+    // Plain JS build helpers: CommonJS, and in no tsconfig, so there is no
+    // type information to lint with. Last, so it wins over the rules above.
+    files: ['**/*.js'],
+    extends: [tseslint.configs.disableTypeChecked],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
 )

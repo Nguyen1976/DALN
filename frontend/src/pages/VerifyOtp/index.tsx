@@ -177,7 +177,7 @@ export default function VerifyOtpPage() {
   const email = form.watch("email");
 
   return (
-    <div className="relative flex min-h-[100dvh] w-full items-center justify-center overflow-hidden bg-background px-5 py-12">
+    <div className="relative flex min-h-dvh w-full items-center justify-center overflow-hidden bg-background px-5 py-12">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -190,7 +190,7 @@ export default function VerifyOtpPage() {
         <ModeToggle />
       </div>
 
-      <div className="relative z-20 w-full max-w-[27rem] space-y-8">
+      <div className="relative z-20 w-full max-w-108 space-y-8">
         <BrandLockup className="animate-stagger-in" />
 
         <div className="animate-stagger-in space-y-6 rounded-2xl border border-border bg-card p-6 shadow-md [--stagger:1] sm:p-8">

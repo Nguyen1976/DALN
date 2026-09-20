@@ -25,9 +25,20 @@ describe('NotificationService.handleMakeFriend — email', () => {
         .fn()
         .mockResolvedValue({ userId: 'u2', createdAt: new Date() }),
     }
+    // A row as Prisma hands it back: what was written, plus what it fills in.
+    const stored = (doc: object) => ({
+      globalSettings: {},
+      overrides: {},
+      digestSettings: {},
+      version: 1,
+      updatedAt: new Date(),
+      ...doc,
+    })
     const preferenceRepo = {
-      findByUserId: jest.fn().mockResolvedValue(preference),
-      create: jest.fn((doc: object) => Promise.resolve(doc)),
+      findByUserId: jest
+        .fn()
+        .mockResolvedValue(preference && stored(preference)),
+      create: jest.fn((doc: object) => Promise.resolve(stored(doc))),
     }
     const publisher = { emitToUsers: jest.fn() }
     const service = new NotificationService(

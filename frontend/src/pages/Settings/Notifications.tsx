@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import {
   Bell,
   BellOff,
@@ -21,14 +21,7 @@ import {
   type ChannelToggles,
   type NotificationPreferences,
 } from "@/redux/slices/notificationPreferenceSlice";
-
-function normalizeChannels(data?: Partial<ChannelToggles>): ChannelToggles {
-  return {
-    IN_APP: data?.IN_APP ?? true,
-    EMAIL: data?.EMAIL ?? true,
-    REALTIME: data?.REALTIME ?? true,
-  };
-}
+import type { NotificationType } from "@/redux/slices/notificationSlice";
 
 const CHANNELS: Array<{
   key: keyof ChannelToggles;
@@ -51,16 +44,12 @@ const CHANNELS: Array<{
   },
 ];
 
-const typeLabels: Record<string, string> = {
-  MESSAGE_RECEIVED: "Tin nhắn mới",
-  FRIEND_REQUEST_SENT: "Lời mời kết bạn đã gửi",
+const typeLabels: Record<NotificationType, string> = {
+  FRIEND_REQUEST_SENT: "Có lời mời kết bạn",
   FRIEND_REQUEST_ACCEPTED: "Lời mời kết bạn được chấp nhận",
   FRIEND_REQUEST_REJECTED: "Lời mời kết bạn bị từ chối",
-  SYSTEM_NOTIFICATION: "Thông báo hệ thống",
-  USER_JOINED_GROUP: "Có người tham gia nhóm",
-  USER_LEFT_GROUP: "Có người rời nhóm",
-  USER_KICKED_FROM_GROUP: "Có người bị mời khỏi nhóm",
-  USER_ADDED_TO_GROUP: "Có người được thêm vào nhóm",
+  MENTIONED_IN_CONVERSATION: "Có người nhắc đến bạn",
+  SYSTEM_NOTIFICATION: "Tóm tắt thông báo chưa đọc",
 };
 
 export default function NotificationSettings() {
@@ -80,22 +69,8 @@ export default function NotificationSettings() {
     if (!preferencesLoaded) void dispatch(getNotificationPreferences());
   }, [dispatch, preferencesLoaded]);
 
-  const typeList = useMemo(() => {
-    if (notificationTypes.length > 0) {
-      return notificationTypes;
-    }
-    return [
-      "MESSAGE_RECEIVED",
-      "FRIEND_REQUEST_SENT",
-      "FRIEND_REQUEST_ACCEPTED",
-      "FRIEND_REQUEST_REJECTED",
-      "SYSTEM_NOTIFICATION",
-      "USER_JOINED_GROUP",
-      "USER_LEFT_GROUP",
-      "USER_KICKED_FROM_GROUP",
-      "USER_ADDED_TO_GROUP",
-    ];
-  }, [notificationTypes]);
+  // The server's list: a switch shows only for something it can send.
+  const typeList = notificationTypes as NotificationType[];
 
   const handleGlobalChannelChange = async (
     channel: keyof ChannelToggles,
@@ -123,7 +98,7 @@ export default function NotificationSettings() {
   ) => {
     if (!data) return;
 
-    const currentTypeSetting = normalizeChannels(data.overrides?.[type]);
+    const currentTypeSetting = data.overrides[type];
 
     await dispatch(
       updateNotificationPreferences({
@@ -197,7 +172,7 @@ export default function NotificationSettings() {
           {/* Channels grey out, but keep their state, while all is off. */}
           <div
             className={cn(
-              "divide-y divide-border transition-opacity duration-(--motion-base) ease-(--ease-out)",
+              "divide-y divide-border transition-opacity duration-(--motion-base) ease-out",
               globalOff && "opacity-55",
             )}
           >
@@ -254,19 +229,19 @@ export default function NotificationSettings() {
       <SettingsSection title="Theo từng loại" step={2}>
         <SettingsCard
           className={cn(
-            "@container transition-opacity duration-(--motion-base) ease-(--ease-out)",
+            "@container transition-opacity duration-(--motion-base) ease-out",
             globalOff && "opacity-55",
           )}
         >
           {typeList.map((type) => {
-            const channels = normalizeChannels(data.overrides?.[type]);
+            const channels = data.overrides[type];
             return (
               <div
                 key={type}
                 className="flex flex-col gap-3 px-4 py-4 sm:px-5 @2xl:flex-row @2xl:items-center @2xl:justify-between"
               >
                 <p className="text-sm font-medium text-foreground">
-                  {typeLabels[type] || type}
+                  {typeLabels[type]}
                 </p>
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                   {CHANNELS.map(({ key, label }) => (
@@ -277,7 +252,7 @@ export default function NotificationSettings() {
                       <Switch
                         checked={channels[key]}
                         disabled={globalOff || isSaving}
-                        aria-label={`${typeLabels[type] || type} — ${label}`}
+                        aria-label={`${typeLabels[type]} — ${label}`}
                         onCheckedChange={(value) =>
                           void handleTypeChannelChange(type, key, value)
                         }

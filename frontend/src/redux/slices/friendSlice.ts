@@ -1,244 +1,113 @@
-import authorizeAxiosInstance from "@/utils/authorizeAxios";
-import {
-  createAsyncThunk,
-  createSelector,
-  createSlice,
-} from "@reduxjs/toolkit";
+import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
 import type { RootState } from "../store";
 import { logoutAPI } from "./userSlice";
-import {
-  getUserProfileByIdAPI,
-  type UserProfileByIdResponse as FriendProfile,
-} from "@/apis";
-
-export interface Friend {
-  id: string;
-  email: string;
-  username: string;
-  avatar?: string;
-  fullName?: string;
-  status: boolean;
-  lastSeen?: string;
-}
+import { getFriendsAPI, type Friend } from "@/apis/user";
 
 export interface FriendState {
   friends: Array<Friend>;
-  /**
-   * How many rows of the server's list have been read. Kept apart from
-   * `friends.length`: friends who come online get prepended out of order.
-   */
-  serverOffset: number;
-  /** False once a page came back shorter than asked. */
+  /** Where the next page starts; null once the list is complete. */
+  nextCursor: string | null;
+  /** True until a page said there is nothing after it. */
   hasMore: boolean;
   /** True after the first page arrived, even if it was empty. */
   loaded: boolean;
   /**
-   * The friend open in the Friends screen's detail panel. Kept here so it is
+   * The friend open in the Friends screen's detail panel, kept here so it is
    * still open after a trip to another tab; nothing is selected by default.
+   * A copy rather than an id: the pick may come from search results that are
+   * not in the loaded list.
    */
-  selectedFriendId: string | null;
-  /** Detail profiles fetched this session, by user id. */
-  profiles: Record<string, FriendProfile>;
-  profileStatus: Record<string, "loading" | "error">;
+  selectedFriend: Friend | null;
 }
 
-/** Page size for scrolling through the friend list. */
-export const FRIENDS_PAGE_SIZE = 20;
-
-interface UserProfileByIdResponse {
-  fullName: string;
-  username: string;
-  email: string;
-  bio: string;
-  avatar: string;
-}
+/**
+ * Friends per page, everywhere the list is loaded. Large enough that the
+ * chat sidebar's presence dots cover most people from the first page.
+ */
+export const FRIENDS_PAGE_SIZE = 50;
 
 const initialState: FriendState = {
   friends: [],
-  serverOffset: 0,
+  nextCursor: null,
   hasMore: true,
   loaded: false,
-  selectedFriendId: null,
-  profiles: {},
-  profileStatus: {},
+  selectedFriend: null,
 };
 
-/**
- * A friend's detail profile, fetched when they are first selected and then
- * served from the store: going back to someone does not call the API again.
- */
-export const fetchFriendProfile = createAsyncThunk(
-  `/friend/profile`,
-  (friendId: string) => getUserProfileByIdAPI(friendId),
-  {
-    condition: (friendId, { getState }) => {
-      const { profiles, profileStatus } = (getState() as RootState).friend;
-      return !profiles[friendId] && profileStatus[friendId] !== "loading";
-    },
-  },
+/** The first page again, replacing what is loaded. */
+export const getFriends = createAsyncThunk(`/user/list-friends`, () =>
+  getFriendsAPI(FRIENDS_PAGE_SIZE, null),
 );
 
-type FriendPage = { friends: Friend[]; page: number; limit: number };
-
-const fetchFriendPage = async (
-  limit: number,
-  page: number,
-): Promise<FriendPage> => {
-  const response = await authorizeAxiosInstance.get(
-    `/user/list-friends?limit=${limit}&page=${page}`,
-  );
-  return { friends: response.data.data?.friends ?? [], page, limit };
-};
-
-/** A page of the list; page 1 replaces what is loaded. */
-export const getFriends = createAsyncThunk(
-  `/user/list-friends`,
-  ({ limit, page }: { limit: number; page: number }) =>
-    fetchFriendPage(limit, page),
-);
-
-/**
- * The next page while scrolling. Callers load page 1 with different sizes
- * (20, 50, 100), so the page is derived from how far the server list has been
- * read, rounded down: at worst a few rows come back twice and are dropped as
- * duplicates, never a gap.
- */
+/** The page after those loaded, while scrolling. */
 export const getMoreFriends = createAsyncThunk(
   `/user/list-friends/more`,
-  (_: void, { getState }) => {
-    const { serverOffset } = (getState() as RootState).friend;
-    const page = Math.floor(serverOffset / FRIENDS_PAGE_SIZE) + 1;
-    return fetchFriendPage(FRIENDS_PAGE_SIZE, page);
-  },
-);
-
-const applyFriendPage = (
-  state: FriendState,
-  { friends, page, limit }: FriendPage,
-) => {
-  const skip = (page - 1) * limit;
-  if (page === 1) {
-    state.friends = friends;
-  } else {
-    const known = new Set(state.friends.map((friend) => friend.id));
-    state.friends.push(...friends.filter((friend) => !known.has(friend.id)));
-  }
-  state.serverOffset = skip + friends.length;
-  state.hasMore = friends.length >= limit;
-  state.loaded = true;
-};
-
-export const upsertOnlineFriend = createAsyncThunk(
-  `/friend/upsert-online`,
-  async (friendId: string, { getState }) => {
-    const state = getState() as RootState;
-    const existingFriend = state.friend.friends.find(
-      (friend) => friend.id === friendId,
-    );
-
-    if (existingFriend) {
-      return { friendId, profile: null as UserProfileByIdResponse | null };
-    }
-
-    const response = await authorizeAxiosInstance.get(
-      `/user?userId=${friendId}`,
-    );
-
-    return {
-      friendId,
-      profile: response.data.data as UserProfileByIdResponse,
-    };
-  },
+  (_: void, { getState }) =>
+    getFriendsAPI(FRIENDS_PAGE_SIZE, (getState() as RootState).friend.nextCursor),
 );
 
 export const friendSlice = createSlice({
   name: "friend",
   initialState,
   reducers: {
-    setSelectedFriend: (state, action: PayloadAction<string | null>) => {
-      state.selectedFriendId = action.payload;
+    setSelectedFriend: (state, action: PayloadAction<Friend | null>) => {
+      state.selectedFriend = action.payload;
+    },
+    /**
+     * A friend came online. The event carries their row, so someone not
+     * loaded yet goes on top straight away, presence and all.
+     */
+    friendCameOnline: (state, action: PayloadAction<Friend>) => {
+      const friend = state.friends.find((item) => item.id === action.payload.id);
+      if (friend) {
+        friend.status = true;
+        friend.lastSeen = null;
+      } else {
+        state.friends.unshift(action.payload);
+      }
     },
     updateStatusOffline: (
       state,
       action: PayloadAction<{ friendId: string; lastSeen: string }>,
     ) => {
       const { friendId, lastSeen } = action.payload;
-      const friendIndex = state.friends.findIndex(
-        (friend) => friend.id === friendId,
-      );
-      if (friendIndex !== -1) {
-        state.friends[friendIndex].status = false;
-        state.friends[friendIndex].lastSeen = lastSeen;
+      const friend = state.friends.find((item) => item.id === friendId);
+      if (friend) {
+        friend.status = false;
+        friend.lastSeen = lastSeen;
       }
-      return state;
     },
   },
   extraReducers: (builder) => {
-    builder.addCase(getFriends.fulfilled, (state, action) => {
-      applyFriendPage(state, action.payload);
+    builder.addCase(getFriends.fulfilled, (state, { payload }) => {
+      state.friends = payload.items;
+      state.nextCursor = payload.nextCursor;
+      state.hasMore = payload.nextCursor !== null;
+      state.loaded = true;
     });
-    builder.addCase(getMoreFriends.fulfilled, (state, action) => {
-      applyFriendPage(state, action.payload);
-    });
-    builder.addCase(fetchFriendProfile.pending, (state, action) => {
-      state.profileStatus[action.meta.arg] = "loading";
-    });
-    builder.addCase(fetchFriendProfile.fulfilled, (state, action) => {
-      state.profiles[action.meta.arg] = action.payload;
-      delete state.profileStatus[action.meta.arg];
-    });
-    builder.addCase(fetchFriendProfile.rejected, (state, action) => {
-      state.profileStatus[action.meta.arg] = "error";
-    });
-
-    builder.addCase(upsertOnlineFriend.fulfilled, (state, action) => {
-      const { friendId, profile } = action.payload;
-
-      const existingIndex = state.friends.findIndex(
-        (friend) => friend.id === friendId,
+    builder.addCase(getMoreFriends.fulfilled, (state, { payload }) => {
+      // Friends who came online are put on top out of order, so a page can
+      // repeat someone already shown.
+      const known = new Set(state.friends.map((friend) => friend.id));
+      state.friends.push(
+        ...payload.items.filter((friend) => !known.has(friend.id)),
       );
-
-      if (existingIndex !== -1) {
-        state.friends[existingIndex].status = true;
-        return state;
-      }
-
-      if (!profile) return state;
-
-      state.friends.unshift({
-        id: friendId,
-        email: profile.email,
-        username: profile.username,
-        fullName: profile.fullName,
-        avatar: profile.avatar,
-        status: true,
-      });
-
-      return state;
+      state.nextCursor = payload.nextCursor;
+      state.hasMore = payload.nextCursor !== null;
+      state.loaded = true;
     });
 
     builder.addCase(logoutAPI.fulfilled, () => initialState);
   },
 });
 
-export const selectFriend = createSelector(
-  (state: RootState) => state.friend,
-  (friend) => friend.friends,
-);
-
+export const selectFriend = (state: RootState) => state.friend.friends;
 export const selectFriendHasMore = (state: RootState) => state.friend.hasMore;
 export const selectFriendsLoaded = (state: RootState) => state.friend.loaded;
-export const selectSelectedFriendId = (state: RootState) =>
-  state.friend.selectedFriendId;
-export const selectFriendProfile = (
-  state: RootState,
-  friendId: string | null,
-) => (friendId ? state.friend.profiles[friendId] : undefined);
-export const selectFriendProfileStatus = (
-  state: RootState,
-  friendId: string | null,
-) => (friendId ? state.friend.profileStatus[friendId] : undefined);
+export const selectSelectedFriend = (state: RootState) =>
+  state.friend.selectedFriend;
 
-export const { updateStatusOffline, setSelectedFriend } = friendSlice.actions;
+export const { updateStatusOffline, setSelectedFriend, friendCameOnline } =
+  friendSlice.actions;
 export default friendSlice.reducer;

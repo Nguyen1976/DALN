@@ -1,28 +1,36 @@
 import { PrismaService } from 'apps/user/prisma/prisma.service'
 import { Inject, Injectable } from '@nestjs/common'
+import { SUMMARY_SELECT } from './user.repository'
 @Injectable()
 export class FriendShipRepository {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async create(data: { userId: string; friendId: string }) {
-    return await this.prisma.friendship.create({
-      data: {
-        userId: data.userId,
-        friendId: data.friendId,
-      },
+  /**
+   * A page of `userId`'s friendships in the order they were made. `after` is
+   * the last friendship id already read (the page cursor).
+   */
+  async findFriendsByUserId(userId: string, take: number, after?: string) {
+    return await this.prisma.friendship.findMany({
+      where: { userId, ...(after ? { id: { gt: after } } : {}) },
+      orderBy: { id: 'asc' },
+      take,
+      select: { id: true, friend: { select: SUMMARY_SELECT } },
     })
   }
 
-  async findFriendsByUserId(userId: string, limit: number, page: number) {
-    return await this.prisma.friendship.findMany({
-      where: { userId },
-      // skip/take need a fixed order, or a page can repeat or miss friends.
-      // _id grows with insertion, so this is the order the list always had.
-      orderBy: { id: 'asc' },
-      take: limit,
-      skip: (page - 1) * limit,
-      select: { friendId: true },
+  /** `userId`'s friends whose username starts with `keyword` (any case). */
+  async searchFriends(userId: string, keyword: string, take: number) {
+    const rows = await this.prisma.friendship.findMany({
+      where: {
+        userId,
+        friend: {
+          is: { username: { startsWith: keyword, mode: 'insensitive' } },
+        },
+      },
+      take,
+      select: { friend: { select: SUMMARY_SELECT } },
     })
+    return rows.map((row) => row.friend)
   }
 
   async findFriendshipBetweenUsers(userId1: string, userId2: string) {

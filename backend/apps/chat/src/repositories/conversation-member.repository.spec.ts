@@ -179,8 +179,8 @@ describe('ConversationMemberRepository.updateLastRead', () => {
     ])
   })
 
-  it('dòng chưa từng có field lastReadMessageId (tạo qua addMembers) -> marker vẫn tiến được', async () => {
-    const row: Row = { isActive: true, unreadCount: 2 }
+  it('chưa từng đọc (lastReadMessageId: null) -> marker tiến được', async () => {
+    const row: Row = { isActive: true, unreadCount: 2, lastReadMessageId: null }
     const { repo } = setup(row)
 
     await repo.updateLastRead(CONV, USER, M1)
@@ -317,7 +317,12 @@ describe('ConversationMemberRepository.updateUnreadCount', () => {
       unreadCount: 0,
       lastReadMessageId: null,
     },
-    { userId: 'thieu-field', isActive: true, unreadCount: 0 },
+    {
+      userId: 'chua-doc-lan-nao',
+      isActive: true,
+      unreadCount: 0,
+      lastReadMessageId: null,
+    },
     {
       userId: 'da-roi',
       isActive: false,
@@ -326,7 +331,7 @@ describe('ConversationMemberRepository.updateUnreadCount', () => {
     },
   ]
 
-  it('có newestMessageId -> bỏ qua người đã đọc tới tin đó, vẫn cộng cho người chưa đọc và dòng thiếu field', async () => {
+  it('có newestMessageId -> bỏ qua người đã đọc tới tin đó, vẫn cộng cho người chưa đọc', async () => {
     const rows = members()
     const repo = setupTable(rows)
 
@@ -339,7 +344,7 @@ describe('ConversationMemberRepository.updateUnreadCount', () => {
       ['da-doc', 0],
       ['doc-do', 3],
       ['chua-doc', 2],
-      ['thieu-field', 2],
+      ['chua-doc-lan-nao', 2],
       ['da-roi', 0],
     ])
   })
@@ -374,21 +379,16 @@ describe('ConversationMemberRepository — không còn backfill lúc runtime', (
     expect(prisma.conversationMember.findFirst).toHaveBeenCalledTimes(1)
   })
 
-  it('findByConversationIdAndUserIds / clearHistoryForMember: chỉ một lời gọi Prisma', async () => {
+  it('clearHistoryForMember: chỉ một lời gọi Prisma', async () => {
     const prisma = {
       conversationMember: {
-        findMany: jest.fn().mockResolvedValue([{ userId: USER }]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     }
     const repo = new ConversationMemberRepository(prisma as never, {} as never)
 
-    await expect(
-      repo.findByConversationIdAndUserIds(CONV, [USER]),
-    ).resolves.toEqual([{ userId: USER }])
     await repo.clearHistoryForMember(CONV, USER, new Date())
 
-    expect(prisma.conversationMember.findMany).toHaveBeenCalledTimes(1)
     expect(prisma.conversationMember.updateMany).toHaveBeenCalledTimes(1)
   })
 })

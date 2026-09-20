@@ -43,31 +43,17 @@ export function useChatMessageActions({
       }
 
       try {
-        const result = await revokeMessageAPI({
+        const revoked = await revokeMessageAPI({
           conversationId,
           messageId: message.id,
         });
 
         dispatch(
-          revokeMessageAction({
-            conversationId,
-            messageId: result?.message?.id || message.id,
-          }),
+          revokeMessageAction({ conversationId, messageId: revoked.id }),
         );
-
+        // The sidebar preview reads "Tin nhắn đã bị thu hồi" off `isRevoked`.
         if (messages[messages.length - 1]?.id === message.id) {
-          dispatch(
-            updateNewMessage({
-              conversationId,
-              lastMessage: {
-                ...(result?.message || message),
-                id: result?.message?.id || message.id,
-                isRevoked: true,
-                content: "",
-                text: "Tin nhắn đã bị thu hồi",
-              } as Message,
-            }),
-          );
+          dispatch(updateNewMessage({ conversationId, lastMessage: revoked }));
         }
 
         toast.success("Đã thu hồi tin nhắn");

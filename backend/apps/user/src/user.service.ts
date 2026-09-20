@@ -24,12 +24,28 @@ import {
 } from 'libs/constant/rmq/saga'
 import {
   AuthSession,
-  UserEntity,
-  Friendship,
+  FriendRequest,
   FriendRequestDetail,
+  FriendRequestView,
+  FriendView,
+  PublicProfile,
+  RequestPerson,
+  SessionUser,
+  toSessionUser,
+  toUserSummary,
   UserProfile,
+  UserSummary,
 } from './domain/user.domain'
 import { RedisService } from '@app/redis/redis.service'
+import type { MemberProfile } from 'libs/constant/member-profile'
+import { internalFetch, serviceUrl } from '@app/common/http/internal-fetch'
+import {
+  buildKeysetCursor,
+  parseKeysetCursor,
+  toGeoPoint,
+  toPage,
+  type Page,
+} from '@app/util'
 import { Status } from '../src/generated'
 
 // Type definitions for service methods
@@ -65,11 +81,12 @@ interface MakeFriendRequest {
   inviteeUsername?: string
 }
 
-interface UpdateStatusRequest {
+interface RespondToFriendRequest {
+  requestId: string
+  /** The caller, who must be the one the request was sent to. */
   inviteeId: string
   inviteeName: string
-  status: Status
-  inviterId: string
+  status: 'ACCEPTED' | 'REJECTED'
 }
 
 interface UpdateProfileRequest {
@@ -85,10 +102,15 @@ interface CompleteInterestOnboardingRequest {
   slugs: string[]
 }
 
+/** Friends a search answers with at most. */
+const SEARCH_LIMIT = 20
+
 @Injectable()
 export class UserService {
-  private readonly recommendationServiceUrl =
-    process.env.RECOMMENDATION_SERVICE_URL ?? 'http://127.0.0.1:3005'
+  private readonly recommendationServiceUrl = serviceUrl(
+    'RECOMMENDATION_SERVICE_URL',
+    'http://127.0.0.1:3005',
+  )
 
   constructor(
     private readonly userRepo: UserRepository,
@@ -104,72 +126,8 @@ export class UserService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
-  private recommendationServiceBaseUrl(): string {
-    return (
-      process.env.RECOMMENDATION_SERVICE_URL?.trim().replace(/\/+$/, '') ||
-      'http://127.0.0.1:3005'
-    )
-  }
-
   private generateOtp(length = 6): string {
     return Array.from({ length }, () => Math.floor(Math.random() * 10)).join('')
-  }
-
-  /** Calls recommendation service: Qdrant `user_bios` embedding upsert. */
-  private async notifyEmbeddingServiceBio(
-    userId: string,
-    bio: string,
-  ): Promise<void> {
-    const url = `${this.recommendationServiceBaseUrl()}/recommendation/embed-and-save`
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 30_000)
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Endpoint này là liên dịch vụ (@InternalOnly), không có phiên JWT.
-          'x-internal-token': process.env.INTERNAL_API_TOKEN ?? '',
-        },
-        body: JSON.stringify({
-          users: [{ id: userId, bio: bio || '', age: 0 }],
-        }),
-        signal: controller.signal,
-      })
-      const text = await res.text()
-      let qdrant = 0
-      let status: string | undefined
-      try {
-        const j = text ? (JSON.parse(text) as { status?: string; qdrant_upserted?: number }) : {}
-        status = j.status
-        qdrant = Number(j.qdrant_upserted ?? 0)
-      } catch {
-        /* ignore */
-      }
-      if (!res.ok) {
-        this.logger.error(
-          `[user] embed-and-save HTTP ${res.status} url=${url} body=${text.slice(0, 400)}`,
-        )
-        return
-      }
-      if (status !== 'ok') {
-        this.logger.error(
-          `[user] embed-and-save bad status url=${url} body=${text.slice(0, 400)}`,
-        )
-        return
-      }
-      this.logger.info('[user] embed-and-save ok', {
-        userId,
-        qdrant_upserted: qdrant,
-      })
-    } catch (err: unknown) {
-      this.logger.error(
-        '[user] embed-and-save request failed',
-        err instanceof Error ? err.message : String(err),
-      )
-    } finally {
-      clearTimeout(timer)
-    }
   }
 
   /**
@@ -283,7 +241,7 @@ export class UserService {
     await this.redisService.deleteOTP(data.email)
 
     this.eventsPublisher.publishUserCreated({
-      id: user.id,
+      userId: user.id,
       email: user.email,
       username: user.username,
       ...(user.fullName != null && user.fullName !== ''
@@ -291,34 +249,9 @@ export class UserService {
         : {}),
       ...(user.avatar ? { avatar: user.avatar } : {}),
       ...(user.bio != null && String(user.bio).trim() !== ''
-        ? { bio: user.bio as string }
+        ? { bio: user.bio }
         : {}),
-      location: (() => {
-        const location = user.location as
-          | { lat?: number; lon?: number; coordinates?: [number, number] }
-          | undefined
-
-        if (!location) {
-          return undefined
-        }
-
-        if (
-          typeof location.lat === 'number' &&
-          typeof location.lon === 'number'
-        ) {
-          return { lat: location.lat, lon: location.lon }
-        }
-
-        if (
-          Array.isArray(location.coordinates) &&
-          typeof location.coordinates[0] === 'number' &&
-          typeof location.coordinates[1] === 'number'
-        ) {
-          return { lat: location.coordinates[1], lon: location.coordinates[0] }
-        }
-
-        return undefined
-      })(),
+      location: toGeoPoint(user.location) ?? undefined,
     })
 
     this.logger.info('[user.verify-otp] user created event published', {
@@ -397,68 +330,53 @@ export class UserService {
       expiresIn: '7d',
     })
 
-    return {
-      userId: user.id,
-      email: user.email,
-      username: user.username,
-      fullName: user.fullName,
-      avatar: user.avatar,
-      bio: user.bio,
-      interests: user.interests ?? [],
-      hasCompletedInterestOnboarding:
-        user.hasCompletedInterestOnboarding ?? true,
-      accessToken,
-      refreshToken,
-    }
+    return { user: toSessionUser(user), accessToken, refreshToken }
   }
 
-  async getMe(userId: string) {
+  async getMemberProfiles(userIds: string[]): Promise<MemberProfile[]> {
+    const users = await this.userRepo.findProfilesByIds(userIds)
+    return users.map((user) => ({
+      userId: user.id,
+      username: user.username,
+      fullName: user.fullName ?? null,
+      avatar: user.avatar ?? null,
+    }))
+  }
+
+  async getMe(userId: string): Promise<SessionUser> {
     const user = await this.userRepo.findSessionFieldsById(userId)
     if (!user) {
       UserErrors.userNotFound()
     }
-    return {
-      id: user.id,
-      email: user.email,
-      username: user.username,
-      fullName: user.fullName ?? '',
-      avatar: user.avatar ?? '',
-      bio: user.bio ?? '',
-      interests: user.interests ?? [],
-      hasCompletedInterestOnboarding:
-        user.hasCompletedInterestOnboarding ?? true,
-    }
-  }
-
-  async getUserById(userId: string): Promise<UserEntity> {
-    const user = await this.userRepo.findByIdWithSelect(userId)
-    if (!user) {
-      UserErrors.userNotFound()
-    }
-    return user as UserEntity
+    return toSessionUser(user)
   }
 
   /**
-   * May `viewerId` see `targetId`'s email address?
-   *
-   * Only themselves, or someone they have actually accepted as a friend. The
-   * profile endpoint used to hand the email back to any signed-in caller for
-   * any user id, which turns a browse into an address harvest.
+   * `userId`'s profile as `viewerId` sees it. The email goes only to the
+   * account itself or to an accepted friend: handing it to any signed-in
+   * caller for any id turns browsing into an address harvest.
    */
-  async canSeeContactDetails(
-    viewerId: string,
-    targetId: string,
-  ): Promise<boolean> {
-    if (!viewerId || !targetId) return false
-    if (viewerId === targetId) return true
-    const friendship = await this.friendShipRepo.findFriendshipBetweenUsers(
-      viewerId,
-      targetId,
-    )
-    return Boolean(friendship)
+  async getProfile(viewerId: string, userId: string): Promise<PublicProfile> {
+    const user = await this.userRepo.findSummaryById(userId)
+    if (!user) {
+      UserErrors.userNotFound()
+    }
+    const { email, username, fullName, avatar, bio } = toUserSummary(user)
+    const canSeeContact =
+      viewerId === userId ||
+      Boolean(
+        await this.friendShipRepo.findFriendshipBetweenUsers(viewerId, userId),
+      )
+    return {
+      ...(canSeeContact ? { email } : {}),
+      username,
+      fullName,
+      avatar,
+      bio,
+    }
   }
 
-  async makeFriend(data: MakeFriendRequest): Promise<Friendship> {
+  async makeFriend(data: MakeFriendRequest): Promise<FriendRequest> {
     // Thẻ gợi ý gửi username (dữ liệu gợi ý không mang email), ô "Thêm bạn" gửi email.
     const friend = data.inviteeUsername
       ? await this.userRepo.findByUsername(data.inviteeUsername)
@@ -516,47 +434,23 @@ export class UserService {
     return friendRequest
   }
 
-  async updateStatusMakeFriend(data: UpdateStatusRequest): Promise<Friendship> {
-    const friendRequests = await this.friendRequestRepo.findByUsers(
-      data.inviterId,
-      data.inviteeId,
-    )
-
-    //sửa logic tìm tắt cả friendrequest sau đó check chỉ cần có 1 cái pending thì cho qua còn nếu không thì mới trả về lỗi
-
-    if (friendRequests.length === 0) {
+  /** The recipient accepts or declines a pending request. */
+  async respondToFriendRequest(data: RespondToFriendRequest): Promise<void> {
+    const request = await this.friendRequestRepo.findById(data.requestId)
+    // Only the recipient may answer; anyone else gets "not found", as for an
+    // id that does not exist.
+    if (!request || request.toUserId !== data.inviteeId) {
       UserErrors.friendRequestNotFound()
     }
-
-    if (!friendRequests.some((r) => r.status === Status.PENDING)) {
+    if (request.status !== Status.PENDING) {
       UserErrors.friendRequestAlreadyResponded()
     }
-
-    const friendRequestId =
-      friendRequests.find((r) => r.status === Status.PENDING)?.id ??
-      friendRequests[0]?.id
-
-    let inviterUpdate
-    let inviteeUpdate
+    const inviterId = request.fromUserId
+    const { inviteeId, inviteeName } = data
 
     if (data.status === Status.ACCEPTED) {
-      inviterUpdate = await this.userRepo.findById(data.inviterId)
-      inviteeUpdate = await this.userRepo.findById(data.inviteeId)
-
-      const members: FriendshipAcceptTriggerPayload['members'] = [
-        {
-          userId: data.inviterId,
-          username: inviterUpdate?.username || '',
-          avatar: inviterUpdate?.avatar || '',
-          fullName: inviterUpdate?.fullName || '',
-        },
-        {
-          userId: data.inviteeId,
-          username: inviteeUpdate?.username || '',
-          avatar: inviteeUpdate?.avatar || '',
-          fullName: inviteeUpdate?.fullName || '',
-        },
-      ]
+      // Both people, for the saga's direct conversation.
+      const members = await this.getMemberProfiles([inviterId, inviteeId])
 
       // Atomic: cập nhật trạng thái + tạo friendship 2 chiều + ghi trigger saga
       // vào outbox trong CÙNG 1 transaction. Relay sẽ publish trigger sau đó.
@@ -569,11 +463,7 @@ export class UserService {
       let alreadyHandled = false
       await this.prisma.$transaction(async (tx) => {
         const claimed = await tx.friendRequest.updateMany({
-          where: {
-            fromUserId: data.inviterId,
-            toUserId: data.inviteeId,
-            status: Status.PENDING,
-          },
+          where: { id: request.id, status: Status.PENDING },
           data: { status: Status.ACCEPTED },
         })
 
@@ -587,39 +477,39 @@ export class UserService {
         const existing = await tx.friendship.findMany({
           where: {
             OR: [
-              { userId: data.inviterId, friendId: data.inviteeId },
-              { userId: data.inviteeId, friendId: data.inviterId },
+              { userId: inviterId, friendId: inviteeId },
+              { userId: inviteeId, friendId: inviterId },
             ],
           },
         })
         const has = (userId: string, friendId: string) =>
           existing.some((f) => f.userId === userId && f.friendId === friendId)
 
-        if (!has(data.inviterId, data.inviteeId)) {
+        if (!has(inviterId, inviteeId)) {
           await tx.friendship.create({
-            data: { userId: data.inviterId, friendId: data.inviteeId },
+            data: { userId: inviterId, friendId: inviteeId },
           })
         }
-        if (!has(data.inviteeId, data.inviterId)) {
+        if (!has(inviteeId, inviterId)) {
           await tx.friendship.create({
-            data: { userId: data.inviteeId, friendId: data.inviterId },
+            data: { userId: inviteeId, friendId: inviterId },
           })
         }
 
-        const sagaId = `${SAGA_TYPE.FRIENDSHIP_ACCEPT}:${friendRequestId}`
+        const sagaId = `${SAGA_TYPE.FRIENDSHIP_ACCEPT}:${request.id}`
         const trigger = buildTrigger<FriendshipAcceptTriggerPayload>(
           sagaId,
           SAGA_TYPE.FRIENDSHIP_ACCEPT,
           SAGA_STEP.CREATE_CONVERSATION,
           {
-            inviterId: data.inviterId,
-            inviteeId: data.inviteeId,
-            inviteeName: data.inviteeName,
-            friendRequestId: String(friendRequestId),
+            inviterId,
+            inviteeId,
+            inviteeName,
+            friendRequestId: request.id,
             members,
           },
         )
-        await enqueueOutbox(tx as any, {
+        await enqueueOutbox(tx, {
           messageId: trigger.messageId,
           exchange: EXCHANGE_RMQ.SAGA_EVENTS,
           routingKey: SAGA_ROUTING.FRIENDSHIP_ACCEPT_REQUESTED,
@@ -631,210 +521,124 @@ export class UserService {
         UserErrors.friendRequestAlreadyResponded()
       }
     } else {
-      await this.friendRequestRepo.updateStatus(
-        data.inviterId,
-        data.inviteeId,
-        data.status as Status,
-      )
+      await this.friendRequestRepo.decline(request.id)
     }
-
-    const updatedRequest = await this.friendRequestRepo.findByUsers(
-      data.inviterId,
-      data.inviteeId,
-    )
 
     // Giữ event choreography cho recommendation (friend-graph) + notify REJECTED.
     // Việc tạo conversation và notify ACCEPTED đã do saga đảm nhiệm.
     this.eventsPublisher.publishUserUpdateStatusMakeFriend({
-      inviterId: data.inviterId,
-      inviteeId: data.inviteeId,
-      inviteeName: data.inviteeName,
+      inviterId,
+      inviteeId,
+      inviteeName,
       status: data.status,
-      members: [
-        {
-          userId: data.inviterId,
-          username: inviterUpdate?.username || '',
-          avatar: inviterUpdate?.avatar || '',
-          fullName: inviterUpdate?.fullName || '',
-        },
-        {
-          userId: data.inviteeId,
-          username: inviteeUpdate?.username || '',
-          avatar: inviteeUpdate?.avatar || '',
-          fullName: inviteeUpdate?.fullName || '',
-        },
-      ],
     })
-
-    return updatedRequest as unknown as Friendship
   }
 
+  /** Friends in the order the friendships were made; the cursor is the last friendship's id. */
   async listFriends(
     userId: string,
-    limit = 10,
-    page = 1,
-  ): Promise<(UserEntity & { status: boolean })[]> {
-    const friendships = await this.friendShipRepo.findFriendsByUserId(
-      userId,
-      limit,
-      page,
+    page: { limit: number; cursor?: string },
+  ): Promise<Page<FriendView>> {
+    const { items: friendships, nextCursor } = toPage(
+      await this.friendShipRepo.findFriendsByUserId(
+        userId,
+        page.limit + 1,
+        page.cursor,
+      ),
+      page.limit,
+      (friendship) => friendship.id,
     )
-
-    if (!friendships) {
-      UserErrors.userNotFound()
+    return {
+      items: await this.withOnlineStatus(
+        friendships.map((f) => toUserSummary(f.friend)),
+      ),
+      nextCursor,
     }
-
-    const users = await this.userRepo.findManyByIds(
-      friendships.map((f) => f.friendId) || [],
-    )
-    // `$in` hands users back in its own order; keep the page's order so the
-    // list reads the same across pages.
-    const userById = new Map(users.map((u) => [u.id, u]))
-    const friends = friendships
-      .map((f) => userById.get(f.friendId))
-      .filter((u): u is (typeof users)[number] => Boolean(u))
-
-    const friendsWithStatus = await Promise.all(
-      friends.map(async (f) => ({
-        ...f,
-        status: await this.redisService.isOnline(f.id),
-      })),
-    )
-
-    return friendsWithStatus as (UserEntity & { status: boolean })[]
   }
 
-  async searchFriends(
-    userId: string,
-    keyword: string,
-  ): Promise<(UserEntity & { status: boolean })[]> {
+  async searchFriends(userId: string, keyword: string): Promise<FriendView[]> {
     const safeKeyword = keyword?.trim()
     if (!safeKeyword) {
       return []
     }
 
-    const friendships = await this.friendShipRepo.findAllFriendsByUserId(userId)
-    if (!friendships.length) {
-      return []
-    }
-
-    const friends = await this.userRepo.findManyByIdsAndUsername(
-      friendships.map((f) => f.friendId),
+    const friends = await this.friendShipRepo.searchFriends(
+      userId,
       safeKeyword,
+      SEARCH_LIMIT,
     )
+    return this.withOnlineStatus(friends.map(toUserSummary))
+  }
 
-    const friendsWithStatus = await Promise.all(
-      friends.map(async (friend) => ({
-        ...friend,
-        status: await this.redisService.isOnline(friend.id),
-      })),
+  private async withOnlineStatus(users: UserSummary[]): Promise<FriendView[]> {
+    const online = await this.redisService.isOnlineBatch(
+      users.map((user) => user.id),
     )
-
-    return friendsWithStatus as (UserEntity & { status: boolean })[]
+    return users.map((user) => ({ ...user, status: online.get(user.id)! }))
   }
 
   async listFriendRequests(
     userId: string,
-    limit = 10,
-    page = 1,
-    direction: 'received' | 'sent' = 'received',
-  ): Promise<any[]> {
-    const requests =
-      direction === 'sent'
-        ? await this.friendRequestRepo.findPendingByFromUserId(
-            userId,
-            limit,
-            page,
-          )
-        : await this.friendRequestRepo.findPendingByToUserId(
-            userId,
-            limit,
-            page,
-          )
-
-    if (!requests.length) {
-      return []
-    }
-
+    direction: 'received' | 'sent',
+    page: { limit: number; cursor?: string },
+  ): Promise<Page<FriendRequestView>> {
+    const { items: requests, nextCursor } = toPage(
+      await this.friendRequestRepo.findPending(
+        direction,
+        userId,
+        page.limit + 1,
+        parseKeysetCursor(page.cursor),
+      ),
+      page.limit,
+      (request) => buildKeysetCursor(request.createdAt, request.id),
+    )
     // The interesting person differs by direction: for a received request it is
     // whoever sent it, for a sent one it is whoever is being waited on.
-    const counterpartOf = (request: { fromUserId: string; toUserId: string }) =>
-      direction === 'sent' ? request.toUserId : request.fromUserId
-
-    const counterpartIds = [...new Set(requests.map(counterpartOf))]
-    const counterparts = await this.userRepo.findManyByIds(counterpartIds)
-    const userMap = new Map(counterparts.map((person) => [person.id, person]))
-
-    return requests
-      .map((request) => {
-        const counterpart = userMap.get(counterpartOf(request))
-        if (!counterpart) {
-          return null
-        }
-
-        // `fromUser` keeps its old meaning for existing callers; `counterpart`
-        // is the one the list should actually render.
-        return {
-          ...request,
-          fromUser: counterpart,
-          counterpart,
-        }
-      })
-      .filter(Boolean)
+    const items = requests.map((request) => ({
+      id: request.id,
+      status: request.status,
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt,
+      counterpart: toRequestPerson(
+        direction === 'sent' ? request.toUser : request.fromUser,
+      ),
+    }))
+    return { items, nextCursor }
   }
 
   async detailMakeFriend(
     friendRequestId: string,
     userId: string,
   ): Promise<FriendRequestDetail> {
-    const friendRequest = await this.friendRequestRepo.findById(friendRequestId)
+    const friendRequest =
+      await this.friendRequestRepo.findWithSender(friendRequestId)
     // Chỉ người nhận xem được: link "Xem lời mời" trong email mang sẵn id, và
     // phản hồi có email người gửi. Người khác nhận "không tìm thấy" như id sai.
     if (!friendRequest || friendRequest.toUserId !== userId) {
       UserErrors.friendRequestNotFound()
     }
 
-    const fromUser = await this.userRepo.findByIdWithSelect(
-      friendRequest.fromUserId,
-    )
-
     return {
-      ...friendRequest,
-      fromUser: fromUser as any,
+      id: friendRequest.id,
+      toUserId: friendRequest.toUserId,
+      status: friendRequest.status,
+      createdAt: friendRequest.createdAt,
+      updatedAt: friendRequest.updatedAt,
+      counterpart: toRequestPerson(friendRequest.fromUser),
     }
   }
 
   private async fetchAllowedInterestSlugs(): Promise<Set<string>> {
-    const base = this.recommendationServiceUrl.replace(/\/$/, '')
-    const url = `${base}/recommendation/interest-tags`
-    let res: globalThis.Response
+    let tags: { slug: string }[]
     try {
-      res = await fetch(url, { signal: AbortSignal.timeout(8_000) })
+      tags = await internalFetch<{ slug: string }[]>(
+        `${this.recommendationServiceUrl}/recommendation/interest-tags`,
+        { timeoutMs: 8_000 },
+      )
     } catch {
       UserErrors.recommendationCatalogUnavailable()
     }
-    if (!res.ok) {
-      UserErrors.recommendationCatalogUnavailable()
-    }
-    let body: unknown
-    try {
-      body = await res.json()
-    } catch {
-      UserErrors.recommendationCatalogUnavailable()
-    }
-    const rows = (body as { data?: unknown })?.data
-    if (!Array.isArray(rows)) {
-      UserErrors.recommendationCatalogUnavailable()
-    }
-    return new Set(
-      rows
-        .map((r) =>
-          typeof (r as { slug?: string })?.slug === 'string'
-            ? (r as { slug: string }).slug
-            : '',
-        )
-        .filter(Boolean),
-    )
+    return new Set(tags.map((tag) => tag.slug).filter(Boolean))
   }
 
   async completeInterestOnboarding(
@@ -894,7 +698,7 @@ export class UserService {
         lookup(data.avatarFilename || '') || 'application/octet-stream'
 
       avatarUrl = await this.s3StorageService.upload({
-        buffer: data.avatar as Buffer,
+        buffer: data.avatar,
         mime: mime,
         folder: 'avatars',
         ext: data.avatarFilename?.split('.').pop() || 'bin',
@@ -917,28 +721,26 @@ export class UserService {
     if (avatarUrl) {
       updatedPayload.avatar = avatarUrl
     }
+    // The recommendation service re-embeds the bio when this event lands;
+    // the request no longer waits on (or duplicates) that work.
     this.eventsPublisher.publishUserUpdated(updatedPayload)
 
-    const bioTrimmed = (user.bio ?? '').trim()
-    if (bioTrimmed) {
-      await this.notifyEmbeddingServiceBio(user.id, bioTrimmed)
-    }
-
     return {
-      fullName: user.fullName,
-      bio: user.bio,
-      avatar: avatarUrl || user.avatar,
+      fullName: user.fullName ?? '',
+      bio: user.bio ?? '',
+      avatar: user.avatar ?? '',
     }
   }
 
   async handleUserOnline(userId: string): Promise<void> {
     const friends = await this.friendShipRepo.findAllFriendsByUserId(userId)
-    const friendIds = friends.map((f) => f.friendId)
-
     await this.userRepo.updateLastSeen(userId, null)
+
+    const user = await this.userRepo.findSummaryById(userId)
+    if (!user || !friends.length) return
     this.eventsPublisher.publisherUserOnline({
-      userIds: friendIds,
-      userId,
+      userIds: friends.map((f) => f.friendId),
+      friend: { ...toUserSummary(user), status: true },
     })
   }
 
@@ -954,4 +756,11 @@ export class UserService {
       lastSeen,
     })
   }
+}
+
+function toRequestPerson(
+  user: Parameters<typeof toUserSummary>[0],
+): RequestPerson {
+  const { id, email, username, fullName, avatar } = toUserSummary(user)
+  return { id, email, username, fullName, avatar }
 }

@@ -1,11 +1,5 @@
 import { Type } from 'class-transformer'
-import {
-  IsArray,
-  IsInt,
-  IsString,
-  Min,
-  ValidateNested,
-} from 'class-validator'
+import { IsArray, IsInt, IsString, Min, ValidateNested } from 'class-validator'
 
 export class EmbedUserDto {
   @IsString()

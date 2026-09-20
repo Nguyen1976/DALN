@@ -19,7 +19,7 @@ export type BatchedMessage = {
   id: string
   conversationId: string
   senderId: string
-  type: string
+  type: BatchMessageInput['type']
   content: string | null
   replyToMessageId: string | null
   isSystem: boolean
@@ -28,7 +28,7 @@ export type BatchedMessage = {
   isDeleted: boolean
   createdAt: Date
   updatedAt: Date
-  medias: unknown[]
+  medias: never[]
   poll: null
   mentionUserIds: string[]
   mentions?: unknown

@@ -29,7 +29,7 @@ describe('NotificationController', () => {
   })
 
   it('số chưa đọc được hỏi theo đúng người dùng đang đăng nhập', async () => {
-    await notificationController.getUnreadCount({ userId: 'u1' })
+    await notificationController.getUnreadCount('u1')
     expect(notificationServiceStub.getUnreadCount).toHaveBeenCalledWith('u1')
   })
 })

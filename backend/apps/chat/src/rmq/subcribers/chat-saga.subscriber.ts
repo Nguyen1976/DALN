@@ -21,8 +21,11 @@ import {
 } from 'libs/constant/rmq/saga'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { ChatEventsPublisher } from '../publishers/chat-events.publisher'
-import { ConversationMemberRepository } from '../../repositories'
-import { buildPeerFields } from '../../domain/peer-fields'
+import {
+  ConversationMemberRepository,
+  ConversationRepository,
+} from '../../repositories'
+import { buildMemberRow } from '../../domain/member-row'
 
 @Injectable()
 export class ChatSagaSubscriber {
@@ -32,6 +35,7 @@ export class ChatSagaSubscriber {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly eventsPublisher: ChatEventsPublisher,
     private readonly memberRepo: ConversationMemberRepository,
+    private readonly conversationRepo: ConversationRepository,
   ) {}
 
   /**
@@ -53,13 +57,13 @@ export class ChatSagaSubscriber {
     assertSupportedVersion(raw, SUPPORTED_SAGA_VERSIONS)
     try {
       const { processed, result } = await consumeIdempotent(
-        this.prisma as any,
+        this.prisma,
         {
           messageId: envelope.messageId,
           consumer: SAGA_CONSUMER.CHAT_CREATE_CONVERSATION,
           sagaId: envelope.sagaId,
         },
-        async (tx: any) => {
+        async (tx) => {
           const members = envelope.payload.members ?? []
           const uniqueMembers = Array.from(
             new Map(members.map((m) => [m.userId, m])).values(),
@@ -70,20 +74,12 @@ export class ChatSagaSubscriber {
           })
 
           await tx.conversationMember.createMany({
-            data: uniqueMembers.map((m) => ({
-              conversationId: conversation.id,
-              userId: m.userId,
-              username: m.username || null,
-              fullName: m.fullName || null,
-              avatar: m.avatar || null,
-              role: 'MEMBER',
-              isActive: true,
-              unreadCount: 0,
-              lastMessageAt: new Date(),
-              // Phi chuẩn hoá đối phương -> danh sách hội thoại không cần
-              // include toàn bộ members để hiển thị tên/avatar.
-              ...buildPeerFields('DIRECT', m.userId, uniqueMembers),
-            })),
+            data: uniqueMembers.map((m) =>
+              buildMemberRow(conversation.id, m, {
+                type: 'DIRECT',
+                members: uniqueMembers,
+              }),
+            ),
           })
 
           const reply = buildReply(envelope, 'OK', {
@@ -96,29 +92,21 @@ export class ChatSagaSubscriber {
             payload: reply,
           })
 
-          return {
-            conversationId: conversation.id,
-            memberIds: uniqueMembers.map((m) => m.userId),
-            members: uniqueMembers,
-          }
+          return conversation.id
         },
       )
 
       // Best-effort realtime "new conversation" (chỉ phát khi xử lý lần đầu).
       if (processed && result) {
-        // `members` là BẮT BUỘC: ConversationMapper.resolveDisplay lấy tên +
-        // avatar đối phương từ mảng này. Thiếu nó, giao diện rơi về chuỗi dự
-        // phòng "Trò chuyện trực tiếp" ngay khi hội thoại vừa hiện ra, và chỉ
-        // đúng lại sau khi tải lại trang (đường HTTP đọc members từ DB).
-        this.eventsPublisher.publishConversationCreated({
-          id: result.conversationId,
-          type: 'DIRECT',
-          memberIds: result.memberIds,
-          members: result.members,
-          memberCount: result.members.length,
-        })
+        // The stored conversation, members included: each side's copy names
+        // the other, with real timestamps.
+        const conversation =
+          await this.conversationRepo.findByIdWithMembers(result)
+        if (conversation) {
+          this.eventsPublisher.publishConversationCreated(conversation)
+        }
         this.logger.log(
-          `Saga ${envelope.sagaId}: đã tạo conversation ${result.conversationId}`,
+          `Saga ${envelope.sagaId}: đã tạo conversation ${result}`,
         )
       }
     } catch (error) {
@@ -140,13 +128,13 @@ export class ChatSagaSubscriber {
   ): Promise<void> {
     assertSupportedVersion(raw, SUPPORTED_SAGA_VERSIONS)
     await consumeIdempotent(
-      this.prisma as any,
+      this.prisma,
       {
         messageId: envelope.messageId,
         consumer: SAGA_CONSUMER.CHAT_DELETE_CONVERSATION,
         sagaId: envelope.sagaId,
       },
-      async (tx: any) => {
+      async (tx) => {
         const conversationId = envelope.payload.conversationId
         await tx.message.deleteMany({ where: { conversationId } })
         await tx.conversationMember.deleteMany({ where: { conversationId } })
@@ -175,13 +163,13 @@ export class ChatSagaSubscriber {
     error?: string,
   ): Promise<void> {
     await consumeIdempotent(
-      this.prisma as any,
+      this.prisma,
       {
         messageId: envelope.messageId,
         consumer: SAGA_CONSUMER.CHAT_CREATE_CONVERSATION,
         sagaId: envelope.sagaId,
       },
-      async (tx: any) => {
+      async (tx) => {
         const reply = buildReply(envelope, 'FAILED', {}, error)
         await enqueueOutbox(tx, {
           messageId: reply.messageId,
@@ -191,6 +179,8 @@ export class ChatSagaSubscriber {
         })
       },
     )
-    this.logger.warn(`Saga ${envelope.sagaId}: createConversation FAILED: ${error}`)
+    this.logger.warn(
+      `Saga ${envelope.sagaId}: createConversation FAILED: ${error}`,
+    )
   }
 }

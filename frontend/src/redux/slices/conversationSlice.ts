@@ -1,4 +1,4 @@
-import authorizeAxiosInstance from "@/utils/authorizeAxios";
+import { createConversationAPI, getConversationsAPI } from "@/apis/chat";
 import {
   createAsyncThunk,
   createSelector,
@@ -8,8 +8,8 @@ import type { PayloadAction } from "@reduxjs/toolkit";
 import type { RootState } from "../store";
 import type { Message } from "./messageSlice";
 import { MessageMapper } from "@/utils/messageMapper";
-import { toast } from "sonner";
 import { logoutAPI } from "./userSlice";
+import { displayNameOf } from "@/utils/displayName";
 
 export interface ConversationMember {
   userId: string;
@@ -29,11 +29,11 @@ export interface Conversation {
   groupAvatar?: string | null;
   displayName: string;
   displayAvatar: string;
-  unreadCount: string;
-  unreadMentionCount?: number;
-  lastMentionMessageId?: string | null;
-  membershipStatus?: "ACTIVE" | "REMOVED" | "LEFT";
-  canSendMessage?: boolean;
+  unreadCount: number;
+  unreadMentionCount: number;
+  lastMentionMessageId: string | null;
+  membershipStatus: "ACTIVE" | "REMOVED" | "LEFT";
+  canSendMessage: boolean;
   memberCount: number;
   /**
    * Id đối phương của hội thoại DIRECT, phi chuẩn hoá từ backend.
@@ -41,11 +41,10 @@ export interface Conversation {
    * theo số thành viên), nên đây là nguồn duy nhất để biết đối phương là ai
    * ở màn danh sách.
    */
-  peerUserId?: string | null;
+  peerUserId: string | null;
   createdAt: string;
   updatedAt: string;
   members?: ConversationMember[];
-  lastMessage?: Message | null;
   lastMessageId?: string | null;
   lastMessageAt?: string | null;
   lastMessageText?: string;
@@ -58,17 +57,14 @@ export type ConversationState = Conversation[];
 
 const initialState: ConversationState = [];
 
+/**
+ * The newer copy wins field by field. List rows come without `members`, so a
+ * list refresh keeps the members an opened conversation already has.
+ */
 const mergeConversation = (
   existing: Conversation,
   incoming: Conversation,
-): Conversation => ({
-  ...existing,
-  ...incoming,
-  members: incoming.members?.length ? incoming.members : existing.members,
-  canSendMessage: incoming.canSendMessage ?? existing.canSendMessage,
-  membershipStatus:
-    incoming.membershipStatus || existing.membershipStatus || "ACTIVE",
-});
+): Conversation => ({ ...existing, ...incoming });
 
 const upsertConversation = (
   state: ConversationState,
@@ -84,49 +80,13 @@ const upsertConversation = (
 
 export const getConversations = createAsyncThunk(
   `/chat/conversations`,
-  async ({ limit = 10, cursor }: { limit: number; cursor: string | null }) => {
-    cursor = cursor?.replaceAll("+", "%2B") || null;
-    const response = await authorizeAxiosInstance.get(
-      `/chat/conversations?limit=${limit}&cursor=${cursor ?? ""}`,
-    );
-    return response.data.data as Conversation[];
-  },
+  ({ limit, cursor }: { limit: number; cursor: string | null }) =>
+    getConversationsAPI(limit, cursor),
 );
-
-/**
- * Keyset cursor for the page after those loaded. Pages are appended to the
- * end of the list while new and active conversations move to the front, so
- * the tail is where paging left off. The id breaks ties: the friendship saga
- * stamps several conversations with the same lastMessageAt.
- *
- * `null` asks for the first page; `undefined` means the loaded list offers
- * nothing to page from, and the caller should stop rather than re-request.
- */
-export const nextConversationCursor = (
-  conversations: Conversation[],
-): string | null | undefined => {
-  if (conversations.length === 0) return null;
-  for (let i = conversations.length - 1; i >= 0; i -= 1) {
-    const { lastMessageAt, id } = conversations[i];
-    if (lastMessageAt) return `${lastMessageAt}|${id}`;
-  }
-  return undefined;
-};
 
 export const createConversation = createAsyncThunk(
   `/chat/create`,
-  async (formData: FormData) => {
-    const response = await authorizeAxiosInstance.post(
-      "/chat/create",
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      },
-    );
-    return response.data.data as { conversation: Conversation };
-  },
+  (formData: FormData) => createConversationAPI(formData),
 );
 
 export const conversationSlice = createSlice({
@@ -137,10 +97,7 @@ export const conversationSlice = createSlice({
       state,
       action: PayloadAction<{ conversation: Conversation }>,
     ) => {
-      upsertConversation(state, {
-        ...action.payload.conversation,
-        unreadCount: action.payload.conversation.unreadCount || "0",
-      });
+      upsertConversation(state, action.payload.conversation);
     },
     updateNewMessage: (
       state,
@@ -155,15 +112,13 @@ export const conversationSlice = createSlice({
       const preview = MessageMapper.previewText(lastMessage);
       const updated: Conversation = {
         ...target,
-        lastMessage,
         lastMessageId: lastMessage.id,
         lastMessageAt: lastMessage.createdAt || target.lastMessageAt,
         lastMessageText: preview,
         lastMessageSenderId: lastMessage.senderId,
-        lastMessageSenderName:
-          lastMessage.senderMember?.fullName ||
-          lastMessage.senderMember?.username ||
-          null,
+        lastMessageSenderName: lastMessage.senderMember
+          ? displayNameOf(lastMessage.senderMember)
+          : null,
         lastMessageSenderAvatar: lastMessage.senderMember?.avatar || null,
         updatedAt: lastMessage.createdAt || target.updatedAt,
       };
@@ -191,19 +146,9 @@ export const conversationSlice = createSlice({
     },
     applyConversationUpdate: (
       state,
-      action: PayloadAction<{
-        conversation: Conversation;
-        membershipStatus?: "ACTIVE" | "REMOVED" | "LEFT";
-        canSendMessage?: boolean;
-      }>,
+      action: PayloadAction<{ conversation: Conversation }>,
     ) => {
-      const { conversation, membershipStatus, canSendMessage } = action.payload;
-      upsertConversation(state, {
-        ...conversation,
-        membershipStatus:
-          membershipStatus || conversation.membershipStatus || "ACTIVE",
-        canSendMessage: canSendMessage ?? conversation.canSendMessage ?? true,
-      });
+      upsertConversation(state, action.payload.conversation);
     },
     addConversationMembers: (
       state,
@@ -293,10 +238,7 @@ export const conversationSlice = createSlice({
       const conversation = state.find(
         (item) => item.id === action.payload.conversationId,
       );
-      if (!conversation || conversation.unreadCount === "5+") return;
-
-      const next = Number(conversation.unreadCount) + 1;
-      conversation.unreadCount = next > 5 ? "5+" : String(next);
+      if (conversation) conversation.unreadCount += 1;
     },
     markConversationRead: (
       state,
@@ -306,7 +248,7 @@ export const conversationSlice = createSlice({
         (conversation) => conversation.id === action.payload.conversationId,
       );
       if (!target) return;
-      target.unreadCount = "0";
+      target.unreadCount = 0;
     },
     markConversationMention: (
       state,
@@ -316,7 +258,7 @@ export const conversationSlice = createSlice({
         (item) => item.id === action.payload.conversationId,
       );
       if (!target) return;
-      target.unreadMentionCount = (target.unreadMentionCount || 0) + 1;
+      target.unreadMentionCount += 1;
       target.lastMentionMessageId = action.payload.messageId;
     },
     clearConversationMentions: (
@@ -334,7 +276,7 @@ export const conversationSlice = createSlice({
   extraReducers: (builder) => {
     builder
       .addCase(getConversations.fulfilled, (state, action) => {
-        for (const conversation of action.payload || []) {
+        for (const conversation of action.payload.items) {
           const index = state.findIndex((item) => item.id === conversation.id);
           if (index === -1) {
             state.push(conversation);
@@ -343,9 +285,9 @@ export const conversationSlice = createSlice({
           state[index] = mergeConversation(state[index], conversation);
         }
       })
+      // The creator also gets `chat.new_conversation`; upserting twice is fine.
       .addCase(createConversation.fulfilled, (state, action) => {
-        upsertConversation(state, action.payload.conversation);
-        toast.success("Đã tạo cuộc trò chuyện thành công");
+        upsertConversation(state, action.payload);
       })
       .addCase(logoutAPI.fulfilled, () => initialState);
   },
@@ -361,6 +303,37 @@ export const selectConversationById = createSelector(
   (conversations, conversationId) =>
     conversations.find((conversation) => conversation.id === conversationId),
 );
+
+/**
+ * The other person in a direct conversation. `peerUserId` comes with every
+ * conversation; `members` only covers rows stored before it existed.
+ */
+export const peerIdOf = (
+  conversation: Pick<Conversation, "type" | "peerUserId" | "members">,
+  selfId: string,
+): string | undefined =>
+  conversation.type === "DIRECT"
+    ? (conversation.peerUserId ??
+      conversation.members?.find((member) => member.userId !== selfId)?.userId)
+    : undefined;
+
+/** The direct conversation with `userId` among these, if there is one. */
+export const findDirectConversationWith = (
+  conversations: Conversation[],
+  userId: string,
+) =>
+  conversations.find(
+    (conversation) =>
+      conversation.type === "DIRECT" &&
+      (conversation.peerUserId === userId ||
+        conversation.members?.some((member) => member.userId === userId)),
+  );
+
+export const selectDirectConversationWith = (
+  state: RootState,
+  userId: string | null | undefined,
+) =>
+  userId ? findDirectConversationWith(state.conversations, userId) : undefined;
 
 export const {
   addConversation,

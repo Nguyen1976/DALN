@@ -3,20 +3,19 @@ import { messageType, Prisma } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { MessageBatchWriter } from '../services/message-batch-writer.service'
 import { olderThanCursor, type KeysetCursor } from '@app/util'
+import { isUniqueConstraintError } from '@app/saga'
+import type { MessageMediaInput } from 'libs/constant/rmq/payload'
 
-type MediaInput = {
-  mediaType: 'IMAGE' | 'VIDEO' | 'FILE'
-  objectKey: string
-  url: string
-  mimeType: string
-  size: string
-  width?: number
-  height?: number
-  duration?: number
-  thumbnailUrl?: string
-  fileName?: string
-  sortOrder?: number
-}
+const SENDER_SELECT = {
+  select: { userId: true, username: true, fullName: true, avatar: true },
+} as const
+
+/** What a message row brings along when it is shown in a thread. */
+const MESSAGE_INCLUDE = {
+  senderMember: SENDER_SELECT,
+  medias: { orderBy: { sortOrder: 'asc' } },
+  poll: true,
+} satisfies Prisma.messageInclude
 
 @Injectable()
 export class MessageRepository {
@@ -25,23 +24,6 @@ export class MessageRepository {
     private readonly batchWriter: MessageBatchWriter,
   ) {}
 
-  private readonly defaultMessageInclude = {
-    senderMember: {
-      select: {
-        userId: true,
-        username: true,
-        fullName: true,
-        avatar: true,
-      },
-    },
-    medias: {
-      orderBy: {
-        sortOrder: 'asc' as const,
-      },
-    },
-    poll: true,
-  }
-
   async create(data: {
     conversationId: string
     senderId: string
@@ -49,7 +31,7 @@ export class MessageRepository {
     content?: string | null
     replyToMessageId?: string | null
     pollId?: string | null
-    medias?: MediaInput[]
+    medias?: MessageMediaInput[]
     isSystem?: boolean
     mentionUserIds?: string[]
     mentions?: unknown
@@ -67,7 +49,7 @@ export class MessageRepository {
         replyToMessageId: data.replyToMessageId,
         isSystem: data.isSystem,
         mentionUserIds: data.mentionUserIds,
-        mentions: data.mentions as any,
+        mentions: data.mentions,
       })
     }
 
@@ -76,12 +58,12 @@ export class MessageRepository {
       data: {
         conversationId: data.conversationId,
         senderId: data.senderId,
-        type: data.type as any, // Ép kiểu messageType
+        type: data.type,
         content: data.content || null,
         replyToMessageId: data.replyToMessageId || null,
         pollId: data.pollId || null,
         mentionUserIds: data.mentionUserIds || [],
-        mentions: (data.mentions ?? undefined) as any,
+        mentions: (data.mentions ?? undefined) as Prisma.InputJsonValue,
 
         // Khởi tạo Medias luôn (Prisma tự động làm Transaction ngầm)
         medias: data.medias?.length
@@ -114,11 +96,14 @@ export class MessageRepository {
       },
     })
 
+    // Giữ nguyên hình dạng trả về để bên gọi không phải đổi.
+    const loaded = created as Partial<
+      Prisma.messageGetPayload<{ include: { medias: true; poll: true } }>
+    >
     return {
       ...created,
-      // Giữ nguyên hình dạng trả về để bên gọi không phải đổi.
-      medias: (created as { medias?: unknown[] }).medias ?? [],
-      poll: (created as { poll?: unknown }).poll ?? null,
+      medias: loaded.medias ?? [],
+      poll: loaded.poll ?? null,
     }
   }
 
@@ -137,9 +122,9 @@ export class MessageRepository {
       data: {
         conversationId: data.conversationId,
         senderId: data.senderId,
-        type: 'CALL' as any,
+        type: messageType.CALL,
         content: data.content,
-        callInfo: data.callInfo as any,
+        callInfo: data.callInfo as Prisma.InputJsonObject,
         isSystem: true,
       },
     })
@@ -155,101 +140,22 @@ export class MessageRepository {
     })
   }
 
-  async findLatestByConversationIds(conversationIds: string[]) {
-    if (!conversationIds.length) return []
-
-    const latestMessages = await Promise.all(
-      conversationIds.map((conversationId) =>
-        this.prisma.message.findFirst({
-          where: {
-            conversationId,
-            isDeleted: false,
-            isRevoked: false,
-          },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          include: {
-            senderMember: {
-              select: {
-                userId: true,
-                username: true,
-                fullName: true,
-                avatar: true,
-              },
-            },
-            poll: true,
-          },
-        }),
-      ),
-    )
-
-    return latestMessages.filter(Boolean)
-  }
-
-  async findByConversationIdPaginated(
-    conversationId: string,
-    take: number,
-    cursor?: Date | null,
-  ) {
-    return await this.prisma.message.findMany({
-      where: {
-        conversationId,
-        ...(cursor && {
-          createdAt: { lt: cursor },
-        }),
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take,
-      include: {
-        senderMember: {
-          select: {
-            userId: true,
-            username: true,
-            fullName: true,
-            avatar: true,
-          },
-        },
-        medias: {
-          orderBy: {
-            sortOrder: 'asc',
-          },
-        },
-        poll: true,
-      },
-    })
-  }
-
+  /**
+   * A page of the thread as `userId` sees it: nothing from before they
+   * cleared their history, nothing they deleted for themselves.
+   */
   async findByConversationIdPaginatedForUser(
     conversationId: string,
     userId: string,
     take: number,
-    cursor?: KeysetCursor | null,
+    cursor: KeysetCursor | null,
+    clearedHistoryAt: Date | null,
   ) {
-    const member = await this.prisma.conversationMember.findFirst({
-      where: {
-        conversationId,
-        userId,
-      },
-      select: {
-        clearedHistoryAt: true,
-      },
-    })
-
-    const deletedMessageIds = new Set(
-      (
-        await this.prisma.deleteMessage.findMany({
-          where: {
-            userId,
-          },
-          select: {
-            messageId: true,
-          },
-        })
-      ).map((item) => item.messageId),
-    )
-
     const batchSize = Math.max(take * 3, 30)
-    const messages: any[] = []
-    let nextCursor: KeysetCursor | null = cursor ?? null
+    const messages: Prisma.messageGetPayload<{
+      include: typeof MESSAGE_INCLUDE
+    }>[] = []
+    let nextCursor: KeysetCursor | null = cursor
 
     while (messages.length < take) {
       // Both the cursor and the cleared-history mark constrain `createdAt`.
@@ -259,8 +165,8 @@ export class MessageRepository {
       // page for ever. Collecting them into one AND keeps both in force.
       const bounds: Prisma.messageWhereInput[] = []
       if (nextCursor) bounds.push(olderThanCursor('createdAt', nextCursor))
-      if (member?.clearedHistoryAt) {
-        bounds.push({ createdAt: { gt: member.clearedHistoryAt } })
+      if (clearedHistoryAt) {
+        bounds.push({ createdAt: { gt: clearedHistoryAt } })
       }
 
       const batch = await this.prisma.message.findMany({
@@ -270,10 +176,21 @@ export class MessageRepository {
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: batchSize,
-        include: this.defaultMessageInclude as any,
+        include: MESSAGE_INCLUDE,
       })
 
       if (!batch.length) break
+
+      // Only this batch's delete-for-me marks: a user's marks across every
+      // conversation can be many more than one page.
+      const deletedMessageIds = new Set(
+        (
+          await this.prisma.deleteMessage.findMany({
+            where: { userId, messageId: { in: batch.map((m) => m.id) } },
+            select: { messageId: true },
+          })
+        ).map((item) => item.messageId),
+      )
 
       for (const message of batch) {
         if (deletedMessageIds.has(message.id)) continue
@@ -300,8 +217,8 @@ export class MessageRepository {
           userId,
         },
       })
-    } catch (error: any) {
-      if (error?.code === 'P2002') {
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
         return null
       }
 
@@ -328,26 +245,6 @@ export class MessageRepository {
     })
   }
 
-  async findUnreadMessages(
-    conversationId: string,
-    lastReadAt: Date | null,
-    userId: string,
-  ) {
-    return await this.prisma.message.findMany({
-      where: {
-        conversationId,
-        ...(lastReadAt && {
-          createdAt: { gt: lastReadAt },
-        }),
-        isDeleted: false,
-        NOT: { senderId: userId },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 6,
-      select: { id: true },
-    })
-  }
-
   /**
    * Minimal shape of the messages other messages quote.
    *
@@ -370,9 +267,7 @@ export class MessageRepository {
         isRevoked: true,
         isDeleted: true,
         createdAt: true,
-        senderMember: {
-          select: { userId: true, username: true, fullName: true, avatar: true },
-        },
+        senderMember: SENDER_SELECT,
         medias: { select: { mediaType: true, fileName: true }, take: 1 },
       },
     })
@@ -401,43 +296,27 @@ export class MessageRepository {
           { content: { contains: 'www.' } },
         ],
       },
-    }[kind]
-
-    const where: any = {
-      conversationId,
-      isDeleted: false,
-      // Both filters are an OR of their own, so they meet under AND. Spreading
-      // the cursor in and then assigning `where.OR` for the kind overwrote the
-      // cursor's OR: every "next page" came back as the first page again.
-      AND: [
-        // Same tie-safe cursor as the message list: several attachments sent
-        // together share a timestamp, and a bare `lt` drops the ones that fell
-        // on the page boundary.
-        olderThanCursor('createdAt', cursor ?? null),
-        kindWhere,
-      ],
-    }
+    } satisfies Record<typeof kind, Prisma.messageWhereInput>
 
     return await this.prisma.message.findMany({
-      where,
+      where: {
+        conversationId,
+        isDeleted: false,
+        // Both filters are an OR of their own, so they meet under AND.
+        // Spreading the cursor in and then assigning `where.OR` for the kind
+        // overwrote the cursor's OR: every "next page" came back as the first
+        // page again.
+        AND: [
+          // Same tie-safe cursor as the message list: several attachments sent
+          // together share a timestamp, and a bare `lt` drops the ones that
+          // fell on the page boundary.
+          olderThanCursor('createdAt', cursor ?? null),
+          kindWhere[kind],
+        ],
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take,
-      include: {
-        senderMember: {
-          select: {
-            userId: true,
-            username: true,
-            fullName: true,
-            avatar: true,
-          },
-        },
-        medias: {
-          orderBy: {
-            sortOrder: 'asc',
-          },
-        },
-        poll: true,
-      },
-    } as any)
+      include: MESSAGE_INCLUDE,
+    })
   }
 }

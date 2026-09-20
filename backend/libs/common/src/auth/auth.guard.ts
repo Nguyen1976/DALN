@@ -9,7 +9,7 @@ import {
 import { JwtService } from '@nestjs/jwt'
 import { Reflector } from '@nestjs/core'
 import { Request, Response } from 'express'
-import { resolveTokens } from './resolve-tokens'
+import { readCookie, resolveTokens } from './resolve-tokens'
 import { timingSafeEqual } from 'crypto'
 
 /** Thời hạn access token — phải khớp với lúc đăng nhập ở user service. */
@@ -48,7 +48,7 @@ export class AuthGuard implements CanActivate {
     private reflector: Reflector,
   ) {}
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  canActivate(context: ExecutionContext): boolean {
     if (context.getType() !== 'http') {
       return true
     }
@@ -81,12 +81,14 @@ export class AuthGuard implements CanActivate {
 
     if (withoutLogin) return true
 
+    // cookie-parser fills `cookies` where it is mounted; the raw header is
+    // the fallback where it is not.
+    const cookies = (request.cookies ?? {}) as Partial<Record<string, string>>
     const accessToken =
-      request.cookies?.accessToken ||
-      this.getCookieValue(request.headers?.cookie, 'accessToken')
+      cookies.accessToken || readCookie(request.headers?.cookie, 'accessToken')
     const refreshToken =
-      request.cookies?.refreshToken ||
-      this.getCookieValue(request.headers?.cookie, 'refreshToken')
+      cookies.refreshToken ||
+      readCookie(request.headers?.cookie, 'refreshToken')
     const resolved = resolveTokens(this.jwtService, accessToken, refreshToken)
 
     if (!resolved.ok) {
@@ -152,22 +154,5 @@ export class AuthGuard implements CanActivate {
     }
 
     return true
-  }
-
-  private getCookieValue(
-    cookieHeader: string | undefined,
-    key: string,
-  ): string | null {
-    if (!cookieHeader) return null
-
-    const chunks = cookieHeader.split(';')
-    for (const chunk of chunks) {
-      const [cookieKey, ...cookieValueParts] = chunk.trim().split('=')
-      if (cookieKey === key) {
-        return decodeURIComponent(cookieValueParts.join('='))
-      }
-    }
-
-    return null
   }
 }

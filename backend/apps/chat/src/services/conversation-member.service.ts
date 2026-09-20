@@ -1,18 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { UserDirectoryClient } from '../clients/user-directory.client'
+import { Injectable } from '@nestjs/common'
+import { displayNameOf } from '@app/util'
 import {
   ConversationRepository,
   ConversationMemberRepository,
 } from '../repositories'
 import { ChatErrors } from '../errors/chat.errors'
 import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
-import { Member } from '../http/chat-http.dto'
 import { conversationType } from '../generated'
 import { MessageService } from './message.service'
+import { isGroupManager, requireGroupManager } from './group-access'
 
 export interface AddMemberToConversationRequest {
   conversationId: string
   userId: string
-  members: Member[]
+  /** People to add; their names and avatars come from the user service. */
+  memberIds: string[]
 }
 
 export interface RemoveMemberFromConversationRequest {
@@ -34,74 +37,40 @@ export interface LeaveConversationRequest {
 
 @Injectable()
 export class ConversationMemberService {
-  private readonly logger = new Logger(ConversationMemberService.name)
-
   constructor(
     private readonly conversationRepo: ConversationRepository,
     private readonly memberRepo: ConversationMemberRepository,
     private readonly eventsPublisher: ChatEventsPublisher,
     private readonly messageService: MessageService,
+    private readonly userDirectory: UserDirectoryClient,
   ) {}
 
   async addMemberToConversation(dto: AddMemberToConversationRequest) {
-    const conversation = await this.conversationRepo.findById(
+    const { conversation, members, actor } = await requireGroupManager(
+      this.conversationRepo,
+      this.memberRepo,
       dto.conversationId,
+      dto.userId,
     )
 
-    if (!conversation) {
-      ChatErrors.conversationNotFound()
-    }
-
-    if (conversation.type === conversationType.DIRECT) {
-      ChatErrors.userNoPermission()
-    }
-
-    const existingMembers = await this.memberRepo.findByConversationId(
-      dto.conversationId,
+    // Active members only: someone who left or was removed can be added back.
+    const activeIds = new Set(members.map((m) => m.userId))
+    const newMemberIds = [...new Set(dto.memberIds)].filter(
+      (id) => !activeIds.has(id),
     )
-
-    const actor = existingMembers.find(
-      (m) =>
-        m.userId === dto.userId && (m.role === 'ADMIN' || m.role === 'OWNER'),
-    )
-    if (!actor) {
-      ChatErrors.userNoPermission()
-    }
-
-    const memberIds = dto.members.map((member) => member.userId)
-
-    const existingMemberIds = existingMembers.map((m) => m.userId)
-    const newMemberIds = memberIds.filter(
-      (id) => !existingMemberIds.includes(id),
-    )
-
-    const newMembers = dto.members.filter((member) =>
-      newMemberIds.includes(member.userId),
-    )
-
     if (newMemberIds.length === 0) {
-      return {
-        status: 'SUCCESS',
-      }
+      return
     }
 
-    // conversationMember keeps a denormalized profile snapshot. Refuse an
-    // incomplete snapshot instead of permanently storing null and making the
-    // UI display the ObjectId as the member name.
-    if (newMembers.some((member) => !member.username?.trim())) {
-      ChatErrors.invalidMemberAction(
-        'Không thể thêm thành viên vì hồ sơ người dùng chưa đầy đủ',
-      )
+    // The member row keeps a copy of the profile, taken from its owner.
+    const newMembers = await this.userDirectory.getProfiles(newMemberIds)
+    if (newMembers.length !== newMemberIds.length) {
+      ChatErrors.invalidMemberAction('Có người dùng không tồn tại')
     }
 
     const addedMemberCount = await this.memberRepo.addMembers(
       dto.conversationId,
-      newMembers.map((member) => ({
-        userId: member.userId,
-        username: member.username,
-        fullName: member.fullName,
-        avatar: member.avatar,
-      })),
+      newMembers,
     )
 
     if (addedMemberCount > 0) {
@@ -111,91 +80,52 @@ export class ConversationMemberService {
       )
     }
 
-    const actorDisplayName = actor.fullName || actor.username || actor.userId
     await this.messageService.createSystemMessageAndSync(
       dto.conversationId,
       dto.userId,
-      `${actorDisplayName} đã thêm ${newMemberIds.length} thành viên vào nhóm`,
+      `${displayNameOf(actor)} đã thêm ${newMemberIds.length} thành viên vào nhóm`,
     )
 
     const res = await this.conversationRepo.findByIdWithMembers(conversation.id)
-
-    this.safePublish(() =>
-      this.eventsPublisher.publishMemberAddedToConversation({
-        ...res,
-        actorId: dto.userId,
-        newMemberIds,
-      }),
-    )
-
-    try {
-      for (const m of newMembers) {
-        this.eventsPublisher.publishUserJoinedGroup({
-          userId: m.userId,
-          groupId: dto.conversationId,
-          conversationId: dto.conversationId,
-          groupName: conversation.groupName ?? undefined,
-          createdAt: new Date().toISOString(),
-        })
-      }
-    } catch (e) {
-      this.logger.warn('[chat-service] publishUserJoinedGroup failed', e)
-    }
-
-    return {
-      status: 'SUCCESS',
+    if (!res) ChatErrors.conversationNotFound()
+    this.eventsPublisher.publishMemberAddedToConversation({
+      ...res,
+      actorId: dto.userId,
+      newMemberIds,
+    })
+    for (const m of newMembers) {
+      this.eventsPublisher.publishUserJoinedGroup({
+        userId: m.userId,
+        conversationId: dto.conversationId,
+        groupName: conversation.groupName ?? undefined,
+        createdAt: new Date().toISOString(),
+      })
     }
   }
 
   async removeMemberFromConversation(dto: RemoveMemberFromConversationRequest) {
-    const conversation = await this.conversationRepo.findById(
-      dto.conversationId,
-    )
-
-    if (!conversation) {
-      ChatErrors.conversationNotFound()
-    }
-
-    if (conversation.type === conversationType.DIRECT) {
-      ChatErrors.userNoPermission()
-    }
-
     if (dto.userId === dto.targetUserId) {
       ChatErrors.invalidMemberAction(
         'Use leave-group API to leave conversation',
       )
     }
 
-    const existingMembers = await this.memberRepo.findByConversationId(
+    const { members, actor } = await requireGroupManager(
+      this.conversationRepo,
+      this.memberRepo,
       dto.conversationId,
+      dto.userId,
     )
 
-    const actor = existingMembers.find(
-      (member) =>
-        member.userId === dto.userId &&
-        (member.role === 'ADMIN' || member.role === 'OWNER'),
-    )
-    if (!actor) {
-      ChatErrors.userNoPermission()
-    }
-
-    const target = existingMembers.find(
-      (member) => member.userId === dto.targetUserId,
-    )
+    const target = members.find((member) => member.userId === dto.targetUserId)
     if (!target) {
       ChatErrors.memberNotFoundInConversation()
     }
 
-    const actorDisplayName =
-      actor.fullName || actor.username || actor.userId
-
-    const targetDisplayName =
-      target.fullName || target.username || dto.targetUserId
-
     await this.messageService.createSystemMessageAndSync(
       dto.conversationId,
       dto.userId,
-      `${actorDisplayName} đã xóa ${targetDisplayName} khỏi nhóm`,
+      `${displayNameOf(actor)} đã xóa ${displayNameOf(target)} khỏi nhóm`,
     )
 
     const removed = await this.memberRepo.removeMember(
@@ -214,62 +144,43 @@ export class ConversationMemberService {
       ChatErrors.conversationNotFound()
     }
 
-    this.safePublish(() =>
-      this.eventsPublisher.publishConversationMemberRemoved({
-        conversation: conversationAfterRemove,
-        actorId: dto.userId,
-        targetUserId: dto.targetUserId,
-        remainingMemberIds: (conversationAfterRemove?.members || []).map(
-          (member) => member.userId,
-        ),
-      }),
-    )
-
-    try {
-      this.eventsPublisher.publishUserLeftGroup({
-        userId: dto.targetUserId,
-        groupId: dto.conversationId,
-        conversationId: dto.conversationId,
-        leftAt: new Date().toISOString(),
-      })
-    } catch (e) {
-      this.logger.warn('[chat-service] publishUserLeftGroup failed', e)
-    }
-
-    return {
-      status: 'SUCCESS',
-    }
+    this.eventsPublisher.publishConversationMemberRemoved({
+      conversation: conversationAfterRemove,
+      actorId: dto.userId,
+      targetUserId: dto.targetUserId,
+      remainingMemberIds: members
+        .filter((member) => member.userId !== dto.targetUserId)
+        .map((member) => member.userId),
+    })
+    this.eventsPublisher.publishUserLeftGroup({
+      userId: dto.targetUserId,
+      conversationId: dto.conversationId,
+      leftAt: new Date().toISOString(),
+    })
   }
 
   async promoteMember(dto: PromoteMemberRequest) {
-    const conversation = await this.conversationRepo.findById(dto.conversationId)
-    if (!conversation || conversation.type === conversationType.DIRECT) {
-      ChatErrors.conversationNotFound()
-    }
-
-    const members = await this.memberRepo.findByConversationId(dto.conversationId)
-    const actor = members.find(
-      (member) =>
-        member.userId === dto.userId &&
-        (member.role === 'ADMIN' || member.role === 'OWNER'),
+    const { members } = await requireGroupManager(
+      this.conversationRepo,
+      this.memberRepo,
+      dto.conversationId,
+      dto.userId,
     )
-    if (!actor) ChatErrors.userNoPermission()
 
     const target = members.find((member) => member.userId === dto.targetUserId)
     if (!target) ChatErrors.memberNotFoundInConversation()
     if (target.userId === dto.userId) {
       ChatErrors.invalidMemberAction('Bạn đã là quản trị viên của nhóm')
     }
-    if (target.role === 'ADMIN' || target.role === 'OWNER') {
-      return { status: 'SUCCESS' }
+    if (isGroupManager(target)) {
+      return
     }
 
     await this.memberRepo.promoteToAdmin(dto.conversationId, dto.targetUserId)
-    const targetName = target.fullName || target.username || target.userId
     await this.messageService.createSystemMessageAndSync(
       dto.conversationId,
       dto.userId,
-      `${targetName} đã trở thành phó nhóm`,
+      `${displayNameOf(target)} đã trở thành phó nhóm`,
     )
 
     const updated = await this.conversationRepo.findByIdWithMembers(
@@ -277,10 +188,7 @@ export class ConversationMemberService {
     )
     if (!updated) ChatErrors.conversationNotFound()
 
-    this.safePublish(() =>
-      this.eventsPublisher.publishConversationUpdated(updated),
-    )
-    return { status: 'SUCCESS' }
+    this.eventsPublisher.publishConversationUpdated(updated)
   }
 
   async leaveConversation(dto: LeaveConversationRequest) {
@@ -302,15 +210,13 @@ export class ConversationMemberService {
 
     const actor = existingMembers.find((member) => member.userId === dto.userId)
     if (!actor) {
-      return {
-        status: 'SUCCESS',
-      }
+      return
     }
 
     const remaining = existingMembers.filter(
       (member) => member.userId !== dto.userId,
     )
-    const isManager = actor.role === 'ADMIN' || actor.role === 'OWNER'
+    const isManager = isGroupManager(actor)
 
     // Nobody left to hand the group to: deleting it is the right action.
     if (isManager && remaining.length === 0) {
@@ -322,26 +228,26 @@ export class ConversationMemberService {
     // Management transfers on exit rather than blocking it. The old rule
     // ("admin không thể rời nhóm") left whoever created a group permanently
     // stuck inside it, with no way to hand it over.
-    const managersLeft = remaining.some(
-      (member) => member.role === 'ADMIN' || member.role === 'OWNER',
-    )
-    let successorId: string | null = null
-    if (isManager && !managersLeft) {
-      successorId = remaining[0].userId
+    const managersLeft = remaining.some(isGroupManager)
+    const successor = isManager && !managersLeft ? remaining[0] : null
+    if (successor) {
       if (actor.role === 'OWNER') {
-        await this.memberRepo.promoteToOwner(dto.conversationId, successorId)
+        await this.memberRepo.promoteToOwner(
+          dto.conversationId,
+          successor.userId,
+        )
       } else {
-        await this.memberRepo.promoteToAdmin(dto.conversationId, successorId)
+        await this.memberRepo.promoteToAdmin(
+          dto.conversationId,
+          successor.userId,
+        )
       }
     }
-
-    const actorDisplayName = actor.fullName || actor.username || actor.userId
-    const leaveText = `${actorDisplayName} đã rời khỏi nhóm`
 
     await this.messageService.createSystemMessageAndSync(
       dto.conversationId,
       dto.userId,
-      leaveText,
+      `${displayNameOf(actor)} đã rời khỏi nhóm`,
     )
 
     const removed = await this.memberRepo.removeMember(
@@ -353,14 +259,11 @@ export class ConversationMemberService {
       await this.conversationRepo.incrementMemberCount(dto.conversationId, -1)
     }
 
-    if (successorId) {
-      const successor = remaining.find((m) => m.userId === successorId)
-      const successorName =
-        successor?.fullName || successor?.username || successorId
+    if (successor) {
       await this.messageService.createSystemMessageAndSync(
         dto.conversationId,
         dto.userId,
-        `${successorName} trở thành người quản lý nhóm`,
+        `${displayNameOf(successor)} trở thành người quản lý nhóm`,
       )
     }
 
@@ -371,37 +274,16 @@ export class ConversationMemberService {
       ChatErrors.conversationNotFound()
     }
 
-    this.safePublish(() =>
-      this.eventsPublisher.publishConversationMemberLeft({
-        conversation: conversationAfterLeave,
-        actorId: dto.userId,
-        remainingMemberIds: (conversationAfterLeave?.members || []).map(
-          (member) => member.userId,
-        ),
-      }),
-    )
-
-    try {
-      this.eventsPublisher.publishUserLeftGroup({
-        userId: dto.userId,
-        groupId: dto.conversationId,
-        conversationId: dto.conversationId,
-        leftAt: new Date().toISOString(),
-      })
-    } catch (e) {
-      this.logger.warn('[chat-service] publishUserLeftGroup failed', e)
-    }
-
-    return {
-      status: 'SUCCESS',
-    }
-  }
-
-  private safePublish(fn: () => void) {
-    try {
-      fn()
-    } catch (error) {
-      this.logger.error('[chat-service] publish event failed', error)
-    }
+    this.eventsPublisher.publishConversationMemberLeft({
+      conversation: conversationAfterLeave,
+      actorId: dto.userId,
+      remainingMemberIds: remaining.map((member) => member.userId),
+      promotedUserId: successor?.userId,
+    })
+    this.eventsPublisher.publishUserLeftGroup({
+      userId: dto.userId,
+      conversationId: dto.conversationId,
+      leftAt: new Date().toISOString(),
+    })
   }
 }

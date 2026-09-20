@@ -33,16 +33,46 @@ export function buildKeysetCursor(at: Date | string, id: string): string {
 
 /**
  * `where` fragment selecting rows strictly *older* than the cursor under a
- * (field desc, id desc) ordering.
+ * (field desc, idField desc) ordering. `idField` must be the id the cursor
+ * was built from: comparing it with another collection's ids breaks ties at
+ * random.
  */
-export function olderThanCursor(field: string, cursor: KeysetCursor | null) {
+export function olderThanCursor(
+  field: string,
+  cursor: KeysetCursor | null,
+  idField = 'id',
+) {
   if (!cursor) return {}
   if (!cursor.id) return { [field]: { lt: cursor.at } }
 
   return {
     OR: [
       { [field]: { lt: cursor.at } },
-      { [field]: cursor.at, id: { lt: cursor.id } },
+      { [field]: cursor.at, [idField]: { lt: cursor.id } },
     ],
+  }
+}
+
+/** One page of a list, and where the next one starts (null: no more). */
+export interface Page<T> {
+  items: T[]
+  nextCursor: string | null
+}
+
+/**
+ * The page for rows fetched with `take: limit + 1`. The extra row only says
+ * whether there is more; the cursor points at the last row that is returned,
+ * so the client never asks for a page that turns out empty.
+ */
+export function toPage<T>(
+  rows: T[],
+  limit: number,
+  cursorOf: (row: T) => string | null,
+): Page<T> {
+  const items = rows.slice(0, limit)
+  const last = items[items.length - 1]
+  return {
+    items,
+    nextCursor: rows.length > limit && last ? cursorOf(last) : null,
   }
 }

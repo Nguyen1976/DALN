@@ -1,225 +1,139 @@
-import { Logger } from '@nestjs/common'
-import { MessageMapper } from './message.mapper'
+import { displayNameOf } from '@app/util'
+import type { conversation, conversationMember } from '../generated'
 
+type Person = Pick<conversationMember, 'userId'> &
+  Partial<Pick<conversationMember, 'username' | 'fullName' | 'avatar'>>
+
+/** The viewer's own counters, off their membership row. */
+type ViewerState = Pick<
+  conversationMember,
+  'unreadCount' | 'unreadMentionCount' | 'lastMentionMessageId'
+>
+
+/** What a member row brings to a conversation's detail. */
+export type MemberView = ViewerState &
+  Pick<
+    conversationMember,
+    | 'userId'
+    | 'role'
+    | 'username'
+    | 'fullName'
+    | 'avatar'
+    | 'lastReadAt'
+    | 'lastReadMessageId'
+    | 'lastMessageAt'
+  >
+
+/** A row of the viewer's list: their membership flattened onto it. */
+export type ConversationListRow = conversation &
+  ViewerState &
+  Pick<
+    conversationMember,
+    'peerUserId' | 'peerUsername' | 'peerFullName' | 'peerAvatar'
+  >
+
+/** A conversation with its active members (detail, events). */
+export type ConversationWithMembers = conversation & { members: MemberView[] }
+
+/**
+ * A conversation as one viewer sees it. It comes in two shapes:
+ *
+ * - a row of the viewer's list: their membership flattened onto the
+ *   conversation, the direct peer included (`peer*`), no `members`;
+ * - a conversation with its active `members` (detail, events), where the
+ *   viewer's own row and the peer are found among them.
+ *
+ * Everything else is stored ready to show (migrations/chat/0005 filled in
+ * the rows that predate it).
+ */
 export class ConversationMapper {
-  private static readonly logger = new Logger(ConversationMapper.name)
-
-  static resolveUnreadCount(conversation: any, userId?: string): string {
-    if (
-      conversation?.unreadCount !== undefined &&
-      conversation?.unreadCount !== null
-    ) {
-      const unread = Number(conversation.unreadCount)
-      if (!Number.isFinite(unread) || unread <= 0) return '0'
-      return unread > 5 ? '5+' : String(unread)
-    }
-
-    if (userId && Array.isArray(conversation?.members)) {
-      const me = conversation.members.find((m: any) => m.userId === userId)
-      const unread = Number(me?.unreadCount || 0)
-      if (!Number.isFinite(unread) || unread <= 0) return '0'
-      return unread > 5 ? '5+' : String(unread)
-    }
-
-    return '0'
-  }
-
-  static resolveDisplay(conversation: any, userId?: string) {
-    if (conversation?.type !== 'DIRECT') {
-      return {
-        displayName: conversation?.groupName || 'Nhóm chat',
-        displayAvatar: conversation?.groupAvatar || '',
-      }
-    }
-
-    // Ưu tiên trường phi chuẩn hoá trên dòng membership: danh sách hội thoại
-    // không còn kéo `members` nữa (include đó đắt tuyến tính theo số thành
-    // viên). `members` chỉ còn là đường dự phòng cho các payload vẫn mang nó
-    // — chi tiết hội thoại, sự kiện realtime.
-    const peer = (conversation?.members || []).find(
-      (member: any) => member.userId !== userId,
-    )
-
-    const displayName =
-      conversation?.peerUsername ||
-      conversation?.peerFullName ||
-      peer?.username ||
-      peer?.fullName ||
-      conversation?.groupName ||
-      null
-
-    if (!displayName) {
-      // Không rơi im lặng về chuỗi mặc định nữa. Trước đây payload realtime
-      // thiếu `members` khiến hội thoại vừa tạo hiện "Trò chuyện trực tiếp"
-      // và bug sống sót rất lâu vì chẳng ai kêu.
-      ConversationMapper.warnMissingPeer(conversation, userId)
-    }
-
-    return {
-      displayName: displayName || 'Trò chuyện trực tiếp',
-      displayAvatar:
-        conversation?.peerAvatar ||
-        peer?.avatar ||
-        conversation?.groupAvatar ||
-        '',
-    }
-  }
-
-  /** Cảnh báo có tiết chế — DIRECT mà không xác định được đối phương là lỗi dữ liệu. */
-  private static warnedConversations = new Set<string>()
-  private static warnMissingPeer(conversation: any, userId?: string) {
-    const id = String(conversation?.id ?? 'unknown')
-    if (ConversationMapper.warnedConversations.has(id)) return
-    ConversationMapper.warnedConversations.add(id)
-    if (ConversationMapper.warnedConversations.size > 500) {
-      ConversationMapper.warnedConversations.clear()
-    }
-    ConversationMapper.logger.warn(
-      `DIRECT ${id}: không xác định được đối phương cho viewer ${userId ?? '?'} ` +
-        `(peerUsername=${conversation?.peerUsername ?? 'null'}, ` +
-        `members=${conversation?.members?.length ?? 0}) -> hiển thị tên mặc định`,
-    )
-  }
-
-  private static toIso(value: any): string | null {
-    if (!value) return null
-    if (value instanceof Date) return value.toISOString()
-    return String(value)
-  }
-
-  private static mapMember(member: any) {
-    return {
-      userId: member.userId,
-      role: member.role,
-      username: member.username,
-      avatar: member.avatar,
-      fullName: member.fullName,
-      lastReadAt: this.toIso(member.lastReadAt),
-      lastReadMessageId: member.lastReadMessageId
-        ? String(member.lastReadMessageId)
-        : null,
-      lastMessageAt: this.toIso(member.lastMessageAt),
-    }
-  }
-
-  private static resolveLastMessageFields(conversation: any) {
-    const latestMessage = conversation?.messages?.[0]
-    const lastMessageId =
-      conversation?.lastMessageId ||
-      latestMessage?.id ||
-      null
-
-    const lastMessageAt = this.toIso(
-      conversation?.lastMessageAt || latestMessage?.createdAt,
-    )
-
-    const lastMessageText =
-      conversation?.lastMessageText !== undefined &&
-      conversation?.lastMessageText !== null
-        ? String(conversation.lastMessageText)
-        : latestMessage
-          ? MessageMapper.previewText(latestMessage)
-          : ''
-
-    const sender = latestMessage?.senderMember
-    const lastMessageSenderId =
-      conversation?.lastMessageSenderId ||
-      latestMessage?.senderId ||
-      null
-    const lastMessageSenderName =
-      conversation?.lastMessageSenderName ||
-      sender?.fullName ||
-      sender?.username ||
-      null
-    const lastMessageSenderAvatar =
-      conversation?.lastMessageSenderAvatar ?? sender?.avatar ?? null
-
-    return {
-      lastMessageId,
-      lastMessageAt,
-      lastMessageText,
-      lastMessageSenderId,
-      lastMessageSenderName,
-      lastMessageSenderAvatar,
-    }
-  }
-
-  static toSummary(conversation: any, userId?: string) {
-    const display = this.resolveDisplay(conversation, userId)
-    const lastMessage = this.resolveLastMessageFields(conversation)
+  static toSummary(
+    conversation: ConversationListRow | ConversationWithMembers,
+    viewerId: string,
+  ) {
+    const members = 'members' in conversation ? conversation.members : null
+    // Someone just removed, or leaving, is no longer among the members.
+    const mine: Partial<ViewerState> =
+      'members' in conversation
+        ? (conversation.members.find((m) => m.userId === viewerId) ?? {})
+        : conversation
+    const isDirect = conversation.type === 'DIRECT'
+    const peer = isDirect ? peerOf(conversation, viewerId) : null
 
     return {
       id: conversation.id,
       type: conversation.type,
       groupName: conversation.groupName ?? null,
       groupAvatar: conversation.groupAvatar ?? null,
-      displayName: display.displayName,
-      displayAvatar: display.displayAvatar,
-      memberCount: conversation.memberCount ?? conversation.members?.length ?? 0,
-      // Danh sách hội thoại không còn kèm `members`, nên client lấy id đối
-      // phương từ đây (dùng cho chấm trạng thái online ở sidebar).
-      peerUserId:
-        conversation.peerUserId ??
-        (conversation.type === 'DIRECT'
-          ? ((conversation.members || []).find(
-              (m: any) => m.userId !== userId,
-            )?.userId ?? null)
-          : null),
-      unreadCount: this.resolveUnreadCount(conversation, userId),
-      unreadMentionCount:
-        conversation.unreadMentionCount ??
-        (conversation.members || []).find((m: any) => m.userId === userId)
-          ?.unreadMentionCount ??
-        0,
-      lastMentionMessageId:
-        conversation.lastMentionMessageId ??
-        (conversation.members || []).find((m: any) => m.userId === userId)
-          ?.lastMentionMessageId ??
-        null,
-      createdAt: this.toIso(conversation.createdAt)!,
-      updatedAt: this.toIso(conversation.updatedAt)!,
-      members: (conversation.members || []).map((member: any) =>
-        this.mapMember(member),
-      ),
-      // The list only ever returns conversations the caller is an active
-      // member of, so these are known here. Leaving them out meant the client
-      // saw `membershipStatus: undefined` for every conversation opened from
-      // the sidebar — which kept the "Rời nhóm" button permanently disabled,
-      // because the detail endpoint that would have filled them in is only
-      // fetched when the members are missing.
+      displayName: isDirect
+        ? (peer && displayNameOf(peer)) || 'Trò chuyện trực tiếp'
+        : conversation.groupName || 'Nhóm chat',
+      displayAvatar: (isDirect ? peer?.avatar : conversation.groupAvatar) || '',
+      memberCount: conversation.memberCount,
+      peerUserId: peer?.userId ?? null,
+      unreadCount: Math.max(0, mine.unreadCount ?? 0),
+      unreadMentionCount: mine.unreadMentionCount ?? 0,
+      lastMentionMessageId: mine.lastMentionMessageId ?? null,
+      createdAt: conversation.createdAt,
+      updatedAt: conversation.updatedAt,
+      // Only when they were loaded: a list row has none, and an empty array
+      // would read as "nobody is in it".
+      ...(members
+        ? {
+            members: members.map((member) => ({
+              userId: member.userId,
+              role: member.role,
+              username: member.username,
+              avatar: member.avatar,
+              fullName: member.fullName,
+              lastReadAt: member.lastReadAt ?? null,
+              lastReadMessageId: member.lastReadMessageId ?? null,
+              lastMessageAt: member.lastMessageAt ?? null,
+            })),
+          }
+        : {}),
+      // Whoever reads a conversation this way is an active member of it;
+      // the events for someone removed or leaving say otherwise (toDetail).
       membershipStatus: 'ACTIVE' as const,
       canSendMessage: true,
-      ...lastMessage,
+      lastMessageId: conversation.lastMessageId ?? null,
+      lastMessageAt: conversation.lastMessageAt ?? null,
+      lastMessageText: conversation.lastMessageText ?? '',
+      lastMessageSenderId: conversation.lastMessageSenderId ?? null,
+      lastMessageSenderName: conversation.lastMessageSenderName ?? null,
+      lastMessageSenderAvatar: conversation.lastMessageSenderAvatar ?? null,
     }
   }
 
   static toDetail(
-    conversation: any,
-    userId?: string,
+    conversation: ConversationListRow | ConversationWithMembers,
+    viewerId: string,
     options?: {
       membershipStatus?: 'ACTIVE' | 'REMOVED' | 'LEFT'
       canSendMessage?: boolean
     },
   ) {
-    const summary = this.toSummary(conversation, userId)
-    const latestMessage = conversation?.messages?.[0]
-
     return {
-      ...summary,
-      lastMessage: latestMessage
-        ? MessageMapper.toResponse(latestMessage)
-        : null,
+      ...this.toSummary(conversation, viewerId),
       membershipStatus: options?.membershipStatus ?? 'ACTIVE',
       canSendMessage: options?.canSendMessage ?? true,
     }
   }
+}
 
-  static toCreateResponse(conversation: any, userId: string) {
-    return {
-      conversation: this.toDetail(conversation, userId, {
-        membershipStatus: 'ACTIVE',
-        canSendMessage: true,
-      }),
-    }
+/** The other side of a direct conversation, from whichever shape it came. */
+function peerOf(
+  conversation: ConversationListRow | ConversationWithMembers,
+  viewerId: string,
+): Person | null {
+  if ('members' in conversation) {
+    return conversation.members.find((m) => m.userId !== viewerId) ?? null
+  }
+  if (!conversation.peerUserId) return null
+  return {
+    userId: conversation.peerUserId,
+    username: conversation.peerUsername,
+    fullName: conversation.peerFullName,
+    avatar: conversation.peerAvatar,
   }
 }

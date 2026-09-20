@@ -33,16 +33,22 @@ export interface OutboxCapablePrisma {
   outboxEvent: PrismaDelegateLike
 }
 
-// Client tối thiểu cho transaction tương tác (interactive transaction).
-export interface TransactionalPrisma {
-  $transaction<T>(fn: (tx: TxClient) => Promise<T>): Promise<T>
+/** A transaction that can record which messages it has consumed. */
+export interface InboxTx {
+  inboxMessage: { create(args: unknown): Promise<unknown> }
 }
 
-// Bên trong transaction: cần tạo bản ghi inbox + (tuỳ chọn) ghi outbox.
-export interface TxClient {
-  inboxMessage: { create(args: unknown): Promise<unknown> }
+/** A transaction that can queue an outgoing event. */
+export interface OutboxTx {
   outboxEvent: { create(args: unknown): Promise<unknown> }
-  [model: string]: unknown
+}
+
+/**
+ * A client that runs interactive transactions. `Tx` is the app's own
+ * transaction client, so a handler gets its real models, fully typed.
+ */
+export interface TransactionalPrisma<Tx> {
+  $transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T>
 }
 
 export interface OutboxEventInput {

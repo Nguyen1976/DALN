@@ -4,7 +4,7 @@ import type {
   OutboxCapablePrisma,
   OutboxEventInput,
   OutboxRecord,
-  TxClient,
+  OutboxTx,
 } from './types'
 
 /**
@@ -14,7 +14,7 @@ import type {
  * bao giờ xảy ra cảnh DB đã đổi nhưng event bị mất (hoặc ngược lại).
  */
 export async function enqueueOutbox(
-  tx: TxClient,
+  tx: OutboxTx,
   input: OutboxEventInput,
 ): Promise<void> {
   await tx.outboxEvent.create({
@@ -156,10 +156,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       if (events.length === 0) {
         // Rảnh: giãn dần chu kỳ (1,5s -> 3 -> 6 -> 12 -> 15) để không phải
         // truy vấn Mongo 40 lần/phút/service khi hệ thống không có việc gì.
-        this.currentDelayMs = Math.min(
-          this.currentDelayMs * 2,
-          this.maxIdleMs,
-        )
+        this.currentDelayMs = Math.min(this.currentDelayMs * 2, this.maxIdleMs)
         return
       }
 

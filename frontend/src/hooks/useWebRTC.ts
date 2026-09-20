@@ -41,11 +41,10 @@ export type CallStatus =
 export type CallType = "audio" | "video";
 
 /** Hình dạng ack của `call.ice_config` (xem hợp đồng TURN). */
-// Gateway ack: { ok, iceServers, expiresAt, ttlSeconds }. Chấp nhận cả `ttl`.
+// Gateway ack: { ok, iceServers, expiresAt, ttlSeconds }.
 type IceConfigResponse = {
   iceServers?: RTCIceServer[];
   ttlSeconds?: number;
-  ttl?: number;
 } | null;
 
 /** Hình dạng ack của `call.incoming_call` (xem hợp đồng TURN). */
@@ -340,7 +339,7 @@ export const useWebRTC = (socket: Socket) => {
         : FALLBACK_ICE_SERVERS;
 
     // Chỉ cache khi có cấu hình thật kèm ttl > 0 (ttl 0 = chỉ STUN dev).
-    const ttlSeconds = config?.ttlSeconds ?? config?.ttl ?? 0;
+    const ttlSeconds = config?.ttlSeconds ?? 0;
     const ttlMs = ttlSeconds > 0 ? ttlSeconds * 1000 : 0;
     if (ttlMs > 0 && config?.iceServers?.length) {
       iceCacheRef.current = {

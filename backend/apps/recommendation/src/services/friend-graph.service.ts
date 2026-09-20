@@ -59,7 +59,9 @@ export class FriendGraphService {
   }
 
   /** userId -> Set<friendId> for a batch of users (graph-feature neighbor sets). */
-  async getNeighborsBatch(userIds: string[]): Promise<Map<string, Set<string>>> {
+  async getNeighborsBatch(
+    userIds: string[],
+  ): Promise<Map<string, Set<string>>> {
     const neighbors = new Map<string, Set<string>>()
     for (const id of userIds) neighbors.set(id, new Set())
     if (!userIds.length) return neighbors
@@ -76,7 +78,10 @@ export class FriendGraphService {
   }
 
   /** Friends-of-friends with shared-friend counts (replaces Neo4j common-friends). */
-  async getCommonFriends(userId: string, limit = 300): Promise<CommonFriendRow[]> {
+  async getCommonFriends(
+    userId: string,
+    limit = 300,
+  ): Promise<CommonFriendRow[]> {
     const directFriends = await this.getFriendIds(userId)
     const exclude = [userId, ...directFriends]
 
@@ -196,7 +201,10 @@ export class FriendGraphService {
   }
 
   /** Users sharing groups with `userId`, with shared-group counts. */
-  async getCommonGroups(userId: string, limit = 300): Promise<CommonGroupRow[]> {
+  async getCommonGroups(
+    userId: string,
+    limit = 300,
+  ): Promise<CommonGroupRow[]> {
     const myGroups = await this.prisma.groupMembership.findMany({
       where: { userId },
       select: { conversationId: true },

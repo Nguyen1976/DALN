@@ -26,10 +26,10 @@ export function createLogger(serviceName: string) {
         const upper = level.toUpperCase().padEnd(5)
 
         return (
-          `[Nest] ${pid}  - ${timestamp}   ` +
+          `[Nest] ${pid}  - ${String(timestamp)}   ` +
           `${upper} ` +
           `[${serviceName}] ` +
-          message
+          String(message)
         )
       }),
     ),

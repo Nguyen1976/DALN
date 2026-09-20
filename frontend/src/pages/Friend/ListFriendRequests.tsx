@@ -98,7 +98,7 @@ const ListFriendRequests = () => {
   /** The first page of a tab, replacing whatever was shown. */
   const fetchRequests = useCallback(
     ({ dir }: { dir: FriendRequestDirection }) =>
-      dispatch(fetchFriendRequests({ direction: dir, page: 1 })),
+      dispatch(fetchFriendRequests({ direction: dir, cursor: null })),
     [dispatch],
   );
 
@@ -115,7 +115,7 @@ const ListFriendRequests = () => {
     itemCount: requests.length,
     loadMore: () =>
       dispatch(
-        fetchFriendRequests({ direction, page: list.page + 1 }),
+        fetchFriendRequests({ direction, cursor: list.nextCursor }),
       ).unwrap(),
   });
 
@@ -174,7 +174,7 @@ const ListFriendRequests = () => {
                 className={cn(
                   "flex items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 py-2.5 text-sm font-medium",
                   "transition-colors duration-(--motion-fast)",
-                  "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
                   selected
                     ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -202,7 +202,7 @@ const ListFriendRequests = () => {
           aria-busy={isLoading || paging.status === "loading"}
         >
           {requests.map((request) => {
-            const person = request.fromUser;
+            const person = request.counterpart;
             const Row = isReceived ? "button" : "div";
             return (
               <Row

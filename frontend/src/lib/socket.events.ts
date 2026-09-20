@@ -25,7 +25,6 @@ export const SOCKET_EVENTS = {
     NEW_MEMBER_ADDED: "chat.new_member_added",
     USER_TYPING: "user:typing",
     MESSAGE_READ: "message:read",
-    USER_READ: "user:read",
     USER_READ_BATCH: "user:read_batch",
   },
 

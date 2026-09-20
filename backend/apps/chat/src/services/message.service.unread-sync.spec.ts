@@ -24,11 +24,12 @@ function setup() {
     eventsPublisher as never,
     {} as never, // messageMediaService
     redisService as never,
+    {} as never, // pollRepo
   )
   return { service, redisService }
 }
 
-function send(service: MessageService, id: string | undefined) {
+function send(service: MessageService, id: string) {
   return service.notifyMessageCreated({
     conversationId: CONV,
     senderId: SENDER,
@@ -79,7 +80,7 @@ describe('MessageService — đồng bộ unread qua Redis', () => {
   it('tin không có id hợp lệ -> bỏ lệnh id mới nhất, phần còn lại giữ nguyên', () => {
     const { service, redisService } = setup()
 
-    send(service, undefined)
+    send(service, 'tmp-1')
 
     const [commands] = redisService.pipeline.mock.calls[0]
     expect(commands.map((command) => command[0])).toEqual([

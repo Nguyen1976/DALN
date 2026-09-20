@@ -15,14 +15,22 @@ import type {
 import {
   ConversationMemberRepository,
   MessageRepository,
+  PollRepository,
+  type MemberRow,
 } from '../repositories'
 import { ChatErrors } from '../errors/chat.errors'
 import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
-import { ConversationAssetKind } from '../http/chat-http.dto'
+import type { AssetKind, UploadType } from '../http/chat-http.dto'
 import { resolveMentions } from '../domain/mention.resolver'
-import { MessageMapper } from '../domain/message.mapper'
+import { MessageMapper, type MessageRow } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
-import { buildKeysetCursor, parseKeysetCursor } from '@app/util'
+import {
+  buildKeysetCursor,
+  displayNameOf,
+  isObjectId,
+  parseKeysetCursor,
+  toPage,
+} from '@app/util'
 
 export interface RevokeMessageRequest {
   conversationId: string
@@ -43,31 +51,31 @@ export interface ClearConversationHistoryRequest {
 
 export interface GroupCallLogRequest {
   conversationId: string
-  participantCount: number
-  durationSeconds: number
+  participantCount?: number
+  durationSeconds?: number
   callId?: string
   callType?: 'audio' | 'video'
   /** Người mở phòng — senderId của tin log để căn phải/trái như tin nhắn. */
   startedBy?: string
 }
 
-type ConversationSyncMember = {
-  userId: string
-  fullName?: string | null
-  username?: string | null
-  avatar?: string | null
-}
+/** Call timings arrive as floats (LiveKit) and are shown in whole units. */
+const wholeNonNegative = (value: number | undefined) =>
+  Number.isFinite(value) ? Math.max(0, Math.floor(value!)) : 0
 
-type OutboundMessage = {
-  id?: string
-  createdAt: Date
-  content?: string | null
-  type?: string
-  poll?: { question?: string } | null
-  isRevoked?: boolean
-  senderMember?: ConversationSyncMember
-  [key: string]: unknown
-}
+/** Who a message is shown as coming from. */
+type Sender = Pick<MemberRow, 'userId'> &
+  Partial<Pick<MemberRow, 'username' | 'fullName' | 'avatar'>>
+
+/** System messages carry a placeholder sender for the conversation list. */
+const systemSender = (userId: string): Sender => ({
+  userId,
+  fullName: 'System',
+  username: 'System',
+  avatar: null,
+})
+
+type OutboundMessage = MessageRow
 
 @Injectable()
 export class MessageService {
@@ -79,6 +87,7 @@ export class MessageService {
     private readonly eventsPublisher: ChatEventsPublisher,
     private readonly messageMediaService: MessageMediaService,
     private readonly redisService: RedisService,
+    private readonly pollRepo: PollRepository,
   ) {}
 
   async clearMentions(conversationId: string, userId: string) {
@@ -88,7 +97,6 @@ export class MessageService {
     )
     if (!member) ChatErrors.userNotMember()
     await this.memberRepo.clearMentions(conversationId, userId)
-    return { success: true }
   }
 
   async sendMessage(data: MessageSendPayload) {
@@ -96,13 +104,15 @@ export class MessageService {
       data.conversationId,
     )
     const memberIds = conversationMembers.map((cm) => cm.userId)
-
-    if (!memberIds.includes(data.senderId)) {
+    const senderMember = conversationMembers.find(
+      (member) => member.userId === data.senderId,
+    )
+    if (!senderMember) {
       ChatErrors.senderNotMember()
     }
 
-    const content = data.text?.trim() || null
-    const medias = data.medias || []
+    const content = data.content?.trim() || null
+    let medias = data.medias || []
     // Nguồn sự thật là NỘI DUNG tin, KHÔNG phải id client gửi lên: xoá chữ
     // "@Alice" khỏi ô soạn thì Alice không còn bị nhắc, gõ tay "@alice" vẫn
     // tính, tên có dấu/có khoảng trắng đều khớp, và `@all` nhắc cả nhóm.
@@ -126,7 +136,10 @@ export class MessageService {
 
     if (medias.length) {
       const normalizedMedias = medias.map((media) => {
-        const fileName = String(media.objectKey || '').split('/').pop() || ''
+        const fileName =
+          String(media.objectKey || '')
+            .split('/')
+            .pop() || ''
         const resolvedMimeType = this.messageMediaService.resolveMimeType(
           fileName,
           media.mimeType,
@@ -146,7 +159,10 @@ export class MessageService {
 
       await Promise.all(
         normalizedMedias.map(async (media) => {
-          const fileName = String(media.objectKey || '').split('/').pop() || ''
+          const fileName =
+            String(media.objectKey || '')
+              .split('/')
+              .pop() || ''
           // 'TEXT' makes the validator infer the kind per attachment, so a
           // mixed batch is checked against the right allow-list and size cap
           // for each file rather than for whatever the message as a whole is.
@@ -166,7 +182,7 @@ export class MessageService {
         }),
       )
 
-      medias.splice(0, medias.length, ...normalizedMedias)
+      medias = normalizedMedias
 
       // Stored kind: the common one when every attachment agrees, otherwise
       // FILE as the umbrella. Rendering keys off each media anyway.
@@ -189,12 +205,7 @@ export class MessageService {
       ChatErrors.invalidMessagePayload()
     }
 
-    const senderMember = conversationMembers.find(
-      (member) => member.userId === data.senderId,
-    )
     message.senderMember = senderMember
-    ;(message as any).mentionUserIds = mentionUserIds
-    ;(message as any).mentions = mentions
     if (mentionUserIds.length) {
       await this.memberRepo.markMention(
         data.conversationId,
@@ -202,17 +213,14 @@ export class MessageService {
         String(message.id),
       )
       // Thông báo cho người bị nhắc (badge trong chat chỉ thấy khi đang mở app).
-      this.safePublish(() =>
-        this.eventsPublisher.publishMentioned({
-          conversationId: data.conversationId,
-          messageId: String(message.id),
-          senderId: data.senderId,
-          senderName:
-            senderMember?.fullName || senderMember?.username || 'Ai đó',
-          userIds: mentionUserIds,
-          preview: (content || '').slice(0, 120),
-        }),
-      )
+      this.eventsPublisher.publishMentioned({
+        conversationId: data.conversationId,
+        messageId: String(message.id),
+        senderId: data.senderId,
+        senderName: displayNameOf(senderMember),
+        userIds: mentionUserIds,
+        preview: (content || '').slice(0, 120),
+      })
     }
 
     // Replies are rare next to plain messages, so the quoted message is fetched
@@ -223,8 +231,11 @@ export class MessageService {
       ])
       // Only quote something from this same conversation: the id arrives from
       // the client and must not become a way to read another thread.
-      if (quoted && String(quoted.conversationId) === String(data.conversationId)) {
-        ;(message as any).replyTo = quoted
+      if (
+        quoted &&
+        String(quoted.conversationId) === String(data.conversationId)
+      ) {
+        message.replyTo = quoted
       }
     }
 
@@ -232,16 +243,16 @@ export class MessageService {
       conversationId: data.conversationId,
       senderId: data.senderId,
       message,
-      senderMember: senderMember || { userId: data.senderId },
-      memberIds: memberIds as string[],
-      tempMessageId: data.tempMessageId,
+      senderMember,
+      memberIds,
+      clientMessageId: data.clientMessageId,
     })
   }
 
   async createMessageUploadUrl(data: {
     conversationId: string
     userId: string
-    type: unknown
+    type: UploadType
     size: number | string
     mimeType?: string
     fileName: string
@@ -272,50 +283,43 @@ export class MessageService {
       data.fileName,
     )
 
-    const upload = await this.messageMediaService.createPresignedUploadUrl({
+    return this.messageMediaService.createPresignedUploadUrl({
       conversationId: data.conversationId,
       userId: data.userId,
       fileName: data.fileName,
       mimeType: resolvedMimeType,
     })
-
-    return {
-      uploadUrl: upload.uploadUrl,
-      objectKey: upload.objectKey,
-      publicUrl: upload.publicUrl,
-      expiresInSeconds: String(upload.expiresInSeconds),
-    }
   }
 
   async getMessagesByConversationId(
     conversationId: string,
     userId: string,
-    params: { limit?: number | string; cursor?: string | null },
+    page: { limit: number; cursor?: string },
   ) {
-    const isMember = await this.memberRepo.findByConversationIdAndUserId(
+    const member = await this.memberRepo.findByConversationIdAndUserId(
       conversationId,
       userId,
     )
-
-    if (!isMember) {
+    if (!member) {
       ChatErrors.userNotMember()
     }
 
-    const take = Number(params.limit) || 20
-    const cursor = parseKeysetCursor(params.cursor)
-
-    const messages =
-      await this.messageRepo.findByConversationIdPaginatedForUser(
-        conversationId,
-        userId,
-        take,
-        cursor,
-      )
-
-    await this.attachQuotedMessages(messages)
+    const rows = await this.messageRepo.findByConversationIdPaginatedForUser(
+      conversationId,
+      userId,
+      page.limit + 1,
+      parseKeysetCursor(page.cursor),
+      member.clearedHistoryAt,
+    )
+    const { items, nextCursor } = toPage(rows, page.limit, (m) =>
+      buildKeysetCursor(m.createdAt, m.id),
+    )
+    await this.attachQuotedMessages(items)
+    const withPolls = await this.withPollState(items, userId)
 
     return {
-      messages: messages.map((m) => MessageMapper.toResponse(m)),
+      items: withPolls.map((m) => MessageMapper.toResponse(m)),
+      nextCursor,
     }
   }
 
@@ -326,7 +330,13 @@ export class MessageService {
    * quote unless the original happens to be on screen, which stops being true
    * as soon as the thread is scrolled.
    */
-  private async attachQuotedMessages(messages: any[]) {
+  private async attachQuotedMessages(
+    messages: {
+      replyToMessageId: string | null
+      conversationId: string
+      replyTo?: unknown
+    }[],
+  ) {
     const ids = messages
       .map((m) => m.replyToMessageId)
       .filter((id): id is string => Boolean(id))
@@ -339,10 +349,37 @@ export class MessageService {
     for (const message of messages) {
       if (!message.replyToMessageId) continue
       const original = byId.get(String(message.replyToMessageId))
-      if (original && String(original.conversationId) === String(message.conversationId)) {
+      if (
+        original &&
+        String(original.conversationId) === String(message.conversationId)
+      ) {
         message.replyTo = original
       }
     }
+  }
+
+  /** Each poll's voter count and the viewer's own vote, for one page. */
+  private async withPollState<T extends { poll: { id: string } | null }>(
+    messages: T[],
+    viewerId: string,
+  ) {
+    const pollIds = messages.flatMap((m) => (m.poll ? [m.poll.id] : []))
+    if (!pollIds.length) return messages
+    const [voters, mine] = await Promise.all([
+      this.pollRepo.countVotesByPoll(pollIds),
+      this.pollRepo.findVotesOf(viewerId, pollIds),
+    ])
+    return messages.map((m) =>
+      m.poll
+        ? {
+            ...m,
+            pollState: {
+              totalVoters: voters.get(m.poll.id) ?? 0,
+              myOptionIds: mine.get(m.poll.id) ?? [],
+            },
+          }
+        : m,
+    )
   }
 
   async revokeMessage(data: RevokeMessageRequest) {
@@ -391,18 +428,17 @@ export class MessageService {
       content: '',
     }
 
+    const dto = MessageMapper.toResponse(revokedMessage)
     this.eventsPublisher.publishMessageRevoked(
       {
         conversationId: data.conversationId,
         messageId: data.messageId,
-        message: revokedMessage,
+        message: dto,
       },
       conversationMembers.map((member) => member.userId),
     )
 
-    return {
-      message: MessageMapper.toResponse(revokedMessage),
-    }
+    return dto
   }
 
   async deleteMessageForMe(data: DeleteMessageForMeRequest) {
@@ -425,11 +461,6 @@ export class MessageService {
     }
 
     await this.messageRepo.createDeleteMessage(data.messageId, data.userId)
-
-    return {
-      messageId: data.messageId,
-      conversationId: data.conversationId,
-    }
   }
 
   async clearConversationHistory(data: ClearConversationHistoryRequest) {
@@ -442,28 +473,18 @@ export class MessageService {
       ChatErrors.userNotMember()
     }
 
-    const clearedHistoryAt = new Date()
-
     await this.memberRepo.clearHistoryForMember(
       data.conversationId,
       data.userId,
-      clearedHistoryAt,
+      new Date(),
     )
-
-    return {
-      conversationId: data.conversationId,
-      clearedHistoryAt: clearedHistoryAt.toISOString(),
-    }
   }
 
   async getConversationAssets(
     conversationId: string,
     userId: string,
-    kind: ConversationAssetKind,
-    params: {
-      limit?: number | string
-      cursor?: string | null
-    },
+    kind: AssetKind,
+    page: { limit: number; cursor?: string },
   ) {
     const isMember = await this.memberRepo.findByConversationIdAndUserId(
       conversationId,
@@ -474,32 +495,17 @@ export class MessageService {
       ChatErrors.userNotMember()
     }
 
-    const take = Number(params.limit) || 20
-    const cursor = parseKeysetCursor(params.cursor)
-
-    const kindMap: Record<number, 'MEDIA' | 'LINK' | 'DOC'> = {
-      [ConversationAssetKind.ASSET_MEDIA]: 'MEDIA',
-      [ConversationAssetKind.ASSET_LINK]: 'LINK',
-      [ConversationAssetKind.ASSET_DOC]: 'DOC',
-    }
-
-    const mappedKind = kindMap[kind] || 'MEDIA'
-
-    const messages = await this.messageRepo.findConversationAssets(
+    const rows = await this.messageRepo.findConversationAssets(
       conversationId,
-      mappedKind,
-      take,
-      cursor,
+      kind,
+      page.limit + 1,
+      parseKeysetCursor(page.cursor),
     )
-
-    const last = messages[messages.length - 1]
-    const nextCursor =
-      messages.length === take && last?.createdAt
-        ? buildKeysetCursor(last.createdAt, last.id)
-        : undefined
-
+    const { items, nextCursor } = toPage(rows, page.limit, (m) =>
+      buildKeysetCursor(m.createdAt, m.id),
+    )
     return {
-      messages: messages.map((message) => MessageMapper.toResponse(message)),
+      items: items.map((message) => MessageMapper.toResponse(message)),
       nextCursor,
     }
   }
@@ -507,7 +513,7 @@ export class MessageService {
   async updateMessageRead(data: UpdateMessageReadPayload) {
     const { conversationId, userId, lastReadMessageId } = data
 
-    if (!this.isObjectId(lastReadMessageId)) {
+    if (!isObjectId(lastReadMessageId)) {
       return
     }
 
@@ -535,7 +541,7 @@ export class MessageService {
     // are not part of.
     if (!isMember(callerId) || (calleeId && !isMember(calleeId))) return
 
-    const seconds = Math.max(0, Math.floor(Number(data.durationSeconds) || 0))
+    const seconds = wholeNonNegative(data.durationSeconds)
     const callType = data.callType ?? 'audio'
     const text = this.describeCallOutcome(outcome, seconds, callType)
 
@@ -558,7 +564,7 @@ export class MessageService {
   async logGroupCall(data: GroupCallLogRequest): Promise<{ ok: boolean }> {
     const conversationId = data?.conversationId?.trim()
 
-    if (!conversationId || !this.isObjectId(conversationId)) {
+    if (!isObjectId(conversationId)) {
       ChatErrors.invalidGroupCallLog()
     }
 
@@ -584,14 +590,8 @@ export class MessageService {
       }
     }
 
-    const durationSeconds = Math.max(
-      0,
-      Math.floor(Number(data.durationSeconds) || 0),
-    )
-    const participantCount = Math.max(
-      0,
-      Math.floor(Number(data.participantCount) || 0),
-    )
+    const durationSeconds = wholeNonNegative(data.durationSeconds)
+    const participantCount = wholeNonNegative(data.participantCount)
     const callType = data.callType ?? 'audio'
     const text = this.describeGroupCall(
       participantCount,
@@ -652,47 +652,21 @@ export class MessageService {
     return `${label} đã kết thúc — ${duration}`
   }
 
+  /** A line like "X đã thêm Y" written into the thread and announced. */
   async createSystemMessageAndSync(
     conversationId: string,
     actorUserId: string,
     text: string,
   ) {
-    const result = await this.messageRepo.create({
+    const message = await this.messageRepo.create({
       conversationId,
       senderId: actorUserId,
       type: 'TEXT',
       content: text,
-      replyToMessageId: undefined,
       medias: [],
       isSystem: true,
     })
-
-    const message = result
-    if (!message) return
-
-    const members = await this.memberRepo.findByConversationId(conversationId)
-    const memberIds = members.map((member) => member.userId)
-
-    this.enqueueConversationSyncJob({
-      conversationId,
-      senderId: actorUserId,
-      message,
-      senderMember: {
-        userId: actorUserId,
-        fullName: 'System',
-        username: 'System',
-        avatar: null,
-      },
-    })
-
-    const normalized = MessageMapper.toResponse(message)
-
-    this.safePublish(() =>
-      this.eventsPublisher.publishSystemMessage(memberIds, normalized),
-    )
-    this.safePublish(() =>
-      this.eventsPublisher.publishMessageSent(normalized, memberIds),
-    )
+    await this.announceSystemMessage(conversationId, actorUserId, message)
   }
 
   /**
@@ -712,6 +686,14 @@ export class MessageService {
       content,
       callInfo,
     })
+    await this.announceSystemMessage(conversationId, actorUserId, message)
+  }
+
+  private async announceSystemMessage(
+    conversationId: string,
+    actorUserId: string,
+    message: OutboundMessage | null,
+  ) {
     if (!message) return
 
     const members = await this.memberRepo.findByConversationId(conversationId)
@@ -721,31 +703,22 @@ export class MessageService {
       conversationId,
       senderId: actorUserId,
       message,
-      senderMember: {
-        userId: actorUserId,
-        fullName: 'System',
-        username: 'System',
-        avatar: null,
-      },
+      senderMember: systemSender(actorUserId),
     })
 
-    const normalized = MessageMapper.toResponse(message)
-
-    this.safePublish(() =>
-      this.eventsPublisher.publishSystemMessage(memberIds, normalized),
-    )
-    this.safePublish(() =>
-      this.eventsPublisher.publishMessageSent(normalized, memberIds),
-    )
+    const dto = MessageMapper.toResponse(message)
+    this.eventsPublisher.publishSystemMessage(memberIds, dto)
+    this.eventsPublisher.publishMessageSent(dto, memberIds)
   }
 
   notifyMessageCreated(params: {
     conversationId: string
     senderId: string
     message: OutboundMessage
-    senderMember: ConversationSyncMember
+    senderMember: Sender
     memberIds: string[]
-    tempMessageId?: string
+    /** The sender's id for its optimistic copy, echoed on the ack. */
+    clientMessageId?: string
   }) {
     const { conversationId, senderId, message, senderMember, memberIds } =
       params
@@ -757,34 +730,12 @@ export class MessageService {
       senderMember,
     })
 
-    const normalizedMessage = MessageMapper.toResponse({
+    const dto = MessageMapper.toResponse({
       ...message,
-      tempMessageId: params.tempMessageId,
+      clientMessageId: params.clientMessageId,
     })
-
-    this.eventsPublisher.publishMessageSent(
-      {
-        ...normalizedMessage,
-        tempMessageId: params.tempMessageId,
-      },
-      memberIds,
-    )
-
-    return {
-      message: normalizedMessage,
-    }
-  }
-
-  private isObjectId(value: string): boolean {
-    return /^[a-f\d]{24}$/i.test(value)
-  }
-
-  private safePublish(fn: () => void) {
-    try {
-      fn()
-    } catch (error) {
-      this.logger.error('[chat-service] publish event failed', error)
-    }
+    this.eventsPublisher.publishMessageSent(dto, memberIds)
+    return dto
   }
 
   /**
@@ -804,7 +755,7 @@ export class MessageService {
     conversationId: string
     senderId: string
     message: OutboundMessage
-    senderMember: ConversationSyncMember
+    senderMember: Sender
   }) {
     const { conversationId, senderId, message, senderMember } = params
 
@@ -815,9 +766,7 @@ export class MessageService {
         ? new Date(message.createdAt).toISOString()
         : undefined,
       lastMessageText: MessageMapper.previewText(message),
-      lastMessageSenderId: senderId,
-      lastMessageSenderName:
-        senderMember.fullName || senderMember.username || senderId,
+      lastMessageSenderName: displayNameOf(senderMember) || senderId,
       lastMessageSenderAvatar: senderMember.avatar || null,
     })
 
@@ -828,8 +777,8 @@ export class MessageService {
     // không kéo lùi. Đặt TRƯỚC HINCRBY: nếu lượt claim của cron lỡ chen vào
     // giữa pipeline (hiếm — Redis thường chạy liền cả gói), thà đếm dư một tin
     // (lần đọc sau tự lành) còn hơn đếm thiếu (người nhận mất badge).
-    const messageId = String(message.id ?? '').toLowerCase()
-    if (this.isObjectId(messageId)) {
+    const messageId = message.id.toLowerCase()
+    if (isObjectId(messageId)) {
       commands.push([
         'eval',
         SET_NEWEST_ID_SCRIPT,

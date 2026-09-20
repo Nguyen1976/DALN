@@ -1,20 +1,11 @@
-import { Controller, Get, Headers, HttpCode, Post, Req } from '@nestjs/common'
+import { Controller, Headers, HttpCode, Post, Req } from '@nestjs/common'
 import type { Request } from 'express'
 import { WebhookReceiver } from 'livekit-server-sdk'
-import { RealtimeGatewayService } from './realtime-gateway.service'
 import { RealtimeGateway } from './realtime/realtime.gateway'
 
 @Controller()
 export class RealtimeGatewayController {
-  constructor(
-    private readonly realtimeGatewayService: RealtimeGatewayService,
-    private readonly realtimeGateway: RealtimeGateway,
-  ) {}
-
-  @Get()
-  getHello(): string {
-    return this.realtimeGatewayService.getHello()
-  }
+  constructor(private readonly realtimeGateway: RealtimeGateway) {}
 
   /**
    * Webhook LiveKit — nguồn sự thật cuối về "ai đang trong phòng".
@@ -37,7 +28,7 @@ export class RealtimeGatewayController {
     const apiSecret = process.env.LIVEKIT_API_SECRET?.trim()
     if (!apiKey || !apiSecret) return { ok: false }
 
-    const body = (req as Request & { body?: unknown }).body
+    const body: unknown = req.body
     const rawBody = Buffer.isBuffer(body)
       ? body.toString('utf8')
       : typeof body === 'string'

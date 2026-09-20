@@ -2,17 +2,18 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common'
-import type { Multer } from 'multer'
 import type { Response } from 'express'
 import { FileInterceptor } from '@nestjs/platform-express'
 import { UserService } from '../user.service'
 import {
+  InternalOnly,
   RequireLogin,
   UserInfo,
   WithoutLogin,
@@ -25,10 +26,17 @@ import {
   ResendOtpDto,
   RegisterUserDto,
   UpdateProfileDto,
-  UpdateStatusMakeFriendDto,
+  RespondFriendRequestDto,
+  FriendRequestParamsDto,
   VerifyOtpDto,
   CompleteInterestOnboardingDto,
+  FriendRequestsQueryDto,
+  MemberProfilesDto,
+  ProfileQueryDto,
 } from './user-http.dto'
+import { PageQueryDto } from '@app/common/http/page-query.dto'
+import type { MultipartFile } from '@app/common/http/multipart-file'
+import type { JwtPayload } from '@app/common/auth/resolve-tokens'
 import {
   ACCESS_TOKEN_MAX_AGE_MS,
   REFRESH_TOKEN_MAX_AGE_MS,
@@ -84,22 +92,12 @@ export class UserHttpController {
   @WithoutLogin()
   async verifyOtp(@Body() dto: VerifyOtpDto) {
     await this.userService.verifyRegistrationOtp(dto)
-
-    return {
-      success: true,
-      message: 'Xác thực OTP thành công',
-    }
   }
 
   @Post('resend-otp')
   @WithoutLogin()
   async resendOtp(@Body() dto: ResendOtpDto) {
-    const registration = await this.userService.resendRegistrationOtp(dto)
-    return {
-      email: registration.email,
-      requiresOtpVerification: registration.requiresOtpVerification,
-      message: 'Đã gửi lại mã OTP',
-    }
+    await this.userService.resendRegistrationOtp(dto)
   }
 
   @Post('login')
@@ -123,79 +121,65 @@ export class UserHttpController {
       maxAge: REFRESH_TOKEN_MAX_AGE_MS,
     })
 
-    return {
-      id: session.userId,
-      email: session.email,
-      username: session.username,
-      fullName: session.fullName || '',
-      avatar: session.avatar || '',
-      bio: session.bio || '',
-      interests: session.interests ?? [],
-      hasCompletedInterestOnboarding:
-        session.hasCompletedInterestOnboarding ?? true,
-      accessToken: session.accessToken,
-      refreshToken: session.refreshToken,
-    }
+    // The tokens travel only as httpOnly cookies. Echoing them in the body
+    // put the refresh token where page scripts (and localStorage) could reach
+    // it; the body is the same user shape GET /user/me returns.
+    return session.user
   }
 
   @Post('logout')
   @WithoutLogin()
-  async logout(@Res({ passthrough: true }) response: Response) {
+  logout(@Res({ passthrough: true }) response: Response) {
     response.clearCookie('accessToken', SESSION_COOKIE_OPTIONS)
     response.clearCookie('refreshToken', SESSION_COOKIE_OPTIONS)
-    return { message: 'Logout successful' }
+  }
+
+  /**
+   * For other services (chat, when a group is created or grows): the name
+   * and avatar of these users, straight from the owner of that data rather
+   * than from whatever a client sends along.
+   */
+  @Post('internal/profiles')
+  @InternalOnly()
+  getMemberProfiles(@Body() dto: MemberProfilesDto) {
+    return this.userService.getMemberProfiles(dto.ids)
   }
 
   @Get('me')
   @RequireLogin()
-  async getMe(@UserInfo() user: any) {
-    return this.userService.getMe(user.userId)
+  getMe(@UserInfo('userId') userId: string) {
+    return this.userService.getMe(userId)
   }
 
   @Post('interest-onboarding')
   @RequireLogin()
-  async completeInterestOnboarding(
+  completeInterestOnboarding(
     @Body() dto: CompleteInterestOnboardingDto,
-    @UserInfo() user: any,
+    @UserInfo('userId') userId: string,
   ) {
     return this.userService.completeInterestOnboarding({
-      userId: user.userId,
+      userId,
       slugs: dto.slugs,
     })
   }
 
   @Get('')
   @RequireLogin()
-  async getUserById(@UserInfo() viewer: any, @Query('userId') userId: string) {
-    const user = await this.userService.getUserById(userId)
-    const canSeeContact = await this.userService.canSeeContactDetails(
-      viewer?.userId,
-      userId,
-    )
-
-    return {
-      // Email is contact detail, not public profile: it goes out only to the
-      // account itself or to an accepted friend.
-      ...(canSeeContact ? { email: user.email } : {}),
-      username: user.username,
-      fullName: user.fullName || '',
-      avatar: user.avatar || '',
-      bio: user.bio || '',
-    }
+  getProfile(
+    @UserInfo('userId') viewerId: string,
+    @Query() query: ProfileQueryDto,
+  ) {
+    return this.userService.getProfile(viewerId, query.userId)
   }
 
   @Post('make-friend')
   @RequireLogin()
-  async makeFriend(@Body() body: MakeFriendDto, @UserInfo() user: any) {
+  async makeFriend(@Body() body: MakeFriendDto, @UserInfo() user: JwtPayload) {
     await this.userService.makeFriend({
       inviterId: user.userId,
       inviterName: user.username,
       inviteeEmail: body.email,
     })
-
-    return {
-      status: 'SUCCESS',
-    }
   }
 
   /**
@@ -206,134 +190,62 @@ export class UserHttpController {
   @RequireLogin()
   async makeFriendByUsername(
     @Body() body: MakeFriendByUsernameDto,
-    @UserInfo() user: any,
+    @UserInfo() user: JwtPayload,
   ) {
     await this.userService.makeFriend({
       inviterId: user.userId,
       inviterName: user.username,
       inviteeUsername: body.username,
     })
-
-    return {
-      status: 'SUCCESS',
-    }
   }
 
-  @Post('update-status-make-friend')
+  /** The recipient accepts or declines; the name on the event is their own. */
+  @Post('friend-requests/:id/respond')
   @RequireLogin()
-  async updateStatusMakeFriend(
-    @Body() body: UpdateStatusMakeFriendDto,
-    @UserInfo() user: any,
+  respondToFriendRequest(
+    @Param() params: FriendRequestParamsDto,
+    @Body() body: RespondFriendRequestDto,
+    @UserInfo() user: JwtPayload,
   ) {
-    await this.userService.updateStatusMakeFriend({
-      ...body,
+    return this.userService.respondToFriendRequest({
+      requestId: params.id,
+      status: body.status,
       inviteeId: user.userId,
       inviteeName: user.username,
     })
-
-    return {
-      status: 'SUCCESS',
-    }
   }
 
   @Get('list-friends')
   @RequireLogin()
-  async listFriends(
-    @UserInfo() user: any,
-    @Query('limit') limit: string,
-    @Query('page') page: string,
-  ) {
-    const friends = await this.userService.listFriends(
-      user.userId,
-      Number(limit),
-      Number(page),
-    )
-    return {
-      friends: friends.map((friend) => ({
-        ...friend,
-        fullName: friend.fullName || '',
-        avatar: friend.avatar || '',
-        bio: friend.bio || '',
-        status: (friend as any).status || false,
-        lastSeen: friend.lastSeen
-          ? new Date(friend.lastSeen).toISOString()
-          : null,
-      })),
-    }
+  listFriends(@UserInfo('userId') userId: string, @Query() page: PageQueryDto) {
+    return this.userService.listFriends(userId, page)
   }
 
   @Get('search')
   @RequireLogin()
-  async searchUsers(@UserInfo() user: any, @Query('keyword') keyword: string) {
-    const friends = await this.userService.searchFriends(user.userId, keyword)
-    return {
-      friends: friends.map((friend) => ({
-        id: friend.id,
-        email: friend.email,
-        username: friend.username,
-        fullName: friend.fullName || '',
-        avatar: friend.avatar || '',
-        bio: friend.bio || '',
-        status: (friend as any).status || false,
-      })),
-    }
+  searchUsers(
+    @UserInfo('userId') userId: string,
+    @Query('keyword') keyword: string,
+  ) {
+    return this.userService.searchFriends(userId, keyword)
   }
 
   @Get('list-friend-requests')
   @RequireLogin()
-  async listFriendRequests(
-    @UserInfo() user: any,
-    @Query('limit') limit: string,
-    @Query('page') page: string,
-    @Query('direction') direction?: string,
+  listFriendRequests(
+    @UserInfo('userId') userId: string,
+    @Query() query: FriendRequestsQueryDto,
   ) {
-    const requests = await this.userService.listFriendRequests(
-      user.userId,
-      Number(limit),
-      Number(page),
-      direction === 'sent' ? 'sent' : 'received',
-    )
-    return {
-      friendRequests: requests.map((request) => ({
-        id: request.id,
-        status: request.status,
-        createdAt: request.createdAt.toString(),
-        updatedAt: request.updatedAt.toString(),
-        fromUser: {
-          id: request.fromUser.id,
-          email: request.fromUser.email,
-          username: request.fromUser.username,
-          fullName: request.fromUser.fullName || '',
-          avatar: request.fromUser.avatar || '',
-        },
-      })),
-    }
+    return this.userService.listFriendRequests(userId, query.direction, query)
   }
 
   @Get('detail-friend-request')
   @RequireLogin()
-  async detailMakeFriend(
-    @UserInfo() user: any,
+  detailMakeFriend(
+    @UserInfo('userId') userId: string,
     @Query('friendRequestId') friendRequestId: string,
   ) {
-    const request = await this.userService.detailMakeFriend(
-      friendRequestId,
-      user.userId,
-    )
-    return {
-      id: request.id,
-      toUserId: request.toUserId,
-      status: request.status,
-      createdAt: request.createdAt.toString(),
-      updatedAt: request.updatedAt.toString(),
-      fromUser: {
-        id: request.fromUser.id,
-        email: request.fromUser.email,
-        username: request.fromUser.username,
-        fullName: request.fromUser.fullName || '',
-        avatar: request.fromUser.avatar || '',
-      },
-    }
+    return this.userService.detailMakeFriend(friendRequestId, userId)
   }
 
   @Post('update-profile')
@@ -345,22 +257,16 @@ export class UserHttpController {
     }),
   )
   @RequireLogin()
-  async updateProfile(
+  updateProfile(
     @Body() dto: UpdateProfileDto,
-    @UserInfo() user: any,
-    @UploadedFile() avatar?: Multer.File,
+    @UserInfo('userId') userId: string,
+    @UploadedFile() avatar?: MultipartFile,
   ) {
-    const profile = await this.userService.updateProfile({
+    return this.userService.updateProfile({
       ...dto,
-      userId: user.userId,
+      userId,
       avatar: avatar?.buffer,
       avatarFilename: avatar?.originalname,
     })
-
-    return {
-      fullName: profile.fullName || '',
-      bio: profile.bio || '',
-      avatar: profile.avatar || '',
-    }
   }
 }

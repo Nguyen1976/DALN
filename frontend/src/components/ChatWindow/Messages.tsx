@@ -115,7 +115,6 @@ const MessageComponent = ({
   onRevokeMessage,
   onDeleteMessageForMe,
   onOpenPoll,
-  pollVoteSelections,
   onRetryMessage,
   onDiscardMessage,
   onReplyMessage,
@@ -134,7 +133,6 @@ const MessageComponent = ({
   onRevokeMessage?: (message: Message) => void;
   onDeleteMessageForMe?: (message: Message) => void;
   onOpenPoll?: (message: Message) => void;
-  pollVoteSelections?: Record<string, string[]>;
   onRetryMessage?: (message: Message) => void;
   onDiscardMessage?: (message: Message) => void;
   onReplyMessage?: (message: Message) => void;
@@ -198,9 +196,7 @@ const MessageComponent = ({
           const kind = resolveMediaKind(media);
           return kind === "IMAGE" || kind === "VIDEO";
         }).length;
-        const selectedPollOptions = message.poll
-          ? pollVoteSelections?.[message.poll.id] || []
-          : [];
+        const selectedPollOptions = message.poll?.myOptionIds ?? [];
 
         const dayDivider = startsNewDay ? (
           <div className="my-4 flex items-center gap-3" role="separator">
@@ -286,7 +282,7 @@ const MessageComponent = ({
                                 aria-hidden="true"
                                 // scaleX, not width: the bar grows smoothly
                                 // when votes come in, without relayout.
-                                className="absolute inset-0 origin-left animate-grow-x bg-primary/12 transition-transform duration-(--motion-slow) ease-(--ease-out)"
+                                className="absolute inset-0 origin-left animate-grow-x bg-primary/12 transition-transform duration-(--motion-slow) ease-out"
                                 style={{ transform: `scaleX(${share / 100})` }}
                               />
                               <span className="relative flex items-center justify-between gap-2">
@@ -352,7 +348,7 @@ const MessageComponent = ({
           message.type === "CALL" && message.callInfo
             ? message.callInfo
             : message.isSystem
-              ? parseLegacyCallInfo(message.text)
+              ? parseLegacyCallInfo(message.content)
               : null;
         if (callInfo) {
           return (
@@ -398,7 +394,7 @@ const MessageComponent = ({
                 )}
               >
                 <p className="max-w-[85%] rounded-full bg-muted px-3 py-1 text-center text-xs leading-relaxed text-muted-foreground">
-                  <MentionText text={message.text} message={message} members={members} selfId={user.id} />
+                  <MentionText text={message.content} message={message} members={members} selfId={user.id} />
                   <time
                     dateTime={message.createdAt}
                     title={formatFullDateTime(message.createdAt)}
@@ -500,7 +496,7 @@ const MessageComponent = ({
                             decoding="async"
                             // Reserving a box keeps the thread from jumping
                             // when the image finally decodes.
-                            className="mb-2 max-h-80 w-full max-w-[17rem] rounded-xl bg-muted object-cover"
+                            className="mb-2 max-h-80 w-full max-w-68 rounded-xl bg-muted object-cover"
                           />
                         );
                       }
@@ -512,7 +508,7 @@ const MessageComponent = ({
                             src={media.url}
                             controls
                             preload="metadata"
-                            className="mb-2 max-h-80 w-full max-w-[18rem] rounded-xl bg-muted"
+                            className="mb-2 max-h-80 w-full max-w-72 rounded-xl bg-muted"
                           />
                         );
                       }
@@ -576,7 +572,7 @@ const MessageComponent = ({
                         >
                           {message.replyTo.isRevoked
                             ? "Tin nhắn đã bị thu hồi"
-                            : message.replyTo.text ||
+                            : message.replyTo.content ||
                               message.replyTo.attachmentName ||
                               quotedPlaceholder(message.replyTo.type)}
                         </span>
@@ -595,9 +591,9 @@ const MessageComponent = ({
                     >
                       Tin nhắn đã bị thu hồi
                     </p>
-                  ) : message.text ? (
+                  ) : message.content ? (
                     <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
-                      <MentionText text={message.text} message={message} members={members} selfId={user.id} isMine={isMine} />
+                      <MentionText text={message.content} message={message} members={members} selfId={user.id} isMine={isMine} />
                     </p>
                   ) : null}
 

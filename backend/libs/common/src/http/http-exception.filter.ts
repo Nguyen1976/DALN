@@ -5,6 +5,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common'
+import type { Response } from 'express'
 
 @Catch()
 export class AppHttpExceptionFilter implements ExceptionFilter {
@@ -16,7 +17,7 @@ export class AppHttpExceptionFilter implements ExceptionFilter {
     if (host.getType() !== 'http') throw exception
 
     const ctx = host.switchToHttp()
-    const response = ctx.getResponse()
+    const response = ctx.getResponse<Response>()
 
     if (exception instanceof HttpException) {
       const statusCode = exception.getStatus()

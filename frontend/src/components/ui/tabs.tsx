@@ -44,7 +44,7 @@ function TabsTrigger({
         data-slot="tabs-trigger"
         className={cn(
           "inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium",
-          "text-muted-foreground transition-[color,background-color,box-shadow] duration-(--motion-fast) ease-(--ease-out)",
+          "text-muted-foreground transition-[color,background-color,box-shadow] duration-(--motion-fast) ease-out",
           "hover:text-foreground",
           "data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm",
           "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",

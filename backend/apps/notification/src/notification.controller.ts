@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Param, Patch, Put, Query } from '@nestjs/common'
 import { NotificationService } from './notification.service'
 import { RequireLogin, UserInfo } from '@app/common/common.decorator'
+import { PageQueryDto } from '@app/common/http/page-query.dto'
+import { UpdateNotificationPreferencesDto } from './notification.dto'
 
 @Controller('notification')
 export class NotificationController {
@@ -10,41 +12,34 @@ export class NotificationController {
   @Get('')
   @RequireLogin()
   getNotifications(
-    @UserInfo() user: any,
-    @Query('limit') limit?: string,
-    @Query('page') page?: string,
+    @UserInfo('userId') userId: string,
+    @Query() page: PageQueryDto,
   ) {
-    return this.notificationService.getNotifications({
-      userId: user.userId,
-      limit: limit || '5',
-      page: page || '1',
-    })
+    return this.notificationService.getNotifications(userId, page)
   }
 
   @Patch(':notificationId/read')
   @RequireLogin()
   markNotificationAsRead(
-    @UserInfo() user: any,
+    @UserInfo('userId') userId: string,
     @Param('notificationId') notificationId: string,
   ) {
-    return this.notificationService.markNotificationAsRead({
-      userId: user.userId,
+    return this.notificationService.markNotificationAsRead(
+      userId,
       notificationId,
-    })
+    )
   }
 
   @Patch('read-all')
   @RequireLogin()
-  markAllNotificationsAsRead(@UserInfo() user: any) {
-    return this.notificationService.markAllNotificationsAsRead({
-      userId: user.userId,
-    })
+  markAllNotificationsAsRead(@UserInfo('userId') userId: string) {
+    return this.notificationService.markAllNotificationsAsRead(userId)
   }
 
   @Get('unread-count')
   @RequireLogin()
-  getUnreadCount(@UserInfo() user: any) {
-    return this.notificationService.getUnreadCount(user.userId)
+  getUnreadCount(@UserInfo('userId') userId: string) {
+    return this.notificationService.getUnreadCount(userId)
   }
 
   @Get('types')
@@ -55,16 +50,16 @@ export class NotificationController {
 
   @Get('preferences')
   @RequireLogin()
-  getNotificationPreferences(@UserInfo() user: any) {
-    return this.notificationService.getNotificationPreferences(user.userId)
+  getNotificationPreferences(@UserInfo('userId') userId: string) {
+    return this.notificationService.getNotificationPreferences(userId)
   }
 
   @Put('preferences')
   @RequireLogin()
-  updateNotificationPreferences(@UserInfo() user: any, @Body() payload: any) {
-    return this.notificationService.updateNotificationPreferences(
-      user.userId,
-      payload,
-    )
+  updateNotificationPreferences(
+    @UserInfo('userId') userId: string,
+    @Body() dto: UpdateNotificationPreferencesDto,
+  ) {
+    return this.notificationService.updateNotificationPreferences(userId, dto)
   }
 }

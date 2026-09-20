@@ -1,29 +1,23 @@
-import { normalizeEmail } from "@/utils/email";
-import authorizeAxiosInstance from "@/utils/authorizeAxios";
+import {
+  getSessionUserAPI,
+  saveInterestsAPI,
+  saveProfileAPI,
+  signInAPI,
+  signOutAPI,
+} from "@/apis/user";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import type { PayloadAction } from "@reduxjs/toolkit";
 
 export interface UserState {
   id: string;
   email: string;
   username: string;
   fullName: string;
-  avatar?: string;
-  bio?: string;
+  avatar: string;
+  bio: string;
   interests: string[];
   hasCompletedInterestOnboarding: boolean;
 }
-
-type AuthUserPayload = Partial<UserState> & {
-  token?: string;
-  accessToken?: string;
-};
-
-type InterestOnboardingResult = {
-  interests?: string[];
-  hasCompletedInterestOnboarding?: boolean;
-};
 
 /**
  * Remove the JWT copy earlier builds wrote to localStorage.
@@ -54,28 +48,20 @@ export const loginAPI = createAsyncThunk(
   `/user/login`,
   async (data: { email: string; password: string }, { rejectWithValue }) => {
     try {
-      const response = await authorizeAxiosInstance.post("/user/login", {
-        ...data,
-        email: normalizeEmail(data.email),
-      });
-      return response.data.data;
+      return await signInAPI(data);
     } catch (error) {
       return rejectWithValue(getErrorMessage(error));
     }
   },
 );
 
-export const logoutAPI = createAsyncThunk(`/user/logout`, async () => {
-  await authorizeAxiosInstance.post("/user/logout");
-  return {};
-});
+export const logoutAPI = createAsyncThunk(`/user/logout`, () => signOutAPI());
 
 export const fetchCurrentUserAPI = createAsyncThunk(
   `user/me`,
   async (_, { rejectWithValue }) => {
     try {
-      const response = await authorizeAxiosInstance.get("/user/me");
-      return response.data.data;
+      return await getSessionUserAPI();
     } catch (error) {
       return rejectWithValue(getErrorMessage(error));
     }
@@ -86,11 +72,7 @@ export const completeInterestOnboardingAPI = createAsyncThunk(
   `user/interest-onboarding`,
   async (slugs: string[], { rejectWithValue }) => {
     try {
-      const response = await authorizeAxiosInstance.post(
-        "/user/interest-onboarding",
-        { slugs },
-      );
-      return response.data.data;
+      return await saveInterestsAPI(slugs);
     } catch (error) {
       return rejectWithValue(getErrorMessage(error));
     }
@@ -99,113 +81,60 @@ export const completeInterestOnboardingAPI = createAsyncThunk(
 
 export const updateProfileAPI = createAsyncThunk(
   `/user/update-profile`,
-  async (formData: FormData) => {
-    const response = await authorizeAxiosInstance.post(
-      "/user/update-profile",
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      },
-    );
-    return response.data.data;
-  },
+  (formData: FormData) => saveProfileAPI(formData),
 );
 
-export const fetchUserByIdAPI = createAsyncThunk(
-  `/user/get-by-id`,
-  async (userId: string) => {
-    const response = await authorizeAxiosInstance.get(
-      `/user?userId=${userId}`,
-    );
-    return response.data.data;
-  },
-);
+/**
+ * The session user built from a server answer (login, /me): exactly the known
+ * fields, nothing else. Reducers return a fresh object rather than merging
+ * into the old one, so a stray key — like the refresh token older builds let
+ * into this persisted slice — cannot survive.
+ */
+function toUserState(user: UserState): UserState {
+  return {
+    id: user.id,
+    email: user.email,
+    username: user.username,
+    fullName: user.fullName,
+    avatar: user.avatar,
+    bio: user.bio,
+    interests: user.interests,
+    hasCompletedInterestOnboarding: user.hasCompletedInterestOnboarding,
+  };
+}
 
 export const userSlice = createSlice({
   name: "user",
   initialState,
   reducers: {},
   extraReducers: (builder) => {
-    builder.addCase(loginAPI.pending, (state) => {
-      Object.assign(state, initialState);
-    });
-
-    builder.addCase(
-      loginAPI.fulfilled,
-      (state, action: PayloadAction<AuthUserPayload>) => {
-        // The tokens are deliberately dropped on the floor. The server already
-        // set them as httpOnly cookies; copying the JWT into localStorage put
-        // a readable duplicate of the session next to the protected one, so
-        // any script on the page could walk off with it.
-        const user: Partial<UserState> = { ...action.payload };
-        delete (user as AuthUserPayload).token;
-        delete (user as AuthUserPayload).accessToken;
-        Object.assign(state, initialState, user);
-        clearLegacySessionStorage();
-        state.interests = action.payload.interests ?? [];
-        state.hasCompletedInterestOnboarding =
-          action.payload.hasCompletedInterestOnboarding ?? true;
-      },
-    );
-    builder.addCase(loginAPI.rejected, (state) => {
-      Object.assign(state, initialState);
+    const signedOut = () => {
       clearLegacySessionStorage();
-    });
+      return initialState;
+    };
+    builder.addCase(loginAPI.pending, signedOut);
+    builder.addCase(loginAPI.rejected, signedOut);
+    builder.addCase(logoutAPI.pending, signedOut);
+    builder.addCase(logoutAPI.fulfilled, signedOut);
+    builder.addCase(logoutAPI.rejected, signedOut);
 
-    builder.addCase(logoutAPI.pending, (state) => {
-      Object.assign(state, initialState);
+    builder.addCase(loginAPI.fulfilled, (_state, action) => {
       clearLegacySessionStorage();
+      return toUserState(action.payload);
     });
-
-    builder.addCase(logoutAPI.fulfilled, (state) => {
-      Object.assign(state, initialState);
-      clearLegacySessionStorage();
+    builder.addCase(fetchCurrentUserAPI.fulfilled, (_state, action) =>
+      toUserState(action.payload),
+    );
+    builder.addCase(updateProfileAPI.fulfilled, (state, action) => {
+      state.fullName = action.payload.fullName;
+      state.bio = action.payload.bio;
+      state.avatar = action.payload.avatar;
     });
-
-    builder.addCase(logoutAPI.rejected, (state) => {
-      Object.assign(state, initialState);
-      clearLegacySessionStorage();
+    builder.addCase(completeInterestOnboardingAPI.fulfilled, (state, action) => {
+      state.interests = action.payload.interests;
+      state.hasCompletedInterestOnboarding =
+        action.payload.hasCompletedInterestOnboarding;
     });
-    builder.addCase(
-      updateProfileAPI.fulfilled,
-      (state, action: PayloadAction<Partial<UserState>>) => {
-        Object.assign(state, action.payload);
-      },
-    );
-    builder.addCase(
-      fetchUserByIdAPI.fulfilled,
-      (state, action: PayloadAction<Partial<UserState>>) => {
-        Object.assign(state, action.payload);
-      },
-    );
-    builder.addCase(
-      fetchCurrentUserAPI.fulfilled,
-      (state, action: PayloadAction<AuthUserPayload>) => {
-        const d = action.payload;
-        if (!d?.id) return;
-        state.id = d.id;
-        state.email = d.email ?? "";
-        state.username = d.username ?? "";
-        state.fullName = d.fullName ?? "";
-        state.avatar = d.avatar ?? "";
-        state.bio = d.bio ?? "";
-        state.interests = d.interests ?? [];
-        state.hasCompletedInterestOnboarding =
-          d.hasCompletedInterestOnboarding ?? true;
-      },
-    );
-    builder.addCase(
-      completeInterestOnboardingAPI.fulfilled,
-      (state, action: PayloadAction<InterestOnboardingResult>) => {
-        if (Array.isArray(action.payload?.interests)) {
-          state.interests = action.payload.interests;
-        }
-        state.hasCompletedInterestOnboarding =
-          action.payload?.hasCompletedInterestOnboarding ?? true;
-      },
-    );
   },
 });
 

@@ -1,13 +1,11 @@
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { publishEvent } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import {
   EmitToUserPayload,
   UserCreatedPayload,
   UserInterestsUpdatedPayload,
-  UserJoinGroupPayload,
-  UserLeftGroupPayload,
   UserMakeFriendPayload,
   UserRegisterOtpPayload,
   UserUpdatedPayload,
@@ -15,23 +13,31 @@ import {
 } from 'libs/constant/rmq/payload'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
+import type { FriendView } from '../../domain/user.domain'
 
 @Injectable()
 export class UserEventsPublisher {
+  private readonly logger = new Logger(UserEventsPublisher.name)
+
   constructor(private readonly amqpConnection: AmqpConnection) {}
 
-  publishUserCreated(payload: UserCreatedPayload): void {
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.USER_EVENTS,
-      ROUTING_RMQ.USER_CREATED,
-      payload,
+  /**
+   * Every event leaves through here. Fire-and-forget: the change it reports
+   * is already saved, so a broker failure is logged, not thrown.
+   */
+  private publish(exchange: string, routingKey: string, payload: unknown) {
+    publishEvent(this.amqpConnection, exchange, routingKey, payload).catch(
+      (error: unknown) =>
+        this.logger.error(`publish ${routingKey} failed`, error),
     )
   }
 
+  publishUserCreated(payload: UserCreatedPayload): void {
+    this.publish(EXCHANGE_RMQ.USER_EVENTS, ROUTING_RMQ.USER_CREATED, payload)
+  }
+
   publishUserRegisterOtp(payload: UserRegisterOtpPayload): void {
-    publishEvent(
-      this.amqpConnection,
+    this.publish(
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_REGISTER_OTP,
       payload,
@@ -39,8 +45,7 @@ export class UserEventsPublisher {
   }
 
   publishUserMakeFriend(payload: UserMakeFriendPayload): void {
-    publishEvent(
-      this.amqpConnection,
+    this.publish(
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_MAKE_FRIEND,
       payload,
@@ -50,8 +55,7 @@ export class UserEventsPublisher {
   publishUserUpdateStatusMakeFriend(
     payload: UserUpdateStatusMakeFriendPayload,
   ): void {
-    publishEvent(
-      this.amqpConnection,
+    this.publish(
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_UPDATE_STATUS_MAKE_FRIEND,
       payload,
@@ -59,51 +63,33 @@ export class UserEventsPublisher {
   }
 
   publishUserUpdated(payload: UserUpdatedPayload): void {
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.USER_EVENTS,
-      ROUTING_RMQ.USER_UPDATED,
-      payload,
-    )
+    this.publish(EXCHANGE_RMQ.USER_EVENTS, ROUTING_RMQ.USER_UPDATED, payload)
   }
 
   publishUserInterestsUpdated(payload: UserInterestsUpdatedPayload): void {
-    publishEvent(
-      this.amqpConnection,
+    this.publish(
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_INTERESTS_UPDATED,
       payload,
     )
   }
 
-  publishUserJoinedGroup(payload: UserJoinGroupPayload): void {
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.USER_EVENTS,
-      ROUTING_RMQ.USER_JOINED_GROUP,
-      payload,
-    )
-  }
-
-  publishUserLeftGroup(payload: UserLeftGroupPayload): void {
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.USER_EVENTS,
-      ROUTING_RMQ.USER_LEFT_GROUP,
-      payload,
-    )
-  }
-
-  publisherUserOnline(payload: { userIds: string[]; userId: string }): void {
-    publishEvent(
-      this.amqpConnection,
+  /**
+   * `friend` came online; their friends get the row their list shows, so
+   * someone not loaded yet can be put on it without asking the server again.
+   */
+  publisherUserOnline(payload: {
+    userIds: string[]
+    friend: FriendView
+  }): void {
+    this.publish(
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
         userIds: payload.userIds,
         event: SOCKET_EVENTS.USER.ONLINE_STATUS_CHANGED,
-        data: payload.userId,
-      } as EmitToUserPayload,
+        data: { userId: payload.friend.id, friend: payload.friend },
+      } satisfies EmitToUserPayload,
     )
   }
   publisherUserOffline(payload: {
@@ -111,8 +97,7 @@ export class UserEventsPublisher {
     userId: string
     lastSeen: string
   }): void {
-    publishEvent(
-      this.amqpConnection,
+    this.publish(
       EXCHANGE_RMQ.REALTIME_EVENTS,
       ROUTING_RMQ.EMIT_REALTIME_EVENT,
       {
@@ -122,7 +107,7 @@ export class UserEventsPublisher {
           userId: payload.userId,
           lastSeen: payload.lastSeen,
         },
-      } as EmitToUserPayload,
+      } satisfies EmitToUserPayload,
     )
   }
 }

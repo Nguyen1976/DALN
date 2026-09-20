@@ -10,6 +10,7 @@ import { ChatErrors } from '../errors/chat.errors'
 import { conversationType } from '../generated'
 import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
 import { MessageService } from './message.service'
+import { toPollDto } from '../domain/message.mapper'
 
 export interface CreatePollRequest {
   conversationId: string
@@ -63,11 +64,10 @@ export class PollService {
       ChatErrors.userNotMember()
     }
 
-    const question = String(data.question || '').trim()
-    if (!question || question.length > 200) {
-      ChatErrors.invalidPollPayload(
-        'Poll question is required and max 200 chars',
-      )
+    // The DTO caps the length; blank-after-trim is checked here.
+    const question = data.question.trim()
+    if (!question) {
+      ChatErrors.invalidPollPayload('Poll question is required')
     }
 
     const normalizedOptions = data.options
@@ -97,7 +97,7 @@ export class PollService {
       })),
     })
 
-    const createdMessage: any = await this.messageRepo.create({
+    const createdMessage = await this.messageRepo.create({
       conversationId: data.conversationId,
       senderId: data.userId,
       type: 'POLL',
@@ -109,30 +109,22 @@ export class PollService {
     const conversationMembers = await this.memberRepo.findByConversationId(
       data.conversationId,
     )
-
     const senderMember = conversationMembers.find(
       (item) => item.userId === data.userId,
     )
 
-    createdMessage.senderMember = senderMember
-
-    const { message: normalizedMessage } =
-      this.messageService.notifyMessageCreated({
-        conversationId: data.conversationId,
-        senderId: data.userId,
-        message: createdMessage,
-        senderMember: senderMember || { userId: data.userId },
-        memberIds: conversationMembers.map((item) => item.userId),
-      })
-
-    if (!normalizedMessage) {
-      ChatErrors.invalidMessagePayload()
-    }
-
-    return {
-      message: normalizedMessage,
-      poll: normalizedMessage.poll,
-    }
+    // A new poll: nobody has voted, the creator included.
+    return this.messageService.notifyMessageCreated({
+      conversationId: data.conversationId,
+      senderId: data.userId,
+      message: {
+        ...createdMessage,
+        senderMember,
+        pollState: { totalVoters: 0, myOptionIds: [] },
+      },
+      senderMember: senderMember ?? { userId: data.userId },
+      memberIds: conversationMembers.map((item) => item.userId),
+    })
   }
 
   async submitPollVote(data: SubmitPollVoteRequest) {
@@ -205,53 +197,28 @@ export class PollService {
     ])
 
     const updatedPoll = await this.pollRepo.findById(data.pollId)
-
     if (!updatedPoll) {
       ChatErrors.pollNotFound()
     }
 
-    const totalVoters = await this.pollRepo.countVotes(data.pollId)
+    const pollDto = toPollDto(updatedPoll, {
+      totalVoters: await this.pollRepo.countVotes(data.pollId),
+    })
     const conversationMembers = await this.memberRepo.findByConversationId(
       message.conversationId,
     )
-
+    const update = {
+      conversationId: message.conversationId,
+      messageId: message.id,
+      poll: pollDto,
+    }
     this.eventsPublisher.publishPollUpdated(
-      {
-        pollId: data.pollId,
-        messageId: message.id,
-        conversationId: message.conversationId,
-        question: updatedPoll.question,
-        isMultipleChoice: Boolean(updatedPoll.isMultipleChoice),
-        isClosed: Boolean(updatedPoll.isClosed),
-        closedAt: updatedPoll.closedAt
-          ? updatedPoll.closedAt.toISOString()
-          : null,
-        options: (updatedPoll.options || []).map((option) => ({
-          id: option.id,
-          text: option.text,
-          count: Number(option.count || 0),
-        })),
-        totalVoters,
-      },
+      update,
       conversationMembers.map((item) => item.userId),
     )
 
-    return {
-      pollId: updatedPoll.id,
-      messageId: message.id,
-      conversationId: message.conversationId,
-      options: (updatedPoll.options || []).map((option) => ({
-        id: option.id,
-        text: option.text,
-        count: Number(option.count || 0),
-      })),
-      isClosed: Boolean(updatedPoll.isClosed),
-      closedAt: updatedPoll.closedAt
-        ? updatedPoll.closedAt.toISOString()
-        : null,
-      userVoteOptionIds: submittedOptionIds,
-      totalVoters,
-    }
+    // The voter also gets their own choice back.
+    return { ...update, poll: { ...pollDto, myOptionIds: submittedOptionIds } }
   }
 
   async closePoll(data: ClosePollRequest) {
@@ -269,13 +236,11 @@ export class PollService {
 
     if (poll.isClosed) {
       return {
-        pollId: poll.id,
-        messageId: message.id,
         conversationId: message.conversationId,
-        isClosed: true,
-        closedAt: poll.closedAt
-          ? poll.closedAt.toISOString()
-          : new Date().toISOString(),
+        messageId: message.id,
+        poll: toPollDto(poll, {
+          totalVoters: await this.pollRepo.countVotes(poll.id),
+        }),
       }
     }
 
@@ -292,36 +257,21 @@ export class PollService {
       ChatErrors.userNotMember()
     }
 
-    const closedAt = new Date()
-    const updatedPoll = await this.pollRepo.closePoll(data.pollId, closedAt)
+    const updatedPoll = await this.pollRepo.closePoll(data.pollId, new Date())
     const conversationMembers = await this.memberRepo.findByConversationId(
       message.conversationId,
     )
-
+    const update = {
+      conversationId: message.conversationId,
+      messageId: message.id,
+      poll: toPollDto(updatedPoll, {
+        totalVoters: await this.pollRepo.countVotes(data.pollId),
+      }),
+    }
     this.eventsPublisher.publishPollClosed(
-      {
-        pollId: data.pollId,
-        messageId: message.id,
-        conversationId: message.conversationId,
-        question: updatedPoll.question,
-        isMultipleChoice: Boolean(updatedPoll.isMultipleChoice),
-        isClosed: true,
-        closedAt: closedAt.toISOString(),
-        options: (updatedPoll.options || []).map((option) => ({
-          id: option.id,
-          text: option.text,
-          count: Number(option.count || 0),
-        })),
-      },
+      update,
       conversationMembers.map((item) => item.userId),
     )
-
-    return {
-      pollId: updatedPoll.id,
-      messageId: message.id,
-      conversationId: message.conversationId,
-      isClosed: true,
-      closedAt: closedAt.toISOString(),
-    }
+    return update
   }
 }

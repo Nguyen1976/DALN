@@ -11,4 +11,4 @@ async function bootstrap() {
 
   Logger.log('Saga Orchestrator đã khởi động (RMQ-only)', 'Bootstrap')
 }
-bootstrap()
+void bootstrap()

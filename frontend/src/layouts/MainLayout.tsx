@@ -9,7 +9,7 @@ import React from "react";
  */
 const MainLayout = ({ children }: { children: React.ReactNode }) => {
   return (
-    <div className="flex h-[100dvh] w-full flex-col-reverse overflow-hidden bg-background text-foreground md:flex-row">
+    <div className="flex h-dvh w-full flex-col-reverse overflow-hidden bg-background text-foreground md:flex-row">
       <a
         href="#main-content"
         className="sr-only-focusable fixed left-4 top-4 z-50 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg"

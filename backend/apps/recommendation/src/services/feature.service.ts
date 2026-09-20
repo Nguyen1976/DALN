@@ -1,3 +1,4 @@
+import { toGeoPoint } from '@app/util'
 import { Injectable } from '@nestjs/common'
 
 /** Must match GB training + inference contract (Python SAFE_FEATURES). */
@@ -147,22 +148,9 @@ export class FeatureService {
     return union.size > 0 ? intersection.size / union.size : 0
   }
 
+  /** [lng, lat] of any stored location shape (see toGeoPoint). */
   getLngLatPair(location: unknown): [number, number] | null {
-    const coordinates = (location as { coordinates?: unknown })?.coordinates
-    if (Array.isArray(coordinates) && coordinates.length >= 2) {
-      const lng = Number(coordinates[0])
-      const lat = Number(coordinates[1])
-      if (Number.isFinite(lng) && Number.isFinite(lat)) {
-        return [lng, lat]
-      }
-    }
-    const lo = location as { lat?: unknown; lon?: unknown } | null
-    const lat = typeof lo?.lat === 'number' ? lo.lat : Number(lo?.lat)
-    const lon = typeof lo?.lon === 'number' ? lo.lon : Number(lo?.lon)
-    if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      return [lon, lat]
-    }
-    return null
+    return toGeoPoint(location)?.coordinates ?? null
   }
 
   haversineDistanceKm(from: [number, number], to: [number, number]): number {

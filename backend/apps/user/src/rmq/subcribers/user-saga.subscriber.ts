@@ -9,7 +9,10 @@ import {
   enqueueOutbox,
   SUPPORTED_SAGA_VERSIONS,
 } from '@app/saga'
+import { randomUUID } from 'crypto'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
+import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
+import type { UserFriendshipRevertedPayload } from 'libs/constant/rmq/payload'
 import {
   buildReply,
   SAGA_CONSUMER,
@@ -24,9 +27,7 @@ import { PrismaService } from 'apps/user/prisma/prisma.service'
 export class UserSagaSubscriber {
   private readonly logger = new Logger(UserSagaSubscriber.name)
 
-  constructor(
-    @Inject(PrismaService) private readonly prisma: PrismaService,
-  ) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   /**
    * Compensation: rollback friendship đã tạo ở bước đồng bộ (HTTP) khi saga thất bại.
@@ -43,13 +44,13 @@ export class UserSagaSubscriber {
   ): Promise<void> {
     assertSupportedVersion(raw, SUPPORTED_SAGA_VERSIONS)
     await consumeIdempotent(
-      this.prisma as any,
+      this.prisma,
       {
         messageId: envelope.messageId,
         consumer: SAGA_CONSUMER.USER_REVERT_FRIENDSHIP,
         sagaId: envelope.sagaId,
       },
-      async (tx: any) => {
+      async (tx) => {
         const p = envelope.payload
         await tx.friendship.deleteMany({
           where: {
@@ -62,6 +63,19 @@ export class UserSagaSubscriber {
         await tx.friendRequest.updateMany({
           where: { fromUserId: p.inviterId, toUserId: p.inviteeId },
           data: { status: 'PENDING' },
+        })
+
+        // Services holding a copy of the friendship (recommendation's graph)
+        // must drop it too; sent from the outbox in this same transaction.
+        const reverted: UserFriendshipRevertedPayload = {
+          inviterId: p.inviterId,
+          inviteeId: p.inviteeId,
+        }
+        await enqueueOutbox(tx, {
+          messageId: randomUUID(),
+          exchange: EXCHANGE_RMQ.USER_EVENTS,
+          routingKey: ROUTING_RMQ.USER_FRIENDSHIP_REVERTED,
+          payload: reverted,
         })
 
         const reply = buildReply(envelope, 'OK')

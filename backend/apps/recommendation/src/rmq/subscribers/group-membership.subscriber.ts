@@ -3,7 +3,6 @@ import { RabbitSubscribeWithRetry } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
-import { safeExecute } from '@app/common/rpc/safe-execute'
 import { RecommendationGroupMembershipService } from '../../services/recommendation-group-membership.service'
 import type {
   UserJoinGroupPayload,
@@ -22,9 +21,7 @@ export class GroupMembershipSubscriber {
     queue: QUEUE_RMQ.RECOMMENDATION_USER_JOINED_GROUP,
   })
   async handleUserJoined(payload: UserJoinGroupPayload): Promise<void> {
-    await safeExecute(() =>
-      this.recommendationGroupMembershipService.onUserJoinedGroup(payload),
-    )
+    await this.recommendationGroupMembershipService.onUserJoinedGroup(payload)
   }
 
   @RabbitSubscribeWithRetry({
@@ -33,8 +30,6 @@ export class GroupMembershipSubscriber {
     queue: QUEUE_RMQ.RECOMMENDATION_USER_LEFT_GROUP,
   })
   async handleUserLeft(payload: UserLeftGroupPayload): Promise<void> {
-    await safeExecute(() =>
-      this.recommendationGroupMembershipService.onUserLeftGroup(payload),
-    )
+    await this.recommendationGroupMembershipService.onUserLeftGroup(payload)
   }
 }

@@ -27,9 +27,10 @@ import {
   type Notification,
 } from "./redux/slices/notificationSlice";
 import {
-  upsertOnlineFriend,
+  friendCameOnline,
   updateStatusOffline,
 } from "./redux/slices/friendSlice";
+import type { Friend } from "./apis";
 import { useChatSocketEvents } from "./hooks/useChatSocketEvents";
 import IncomingCallManager from "./components/IncomingCallManager";
 import { CallProvider } from "./contexts/CallProvider";
@@ -58,7 +59,7 @@ const lazyPage =
 /** Opening the interests step directly (F5, a link): nothing else to show. */
 function ScreenFallback() {
   return (
-    <div className="flex min-h-[100dvh] w-full items-center justify-center">
+    <div className="flex min-h-dvh w-full items-center justify-center">
       <Spinner label="Đang tải màn hình" />
     </div>
   );
@@ -203,8 +204,8 @@ function App() {
   }, [dispatch, play]);
 
   useEffect(() => {
-    const handleOnlineStatusChanged = (userId: string) => {
-      void dispatch(upsertOnlineFriend(userId));
+    const handleOnlineStatusChanged = ({ friend }: { friend: Friend }) => {
+      dispatch(friendCameOnline(friend));
     };
 
     socket.on("user.online_status_changed", handleOnlineStatusChanged);

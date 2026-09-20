@@ -71,6 +71,30 @@ export class PollRepository {
     })
   }
 
+  /** Voters per poll, for a page of messages: one query for all of them. */
+  async countVotesByPoll(pollIds: string[]): Promise<Map<string, number>> {
+    if (!pollIds.length) return new Map()
+    const rows = await this.prisma.pollVote.groupBy({
+      by: ['pollId'],
+      where: { pollId: { in: pollIds } },
+      _count: { _all: true },
+    })
+    return new Map(rows.map((row) => [row.pollId, row._count._all]))
+  }
+
+  /** What `userId` chose in each of these polls. */
+  async findVotesOf(
+    userId: string,
+    pollIds: string[],
+  ): Promise<Map<string, string[]>> {
+    if (!pollIds.length) return new Map()
+    const votes = await this.prisma.pollVote.findMany({
+      where: { userId, pollId: { in: pollIds } },
+      select: { pollId: true, optionIds: true },
+    })
+    return new Map(votes.map((vote) => [vote.pollId, vote.optionIds]))
+  }
+
   async findMessageByPollId(pollId: string) {
     return await this.prisma.message.findFirst({
       where: {

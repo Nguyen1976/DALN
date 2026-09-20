@@ -71,28 +71,6 @@ export const useChatSocketEvents = () => {
     };
 
     // ===== SEEN STATUS =====
-    const handleUserRead = (data: {
-      conversationId: string;
-      userId: string;
-      lastReadMessageId?: string;
-      lastMessageId?: string;
-    }) => {
-      // Không dispatch nếu là chính mình (đã xử lý phía local)
-      if (data.userId === user.id) return;
-
-      const normalizedLastReadMessageId =
-        data.lastReadMessageId || data.lastMessageId;
-      if (!normalizedLastReadMessageId) return;
-
-      dispatch(
-        updateSeenStatus({
-          conversationId: data.conversationId,
-          userId: data.userId,
-          lastReadMessageId: normalizedLastReadMessageId,
-        }),
-      );
-    };
-
     const handleUserReadBatch = (data: {
       conversationId: string;
       users: Array<{
@@ -118,13 +96,11 @@ export const useChatSocketEvents = () => {
 
     // Register event listeners
     socket.on(SOCKET_EVENTS.CHAT.USER_TYPING, handleUserTyping);
-    socket.on(SOCKET_EVENTS.CHAT.USER_READ, handleUserRead);
     socket.on(SOCKET_EVENTS.CHAT.USER_READ_BATCH, handleUserReadBatch);
 
     // Cleanup
     return () => {
       socket.off(SOCKET_EVENTS.CHAT.USER_TYPING, handleUserTyping);
-      socket.off(SOCKET_EVENTS.CHAT.USER_READ, handleUserRead);
       socket.off(SOCKET_EVENTS.CHAT.USER_READ_BATCH, handleUserReadBatch);
 
       typingTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));

@@ -149,7 +149,7 @@ export default function InterestOnboardingPage() {
   const remaining = Math.max(0, RECOMMENDED_MIN - selected.size);
 
   return (
-    <div className="relative min-h-[100dvh] w-full overflow-hidden bg-background">
+    <div className="relative min-h-dvh w-full overflow-hidden bg-background">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -162,7 +162,7 @@ export default function InterestOnboardingPage() {
         <ModeToggle />
       </div>
 
-      <div className="relative z-20 mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col px-5 py-10 sm:px-8">
+      <div className="relative z-20 mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-5 py-10 sm:px-8">
         <BrandLockup className="mb-10 animate-stagger-in" />
 
         <header className="mb-8 animate-stagger-in space-y-3 [--stagger:1]">

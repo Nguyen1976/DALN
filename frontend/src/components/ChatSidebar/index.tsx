@@ -10,7 +10,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getConversations,
-  nextConversationCursor,
+  peerIdOf,
   selectConversation,
   type Conversation,
 } from "@/redux/slices/conversationSlice";
@@ -23,8 +23,8 @@ import {
   selectFriendsLoaded,
 } from "@/redux/slices/friendSlice";
 import {
-  markConversationsExhausted,
   selectConversationsHasMore,
+  selectConversationsNextCursor,
   selectConversationsLoaded,
 } from "@/redux/slices/conversationPagingSlice";
 import { formatConversationTime } from "@/utils/formatDateTime";
@@ -88,13 +88,6 @@ function ConversationRowsSkeleton({ count }: { count: number }) {
   );
 }
 
-const unreadCountOf = (conversation: Conversation) => {
-  const raw = conversation.unreadCount;
-  if (raw === "5+") return 6;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
 export function ChatSidebar({ className }: { className?: string }) {
   const user = useSelector(selectUser);
   const friends = useSelector(selectFriend);
@@ -111,6 +104,7 @@ export function ChatSidebar({ className }: { className?: string }) {
   // is open, and coming back must neither refetch nor flash a skeleton.
   const loaded = useSelector(selectConversationsLoaded);
   const hasMore = useSelector(selectConversationsHasMore);
+  const nextCursor = useSelector(selectConversationsNextCursor);
   const friendsLoaded = useSelector(selectFriendsLoaded);
   const [initialLoading, setInitialLoading] = useState(!loaded);
   const [query, setQuery] = useState("");
@@ -122,7 +116,7 @@ export function ChatSidebar({ className }: { className?: string }) {
   // `loaded`, not "the list is empty", or someone with no friends refetched
   // on every visit.
   useEffect(() => {
-    if (!friendsLoaded) void dispatch(getFriends({ limit: 50, page: 1 }));
+    if (!friendsLoaded) void dispatch(getFriends());
   }, [dispatch, friendsLoaded]);
 
   useEffect(() => {
@@ -142,16 +136,10 @@ export function ChatSidebar({ className }: { className?: string }) {
     hasMore,
     enabled: !initialLoading,
     itemCount: conversations.length,
-    loadMore: async () => {
-      const cursor = nextConversationCursor(conversations);
-      if (cursor === undefined) {
-        dispatch(markConversationsExhausted());
-        return;
-      }
-      await dispatch(
-        getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor }),
-      ).unwrap();
-    },
+    loadMore: () =>
+      dispatch(
+        getConversations({ limit: CONVERSATIONS_PAGE_SIZE, cursor: nextCursor }),
+      ).unwrap(),
   });
 
   /** userId -> online, so a direct chat can show the peer's presence. */
@@ -162,14 +150,14 @@ export function ChatSidebar({ className }: { className?: string }) {
   }, [friends]);
 
   const totalUnread = useMemo(
-    () => conversations.filter((c) => unreadCountOf(c) > 0).length,
+    () => conversations.filter((c) => c.unreadCount > 0).length,
     [conversations],
   );
 
   const visibleConversations = useMemo(() => {
     const needle = normalize(query.trim());
     return conversations.filter((conversation) => {
-      if (filter === "unread" && unreadCountOf(conversation) === 0) {
+      if (filter === "unread" && conversation.unreadCount === 0) {
         return false;
       }
       if (!needle) return true;
@@ -188,19 +176,13 @@ export function ChatSidebar({ className }: { className?: string }) {
   const { activeGroupConversationIds } = useCall();
 
   const renderConversationItem = (conversation: Conversation) => {
-    const memberCount =
-      conversation.memberCount ?? conversation.members?.length ?? 0;
+    const { memberCount } = conversation;
     const isActive = selectedChatId === conversation.id;
-    const unread = unreadCountOf(conversation);
+    const unread = conversation.unreadCount;
     const isDirect = conversation.type === "DIRECT";
     const isCalling = activeGroupConversationIds.includes(conversation.id);
 
-    // `peerUserId` do backend phi chuẩn hoá; `members` chỉ còn là đường dự
-    // phòng cho payload nào vẫn mang nó (chi tiết hội thoại, realtime).
-    const peerId = isDirect
-      ? (conversation.peerUserId ??
-        conversation.members?.find((m) => m.userId !== user?.id)?.userId)
-      : undefined;
+    const peerId = peerIdOf(conversation, user.id);
     const peerOnline = peerId ? presenceByUserId.get(peerId) : undefined;
 
     const preview = conversation.lastMessageText
@@ -222,7 +204,7 @@ export function ChatSidebar({ className }: { className?: string }) {
         className={cn(
           "relative flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
           "transition-colors duration-(--motion-fast)",
-          "hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+          "hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
           isActive && "bg-accent",
         )}
       >
@@ -318,7 +300,7 @@ export function ChatSidebar({ className }: { className?: string }) {
               </p>
             )}
             <div className="flex shrink-0 items-center gap-1">
-              {(conversation.unreadMentionCount || 0) > 0 && (
+              {conversation.unreadMentionCount > 0 && (
                 <span
                   className="flex size-5 items-center justify-center rounded-full bg-brand text-xs font-bold text-white"
                   aria-label={`Bạn được nhắc ${conversation.unreadMentionCount} lần`}
@@ -338,7 +320,7 @@ export function ChatSidebar({ className }: { className?: string }) {
     <aside
       aria-label="Danh sách cuộc trò chuyện"
       className={cn(
-        "w-full flex-col border-r border-sidebar-border bg-sidebar md:flex md:w-80 lg:w-[22rem]",
+        "w-full flex-col border-r border-sidebar-border bg-sidebar md:flex md:w-80 lg:w-88",
         className,
       )}
     >
@@ -367,7 +349,7 @@ export function ChatSidebar({ className }: { className?: string }) {
                   aria-label="Tạo nhóm mới"
                   onClick={() => setShowNewGroup(true)}
                 >
-                  <SquarePen className="size-[18px]" />
+                  <SquarePen className="size-4.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">Tạo nhóm mới</TooltipContent>

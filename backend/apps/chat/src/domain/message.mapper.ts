@@ -1,24 +1,117 @@
+import { displayNameOf } from '@app/util'
+import type { message, messageMedia, poll } from '../generated'
+
+/**
+ * A poll as clients receive it — the same shape inside a message, in answer
+ * to a vote or a close, and on the poll events. `myOptionIds` is the
+ * viewer's own vote: present where the viewer is known (their thread, their
+ * vote), absent on events that go to everyone.
+ */
+export interface PollDto {
+  id: string
+  question: string
+  isMultipleChoice: boolean
+  isClosed: boolean
+  closedAt: string | null
+  options: { id: string; text: string; count: number }[]
+  totalVoters: number
+  myOptionIds?: string[]
+}
+
+/** The poll counts that depend on who is asking (see PollDto). */
+export interface PollState {
+  totalVoters?: number
+  myOptionIds?: string[]
+}
+
+export function toPollDto(
+  poll: Pick<
+    poll,
+    'id' | 'question' | 'isMultipleChoice' | 'isClosed' | 'closedAt' | 'options'
+  >,
+  state: PollState = {},
+): PollDto {
+  return {
+    id: poll.id,
+    question: poll.question,
+    isMultipleChoice: poll.isMultipleChoice,
+    isClosed: poll.isClosed,
+    closedAt: poll.closedAt?.toISOString() ?? null,
+    options: poll.options.map(({ id, text, count }) => ({ id, text, count })),
+    totalVoters: state.totalVoters ?? 0,
+    ...(state.myOptionIds ? { myOptionIds: state.myOptionIds } : {}),
+  }
+}
+
+type Person = {
+  userId: string
+  username?: string | null
+  fullName?: string | null
+  avatar?: string | null
+}
+
+/** A message another one quotes, as MessageRepository.findQuotedByIds reads it. */
+type QuotedMessage = Pick<
+  message,
+  'id' | 'senderId' | 'content' | 'type' | 'isRevoked'
+> & {
+  senderMember?: Person | null
+  medias?: Pick<messageMedia, 'fileName'>[]
+}
+
+/**
+ * A message row, with whatever came along with it. Only the columns are
+ * certain: a fresh text message has no relations loaded (it went through
+ * the batch writer), a thread page has them all.
+ */
+export type MessageRow = Pick<
+  message,
+  'id' | 'conversationId' | 'senderId' | 'createdAt'
+> &
+  Partial<
+    Pick<
+      message,
+      | 'content'
+      | 'type'
+      | 'mentionUserIds'
+      | 'replyToMessageId'
+      | 'isRevoked'
+      | 'isSystem'
+      | 'isDeleted'
+    >
+  > & {
+    /** Stored as JSON, and passed on to clients as it was stored. */
+    mentions?: unknown
+    callInfo?: unknown
+    senderMember?: Person | null
+    replyTo?: QuotedMessage | null
+    medias?: Omit<messageMedia, 'messageId' | 'createdAt'>[]
+    poll?: Parameters<typeof toPollDto>[0] | null
+    pollState?: PollState
+    /** Only on the sender's own copy, to match it with the optimistic one. */
+    clientMessageId?: string
+  }
+
 export class MessageMapper {
-  static toResponse(message: any) {
-    if (!message) return null
-
-    const text = String(message.text ?? message.content ?? '').trim()
-    const createdAt =
-      message.createdAt instanceof Date
-        ? message.createdAt.toISOString()
-        : String(message.createdAt ?? new Date().toISOString())
-
+  /**
+   * The message as clients receive it. What is real work here: BigInt sizes
+   * become strings (JSON has no BigInt), a revoked message loses its text,
+   * and the quoted message is flattened to what a reply bubble shows.
+   */
+  static toResponse(message: MessageRow) {
     return {
       id: String(message.id),
       conversationId: String(message.conversationId),
       senderId: String(message.senderId),
-      text: message.isRevoked ? '' : text,
+      content: message.isRevoked ? '' : (message.content ?? '').trim(),
       type: message.type || 'TEXT',
-      mentionUserIds: message.mentionUserIds || [],
+      /** Resolved from the content by the server. */
+      mentionUserIds: message.mentionUserIds ?? [],
       mentions: message.mentions ?? undefined,
       // Tin type=CALL: dữ liệu để client render thẻ cuộc gọi + nút gọi lại.
       callInfo: message.callInfo ?? undefined,
-      clientMessageId: message.clientMessageId || message.tempMessageId || undefined,
+      /** Only on the sender's own copy, to match it with the optimistic one. */
+      clientMessageId: message.clientMessageId,
       replyToMessageId: message.replyToMessageId || undefined,
       // Quoted message, flattened to exactly what a reply bubble needs. Sending
       // only the id would force the client to have the original already loaded,
@@ -27,15 +120,12 @@ export class MessageMapper {
         ? {
             id: String(message.replyTo.id),
             senderId: String(message.replyTo.senderId),
-            senderName:
-              message.replyTo.senderMember?.fullName ||
-              message.replyTo.senderMember?.username ||
-              '',
-            text: message.replyTo.isRevoked
+            senderName: message.replyTo.senderMember
+              ? displayNameOf(message.replyTo.senderMember)
+              : '',
+            content: message.replyTo.isRevoked
               ? ''
-              : String(
-                  message.replyTo.text ?? message.replyTo.content ?? '',
-                ).trim(),
+              : (message.replyTo.content ?? '').trim(),
             type: message.replyTo.type || 'TEXT',
             isRevoked: Boolean(message.replyTo.isRevoked),
             attachmentName: message.replyTo.medias?.[0]?.fileName || undefined,
@@ -44,16 +134,11 @@ export class MessageMapper {
       isRevoked: Boolean(message.isRevoked),
       isSystem: Boolean(message.isSystem),
       isDeleted: Boolean(message.isDeleted),
-      createdAt,
+      createdAt: new Date(message.createdAt).toISOString(),
       senderMember: message.senderMember
-        ? {
-            userId: message.senderMember.userId,
-            username: message.senderMember.username || '',
-            fullName: message.senderMember.fullName || '',
-            avatar: message.senderMember.avatar || '',
-          }
+        ? toSender(message.senderMember)
         : undefined,
-      medias: (message.medias || []).map((media: any) => ({
+      medias: (message.medias ?? []).map((media) => ({
         id: media.id,
         mediaType: media.mediaType,
         objectKey: media.objectKey,
@@ -68,36 +153,20 @@ export class MessageMapper {
         sortOrder: media.sortOrder ?? undefined,
       })),
       poll: message.poll
-        ? {
-            id: message.poll.id,
-            question: message.poll.question,
-            isMultipleChoice: Boolean(message.poll.isMultipleChoice),
-            isClosed: Boolean(message.poll.isClosed),
-            closedAt: message.poll.closedAt
-              ? message.poll.closedAt instanceof Date
-                ? message.poll.closedAt.toISOString()
-                : String(message.poll.closedAt)
-              : null,
-            options: (message.poll.options || []).map((option: any) => ({
-              id: option.id,
-              text: option.text,
-              count: Number(option.count || 0),
-            })),
-          }
+        ? toPollDto(message.poll, message.pollState)
         : undefined,
     }
   }
 
   static previewText(message: {
     content?: string | null
-    text?: string | null
     type?: string
     isRevoked?: boolean
     poll?: { question?: string } | null
   }) {
     if (message.isRevoked) return 'Tin nhắn đã bị thu hồi'
 
-    const content = String(message.text ?? message.content ?? '').trim()
+    const content = (message.content ?? '').trim()
     if (content) return content
 
     switch (message.type) {
@@ -114,3 +183,18 @@ export class MessageMapper {
     }
   }
 }
+
+const toSender = (person: Person) => ({
+  userId: person.userId,
+  username: person.username ?? '',
+  fullName: person.fullName ?? '',
+  avatar: person.avatar ?? '',
+})
+
+/**
+ * A message as clients receive it. Build it once, where the message is
+ * produced, and pass it along as is: `toResponse` is not idempotent (a second
+ * pass rebuilds `replyTo` from a `senderMember` the first pass dropped, which
+ * blanked the quoted sender's name on every realtime event).
+ */
+export type MessageDto = ReturnType<typeof MessageMapper.toResponse>

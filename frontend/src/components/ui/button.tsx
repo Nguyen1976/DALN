@@ -10,7 +10,7 @@ const buttonVariants = cva(
     "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium",
     // Micro-interaction: 140ms colour/shadow, plus a small press-in scale.
     // Both are neutralised by the global prefers-reduced-motion rule.
-    "transition-[color,background-color,border-color,box-shadow,transform,scale] duration-(--motion-fast) ease-(--ease-out)",
+    "transition-[color,background-color,border-color,box-shadow,transform,scale] duration-(--motion-fast) ease-out",
     "active:scale-[0.97]",
     "disabled:pointer-events-none disabled:opacity-55",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",

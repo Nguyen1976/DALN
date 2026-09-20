@@ -31,7 +31,7 @@ function Switch({
       onClick={() => onCheckedChange?.(!checked)}
       className={cn(
         "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent",
-        "transition-colors duration-(--motion-fast) ease-(--ease-out)",
+        "transition-colors duration-(--motion-fast) ease-out",
         "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         "disabled:cursor-not-allowed disabled:opacity-55",
         checked ? "bg-primary" : "bg-input/70",
@@ -43,7 +43,7 @@ function Switch({
         aria-hidden="true"
         className={cn(
           "pointer-events-none block size-5 rounded-full bg-card shadow-sm ring-0",
-          "transition-transform duration-(--motion-fast) ease-(--ease-out)",
+          "transition-transform duration-(--motion-fast) ease-out",
           checked ? "translate-x-5" : "translate-x-0",
         )}
       />

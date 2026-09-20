@@ -69,14 +69,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import type { AppDispatch } from "@/redux/store";
 import {
   clearConversationMentions,
+  peerIdOf,
   type ConversationMember,
 } from "@/redux/slices/conversationSlice";
 import { clearConversationMentionsAPI } from "@/apis";
 import {
-  mentionedUserIds,
   removeMentionFromText,
   resolveMentionsInText,
 } from "@/utils/mention";
+import { displayNameOf } from "@/utils/displayName";
 
 interface ChatWindowProps {
   conversationId?: string;
@@ -109,7 +110,6 @@ export default function ChatWindow({
 
   const {
     user,
-    effectiveConversation,
     canSendMessage,
     membershipStatus,
     canLoadMessages,
@@ -126,13 +126,10 @@ export default function ChatWindow({
   // Header subtitle shows real presence for direct chats instead of the
   // static "Trò chuyện trực tiếp" label.
   const peer = useMemo(() => {
-    if (effectiveConversation?.type !== "DIRECT") return undefined;
-    const peerId = effectiveConversation?.members?.find(
-      (member) => member.userId !== user.id,
-    )?.userId;
-    if (!peerId) return undefined;
-    return friends.find((friend) => friend.id === peerId);
-  }, [effectiveConversation, friends, user.id]);
+    const peerId =
+      conversation && peerIdOf(conversation, user.id);
+    return peerId ? friends.find((friend) => friend.id === peerId) : undefined;
+  }, [conversation, friends, user.id]);
 
   const messages = useSelector((state: RootState) =>
     selectMessage(state, conversationId),
@@ -182,13 +179,10 @@ export default function ChatWindow({
     addFiles,
     removeAttachment,
     isUploading,
-    setMentionUserIds,
   } = useChatComposer({
     conversationId,
     user,
     canSendMessage,
-    conversation,
-    effectiveConversation,
     stopTyping,
     scrollToBottom,
   });
@@ -204,7 +198,7 @@ export default function ChatWindow({
   } | null>(null);
 
   const poll = useChatPoll({ conversationId, messages });
-  const isGroupConversation = effectiveConversation?.type === "GROUP";
+  const isGroupConversation = conversation?.type === "GROUP";
   /** Một mục trong danh sách gợi ý: một thành viên, hoặc "@all" cho cả nhóm. */
   type MentionOption =
     | { kind: "all"; label: string }
@@ -216,7 +210,7 @@ export default function ChatWindow({
     if (mentionQuery === null) return [];
     const needle = mentionQuery.toLocaleLowerCase("vi").trim();
 
-    const ranked = (effectiveConversation?.members || [])
+    const ranked = (conversation?.members || [])
       .filter((member) => member.userId !== user.id)
       .map((member) => {
         const name = (member.fullName || "").toLocaleLowerCase("vi");
@@ -247,7 +241,7 @@ export default function ChatWindow({
     }
     return [...options, ...ranked];
   }, [
-    effectiveConversation?.members,
+    conversation?.members,
     isGroupConversation,
     mentionQuery,
     user.id,
@@ -286,27 +280,14 @@ export default function ChatWindow({
     () =>
       resolveMentionsInText(
         msg,
-        effectiveConversation?.members || [],
+        conversation?.members || [],
         user.id,
       ),
-    [msg, effectiveConversation?.members, user.id],
+    [msg, conversation?.members, user.id],
   );
 
-  useEffect(() => {
-    const ids = mentionedUserIds(
-      activeMentions,
-      effectiveConversation?.members || [],
-      user.id,
-    );
-    setMentionUserIds((prev) =>
-      prev.length === ids.length && prev.every((id) => ids.includes(id))
-        ? prev
-        : ids,
-    );
-  }, [activeMentions, effectiveConversation?.members, setMentionUserIds, user.id]);
-
   const jumpToMention = async () => {
-    const messageId = effectiveConversation?.lastMentionMessageId;
+    const messageId = conversation?.lastMentionMessageId;
     if (!conversationId || !messageId) return;
     setInternalJumpId(messageId);
     dispatch(clearConversationMentions({ conversationId }));
@@ -315,7 +296,7 @@ export default function ChatWindow({
 
   // Discovery: phòng gọi nhóm đang mở của hội thoại này (banner "Tham gia").
   const activeGroupRoom = useGroupCallDiscovery(
-    effectiveConversation?.id,
+    conversation?.id,
     isGroupConversation,
   );
   const { joinGroupRoom, hasActiveOutgoingCall } = useCall();
@@ -332,7 +313,7 @@ export default function ChatWindow({
 
   // A conversation that cannot be loaded needs to say so. Falling through to
   // the normal shell left an empty thread with no explanation.
-  if (loadError && !effectiveConversation) {
+  if (loadError && !conversation) {
     return (
       <div className="chat-canvas flex min-w-0 flex-1 flex-col items-center justify-center px-6 text-center">
         <EmptyState
@@ -377,7 +358,7 @@ export default function ChatWindow({
           >
             <AvatarWithPresence
               status={
-                effectiveConversation?.type !== "DIRECT" || !peer
+                conversation?.type !== "DIRECT" || !peer
                   ? null
                   : peer.status
                     ? "online"
@@ -398,7 +379,7 @@ export default function ChatWindow({
                 {conversationName}
               </div>
               <div className="truncate text-xs text-muted-foreground">
-                {effectiveConversation?.type === "DIRECT"
+                {conversation?.type === "DIRECT"
                   ? peer
                     ? peer.status
                       ? "Đang hoạt động"
@@ -406,7 +387,7 @@ export default function ChatWindow({
                         ? `Hoạt động ${formatRelativeTime(peer.lastSeen)}`
                         : "Ngoại tuyến"
                     : "Trò chuyện trực tiếp"
-                  : `${effectiveConversation?.memberCount ?? 0} thành viên`}
+                  : `${conversation?.memberCount ?? 0} thành viên`}
               </div>
             </div>
           </button>
@@ -515,7 +496,6 @@ export default function ChatWindow({
             setPendingMessageAction({ kind: "deleteForMe", message })
           }
           onOpenPoll={poll.handleOpenPoll}
-          pollVoteSelections={poll.pollVoteSelections}
           onRetryMessage={handleRetryMessage}
           onDiscardMessage={handleDiscardMessage}
           onReplyMessage={(message) => {
@@ -524,7 +504,7 @@ export default function ChatWindow({
           }}
           onJumpToMessage={setInternalJumpId}
           isGroup={isGroupConversation}
-          members={effectiveConversation?.members || []}
+          members={conversation?.members || []}
         />
         <TypingIndicator userNames={typingUserNames} />
         <div ref={bottomRef} />
@@ -542,18 +522,18 @@ export default function ChatWindow({
         </button>
       )}
 
-      {(effectiveConversation?.unreadMentionCount || 0) > 0 && (
+      {(conversation?.unreadMentionCount ?? 0) > 0 && (
         <button
           type="button"
-          aria-label={`Đi đến ${effectiveConversation?.unreadMentionCount} lượt nhắc bạn`}
+          aria-label={`Đi đến ${conversation?.unreadMentionCount} lượt nhắc bạn`}
           onClick={() => void jumpToMention()}
           className="absolute bottom-36 right-4 z-20 flex size-10 animate-pop-in items-center justify-center rounded-full bg-brand text-white shadow-lg transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <AtSign className="size-5" aria-hidden="true" />
           <span
-            key={effectiveConversation?.unreadMentionCount}
+            key={conversation?.unreadMentionCount}
             className="absolute -right-1 -top-1 min-w-5 animate-pop-in rounded-full bg-destructive px-1 text-[10px] font-bold leading-5">
-            {effectiveConversation?.unreadMentionCount}
+            {conversation?.unreadMentionCount}
           </span>
         </button>
       )}
@@ -735,9 +715,9 @@ export default function ChatWindow({
                     </>
                   ) : (
                     <>
-                      <Avatar className="size-8"><AvatarImage src={option.member.avatar || ""} /><AvatarFallback>{(option.member.fullName || option.member.username || "T")[0]}</AvatarFallback></Avatar>
+                      <Avatar className="size-8"><AvatarImage src={option.member.avatar || ""} /><AvatarFallback>{(displayNameOf(option.member) || "T")[0]}</AvatarFallback></Avatar>
                       <span className="min-w-0">
-                        <span className="block truncate font-medium">{option.member.fullName || option.member.username}</span>
+                        <span className="block truncate font-medium">{displayNameOf(option.member)}</span>
                         <span className="block truncate text-xs text-muted-foreground">@{option.label}</span>
                       </span>
                     </>
@@ -854,9 +834,9 @@ export default function ChatWindow({
             onClick={handleSendMessage}
           >
             {isUploading ? (
-              <Loader2 className="size-[18px] animate-spin" aria-hidden="true" />
+              <Loader2 className="size-4.5 animate-spin" aria-hidden="true" />
             ) : (
-              <Send className="size-[18px]" />
+              <Send className="size-4.5" />
             )}
           </Button>
         </div>

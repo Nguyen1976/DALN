@@ -1,5 +1,5 @@
 import { isUniqueConstraintError } from './prisma-error'
-import type { TransactionalPrisma, TxClient } from './types'
+import type { InboxTx, TransactionalPrisma } from './types'
 
 class AlreadyProcessedError extends Error {
   constructor() {
@@ -38,10 +38,10 @@ export interface ConsumeOptions {
  * DB đảm bảo chỉ 1 transaction commit được, transaction còn lại chắc chắn rơi
  * vào catch (P2002) -> race condition được chặn 100% ở tầng DB.
  */
-export async function consumeIdempotent<T>(
-  prisma: TransactionalPrisma,
+export async function consumeIdempotent<Tx extends InboxTx, T>(
+  prisma: TransactionalPrisma<Tx>,
   options: ConsumeOptions,
-  handler: (tx: TxClient) => Promise<T>,
+  handler: (tx: Tx) => Promise<T>,
 ): Promise<ConsumeResult<T>> {
   try {
     const result = await prisma.$transaction(async (tx) => {

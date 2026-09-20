@@ -1,61 +1,60 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsIn,
+  IsMongoId,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator'
+import { Transform } from 'class-transformer'
+import { PageQueryDto } from '@app/common/http/page-query.dto'
 
-export enum ConversationAssetKind {
-  ASSET_MEDIA = 0,
-  ASSET_LINK = 1,
-  ASSET_DOC = 2,
-  UNRECOGNIZED = -1,
+export const ASSET_KINDS = ['MEDIA', 'LINK', 'DOC'] as const
+export type AssetKind = (typeof ASSET_KINDS)[number]
+
+export const UPLOAD_TYPES = ['IMAGE', 'VIDEO', 'FILE'] as const
+export type UploadType = (typeof UPLOAD_TYPES)[number]
+
+export class AssetsQueryDTO extends PageQueryDto {
+  @IsMongoId()
+  conversationId: string
+
+  @IsIn(ASSET_KINDS)
+  kind: AssetKind
 }
 
-export enum MessageType {
-  TEXT = 0,
-  IMAGE = 1,
-  VIDEO = 2,
-  FILE = 3,
-  UNRECOGNIZED = -1,
-}
-
-export interface Member {
-  username: string
-  avatar?: string | undefined
-  userId: string
-  lastReadAt?: string | undefined
-  fullName?: string | undefined
-}
+/** Multipart forms send one id as a string and several as an array. */
+const toIdList = ({ value }: { value: unknown }) =>
+  Array.isArray(value) ? value : value === undefined ? value : [value]
 
 export class CreateConversationDTO {
   @IsNotEmpty()
-  members: Member[]
-
-  @IsNotEmpty()
+  @IsString()
+  @MaxLength(100)
   groupName: string
+
+  /** Everyone besides the creator; names come from the user service. */
+  @Transform(toIdList)
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsMongoId({ each: true })
+  memberIds: string[]
 }
 
 export class AddMemberToConversationDTO {
-  @IsNotEmpty({
-    message: 'conversationId is required',
-  })
+  @IsMongoId()
   conversationId: string
 
-  @IsNotEmpty({
-    message: 'memberIds is required',
-  })
-  memberIds: string[]
-
-  // ValidationPipe bật whitelist; thiếu decorator khiến toàn bộ profile
-  // snapshot bị loại khỏi body và controller chỉ còn memberIds.
-  @IsOptional()
   @IsArray()
-  members?: Member[]
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @IsMongoId({ each: true })
+  memberIds: string[]
 }
 
 export class RemoveMemberFromConversationDTO {
@@ -98,8 +97,8 @@ export class CreateMessageUploadUrlDTO {
   @IsNotEmpty()
   conversationId: string
 
-  @IsNotEmpty()
-  type: 'IMAGE' | 'VIDEO' | 'FILE'
+  @IsIn(UPLOAD_TYPES)
+  type: UploadType
 
   @IsNotEmpty()
   mimeType: string
@@ -192,8 +191,8 @@ export class GroupCallLogDTO {
   callId?: string
 
   @IsOptional()
-  @IsString()
-  callType?: string
+  @IsIn(['audio', 'video'])
+  callType?: 'audio' | 'video'
 
   @IsOptional()
   @IsString()

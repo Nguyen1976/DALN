@@ -15,11 +15,11 @@ import { TokenExpiredError } from 'jsonwebtoken'
  * WebSocket không có `Response` để set.
  */
 
+/** What the user service signs into both session tokens. */
 export type JwtPayload = {
   userId: string
-  email?: string
-  username?: string
-  [key: string]: unknown
+  email: string
+  username: string
 }
 
 export type TokenResolution =
@@ -61,7 +61,7 @@ export function resolveTokens(
   try {
     return {
       ok: true,
-      payload: jwtService.verify(accessToken) as JwtPayload,
+      payload: jwtService.verify(accessToken),
       usedRefresh: false,
     }
   } catch (err) {
@@ -87,7 +87,7 @@ function resolveFromRefresh(
   try {
     return {
       ok: true,
-      payload: jwtService.verify(refreshToken) as JwtPayload,
+      payload: jwtService.verify(refreshToken),
       usedRefresh: true,
     }
   } catch {

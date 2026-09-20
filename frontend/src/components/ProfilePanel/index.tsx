@@ -3,14 +3,10 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  getConversationAssetsAPI,
-  type ConversationAssetMessage,
-} from "@/apis";
-import type {
-  Conversation,
-  ConversationState,
-} from "@/redux/slices/conversationSlice";
+import { getConversationAssetsAPI } from "@/apis";
+import type { Message } from "@/redux/slices/messageSlice";
+import { selectConversationById } from "@/redux/slices/conversationSlice";
+import type { RootState } from "@/redux/store";
 import {
   AnimateIcon,
   FileText,
@@ -52,16 +48,15 @@ export default function ProfilePanel({
   onJumpToMessage,
 }: ProfilePanelProps) {
   const [assetKind, setAssetKind] = useState<"MEDIA" | "LINK" | "DOC">("MEDIA");
-  const [assets, setAssets] = useState<ConversationAssetMessage[]>([]);
+  const [assets, setAssets] = useState<Message[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
   // Có thể chưa có: bảng được mở trước khi danh sách hội thoại (hoặc bản tải theo
   // id) về tới store.
-  const conversation: Conversation | undefined = useSelector(
-    (state: { conversations: ConversationState }) =>
-      state.conversations?.find((c) => c.id === conversationId),
+  const conversation = useSelector((state: RootState) =>
+    selectConversationById(state, conversationId),
   );
 
   const title = conversation?.displayName || "Cuộc trò chuyện";
@@ -108,9 +103,9 @@ export default function ProfilePanel({
     })
       .then((response) => {
         if (cancelled) return;
-        setAssets(response.messages || []);
-        setNextCursor(response.nextCursor || null);
-        setHasMore(Boolean(response.nextCursor));
+        setAssets(response.items);
+        setNextCursor(response.nextCursor);
+        setHasMore(response.nextCursor !== null);
       })
       .catch(() => {
         if (!cancelled) setHasMore(false);
@@ -126,7 +121,7 @@ export default function ProfilePanel({
 
   // Later pages, as the panel is scrolled down to the end of the list.
   const assetPaging = useInfiniteScroll({
-    hasMore: hasMore && Boolean(nextCursor),
+    hasMore,
     enabled: !isLoading && assets.length > 0,
     itemCount: assets.length,
     loadMore: async () => {
@@ -138,40 +133,39 @@ export default function ProfilePanel({
         limit: ASSET_PAGE_SIZE,
       });
       if (tokenRef.current !== token) return;
-      const nextMessages = response.messages || [];
       setAssets((prev) => {
         const known = new Set(prev.map((item) => item.id));
-        return [...prev, ...nextMessages.filter((item) => !known.has(item.id))];
+        return [
+          ...prev,
+          ...response.items.filter((item) => !known.has(item.id)),
+        ];
       });
-      setNextCursor(response.nextCursor || null);
-      setHasMore(Boolean(response.nextCursor));
+      setNextCursor(response.nextCursor);
+      setHasMore(response.nextCursor !== null);
     },
   });
 
-  const resolveMediaPreviewUrl = (message: ConversationAssetMessage) => {
+  const resolveMediaPreviewUrl = (message: Message) => {
     const media = message.medias?.[0];
     if (media?.url) return media.url;
 
-    const content = message.text || "";
+    const content = message.content;
     if (content.startsWith("http")) return content;
     return "";
   };
 
-  const resolveFileName = (message: ConversationAssetMessage) => {
-    const mediaUrl = message.medias?.[0]?.url || message.text || "";
-    if (!mediaUrl) return "tệp đính kèm";
-    try {
-      const parsed = new URL(mediaUrl);
-      return decodeURIComponent(
-        parsed.pathname.split("/").pop() || "tệp đính kèm",
-      );
-    } catch {
-      return decodeURIComponent(mediaUrl.split("/").pop() || "tệp đính kèm");
-    }
+  // Files uploaded before names were stored fall back to the URL's last part.
+  const resolveFileName = (message: Message) => {
+    const media = message.medias?.[0];
+    const fromUrl = media?.url.split("/").pop();
+    return (
+      media?.fileName ||
+      (fromUrl ? decodeURIComponent(fromUrl) : "tệp đính kèm")
+    );
   };
 
-  const resolvePrimaryLink = (message: ConversationAssetMessage) => {
-    const text = message.text || "";
+  const resolvePrimaryLink = (message: Message) => {
+    const text = message.content;
     const matched = text.match(/https?:\/\/\S+/i);
     if (matched?.[0]) return matched[0];
     return message.medias?.[0]?.url || "";
@@ -229,9 +223,7 @@ export default function ProfilePanel({
           <div className="flex animate-stagger-in flex-col items-center text-center [--stagger:1]">
             <Avatar className="mb-3 size-24 border border-border">
               <AvatarImage
-                src={
-                  conversation.groupAvatar || conversation.displayAvatar || ""
-                }
+                src={conversation.displayAvatar}
                 alt={`Ảnh đại diện ${title}`}
               />
               <AvatarFallback className="text-2xl">{title?.[0]}</AvatarFallback>
@@ -241,7 +233,7 @@ export default function ProfilePanel({
             </h3>
             <p className="mt-0.5 text-sm text-muted-foreground">
               {conversation.type === "GROUP"
-                ? `${conversation.memberCount ?? conversation.members?.length ?? 0} thành viên`
+                ? `${conversation.memberCount} thành viên`
                 : "Trò chuyện trực tiếp"}
             </p>
           </div>
@@ -349,12 +341,12 @@ export default function ProfilePanel({
                         <ImageIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
                         <img
                           src={url}
-                          alt={message.text || "Tệp phương tiện đã gửi"}
+                          alt={message.content || "Tệp phương tiện đã gửi"}
                           loading="lazy"
                           className="size-12 rounded-md object-cover"
                         />
                         <p className="truncate text-xs text-muted-foreground">
-                          {message.text || "Tệp phương tiện"}
+                          {message.content || "Tệp phương tiện"}
                         </p>
                       </div>
                     </button>

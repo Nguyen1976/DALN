@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from 'apps/notification/prisma/prisma.service'
+import type { Prisma } from '../generated'
 
 @Injectable()
 export class NotificationPreferenceRepository {
@@ -13,9 +14,9 @@ export class NotificationPreferenceRepository {
 
   create(data: {
     userId: string
-    globalSettings: any
-    overrides: any
-    digestSettings: any
+    globalSettings: Prisma.InputJsonValue
+    overrides: Prisma.InputJsonValue
+    digestSettings: Prisma.InputJsonValue
   }) {
     return this.prisma.userNotificationPreference.create({
       data,
@@ -24,9 +25,9 @@ export class NotificationPreferenceRepository {
 
   upsert(data: {
     userId: string
-    globalSettings: any
-    overrides: any
-    digestSettings: any
+    globalSettings: Prisma.InputJsonValue
+    overrides: Prisma.InputJsonValue
+    digestSettings: Prisma.InputJsonValue
     version: number
   }) {
     return this.prisma.userNotificationPreference.upsert({
@@ -41,29 +42,16 @@ export class NotificationPreferenceRepository {
     })
   }
 
-  updateDigest(userId: string, digestSettings: any, version: number) {
+  updateDigest(
+    userId: string,
+    digestSettings: Prisma.InputJsonValue,
+    version: number,
+  ) {
     return this.prisma.userNotificationPreference.update({
       where: { userId },
       data: {
         digestSettings,
         version,
-      },
-    })
-  }
-
-  /**
-   * @deprecated Tải TOÀN BỘ preference — chi phí O(số user) mỗi lượt quét.
-   * Dùng {@link findManyByUserIds} với tập ứng viên đã lọc từ notification.
-   */
-  findAllForDigestSweep() {
-    return this.prisma.userNotificationPreference.findMany({
-      select: {
-        userId: true,
-        globalSettings: true,
-        overrides: true,
-        digestSettings: true,
-        version: true,
-        updatedAt: true,
       },
     })
   }

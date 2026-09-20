@@ -39,7 +39,10 @@ export class EmbeddingService {
         const modelName =
           process.env.EMBEDDING_MODEL_NAME?.trim() ||
           'Xenova/paraphrase-multilingual-MiniLM-L12-v2'
-        return pipeline('feature-extraction', modelName) as Promise<FeatureExtractionPipeline>
+        return pipeline(
+          'feature-extraction',
+          modelName,
+        ) as Promise<FeatureExtractionPipeline>
       })()
     }
     return this.extractorPromise
@@ -53,9 +56,10 @@ export class EmbeddingService {
     output: { data: Float32Array; dims: number[] },
     batchSize: number,
   ): number[][] {
-    const [rows, dims] = output.dims.length === 2
-      ? output.dims
-      : [batchSize, output.data.length / batchSize]
+    const [rows, dims] =
+      output.dims.length === 2
+        ? output.dims
+        : [batchSize, output.data.length / batchSize]
     const vectors: number[][] = []
     for (let i = 0; i < rows; i++) {
       const start = i * dims
@@ -69,6 +73,17 @@ export class EmbeddingService {
     const extractor = await this.getExtractor()
     const output = await extractor(texts, { pooling: 'mean', normalize: true })
     return this.tensorToVectors(output, texts.length)
+  }
+
+  /** One user's bio into Qdrant; false (and logged) when that failed. */
+  async embedBio(userId: string, bio: string): Promise<boolean> {
+    const result = await this.embedAndSave([{ id: userId, bio, age: 0 }])
+    if (result.status !== 'ok') {
+      this.logger.error(
+        `bio embedding failed userId=${userId}: ${result.message ?? result.status}`,
+      )
+    }
+    return result.status === 'ok'
   }
 
   async embedAndSave(users: EmbedUserInput[]): Promise<EmbedAndSaveResult> {

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Check, RefreshCw, UserPlus } from "@/components/icons";
 import { toast } from "sonner";
 
 import {
   makeFriendRequestByUsername,
-  type RecommendationCandidateItem,
+  type SuggestedFriend,
 } from "@/apis";
 import {
   fetchRecommendations,
@@ -13,6 +13,7 @@ import {
   selectRecommendationSentIds,
   selectRecommendations,
   selectRecommendationsLoaded,
+  selectRecommendationsStale,
   unmarkRecommendationSent,
 } from "@/redux/slices/recommendationSlice";
 import { markRequestsStale } from "@/redux/slices/friendRequestSlice";
@@ -23,10 +24,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AvatarCircles } from "@/components/ui/avatar-circles";
 import { EmptyState } from "@/components/ui/feedback";
 import { Skeleton } from "@/components/ui/skeleton";
-import { socket } from "@/lib/socket";
-import { SOCKET_EVENTS } from "@/lib/socket.events";
 import { showErrorToast } from "@/utils/toastError";
 import { cn } from "@/lib/utils";
+import { displayNameOf } from "@/utils/displayName";
 
 /**
  * Cards are at least 14rem wide and share the row evenly: about five across on
@@ -59,14 +59,14 @@ function Silhouette() {
 function MutualFriends({
   mutual,
 }: {
-  mutual: RecommendationCandidateItem["mutualFriends"];
+  mutual: SuggestedFriend["mutualFriends"];
 }) {
   const count = mutual?.count ?? 0;
   if (count === 0) return <div className="h-6" />;
 
   const people = (mutual?.preview ?? []).map((person) => ({
     id: person.userId,
-    name: person.fullName || person.username,
+    name: displayNameOf(person),
     avatar: person.avatar,
   }));
   const names = people.map((person) => person.name).join(", ");
@@ -108,60 +108,38 @@ export default function ListRecommendation() {
   // skeleton and no request, along with the "request sent" marks.
   const recommendations = useSelector(selectRecommendations);
   const loaded = useSelector(selectRecommendationsLoaded);
+  // Set when one of our requests is accepted (see recommendationSlice).
+  const stale = useSelector(selectRecommendationsStale);
   const sentIds = useSelector(selectRecommendationSentIds);
 
-  const loadRecommendations = useCallback(
-    () => dispatch(fetchRecommendations()),
-    [dispatch],
-  );
-
-  // Once per session; later refreshes come from the events below.
+  // Once per session, and again after an accepted request.
   useEffect(() => {
-    if (!loaded) void loadRecommendations();
-  }, [loaded, loadRecommendations]);
+    if (!loaded || stale) void dispatch(fetchRecommendations());
+  }, [dispatch, loaded, stale]);
 
   useEffect(() => {
-    const handleNotification = (payload: { message?: string } | null) => {
-      const message = String(payload?.message ?? "").toLowerCase();
-      if (
-        message.includes("lời mời kết bạn") &&
-        message.includes("chấp nhận")
-      ) {
-        void loadRecommendations();
-      }
-    };
-
     const handleWindowFocus = () => {
       void dispatch(
         fetchRecommendations({ ifOlderThan: FOCUS_REFRESH_AFTER_MS }),
       );
     };
-
-    socket.on(SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION, handleNotification);
     window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
+  }, [dispatch]);
 
-    return () => {
-      socket.off(
-        SOCKET_EVENTS.NOTIFICATION.NEW_NOTIFICATION,
-        handleNotification,
-      );
-      window.removeEventListener("focus", handleWindowFocus);
-    };
-  }, [dispatch, loadRecommendations]);
-
-  const handleMakeFriend = async (candidate: RecommendationCandidateItem) => {
-    const candidateId = candidate.candidateId;
+  const handleMakeFriend = async (candidate: SuggestedFriend) => {
+    const candidateId = candidate.userId;
     if (sentIds.includes(candidateId)) return;
 
     // Flip the button straight away; undo it if the request fails.
     dispatch(markRecommendationSent(candidateId));
     try {
       // Gửi theo username: dữ liệu gợi ý và hồ sơ công khai đều không có email.
-      await makeFriendRequestByUsername(candidate.profile.username);
+      await makeFriendRequestByUsername(candidate.username);
       // The "sent" list on the requests tab gained one.
       dispatch(markRequestsStale("sent"));
       toast.success(
-        `Đã gửi lời mời kết bạn đến ${candidate.profile.fullName || candidate.profile.username}`,
+        `Đã gửi lời mời kết bạn đến ${displayNameOf(candidate)}`,
       );
     } catch (error) {
       showErrorToast(error, "Không thể gửi lời mời kết bạn");
@@ -196,7 +174,7 @@ export default function ListRecommendation() {
           action={
             <Button
               variant="outline"
-              onClick={() => void loadRecommendations()}
+              onClick={() => void dispatch(fetchRecommendations())}
             >
               <RefreshCw className="size-4" aria-hidden="true" />
               Thử lại
@@ -208,21 +186,20 @@ export default function ListRecommendation() {
       {recommendations.length > 0 && (
         <ul ref={gridRef} className={cn(GRID, "relative")}>
           {recommendations.map((candidate) => {
-            const profile = candidate.profile;
             // Username stands in for people who never set a display name.
-            const name = profile.fullName || profile.username;
-            const sent = sentIds.includes(candidate.candidateId);
+            const name = displayNameOf(candidate);
+            const sent = sentIds.includes(candidate.userId);
 
             return (
               <li
-                key={candidate.candidateId}
-                data-motion-key={candidate.candidateId}
+                key={candidate.userId}
+                data-motion-key={candidate.userId}
                 className="flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs"
               >
                 <div className="aspect-square bg-muted">
                   <Avatar className="size-full rounded-none">
                     <AvatarImage
-                      src={profile.avatar || ""}
+                      src={candidate.avatar || ""}
                       alt={`Ảnh đại diện ${name}`}
                     />
                     <AvatarFallback className="rounded-none bg-muted">

@@ -1,31 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import * as path from 'path'
-import { SAFE_FEATURES } from './feature.service'
+import { SAFE_FEATURES, type PairFeatureRow } from './feature.service'
 import {
   GradientBoostingClassifier,
   GradientBoostingModelJson,
   StandardScaler,
 } from '../ml/gradient-boosting'
 
+/** A candidate and its model features; missing ones count as -1. */
 export type RankingCandidateInput = {
   candidateId: string
-  jaccard?: number
-  cosine_graph?: number
-  adamic_adar?: number
-  pref_attach?: number
-  deg_u?: number
-  deg_v?: number
-  dist_km?: number
-  dist_bucket?: number
-  bio_cosine?: number
-  bio_dot?: number
-  bio_l2?: number
-  same_cluster?: number
-  group_inter?: number
-  group_jaccard?: number
-  same_group?: number
-}
+} & Partial<PairFeatureRow>
+
+export type RankedCandidate = RankingCandidateInput & { score: number }
 
 type LoadedBundle = {
   model: GradientBoostingClassifier
@@ -67,7 +55,11 @@ export class GbRankerService {
   async rankTopK(
     candidates: RankingCandidateInput[],
     k = 100,
-  ): Promise<{ status: 'ok' | 'empty' | 'error'; data: any[]; message?: string }> {
+  ): Promise<{
+    status: 'ok' | 'empty' | 'error'
+    data: RankedCandidate[]
+    message?: string
+  }> {
     if (!candidates.length) {
       return { status: 'empty', data: [] }
     }
@@ -76,8 +68,7 @@ export class GbRankerService {
       const { model, scaler } = await this.loadBundle()
       const matrix = candidates.map((candidate) =>
         SAFE_FEATURES.map((feature) => {
-          const raw = candidate[feature as keyof RankingCandidateInput]
-          const value = Number(raw ?? 0)
+          const value = Number(candidate[feature] ?? 0)
           return Number.isFinite(value) ? value : -1
         }),
       )
@@ -102,7 +93,7 @@ export class GbRankerService {
 
   async predictTop100(
     candidates: RankingCandidateInput[],
-  ): Promise<RankingCandidateInput[]> {
+  ): Promise<RankedCandidate[]> {
     const result = await this.rankTopK(candidates, 100)
     if (result.status !== 'ok') {
       return []

@@ -17,9 +17,7 @@ const commonOptions = (): Pick<
  * Options for BullMQ / fallback host-port mode.
  * Với REDIS_URL: trả về URL string (Bull chấp nhận trực tiếp).
  */
-export function getRedisConnectionConfig():
-  | string
-  | RedisConnectionOptions {
+export function getRedisConnectionConfig(): string | RedisConnectionOptions {
   const url = process.env.REDIS_URL?.trim()
   if (url) {
     return url
@@ -87,8 +85,15 @@ export function createRedisClient(
   const shared = { ...commonOptions(), ...overrides }
 
   if (url) {
-    const { url: _u, host: _h, port: _p, db: _db, ...rest } = shared
-    return new Redis(url, rest)
+    // The URL names the server: nothing in the overrides may point elsewhere.
+    const options: RedisConnectionOptions = {
+      ...shared,
+      url: undefined,
+      host: undefined,
+      port: undefined,
+      db: undefined,
+    }
+    return new Redis(url, options)
   }
 
   return new Redis({

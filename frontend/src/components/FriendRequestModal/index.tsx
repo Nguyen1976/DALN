@@ -9,15 +9,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
+import { displayNameOf } from "@/utils/displayName";
 import {
   getFriendRequestDetail,
-  updateFriendRequestStatus,
-  type DetailMakeFriendResponse,
+  respondToFriendRequestAPI,
+  type FriendRequestDetail,
 } from "@/apis";
-import { useDispatch, useSelector } from "react-redux";
+import { useDispatch } from "react-redux";
 import { getFriends } from "@/redux/slices/friendSlice";
 import { markRequestsStale } from "@/redux/slices/friendRequestSlice";
-import { selectUser } from "@/redux/slices/userSlice";
 import type { AppDispatch } from "@/redux/store";
 import { showErrorToast } from "@/utils/toastError";
 import { getErrorMessage } from "@/utils/getErrorMessage";
@@ -38,7 +38,7 @@ const FriendRequestModal = ({
 }: FriendRequestModalProps) => {
   const dispatch = useDispatch<AppDispatch>();
   const [friendRequestData, setFriendRequestData] =
-    useState<DetailMakeFriendResponse | null>(null);
+    useState<FriendRequestDetail | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   // Which action is in flight, so both buttons can lock together and the one
   // that was pressed can say what it is doing.
@@ -49,7 +49,6 @@ const FriendRequestModal = ({
   // server then raced into a half-created friendship.
   const inFlight = useRef(false);
 
-  const user = useSelector(selectUser);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -89,27 +88,19 @@ const FriendRequestModal = ({
       return;
     }
 
-    const fromUser = friendRequestData.fromUser;
-    if (!fromUser?.id) {
-      toast.error("Không tìm thấy thông tin người gửi lời mời.");
-      return;
-    }
+    const sender = friendRequestData.counterpart;
 
     if (inFlight.current) return;
     inFlight.current = true;
     setPending("accept");
     try {
-      await updateFriendRequestStatus({
-        inviterId: fromUser.id,
-        inviteeName: user?.username || "",
-        status: "ACCEPTED",
-      });
+      await respondToFriendRequestAPI(friendRequestData.id, "ACCEPTED");
 
-      await dispatch(getFriends({ limit: 100, page: 1 })).unwrap();
+      await dispatch(getFriends()).unwrap();
       // The request is answered: the received list is out of date.
       dispatch(markRequestsStale("received"));
 
-      toast.success(`Đã kết bạn với ${fromUser.username}`);
+      toast.success(`Đã kết bạn với ${displayNameOf(sender)}`);
       onClose();
     } catch (error) {
       showErrorToast(error, "Không thể chấp nhận lời mời kết bạn");
@@ -131,11 +122,7 @@ const FriendRequestModal = ({
     inFlight.current = true;
     setPending("reject");
     try {
-      await updateFriendRequestStatus({
-        inviterId: friendRequestData.fromUser?.id || "",
-        inviteeName: user?.username || "",
-        status: "REJECTED",
-      });
+      await respondToFriendRequestAPI(friendRequestData.id, "REJECTED");
       dispatch(markRequestsStale("received"));
       toast.success("Đã từ chối lời mời kết bạn");
       onClose();
@@ -195,23 +182,23 @@ const FriendRequestModal = ({
               <>
                 <Avatar className="size-24 border border-border shadow-sm">
                   <AvatarImage
-                    src={friendRequestData?.fromUser?.avatar || ""}
+                    src={friendRequestData?.counterpart.avatar || ""}
                     alt={
-                      friendRequestData?.fromUser?.username ||
+                      friendRequestData?.counterpart.username ||
                       "Ảnh đại diện người dùng"
                     }
                   />
                   <AvatarFallback>
-                    {friendRequestData?.fromUser?.username?.[0]}
+                    {friendRequestData?.counterpart.username?.[0]}
                   </AvatarFallback>
                 </Avatar>
                 <div className="space-y-1 text-center">
                   <h3 className="text-lg font-semibold tracking-[-0.01em] text-foreground">
-                    {friendRequestData?.fromUser?.username}
+                    {friendRequestData?.counterpart.username}
                   </h3>
-                  {friendRequestData?.fromUser?.email && (
+                  {friendRequestData?.counterpart.email && (
                     <p className="text-sm text-muted-foreground">
-                      {friendRequestData.fromUser.email}
+                      {friendRequestData.counterpart.email}
                     </p>
                   )}
                 </div>

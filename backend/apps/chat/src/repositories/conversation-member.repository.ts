@@ -1,18 +1,23 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
-import { Member } from '../http/chat-http.dto'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
-import { conversationType } from 'apps/chat/src/generated'
+import type { Prisma } from 'apps/chat/src/generated'
 import { RedisService } from '@app/redis'
-import { buildPeerFields } from '../domain/peer-fields'
+import { isObjectId } from '@app/util'
+import { buildMemberRow } from '../domain/member-row'
+import type { MemberProfile } from 'libs/constant/member-profile'
 
-type CachedMember = {
-  userId: string
-  role: string | null
-  username: string | null
-  fullName: string | null
-  avatar: string | null
-  joinedAt: string | null
-}
+/** An active member as the rest of the service needs them (and as cached). */
+const MEMBER_SELECT = {
+  userId: true,
+  role: true,
+  username: true,
+  fullName: true,
+  avatar: true,
+} as const
+
+export type MemberRow = Prisma.conversationMemberGetPayload<{
+  select: typeof MEMBER_SELECT
+}>
 
 /** Danh sách thành viên của một cuộc trò chuyện. */
 const membersKey = (conversationId: string) => `conv:members:${conversationId}`
@@ -30,11 +35,8 @@ const MEMBERS_TTL_SECONDS = 300
 const UNREAD_RECOUNT_CAP = 99
 
 /** ObjectId hex -> chữ thường; không phải ObjectId hợp lệ -> null. */
-function normalizeObjectId(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const id = value.toLowerCase()
-  return /^[a-f\d]{24}$/.test(id) ? id : null
-}
+const normalizeObjectId = (value: unknown): string | null =>
+  isObjectId(value) ? value.toLowerCase() : null
 
 @Injectable()
 export class ConversationMemberRepository {
@@ -80,29 +82,21 @@ export class ConversationMemberRepository {
     await this.invalidateMembersCache(...rows.map((r) => r.conversationId))
   }
 
+  /** A new conversation's members; `ownerId` owns a group. */
   async createMany(
     conversationId: string,
-    members: Member[],
-    createrId: string,
-    type: conversationType,
+    profiles: MemberProfile[],
+    { type, ownerId }: { type: 'DIRECT' | 'GROUP'; ownerId?: string },
   ) {
     const result = await this.prisma.conversationMember.createMany({
-      data: members.map((member: Member) => ({
-        ...member,
-        conversationId,
-        userId: member.userId,
-        role:
-          type === conversationType.GROUP && createrId === member.userId
-            ? 'OWNER'
-            : 'MEMBER',
-        isActive: true,
-        unreadCount: 0,
-        lastReadMessageId: null,
-        lastMessageAt: new Date(),
-        // DIRECT: phi chuẩn hoá đối phương để danh sách hội thoại khỏi phải
-        // include toàn bộ members. GROUP: toàn null, nhóm dùng groupName.
-        ...buildPeerFields(String(type), member.userId, members),
-      })),
+      data: profiles.map((profile) =>
+        buildMemberRow(conversationId, profile, {
+          type,
+          role:
+            type === 'GROUP' && profile.userId === ownerId ? 'OWNER' : 'MEMBER',
+          members: profiles,
+        }),
+      ),
     })
 
     await this.invalidateMembersCache(conversationId)
@@ -117,18 +111,12 @@ export class ConversationMemberRepository {
    * 1000 msg/s là 1000 read Mongo/giây, trong khi thành phần nhóm gần như
    * không đổi. Cache cắt gần trọn lượng đọc đó.
    */
-  async findByConversationId(conversationId: string) {
+  async findByConversationId(conversationId: string): Promise<MemberRow[]> {
     const key = membersKey(conversationId)
 
     try {
       const cached = await this.redisService.get(key)
-      if (cached) {
-        const rows = JSON.parse(cached) as CachedMember[]
-        return rows.map((row) => ({
-          ...row,
-          joinedAt: row.joinedAt ? new Date(row.joinedAt) : null,
-        }))
-      }
+      if (cached) return JSON.parse(cached) as MemberRow[]
     } catch (error) {
       // Redis lỗi hoặc JSON hỏng -> rơi xuống đọc Mongo, không ném ra ngoài.
       this.logger.warn(
@@ -143,14 +131,7 @@ export class ConversationMemberRepository {
         conversationId,
         ...this.activeMemberFilter,
       },
-      select: {
-        userId: true,
-        role: true,
-        username: true,
-        fullName: true,
-        avatar: true,
-        joinedAt: true,
-      },
+      select: MEMBER_SELECT,
     })
 
     try {
@@ -179,18 +160,13 @@ export class ConversationMemberRepository {
 
   /**
    * Điều kiện "marker đọc đứng TRƯỚC `messageId`, hoặc chưa có marker".
-   *
-   * Prisma MongoDB phân biệt field null và field KHÔNG tồn tại: `{ field: null }`
-   * được dịch thành `$eq null AND $ne $$REMOVE`, `lt` cũng kèm `$ne $$REMOVE`,
-   * nên cả hai đều bỏ qua document thiếu field. Dòng tạo qua createMany có
-   * `lastReadMessageId: null`, dòng tạo qua create() trong addMembers thì không
-   * có field này (trên dev: 33/68 dòng) — phải thêm `isSet: false`.
+   * Mọi dòng đều có field (null khi chưa đọc): buildMemberRow đặt sẵn, dòng cũ
+   * được migrations/chat/0005 điền.
    */
   private markerBefore(messageId: string) {
     return {
       OR: [
         { lastReadMessageId: null },
-        { lastReadMessageId: { isSet: false } },
         { lastReadMessageId: { lt: messageId } },
       ],
     }
@@ -225,20 +201,6 @@ export class ConversationMemberRepository {
           increment: unreadCount,
         },
       },
-    })
-  }
-
-  async findByConversationIdAndUserIds(
-    conversationId: string,
-    userIds: string[],
-  ) {
-    return await this.prisma.conversationMember.findMany({
-      where: {
-        conversationId,
-        userId: { in: userIds },
-        ...this.activeMemberFilter,
-      },
-      select: { userId: true },
     })
   }
 
@@ -281,15 +243,8 @@ export class ConversationMemberRepository {
     })
   }
 
-  async addMembers(
-    conversationId: string,
-    members: Array<{
-      userId: string
-      username?: string
-      fullName?: string
-      avatar?: string
-    }>,
-  ) {
+  /** Add (or bring back) people to a group; returns how many changed. */
+  async addMembers(conversationId: string, members: MemberProfile[]) {
     let changedCount = 0
 
     for (const member of members) {
@@ -326,17 +281,10 @@ export class ConversationMemberRepository {
       }
 
       await this.prisma.conversationMember.create({
-        data: {
-          conversationId,
-          userId: member.userId,
-          username: member.username || null,
-          fullName: member.fullName || null,
-          avatar: member.avatar || null,
-          role: 'MEMBER',
-          isActive: true,
-          unreadCount: 0,
-          lastMessageAt: new Date(),
-        },
+        data: buildMemberRow(conversationId, member, {
+          type: 'GROUP',
+          members,
+        }),
       })
 
       changedCount += 1
@@ -529,19 +477,6 @@ export class ConversationMemberRepository {
     await this.invalidateMembersCache(conversationId)
     return true
   }
-
-  // async findUserProfileById(userId: string) {
-  //   return await this.prisma.user.findUnique({
-  //     where: {
-  //       id: userId,
-  //     },
-  //     select: {
-  //       username: true,
-  //       fullName: true,
-  //       avatar: true,
-  //     },
-  //   })
-  // }
 
   async promoteToOwner(conversationId: string, userId: string) {
     const result = await this.prisma.conversationMember.updateMany({

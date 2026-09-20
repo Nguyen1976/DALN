@@ -15,7 +15,7 @@
  *   cd backend
  *   npm run rcm:train-bootstrap
  */
-import neo4j from 'neo4j-driver'
+import neo4j, { type Session } from 'neo4j-driver'
 import { mkdir, writeFile } from 'fs/promises'
 import * as path from 'path'
 import {
@@ -82,13 +82,13 @@ function subsampleBalanced(pairs: LabeledPair[]): LabeledPair[] {
 
 type LabeledPair = { u: string; v: string; label: 0 | 1; split: string }
 
-async function readFriendAdjacency(session: any): Promise<{
+async function readFriendAdjacency(session: Session): Promise<{
   adj: Map<string, Set<string>>
   degrees: Map<string, number>
 }> {
   console.log('Đọc FRIEND graph từ Neo4j...')
   const adj = new Map<string, Set<string>>()
-  const res = await session.run(
+  const res = await session.run<{ a: string; b: string }>(
     'MATCH (a:User)-[:FRIEND]->(b:User) RETURN a.userId AS a, b.userId AS b',
   )
   for (const rec of res.records) {
@@ -106,16 +106,21 @@ async function readFriendAdjacency(session: any): Promise<{
   return { adj, degrees }
 }
 
-async function readLabeledLinks(session: any): Promise<LabeledPair[]> {
+async function readLabeledLinks(session: Session): Promise<LabeledPair[]> {
   console.log('Đọc LINK đã gắn nhãn từ Neo4j...')
-  const res = await session.run(
+  const res = await session.run<{
+    a: string
+    b: string
+    label: unknown
+    split: string | null
+  }>(
     'MATCH (a:User)-[r:LINK]->(b:User) ' +
       'RETURN a.userId AS a, b.userId AS b, r.label AS label, r.split AS split',
   )
-  const rows: LabeledPair[] = res.records.map((rec: any) => ({
+  const rows: LabeledPair[] = res.records.map((rec) => ({
     u: String(rec.get('a')),
     v: String(rec.get('b')),
-    label: (Number(rec.get('label')) === 1 ? 1 : 0) as 0 | 1,
+    label: Number(rec.get('label')) === 1 ? 1 : 0,
     split: String(rec.get('split') ?? 'train'),
   }))
   console.log(`  labeled pairs=${rows.length}`)
@@ -213,7 +218,9 @@ async function main() {
     const XTrainScaled = scaler.transform(XTrain)
     const XTestScaled = scaler.transform(XTest)
 
-    console.log(`Train GradientBoostingClassifier (giống RCM, nEstimators=${N_ESTIMATORS})...`)
+    console.log(
+      `Train GradientBoostingClassifier (giống RCM, nEstimators=${N_ESTIMATORS})...`,
+    )
     const model = new GradientBoostingClassifier()
     model.nEstimators = N_ESTIMATORS
     model.fit(XTrainScaled, yTrain)

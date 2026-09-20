@@ -1,4 +1,5 @@
-import { Server, Socket } from 'socket.io'
+import type { Server } from 'socket.io'
+import type Redis from 'ioredis'
 import {
   ConnectedSocket,
   MessageBody,
@@ -9,7 +10,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets'
 import { JwtService } from '@nestjs/jwt'
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
 import { publishEvent, RabbitSubscribeWithRetry } from '@app/common/rmq'
@@ -17,14 +18,15 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { UserStatusStore } from './user-status.store'
-import type { EmitToUserPayload } from 'libs/constant/rmq/payload'
-import * as cookie from 'cookie'
-import { resolveTokens } from '@app/common'
+import type {
+  EmitToUserPayload,
+  MessageSendPayload,
+} from 'libs/constant/rmq/payload'
+import { readCookie, resolveTokens } from '@app/common'
 import { randomUUID } from 'crypto'
 import { buildIceConfig } from './turn-credentials'
 import { CallSession, CallSessionStore, isCallId } from './call-session.store'
 import { CallBusyStore } from './call-busy.store'
-import { fetchCallPeer } from './chat-call-peer.client'
 import {
   conversationIdFromRoom,
   GroupCallMember,
@@ -32,15 +34,27 @@ import {
   GroupCallStore,
   isGroupCallId,
 } from './group-call.store'
-import { fetchCallMembers, postGroupCallLog } from './chat-call-members.client'
+import {
+  fetchCallMembers,
+  fetchCallPeer,
+  postGroupCallLog,
+} from './chat.client'
 import {
   buildGroupCallToken,
   getLivekitUrl,
   isLivekitConfigured,
 } from './livekit-token'
+import type {
+  CallBody,
+  ClientSocket,
+  ConversationBody,
+  CreateMessageBody,
+  MessageReadBody,
+  TypingBody,
+} from './socket.types'
 
 /** Ack trả về cho client ở các sự kiện `call.*`. */
-type CallAck =
+export type CallAck =
   | ({ ok: true } & Record<string, unknown>)
   | { ok: false; code: string; message: string }
 
@@ -65,6 +79,8 @@ export class RealtimeGateway
   @WebSocketServer()
   server!: Server
 
+  private readonly logger = new Logger(RealtimeGateway.name)
+
   private userStatusStore: UserStatusStore
   private callSessionStore: CallSessionStore
   private groupCallStore: GroupCallStore
@@ -76,7 +92,10 @@ export class RealtimeGateway
   // 40s, pingTimeout 10s -> tối đa 50s giữa hai lần) đã gia hạn TTL 90s của
   // key socket, dư 1,8 lần biên an toàn. Timer server-side còn có hại: nó gia
   // hạn cho cả kết nối đã chết, kéo dài trạng thái online giả.
-  private readonly packetListeners = new Map<string, (packet: any) => void>()
+  private readonly packetListeners = new Map<
+    string,
+    (packet: { type: string }) => void
+  >()
   private readonly typingConversationsBySocket = new Map<string, Set<string>>()
   private readonly readBatchByConversation = new Map<
     string,
@@ -88,7 +107,7 @@ export class RealtimeGateway
   private readonly readBatchWindowMs = 1000
 
   private emitTypingStopToRoom(
-    client: Socket,
+    client: ClientSocket,
     userId: string,
     conversationId: string,
   ) {
@@ -101,7 +120,7 @@ export class RealtimeGateway
       })
   }
 
-  private forceStopAllTypingForSocket(client: Socket, userId: string) {
+  private forceStopAllTypingForSocket(client: ClientSocket, userId: string) {
     const typingConversations = this.typingConversationsBySocket.get(client.id)
     if (!typingConversations || typingConversations.size === 0) {
       this.typingConversationsBySocket.delete(client.id)
@@ -116,7 +135,7 @@ export class RealtimeGateway
   }
 
   private queueReadBroadcast(
-    client: Socket,
+    client: ClientSocket,
     conversationId: string,
     userId: string,
     lastReadMessageId: string,
@@ -161,7 +180,7 @@ export class RealtimeGateway
   constructor(
     private jwtService: JwtService,
     @Inject('REDIS_CLIENT')
-    private redisClient: any,
+    private readonly redisClient: Redis,
     private readonly amqpConnection: AmqpConnection,
   ) {
     this.userStatusStore = new UserStatusStore(this.redisClient)
@@ -171,10 +190,9 @@ export class RealtimeGateway
   }
 
   //default function
-  async handleConnection(client: Socket) {
+  async handleConnection(client: ClientSocket) {
     try {
       const rawCookie = client.handshake.headers.cookie
-      const parsed = rawCookie ? cookie.parse(rawCookie) : {}
 
       // Dùng CHUNG hàm phân giải với AuthGuard. Trước đây chỗ này chỉ verify
       // accessToken và không đụng tới refreshToken — dù nó nằm sẵn trong cùng
@@ -187,8 +205,8 @@ export class RealtimeGateway
       // hề mở rộng bề mặt lộ lọt.
       const resolved = resolveTokens(
         this.jwtService,
-        parsed.accessToken,
-        parsed.refreshToken,
+        readCookie(rawCookie, 'accessToken'),
+        readCookie(rawCookie, 'refreshToken'),
       )
 
       if (!resolved.ok || !resolved.payload?.userId) {
@@ -205,34 +223,44 @@ export class RealtimeGateway
       const prevOnline = await this.userStatusStore.isOnline(userId)
 
       // 🔥 Join room theo user
-      client.join(`user:${userId}`)
+      await client.join(`user:${userId}`)
 
       // 🔥 Lưu Redis + TTL
       await this.userStatusStore.addConnection(userId, client.id)
 
-      const packetListener = async (packet) => {
-        if (packet.type === 'pong') {
-          await this.userStatusStore.touchConnection(userId, client.id)
-        }
+      const packetListener = (packet: { type: string }) => {
+        if (packet.type !== 'pong') return
+        this.userStatusStore
+          .touchConnection(userId, client.id)
+          .catch((error: unknown) =>
+            this.logger.warn(`touch ${client.id} failed`, error),
+          )
       }
 
       client.conn.on('packet', packetListener)
       this.packetListeners.set(client.id, packetListener)
 
       if (!prevOnline) {
-        //delete lastSeen vì user đã online trở lại
-        await this.redisClient.del(`user:${userId}:lastSeen`)
-
-        publishEvent(
-          this.amqpConnection,
-          EXCHANGE_RMQ.REALTIME_EVENTS,
-          ROUTING_RMQ.USER_ONLINE,
-          { userId },
-        )
+        this.publish(ROUTING_RMQ.USER_ONLINE, { userId })
       }
     } catch {
       client.disconnect()
     }
+  }
+
+  /**
+   * Hand an event to the other services. Fire-and-forget: a socket handler
+   * has nothing to roll back, so a broker failure is logged, not thrown.
+   */
+  private publish(routingKey: string, payload: unknown) {
+    publishEvent(
+      this.amqpConnection,
+      EXCHANGE_RMQ.REALTIME_EVENTS,
+      routingKey,
+      payload,
+    ).catch((error: unknown) =>
+      this.logger.error(`publish ${routingKey} failed`, error),
+    )
   }
 
   /**
@@ -244,7 +272,7 @@ export class RealtimeGateway
    *
    * `volatile: false` + emit trước disconnect để gói tin kịp ra khỏi hàng đợi.
    */
-  private rejectConnection(client: Socket, code: string) {
+  private rejectConnection(client: ClientSocket, code: string) {
     try {
       client.emit(SOCKET_EVENTS.AUTH.ERROR, { code })
     } catch {
@@ -254,7 +282,7 @@ export class RealtimeGateway
     setTimeout(() => client.disconnect(true), 50)
   }
 
-  async handleDisconnect(client: Socket) {
+  async handleDisconnect(client: ClientSocket) {
     const userId = client.data.userId
     if (!userId) return
 
@@ -283,25 +311,15 @@ export class RealtimeGateway
 
     if (!stillOnline) {
       //trường hợp này là trường hợp user offline thật sự, chứ k phải do lỗi kết nối mạng hay tắt máy đột ngột mà chưa kịp remove connection
+      // The user service stores it on the account (USER_OFFLINE).
       const lastSeen = new Date().toISOString()
-      await this.redisClient.set(
-        `user:${userId}:lastSeen`,
-        lastSeen,
-        'EX',
-        60 * 60 * 24 * 7,
-      ) // lưu lastSeen trong 7 ngày
 
-      publishEvent(
-        this.amqpConnection,
-        EXCHANGE_RMQ.REALTIME_EVENTS,
-        ROUTING_RMQ.USER_OFFLINE,
-        { userId, lastSeen },
-      )
+      this.publish(ROUTING_RMQ.USER_OFFLINE, { userId, lastSeen })
     }
   }
 
   @SubscribeMessage('pong')
-  async handleHeartbeat(@ConnectedSocket() client: Socket) {
+  async handleHeartbeat(@ConnectedSocket() client: ClientSocket) {
     const userId = client.data.userId
     if (!userId) return
     await this.userStatusStore.touchConnection(userId, client.id)
@@ -312,13 +330,13 @@ export class RealtimeGateway
    */
   @SubscribeMessage('conversation:join')
   async handleJoinConversation(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: ConversationBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ) {
-    const { conversationId } = data
+    const conversationId = data?.conversationId
     if (!conversationId) return
 
-    client.join(`conversation:${conversationId}`)
+    await client.join(`conversation:${conversationId}`)
   }
 
   /**
@@ -326,11 +344,11 @@ export class RealtimeGateway
    */
   @SubscribeMessage('conversation:leave')
   async handleLeaveConversation(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: ConversationBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ) {
     const userId = client.data.userId
-    const { conversationId } = data
+    const conversationId = data?.conversationId
     if (!conversationId || !userId) return
 
     const typingConversations = this.typingConversationsBySocket.get(client.id)
@@ -343,11 +361,7 @@ export class RealtimeGateway
       }
     }
 
-    client.leave(`conversation:${conversationId}`)
-  }
-
-  async checkUserOnline(userId: string): Promise<boolean> {
-    return this.userStatusStore.isOnline(userId)
+    await client.leave(`conversation:${conversationId}`)
   }
 
   @RabbitSubscribeWithRetry({
@@ -355,16 +369,14 @@ export class RealtimeGateway
     routingKey: ROUTING_RMQ.EMIT_REALTIME_EVENT,
     queue: QUEUE_RMQ.REALTIME_EMIT_EVENT,
   })
-  async emitToUser({ userIds, event, data }: EmitToUserPayload) {
-    for (const userId of userIds) {
-      this.server.to(`user:${userId}`).emit(event, data)
-    }
+  emitToUser({ userIds, event, data }: EmitToUserPayload) {
+    this.emitToUserSockets(userIds, event, data)
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_CREATE)
-  async handleCreateMessage(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+  handleCreateMessage(
+    @MessageBody() data: CreateMessageBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ) {
     if (!client.data.userId) {
       client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
@@ -388,24 +400,16 @@ export class RealtimeGateway
       return
     }
 
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.SEND_MESSAGE,
-      {
-        conversationId: data.conversationId,
-        senderId: client.data.userId,
-        text: data.content,
-        replyToMessageId: data.replyToMessageId,
-        tempMessageId: data.clientMessageId,
-        clientMessageId: data.clientMessageId,
-        type: data.type,
-        medias: data.media || data.medias || [],
-        mentionUserIds: Array.isArray(data.mentionUserIds)
-          ? data.mentionUserIds
-          : [],
-      },
-    )
+    const message: MessageSendPayload = {
+      conversationId: data.conversationId,
+      senderId: client.data.userId,
+      content: data.content,
+      replyToMessageId: data.replyToMessageId,
+      clientMessageId: data.clientMessageId,
+      type: data.type,
+      medias: data.medias ?? [],
+    }
+    this.publish(ROUTING_RMQ.SEND_MESSAGE, message)
   }
 
   /**
@@ -414,9 +418,9 @@ export class RealtimeGateway
    * Broadcast tới các thành viên khác trong room
    */
   @SubscribeMessage(SOCKET_EVENTS.CHAT.USER_TYPING)
-  async handleUserTyping(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+  handleUserTyping(
+    @MessageBody() data: TypingBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ) {
     const userId = client.data.userId
     if (!userId) {
@@ -428,8 +432,8 @@ export class RealtimeGateway
       return
     }
 
-    const { conversationId, status } = data
-    if (!conversationId || !status || !['start', 'stop'].includes(status)) {
+    const { conversationId, status } = data ?? {}
+    if (!conversationId || (status !== 'start' && status !== 'stop')) {
       client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
         code: 'INVALID_PAYLOAD',
         message: 'conversationId and status (start/stop) are required',
@@ -471,9 +475,9 @@ export class RealtimeGateway
    * 2. Gửi async message tới Chat Service để cập nhật MongoDB
    */
   @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_READ)
-  async handleMessageRead(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+  handleMessageRead(
+    @MessageBody() data: MessageReadBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ) {
     const userId = client.data.userId
     if (!userId) {
@@ -485,7 +489,7 @@ export class RealtimeGateway
       return
     }
 
-    const { conversationId, lastMessageId } = data
+    const { conversationId, lastMessageId } = data ?? {}
     if (!conversationId || !lastMessageId) {
       client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
         code: 'INVALID_PAYLOAD',
@@ -499,23 +503,14 @@ export class RealtimeGateway
     this.queueReadBroadcast(client, conversationId, userId, lastMessageId)
 
     // 2️⃣ Gửi async message tới Chat Service để cập nhật MongoDB
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.UPDATE_MESSAGE_READ,
-      {
-        conversationId,
-        userId,
-        lastReadMessageId: lastMessageId,
-      },
-    )
+    this.publish(ROUTING_RMQ.UPDATE_MESSAGE_READ, {
+      conversationId,
+      userId,
+      lastReadMessageId: lastMessageId,
+    })
   }
 
-  private emitToUserSockets(
-    userIds: string[],
-    event: string,
-    data: Record<string, unknown>,
-  ) {
+  private emitToUserSockets(userIds: string[], event: string, data: unknown) {
     for (const userId of userIds) {
       this.server.to(`user:${userId}`).emit(event, data)
     }
@@ -528,7 +523,7 @@ export class RealtimeGateway
    * chỉ sống một giờ, không có lý do gì để nó đi tới socket khác.
    */
   @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CONFIG)
-  async handleIceConfig(@ConnectedSocket() client: Socket): Promise<CallAck> {
+  handleIceConfig(@ConnectedSocket() client: ClientSocket): CallAck {
     const userId = client.data.userId
     if (!userId) {
       return callError('UNAUTHORIZED', 'Unauthorized socket client')
@@ -583,8 +578,8 @@ export class RealtimeGateway
    */
   @SubscribeMessage(SOCKET_EVENTS.CALL.INCOMING_CALL)
   async handleIncomingCall(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const callerId = client.data.userId
     if (!callerId) {
@@ -660,8 +655,8 @@ export class RealtimeGateway
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_ACCEPTED)
   async handleCallAccepted(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const userId = client.data.userId
     if (!userId) {
@@ -723,8 +718,8 @@ export class RealtimeGateway
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_REJECTED)
   async handleCallRejected(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const userId = client.data.userId
     if (!userId) {
@@ -766,8 +761,8 @@ export class RealtimeGateway
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_ENDED)
   async handleCallEnded(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const enderId = client.data.userId
     if (!enderId) {
@@ -778,7 +773,7 @@ export class RealtimeGateway
     if (!loaded.ok) return loaded.ack
 
     const { session } = loaded
-    const reason = String(data?.reason || '')
+    const reason = typeof data?.reason === 'string' ? data.reason : ''
 
     this.emitToUserSockets(
       [CallSessionStore.peerOf(session, enderId)],
@@ -849,12 +844,7 @@ export class RealtimeGateway
   }) {
     if (!payload.conversationId) return
 
-    publishEvent(
-      this.amqpConnection,
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.CALL_ENDED,
-      payload,
-    )
+    this.publish(ROUTING_RMQ.CALL_ENDED, payload)
   }
 
   /** Mở khoá bận cho cả người gọi lẫn người nhận của một phiên 1-1. */
@@ -865,8 +855,8 @@ export class RealtimeGateway
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CANDIDATE)
   async handleIceCandidate(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const senderId = client.data.userId
     if (!senderId) {
@@ -904,8 +894,8 @@ export class RealtimeGateway
    */
   @SubscribeMessage(SOCKET_EVENTS.CALL.MEDIA_STATE)
   async handleCallMediaState(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const senderId = client.data.userId
     if (!senderId) {
@@ -944,8 +934,8 @@ export class RealtimeGateway
    */
   @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.QUERY_STATE)
   async handleGroupCallQueryState(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const userId = client.data.userId
     if (!userId) {
@@ -957,7 +947,8 @@ export class RealtimeGateway
       return callError('INVALID_PAYLOAD', 'conversationId is required')
     }
 
-    const session = await this.groupCallStore.getByConversationId(conversationId)
+    const session =
+      await this.groupCallStore.getByConversationId(conversationId)
     if (!session || !GroupCallStore.isMember(session, userId)) {
       return { ok: true, active: null }
     }
@@ -1001,8 +992,8 @@ export class RealtimeGateway
    */
   @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.START)
   async handleGroupCallStart(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const callerId = client.data.userId
     if (!callerId) {
@@ -1118,8 +1109,8 @@ export class RealtimeGateway
    */
   @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.ACCEPT)
   async handleGroupCallAccept(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const userId = client.data.userId
     if (!userId) {
@@ -1190,8 +1181,8 @@ export class RealtimeGateway
    */
   @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.DECLINE)
   async handleGroupCallDecline(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const userId = client.data.userId
     if (!userId) {
@@ -1217,8 +1208,8 @@ export class RealtimeGateway
    */
   @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.LEAVE)
   async handleGroupCallLeave(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CallBody | undefined,
+    @ConnectedSocket() client: ClientSocket,
   ): Promise<CallAck> {
     const userId = client.data.userId
     if (!userId) {

@@ -17,7 +17,11 @@ describe('email ở đầu vào: bỏ khoảng trắng, không phân biệt hoa 
   const raw = '  NgMinh4205@Gmail.COM '
 
   it.each([
-    ['RegisterUserDto', RegisterUserDto, { email: raw, password: 'secret1', username: 'minh' }],
+    [
+      'RegisterUserDto',
+      RegisterUserDto,
+      { email: raw, password: 'secret1', username: 'minh' },
+    ],
     ['LoginUserDto', LoginUserDto, { email: raw, password: 'x' }],
     ['VerifyOtpDto', VerifyOtpDto, { email: raw, otp: '123456' }],
     ['ResendOtpDto', ResendOtpDto, { email: raw }],
@@ -36,7 +40,9 @@ describe('email ở đầu vào: bỏ khoảng trắng, không phân biệt hoa 
 
 describe('MakeFriendByUsernameDto', () => {
   it('bỏ khoảng trắng hai đầu username', async () => {
-    const dto = plainToInstance(MakeFriendByUsernameDto, { username: '  dmhanguyen ' })
+    const dto = plainToInstance(MakeFriendByUsernameDto, {
+      username: '  dmhanguyen ',
+    })
     expect(dto.username).toBe('dmhanguyen')
     expect(await invalidFields(dto)).toEqual([])
   })

@@ -11,7 +11,6 @@ import {
   MessageSquare,
   Settings2,
   UserPlus,
-  Users,
 } from "@/components/icons";
 import { EmptyState } from "@/components/ui/feedback";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
@@ -29,10 +28,11 @@ import {
   selectNotification,
   selectNotificationsHasMore,
   selectNotificationsLoaded,
-  selectNotificationsPage,
+  selectNotificationsNextCursor,
   selectUnreadCountLoaded,
   selectUnreadNotificationCount,
   type Notification,
+  type NotificationType,
 } from "@/redux/slices/notificationSlice";
 import { formatFullDateTime, formatRelativeTime } from "@/utils/formatDateTime";
 import FriendRequestModal from "../FriendRequestModal";
@@ -41,10 +41,9 @@ import { socket } from "@/lib/socket";
 import { staggerStyle } from "@/lib/motion";
 
 /** Notification type -> icon, so each row is scannable without reading it. */
-const iconForType = (type?: string) => {
-  if (type === "FRIEND_REQUEST") return UserPlus;
-  if (type?.includes("GROUP")) return Users;
-  if (type?.includes("MESSAGE")) return MessageSquare;
+const iconForType = (type: NotificationType) => {
+  if (type.startsWith("FRIEND_REQUEST")) return UserPlus;
+  if (type === "MENTIONED_IN_CONVERSATION") return MessageSquare;
   return BellRing;
 };
 
@@ -59,7 +58,7 @@ export function NotificationsDropdown() {
   // Paging lives in redux: this dropdown sits in the chat sidebar, which
   // unmounts whenever another tab is open, and must not start over each time.
   const loaded = useSelector(selectNotificationsLoaded);
-  const page = useSelector(selectNotificationsPage);
+  const nextCursor = useSelector(selectNotificationsNextCursor);
   const hasMore = useSelector(selectNotificationsHasMore);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const limit = NOTIFICATIONS_PAGE_SIZE;
@@ -87,8 +86,8 @@ export function NotificationsDropdown() {
   // First page once per session. Checking `loaded` rather than an empty list:
   // someone with no notifications at all used to refetch on every visit.
   useEffect(() => {
-    if (!loaded) void dispatch(getNotifications({ limit, page: 1 }));
-  }, [dispatch, loaded, limit]);
+    if (!loaded) void dispatch(getNotifications({ cursor: null }));
+  }, [dispatch, loaded]);
 
   const [showFriendRequestModal, setShowFriendRequestModal] = useState("");
 
@@ -97,7 +96,7 @@ export function NotificationsDropdown() {
       await dispatch(markNotificationAsRead({ notificationId: n.id }));
     }
 
-    if (n.type === "FRIEND_REQUEST" && n.friendRequestId) {
+    if (n.type === "FRIEND_REQUEST_SENT" && n.friendRequestId) {
       setShowFriendRequestModal(n.friendRequestId);
     }
   };
@@ -118,7 +117,7 @@ export function NotificationsDropdown() {
     enabled: notifications.length > 0,
     itemCount: notifications.length,
     loadMore: () =>
-      dispatch(getNotifications({ limit, page: page + 1 })).unwrap(),
+      dispatch(getNotifications({ cursor: nextCursor })).unwrap(),
   });
 
   return (
@@ -158,7 +157,7 @@ export function NotificationsDropdown() {
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="w-[22rem] overflow-hidden p-0"
+          className="w-88 overflow-hidden p-0"
           align="end"
           sideOffset={8}
         >
@@ -201,7 +200,7 @@ export function NotificationsDropdown() {
                         className={cn(
                           "flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left last:border-0",
                           "transition-colors duration-(--motion-fast) hover:bg-accent",
-                          "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                          "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
                           !n.isRead && "bg-accent/45",
                         )}
                         onClick={() => handleClickNotification(n)}
