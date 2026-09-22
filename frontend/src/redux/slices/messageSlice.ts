@@ -66,7 +66,12 @@ export interface Message {
     content: string;
     type: string;
     isRevoked: boolean;
+    /** Tệp/ảnh đầu tiên của tin gốc, để quote vẽ được thumbnail thay vì tên file. */
     attachmentName?: string;
+    attachmentType?: "IMAGE" | "VIDEO" | "FILE";
+    attachmentUrl?: string;
+    attachmentMimeType?: string;
+    attachmentThumbnailUrl?: string;
   };
   isDeleted?: boolean;
   isRevoked?: boolean;

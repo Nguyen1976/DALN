@@ -6,6 +6,7 @@ import {
   formatDateTime,
   formatDayDivider,
   formatFullDateTime,
+  hasTimeGap,
   isNewDay,
 } from "@/utils/formatDateTime";
 import { useSelector } from "react-redux";
@@ -17,6 +18,7 @@ import {
   Check,
   ChevronRight,
   Loader2,
+  Maximize2,
   MoreVertical,
   RotateCcw,
   Trash2,
@@ -97,16 +99,13 @@ import {
 } from "../ui/dropdown-menu";
 import FileAttachmentPreview from "./FileAttachmentPreview";
 import CallLogMessage from "./CallLogMessage";
+import QuotedMessagePreview from "./QuotedMessagePreview";
+import {
+  mediaItemsOf,
+  resolveMediaKind,
+} from "@/utils/conversationMedia";
+import type { LightboxAnchor } from "@/components/MediaLightbox";
 import { parseLegacyCallInfo } from "@/utils/callLog";
-
-/** Nhãn thay cho nội dung khi tin nhắn gốc không phải văn bản. */
-function quotedPlaceholder(type: string): string {
-  if (type === "IMAGE") return "Hình ảnh";
-  if (type === "VIDEO") return "Video";
-  if (type === "FILE") return "Tệp đính kèm";
-  if (type === "POLL") return "Bình chọn";
-  return "Tin nhắn";
-}
 
 const MessageComponent = ({
   messages,
@@ -119,6 +118,7 @@ const MessageComponent = ({
   onDiscardMessage,
   onReplyMessage,
   onJumpToMessage,
+  onOpenMedia,
   isGroup = false,
   members = [],
 }: {
@@ -137,28 +137,12 @@ const MessageComponent = ({
   onDiscardMessage?: (message: Message) => void;
   onReplyMessage?: (message: Message) => void;
   onJumpToMessage?: (messageId: string) => void;
+  /** Mở trình xem ảnh, bắt đầu từ tấm được bấm. */
+  onOpenMedia?: (anchor: LightboxAnchor) => void;
   /** Dùng để tô đúng mention của tin CŨ (chưa có `mentions` kèm theo). */
   members?: MentionMember[];
 }) => {
   const user = useSelector(selectUser);
-
-  const resolveMediaKind = (media: {
-    mediaType?: string;
-    mimeType?: string;
-  }): "IMAGE" | "VIDEO" | "FILE" => {
-    const mediaType = String(media.mediaType || "").toUpperCase();
-    const mimeType = String(media.mimeType || "").toLowerCase();
-
-    if (mediaType.includes("IMAGE") || mimeType.startsWith("image/")) {
-      return "IMAGE";
-    }
-
-    if (mediaType.includes("VIDEO") || mimeType.startsWith("video/")) {
-      return "VIDEO";
-    }
-
-    return "FILE";
-  };
 
   return (
     <>
@@ -174,15 +158,20 @@ const MessageComponent = ({
         // A day divider also breaks the visual grouping — the first message
         // after a new day always shows its avatar and sender again.
         const startsNewDay = isNewDay(message.createdAt, prevMessage?.createdAt);
-        const nextStartsNewDay = isNewDay(
-          nextMessage?.createdAt,
-          message.createdAt,
-        );
+
+        // Khoảng lặng cũng ngắt nhóm như sang ngày mới. Nhóm tin CHỈ theo người
+        // gửi thì mười tin rải suốt buổi chiều dán thành một khối liền, đọc
+        // không ra lúc nào là lúc nào — và đó là bức tường ở ảnh người dùng gửi.
+        const startsNewBlock =
+          startsNewDay || hasTimeGap(message.createdAt, prevMessage?.createdAt);
+        const nextStartsNewBlock =
+          isNewDay(nextMessage?.createdAt, message.createdAt) ||
+          hasTimeGap(nextMessage?.createdAt, message.createdAt);
 
         const isSameAsPrev =
-          prevMessage?.senderId === message.senderId && !startsNewDay;
+          prevMessage?.senderId === message.senderId && !startsNewBlock;
         const isSameAsNext =
-          nextMessage?.senderId === message.senderId && !nextStartsNewDay;
+          nextMessage?.senderId === message.senderId && !nextStartsNewBlock;
 
         const showAvatar = !isSameAsPrev;
         const isRevoked = Boolean(message.isRevoked);
@@ -192,19 +181,52 @@ const MessageComponent = ({
           message.status !== "pending" &&
           message.type !== "POLL";
         const isPoll = message.type === "POLL" && Boolean(message.poll);
-        const visualCount = (message.medias || []).filter((media) => {
-          const kind = resolveMediaKind(media);
-          return kind === "IMAGE" || kind === "VIDEO";
-        }).length;
+        const senderName = message.senderMember?.username;
+        // Ảnh/video hiển thị TRẦN (ngoài bong bóng); tệp vẫn là thẻ card nên
+        // ở lại trong bong bóng cùng với chữ.
+        const visualMedias = (message.medias || []).filter(
+          (media) => resolveMediaKind(media) !== "FILE",
+        );
+        const fileMedias = (message.medias || []).filter(
+          (media) => resolveMediaKind(media) === "FILE",
+        );
+        const showBareMedia = !isRevoked && visualMedias.length > 0;
+        const isMediaGrid = visualMedias.length > 1;
+        // Bong bóng chỉ tồn tại khi còn thứ gì đó cần nền: chữ, tệp, hoặc lời
+        // báo thu hồi. Tin chỉ có ảnh thì bức ảnh chính là tin nhắn.
+        const showBubble =
+          !showBareMedia ||
+          isRevoked ||
+          Boolean(message.content) ||
+          fileMedias.length > 0;
+        const showSenderLabel = Boolean(
+          !isMine && isGroup && showAvatar && senderName,
+        );
+        const mediaSeed = showBareMedia ? mediaItemsOf(message) : [];
+        const canOpenMedia = Boolean(
+          onOpenMedia && message.status !== "pending" && mediaSeed.length > 0,
+        );
         const selectedPollOptions = message.poll?.myOptionIds ?? [];
 
-        const dayDivider = startsNewDay ? (
+        // Sang ngày mới thì cần cả ngày; trong cùng một ngày chỉ cần giờ, nên
+        // nhãn giờ nhẹ hơn hẳn vạch ngày — không gạch ngang, không nền.
+        const blockDivider = startsNewDay ? (
           <div className="my-4 flex items-center gap-3" role="separator">
             <span className="h-px flex-1 bg-border" />
             <span className="rounded-full bg-muted px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               {formatDayDivider(message.createdAt)}
             </span>
             <span className="h-px flex-1 bg-border" />
+          </div>
+        ) : startsNewBlock ? (
+          <div className="my-3 flex justify-center" role="separator">
+            <time
+              dateTime={message.createdAt}
+              title={formatFullDateTime(message.createdAt)}
+              className="text-[11px] font-medium tabular-nums text-muted-foreground"
+            >
+              {formatDateTime(message.createdAt)}
+            </time>
           </div>
         ) : null;
 
@@ -216,7 +238,7 @@ const MessageComponent = ({
 
           return (
             <div key={rowKey}>
-              {dayDivider}
+              {blockDivider}
               <div
                 id={`message-${message.id}`}
                 className={cn(
@@ -338,7 +360,6 @@ const MessageComponent = ({
           );
         }
 
-        const senderName = message.senderMember?.username;
 
         // Tin tổng kết cuộc gọi → thẻ căn như MỘT TIN NHẮN (Messenger/Zalo):
         // người gọi bên phải, người kia bên trái + avatar; có nút gọi lại / tham
@@ -353,7 +374,7 @@ const MessageComponent = ({
         if (callInfo) {
           return (
             <div key={rowKey}>
-              {dayDivider}
+              {blockDivider}
               <div
                 id={`message-${message.id}`}
                 className={cn(
@@ -385,7 +406,7 @@ const MessageComponent = ({
         if (message.isSystem) {
           return (
             <div key={rowKey}>
-              {dayDivider}
+              {blockDivider}
               <div
                 id={`message-${message.id}`}
                 className={cn(
@@ -410,12 +431,15 @@ const MessageComponent = ({
 
         return (
           <div key={rowKey}>
-            {dayDivider}
+            {blockDivider}
             <div
               id={`message-${message.id}`}
               className={cn(
                 "scroll-mt-24 rounded-lg transition-colors duration-300",
-                isSameAsNext ? "mb-0.5" : "mb-2",
+                // Bong bóng chữ liền nhau đọc như một đoạn văn nên sát nhau là
+                // đúng; ảnh trần thì không — xếp sát, ảnh này chồng lên khối
+                // trích dẫn của ảnh kia thành một mảng đặc.
+                isSameAsNext ? (showBareMedia ? "mb-2" : "mb-0.5") : "mb-4",
                 highlightMessageId === message.id && "bg-accent",
               )}
             >
@@ -446,156 +470,234 @@ const MessageComponent = ({
 
                 <div
                   className={cn(
-                    "group relative max-w-[min(30rem,78%)] px-3.5 py-2 text-sm leading-relaxed shadow-bubble",
+                    "group relative flex max-w-[min(30rem,78%)] flex-col text-sm leading-relaxed",
+                    isMine ? "items-end" : "items-start",
                     // Grows out of its own side of the conversation.
                     "animate-bubble-in",
                     isMine ? "origin-bottom-right" : "origin-bottom-left",
-                    isMine
-                      ? "bg-bubble-out text-bubble-out-foreground"
-                      : "bg-bubble-in text-bubble-in-foreground",
-                    // Corner shaping follows the run of messages so a group
-                    // reads as one block instead of separate pills.
-                    "rounded-2xl",
-                    isMine
-                      ? cn(isSameAsPrev && "rounded-tr-md", isSameAsNext && "rounded-br-md")
-                      : cn(isSameAsPrev && "rounded-tl-md", isSameAsNext && "rounded-bl-md"),
                   )}
                 >
-                  {!isMine && isGroup && showAvatar && senderName && (
-                    <p className="mb-0.5 text-xs font-semibold text-brand">
+                  {/* Với ảnh trần thì không còn bong bóng để lồng tên người gửi
+                      và khối trích dẫn vào, nên chúng nổi lên thành tầng riêng
+                      ngay phía trên ảnh. */}
+                  {showSenderLabel && !showBubble && (
+                    <p className="mb-0.5 px-1 text-xs font-semibold text-brand">
                       {senderName}
                     </p>
                   )}
 
-                  {/* Two or more visual attachments tile into a grid. Stacked
-                      full-width they turned a five-image message into a wall of
-                      scrolling. */}
-                  {!isRevoked && (
-                  <div
-                    className={cn(
-                      visualCount > 1 &&
-                        "mb-2 grid gap-1 [&>*]:mb-0 [&>img]:h-32 [&>img]:max-w-none [&>video]:h-32 [&>video]:max-w-none",
-                      visualCount === 2 && "grid-cols-2",
-                      visualCount > 2 && "grid-cols-2 sm:grid-cols-3",
-                    )}
-                  >
-                  {message.medias?.map((media, mediaIndex) => {
-                      const mediaKind = resolveMediaKind(media);
-
-                      if (mediaKind === "IMAGE") {
-                        return (
-                          <img
-                            key={`${message.id}-${mediaIndex}`}
-                            src={media.url}
-                            alt={
-                              media.fileName
-                                ? `Ảnh: ${media.fileName}`
-                                : `Ảnh do ${senderName || "người dùng"} gửi`
-                            }
-                            loading="lazy"
-                            decoding="async"
-                            // Reserving a box keeps the thread from jumping
-                            // when the image finally decodes.
-                            className="mb-2 max-h-80 w-full max-w-68 rounded-xl bg-muted object-cover"
-                          />
-                        );
-                      }
-
-                      if (mediaKind === "VIDEO") {
-                        return (
-                          <video
-                            key={`${message.id}-${mediaIndex}`}
-                            src={media.url}
-                            controls
-                            preload="metadata"
-                            className="mb-2 max-h-80 w-full max-w-72 rounded-xl bg-muted"
-                          />
-                        );
-                      }
-
-                      return (
-                        <FileAttachmentPreview
-                          key={`${message.id}-${mediaIndex}`}
-                          url={media.url}
-                          mimeType={media.mimeType}
-                          size={media.size}
-                          fileName={media.fileName}
-                        />
-                      );
-                    })}
-                  </div>
-                  )}
-
-                  {/* Quoted message. Clicking it jumps to the original so a
-                      reply in a busy thread can be traced back. */}
-                  {message.replyTo && (
-                    <button
-                      type="button"
-                      onClick={() => onJumpToMessage?.(message.replyTo!.id)}
-                      className={cn(
-                        "mb-1.5 flex w-full items-stretch gap-2 rounded-lg px-2 py-1.5 text-left",
-                        "transition-colors duration-(--motion-fast)",
-                        isMine
-                          ? "bg-bubble-out-foreground/12 hover:bg-bubble-out-foreground/20"
-                          : "bg-foreground/6 hover:bg-foreground/10",
-                        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
-                      )}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          "w-0.5 shrink-0 rounded-full",
-                          isMine ? "bg-bubble-out-foreground/60" : "bg-primary",
-                        )}
+                  {message.replyTo && showBareMedia && (
+                    <div className="mb-1 w-full">
+                      <QuotedMessagePreview
+                        replyTo={message.replyTo}
+                        isMine={isMine}
+                        selfId={user.id}
+                        standalone
+                        onJump={onJumpToMessage}
                       />
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={cn(
-                            "block truncate text-[11px] font-semibold",
-                            isMine
-                              ? "text-bubble-out-foreground/85"
-                              : "text-brand",
-                          )}
-                        >
-                          {message.replyTo.senderId === user.id
-                            ? "Bạn"
-                            : message.replyTo.senderName || "Người dùng"}
-                        </span>
-                        <span
-                          className={cn(
-                            "block truncate text-xs",
-                            isMine
-                              ? "text-bubble-out-foreground/70"
-                              : "text-muted-foreground",
-                            message.replyTo.isRevoked && "italic",
-                          )}
-                        >
-                          {message.replyTo.isRevoked
-                            ? "Tin nhắn đã bị thu hồi"
-                            : message.replyTo.content ||
-                              message.replyTo.attachmentName ||
-                              quotedPlaceholder(message.replyTo.type)}
-                        </span>
-                      </span>
-                    </button>
+                    </div>
                   )}
 
-                  {isRevoked ? (
-                    <p
+                  {/* Ảnh và video hiển thị TRẦN: không nền, không padding — bức
+                      ảnh chính là tin nhắn. Chỉ còn viền 1px rất mờ để ảnh nền
+                      trắng không lẫn vào khung chat sáng. Hai ảnh trở lên thì
+                      xếp lưới, vì xếp dọc nguyên khổ biến một tin năm ảnh thành
+                      một bức tường phải cuộn. */}
+                  {showBareMedia && (
+                    <div
                       className={cn(
-                        "italic",
-                        isMine
-                          ? "text-bubble-out-foreground/75"
-                          : "text-muted-foreground",
+                        "w-full",
+                        isMediaGrid && "grid gap-1",
+                        visualMedias.length === 2 && "grid-cols-2",
+                        visualMedias.length > 2 && "grid-cols-2 sm:grid-cols-3",
                       )}
                     >
-                      Tin nhắn đã bị thu hồi
-                    </p>
-                  ) : message.content ? (
-                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
-                      <MentionText text={message.content} message={message} members={members} selfId={user.id} isMine={isMine} />
-                    </p>
-                  ) : null}
+                      {visualMedias.map((media, mediaIndex) => {
+                        const mediaKind = resolveMediaKind(media);
+                        const frame = cn(
+                          "block overflow-hidden border border-border/50 bg-muted",
+                          isMediaGrid
+                            ? "h-32 w-full rounded-lg"
+                            : "w-full max-w-72 rounded-2xl",
+                        );
+                        const seedItem = mediaSeed[mediaIndex];
+                        const openThis = () =>
+                          seedItem &&
+                          onOpenMedia?.({
+                            seed: mediaSeed,
+                            currentKey: seedItem.key,
+                          });
+
+                        if (mediaKind === "IMAGE") {
+                          return (
+                            <button
+                              key={`${message.id}-${mediaIndex}`}
+                              type="button"
+                              // Tin chưa gửi xong mới chỉ có blob tạm trong máy;
+                              // mở trình xem lúc này là xem một bức ảnh chưa tồn
+                              // tại ở đâu cả.
+                              disabled={!canOpenMedia}
+                              onClick={openThis}
+                              className={cn(
+                                frame,
+                                "transition-[filter] duration-(--motion-fast)",
+                                canOpenMedia &&
+                                  "cursor-zoom-in hover:brightness-95",
+                                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                              )}
+                            >
+                              <img
+                                src={media.url}
+                                alt={
+                                  media.fileName
+                                    ? `Ảnh: ${media.fileName}`
+                                    : `Ảnh do ${senderName || "người dùng"} gửi`
+                                }
+                                loading="lazy"
+                                decoding="async"
+                                // Reserving a box keeps the thread from jumping
+                                // when the image finally decodes.
+                                className={cn(
+                                  "block object-cover",
+                                  isMediaGrid
+                                    ? "size-full"
+                                    : "max-h-80 w-full",
+                                )}
+                              />
+                            </button>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={`${message.id}-${mediaIndex}`}
+                            className={cn(frame, "relative")}
+                          >
+                            <video
+                              src={media.url}
+                              controls
+                              preload="metadata"
+                              className={cn(
+                                "block object-cover",
+                                isMediaGrid ? "size-full" : "max-h-80 w-full",
+                              )}
+                            />
+                            {/* Thẻ video đã nuốt cú bấm cho nút phát của nó, nên
+                                lối vào trình xem là một nút riêng ở góc — không
+                                lồng nút trong nút. */}
+                            {canOpenMedia && (
+                              <button
+                                type="button"
+                                aria-label="Xem toàn màn hình"
+                                title="Xem toàn màn hình"
+                                onClick={openThis}
+                                className="absolute right-1.5 top-1.5 inline-flex size-8 items-center justify-center rounded-lg bg-black/55 text-white transition-colors duration-(--motion-fast) hover:bg-black/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                              >
+                                <Maximize2 className="size-4" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {showBubble && (
+                    <div
+                      className={cn(
+                        "px-3.5 py-2 shadow-bubble",
+                        showBareMedia && "mt-1",
+                        isMine
+                          ? "bg-bubble-out text-bubble-out-foreground"
+                          : "bg-bubble-in text-bubble-in-foreground",
+                        // Corner shaping follows the run of messages so a group
+                        // reads as one block instead of separate pills.
+                        "rounded-2xl",
+                        isMine
+                          ? cn(
+                              isSameAsPrev && !showBareMedia && "rounded-tr-md",
+                              isSameAsNext && "rounded-br-md",
+                            )
+                          : cn(
+                              isSameAsPrev && !showBareMedia && "rounded-tl-md",
+                              isSameAsNext && "rounded-bl-md",
+                            ),
+                      )}
+                    >
+                      {showSenderLabel && (
+                        <p className="mb-0.5 text-xs font-semibold text-brand">
+                          {senderName}
+                        </p>
+                      )}
+
+                      {/* Quoted message. Clicking it jumps to the original so a
+                          reply in a busy thread can be traced back. */}
+                      {message.replyTo && !showBareMedia && (
+                        <QuotedMessagePreview
+                          replyTo={message.replyTo}
+                          isMine={isMine}
+                          selfId={user.id}
+                          onJump={onJumpToMessage}
+                        />
+                      )}
+
+                      {!isRevoked &&
+                        fileMedias.map((media, mediaIndex) => (
+                          <FileAttachmentPreview
+                            key={`${message.id}-file-${mediaIndex}`}
+                            url={media.url}
+                            mimeType={media.mimeType}
+                            size={media.size}
+                            fileName={media.fileName}
+                          />
+                        ))}
+
+                      {isRevoked ? (
+                        <p
+                          className={cn(
+                            "italic",
+                            isMine
+                              ? "text-bubble-out-foreground/75"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          Tin nhắn đã bị thu hồi
+                        </p>
+                      ) : message.content ? (
+                        <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+                          <MentionText text={message.content} message={message} members={members} selfId={user.id} isMine={isMine} />
+                        </p>
+                      ) : null}
+
+                      {/* Timestamp on the last message of each run. */}
+                      {!isSameAsNext && (
+                        <time
+                          dateTime={message.createdAt}
+                          title={formatFullDateTime(message.createdAt)}
+                          className={cn(
+                            "mt-1 block text-[11px] tabular-nums",
+                            isMine
+                              ? "text-bubble-out-foreground/80"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          {formatDateTime(message.createdAt)}
+                        </time>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Ảnh trần không có bong bóng để đặt giờ vào, nên giờ nằm
+                      ngay dưới ảnh. */}
+                  {!showBubble && !isSameAsNext && (
+                    <time
+                      dateTime={message.createdAt}
+                      title={formatFullDateTime(message.createdAt)}
+                      className="mt-1 block px-1 text-[11px] tabular-nums text-muted-foreground"
+                    >
+                      {formatDateTime(message.createdAt)}
+                    </time>
+                  )}
 
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -654,22 +756,6 @@ const MessageComponent = ({
                       </DropdownMenuGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
-
-                  {/* Timestamp on the last message of each run. */}
-                  {!isSameAsNext && (
-                    <time
-                      dateTime={message.createdAt}
-                      title={formatFullDateTime(message.createdAt)}
-                      className={cn(
-                        "mt-1 block text-[11px] tabular-nums",
-                        isMine
-                          ? "text-bubble-out-foreground/80"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {formatDateTime(message.createdAt)}
-                    </time>
-                  )}
                 </div>
               </div>
 

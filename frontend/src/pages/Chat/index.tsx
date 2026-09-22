@@ -5,6 +5,9 @@ import { EmptyState } from "@/components/ui/feedback";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import ProfilePanel from "@/components/ProfilePanel";
+import MediaLightbox, {
+  type LightboxAnchor,
+} from "@/components/MediaLightbox";
 import { useNavigate, useParams } from "react-router";
 import { selectConversationById } from "@/redux/slices/conversationSlice";
 import type { RootState } from "@/redux/store";
@@ -15,6 +18,9 @@ type CallType = "audio" | "video";
 export default function ChatPage() {
   const [showProfile, setShowProfile] = useState(false);
   const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
+  // Trình xem ảnh nằm ở đây chứ không trong ChatWindow: luồng chat và tab
+  // Ảnh/Video ở panel phải là hai nhánh anh em, cả hai đều mở được nó.
+  const [lightbox, setLightbox] = useState<LightboxAnchor | null>(null);
   // Cuộc gọi ra ngoài do CallProvider (cấp app) giữ → thu nhỏ + sống xuyên trang.
   const { startDirectCall, startGroupCall } = useCall();
 
@@ -50,6 +56,7 @@ export default function ChatPage() {
           onBack={() => navigate("/")}
           focusMessageId={focusMessageId}
           onFocusHandled={() => setFocusMessageId(null)}
+          onOpenMedia={setLightbox}
         />
       ) : (
         <div className="chat-canvas hidden flex-1 flex-col items-center justify-center px-6 text-center md:flex">
@@ -68,6 +75,16 @@ export default function ChatPage() {
           onJumpToMessage={(messageId) => {
             setFocusMessageId(messageId);
           }}
+          onOpenMedia={setLightbox}
+        />
+      )}
+
+      {selectedChatId && (
+        <MediaLightbox
+          conversationId={selectedChatId}
+          anchor={lightbox}
+          onClose={() => setLightbox(null)}
+          onJumpToMessage={setFocusMessageId}
         />
       )}
     </>

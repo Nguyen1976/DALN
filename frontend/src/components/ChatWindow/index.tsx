@@ -14,6 +14,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
+  Play,
   Smile,
   Send,
   ChevronDown,
@@ -55,6 +56,8 @@ import { useChatMessageActions } from "@/hooks/chat/useChatMessageActions";
 import { useChatPoll } from "@/hooks/chat/useChatPoll";
 import { useChatComposer } from "@/hooks/chat/useChatComposer";
 import { useChatMessagesScroll } from "@/hooks/chat/useChatMessagesScroll";
+import { useComposerDropZone } from "@/hooks/chat/useComposerDropZone";
+import type { LightboxAnchor } from "@/components/MediaLightbox";
 import { TypingIndicator } from "@/components/TypingIndicator";
 import {
   Dialog,
@@ -89,6 +92,8 @@ interface ChatWindowProps {
   onBack?: () => void;
   focusMessageId?: string | null;
   onFocusHandled?: () => void;
+  /** Mở trình xem ảnh cho media của một tin nhắn. */
+  onOpenMedia?: (anchor: LightboxAnchor) => void;
 }
 
 export default function ChatWindow({
@@ -100,6 +105,7 @@ export default function ChatWindow({
   onBack,
   focusMessageId,
   onFocusHandled,
+  onOpenMedia,
 }: ChatWindowProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -186,6 +192,29 @@ export default function ChatWindow({
     stopTyping,
     scrollToBottom,
   });
+
+  // Kéo tệp thả vào bất kỳ đâu trong khung chat, và dán ảnh vào ô nhập.
+  const { isDraggingFiles, onPasteFiles, dropZoneProps } = useComposerDropZone({
+    enabled: canSendMessage && !isUploading,
+    addFiles,
+  });
+
+  // Ảnh/video đầu tiên của tin đang trả lời, để thanh trích dẫn vẽ được nó.
+  const replyQuoteThumbnail = useMemo(() => {
+    const media = replyingTo?.medias?.[0];
+    if (!media) return null;
+    const isImage =
+      media.mediaType === "IMAGE" || media.mimeType?.startsWith("image/");
+    const isVideo =
+      media.mediaType === "VIDEO" || media.mimeType?.startsWith("video/");
+    if (isImage) return { src: media.url, isVideo: false };
+    // Video chỉ vẽ được khi server đã sinh poster; không có thì thanh trích
+    // dẫn về lại dạng chữ.
+    if (isVideo && media.thumbnailUrl) {
+      return { src: media.thumbnailUrl, isVideo: true };
+    }
+    return null;
+  }, [replyingTo]);
 
   const { handleRevokeMessage, handleDeleteMessageForMe } =
     useChatMessageActions({ conversationId, messages });
@@ -334,7 +363,34 @@ export default function ChatWindow({
   }
 
   return (
-    <div className="relative flex min-w-0 flex-1 flex-col chat-canvas">
+    <div
+      className="relative flex min-w-0 flex-1 flex-col chat-canvas"
+      {...dropZoneProps}
+    >
+      {/* Vùng thả phủ cả khung chat, không chỉ ô nhập: ngắm trúng thanh soạn
+          tin cao 40px là việc không cần bắt người dùng làm. Lớp phủ để
+          pointer-events-none nên sự kiện drop vẫn rơi xuống div gốc. */}
+      {isDraggingFiles && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-40 flex animate-fade-in items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+        >
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-primary bg-card/90 px-10 py-8 text-center shadow-lg">
+            <span className="flex size-12 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <Paperclip className="size-6" />
+            </span>
+            <div>
+              <p className="text-base font-semibold text-foreground">
+                Thả để gửi
+              </p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Ảnh, video hoặc tệp đính kèm
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-border bg-sidebar px-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-1">
           {onBack && (
@@ -503,6 +559,7 @@ export default function ChatWindow({
             composerRef.current?.focus();
           }}
           onJumpToMessage={setInternalJumpId}
+          onOpenMedia={onOpenMedia}
           isGroup={isGroupConversation}
           members={conversation?.members || []}
         />
@@ -637,6 +694,26 @@ export default function ChatWindow({
                   : MessageMapper.previewText(replyingTo)}
               </p>
             </div>
+            {/* Cùng lý do như khối trích dẫn trong luồng chat: trả lời một bức
+                ảnh thì phải thấy bức ảnh, không phải tên tệp. */}
+            {!replyingTo.isRevoked && replyQuoteThumbnail && (
+              <span className="relative size-10 shrink-0 self-center overflow-hidden rounded-md bg-muted">
+                <img
+                  src={replyQuoteThumbnail.src}
+                  alt=""
+                  aria-hidden="true"
+                  className="size-full object-cover"
+                />
+                {replyQuoteThumbnail.isVideo && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-0 flex items-center justify-center bg-black/35 text-white"
+                  >
+                    <Play className="size-3.5 fill-current" />
+                  </span>
+                )}
+              </span>
+            )}
             <Button
               variant="ghost-muted"
               size="icon-sm"
@@ -756,6 +833,7 @@ export default function ChatWindow({
               updateMentionQuery(e.target.value, e.target.selectionStart);
             }}
             value={msg}
+            onPaste={onPasteFiles}
             onFocus={handleInputFocus}
             onBlur={handleInputBlur}
             onKeyDown={(e) => {

@@ -268,7 +268,20 @@ export class MessageRepository {
         isDeleted: true,
         createdAt: true,
         senderMember: SENDER_SELECT,
-        medias: { select: { mediaType: true, fileName: true }, take: 1 },
+        // The first attachment only — a reply bubble shows one thumbnail.
+        // Ordered, because `take: 1` on an unordered relation picked an
+        // arbitrary image out of a multi-photo message.
+        medias: {
+          select: {
+            mediaType: true,
+            fileName: true,
+            url: true,
+            mimeType: true,
+            thumbnailUrl: true,
+          },
+          orderBy: { sortOrder: 'asc' },
+          take: 1,
+        },
       },
     })
   }
@@ -302,6 +315,9 @@ export class MessageRepository {
       where: {
         conversationId,
         isDeleted: false,
+        // Thu hồi với mọi người mà bức ảnh vẫn nằm trong tab Ảnh/Video và mở
+        // được đầy màn hình thì không phải là thu hồi.
+        isRevoked: false,
         // Both filters are an OR of their own, so they meet under AND.
         // Spreading the cursor in and then assigning `where.OR` for the kind
         // overwrote the cursor's OR: every "next page" came back as the first

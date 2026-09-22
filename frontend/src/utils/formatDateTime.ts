@@ -64,6 +64,27 @@ export const isNewDay = (current?: string, previous?: string) => {
   return !isSameDay(a, b);
 };
 
+/** Cách nhau bao lâu thì hai tin nhắn thuộc hai lượt trò chuyện khác nhau. */
+export const MESSAGE_GAP_MINUTES = 10;
+
+/**
+ * True khi hai tin nhắn cách nhau đủ lâu để không còn là một mạch.
+ *
+ * Nhóm tin chỉ theo người gửi thì mười tin rải suốt buổi chiều bị dán thành
+ * một khối liền, không còn nhìn ra lúc nào là lúc nào.
+ */
+export const hasTimeGap = (
+  current?: string,
+  previous?: string,
+  minutes = MESSAGE_GAP_MINUTES,
+) => {
+  if (!current || !previous) return false;
+  const a = new Date(current);
+  const b = new Date(previous);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return false;
+  return Math.abs(a.getTime() - b.getTime()) >= minutes * 60 * 1000;
+};
+
 /**
  * Compact timestamp for conversation lists and notifications:
  * "14:32" today, "Hôm qua", weekday within the week, then a short date.
