@@ -70,7 +70,8 @@ DOMAIN="${DALN_DOMAIN:-nguyen1976.xyz}"
 # image store (server đang dùng), .Id là digest của index và đổi sau mỗi lần build,
 # kể cả khi build ăn cache hoàn toàn.
 image_id() {
-  { docker image inspect -f '{{json .RootFS.Layers}}{{json .Config}}' "daln/$1:latest" 2>/dev/null || true; } |
+  { docker image inspect -f '{{json .RootFS.Layers}}{{json .Config}}' \
+    "${DALN_IMAGE_PREFIX}/$1:${DALN_IMAGE_TAG}" 2>/dev/null || true; } |
     sha256sum | cut -c1-16
 }
 
@@ -430,6 +431,15 @@ fi
 docker image ls --filter "reference=${DALN_IMAGE_PREFIX}/*" --format '{{.Repository}}:{{.Tag}}' |
   grep -v ":${DALN_IMAGE_TAG}\$" |
   xargs -r docker rmi >/dev/null 2>&1 || true
+
+# Image build tại chỗ từ thời trước khi chuyển sang registry (daln/<svc>:latest).
+# Khi đang chạy bằng image từ registry thì chúng là ~6GB rác không ai tham chiếu,
+# và không tên nào trong số đó khớp bộ lọc ở trên. Chỉ dọn khi KHÔNG ở chế độ
+# build tại chỗ — ở chế độ đó chúng chính là image đang chạy.
+if [ "${DALN_IMAGE_PREFIX}" != "daln" ]; then
+  docker image ls --filter 'reference=daln/*' --format '{{.Repository}}:{{.Tag}}' |
+    xargs -r docker rmi >/dev/null 2>&1 || true
+fi
 
 docker image prune -f >/dev/null
 docker builder prune -f --filter until=168h >/dev/null
