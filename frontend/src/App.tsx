@@ -36,6 +36,8 @@ import IncomingCallManager from "./components/IncomingCallManager";
 import { CallProvider } from "./contexts/CallProvider";
 import { Spinner } from "@/components/ui/feedback";
 import VerifyOtpPage from "./pages/VerifyOtp";
+import ForgotPasswordPage from "./pages/ForgotPassword";
+import ResetPasswordPage from "./pages/ResetPassword";
 import { SettingsPage } from "./pages/Settings/SettingsPage";
 import ProfileSettings from "./pages/Settings/Profile";
 import AccountSettings from "./pages/Settings/Account";
@@ -82,6 +84,14 @@ const router = createBrowserRouter([
   {
     path: "/verify-otp",
     element: <VerifyOtpPage />,
+  },
+  {
+    path: "/forgot-password",
+    element: <ForgotPasswordPage />,
+  },
+  {
+    path: "/reset-password",
+    element: <ResetPasswordPage />,
   },
   {
     path: "/onboarding/interests",
