@@ -147,6 +147,18 @@ class ForgotPasswordDto {
 tài khoản chưa kích hoạt, đang trong cooldown, hay vượt hạn mức IP. Không có
 nhánh nào ném ngoại lệ.
 
+**Kể cả khi hạ tầng lỗi.** Toàn thân phương thức nằm trong `try/catch`: Redis
+hỏng hay truy vấn thất bại đều ghi log mức `error` rồi `return` im lặng. Đây
+không phải sự cẩn thận thừa. `savePasswordResetToken` chỉ chạy *sau* chốt
+`!user || !user.isActive`, nghĩa là nó chỉ được gọi cho tài khoản có thật và đã
+kích hoạt — để ngoại lệ thoát ra ở đó thì một lần Redis chập chờn sẽ khiến địa
+chỉ **có** tài khoản nhận `500` còn địa chỉ lạ vẫn nhận `204`. Sự cố hạ tầng khi
+đó biến thành đúng cái oracle mà cả mục này dựng lên để chặn.
+
+Cái giá phải trả là người dùng nhận `204` mà không có mail nào khi Redis chết,
+và chỉ log mới cho biết điều đó. Chấp nhận: luồng này đã chọn im lặng một cách
+có chủ đích, và một `500` rò rỉ thông tin thì tệ hơn một lần gửi lại.
+
 Thứ tự thực hiện, và lý do của thứ tự đó:
 
 1. **Bộ đếm IP** — `INCR pwdreset:ip:<ip>`, đặt `EXPIRE 3600` khi giá trị trả về
