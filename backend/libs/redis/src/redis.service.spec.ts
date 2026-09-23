@@ -75,10 +75,16 @@ describe('RedisService — token đặt lại mật khẩu', () => {
     // Email phải được chuẩn hoá trước khi thành tên key.
     expect(client.get).toHaveBeenCalledWith('pwdreset:email:an@example.test')
     expect(pipelineStub.set).toHaveBeenCalledWith(
-      'pwdreset:hash-new', 'u1', 'EX', 900,
+      'pwdreset:hash-new',
+      'u1',
+      'EX',
+      900,
     )
     expect(pipelineStub.set).toHaveBeenCalledWith(
-      'pwdreset:email:an@example.test', 'hash-new', 'EX', 900,
+      'pwdreset:email:an@example.test',
+      'hash-new',
+      'EX',
+      900,
     )
   })
 
@@ -126,27 +132,41 @@ describe('RedisService — token đặt lại mật khẩu', () => {
 
   it('cooldown theo email: lần đầu giành được, lần sau thua', async () => {
     client.set.mockResolvedValueOnce('OK')
-    await expect(service.claimPasswordResetSlot('an@example.test')).resolves.toBe(true)
+    await expect(
+      service.claimPasswordResetSlot('an@example.test'),
+    ).resolves.toBe(true)
     expect(client.set).toHaveBeenCalledWith(
-      'pwdreset:cooldown:an@example.test', '1', 'EX', 60, 'NX',
+      'pwdreset:cooldown:an@example.test',
+      '1',
+      'EX',
+      60,
+      'NX',
     )
 
     client.set.mockResolvedValueOnce(null)
-    await expect(service.claimPasswordResetSlot('an@example.test')).resolves.toBe(false)
+    await expect(
+      service.claimPasswordResetSlot('an@example.test'),
+    ).resolves.toBe(false)
   })
 
   it('hạn mức IP: đặt EXPIRE đúng một lần, ở lần đếm đầu tiên', async () => {
     client.incr.mockResolvedValueOnce(1)
-    await expect(service.claimPasswordResetIpSlot('1.2.3.4')).resolves.toBe(true)
+    await expect(service.claimPasswordResetIpSlot('1.2.3.4')).resolves.toBe(
+      true,
+    )
     expect(client.expire).toHaveBeenCalledWith('pwdreset:ip:1.2.3.4', 3600)
 
     client.incr.mockResolvedValueOnce(2)
-    await expect(service.claimPasswordResetIpSlot('1.2.3.4')).resolves.toBe(true)
+    await expect(service.claimPasswordResetIpSlot('1.2.3.4')).resolves.toBe(
+      true,
+    )
     expect(client.expire).toHaveBeenCalledTimes(1)
   })
 
   it('hạn mức IP: vượt 10 lần thì từ chối', async () => {
     client.incr.mockResolvedValueOnce(11)
-    await expect(service.claimPasswordResetIpSlot('1.2.3.4')).resolves.toBe(false)
+    await expect(service.claimPasswordResetIpSlot('1.2.3.4')).resolves.toBe(
+      false,
+    )
   })
 })
