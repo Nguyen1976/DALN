@@ -122,6 +122,18 @@ describe('UserService.forgotPassword', () => {
     expect(userRepo.findByEmail).not.toHaveBeenCalled()
   })
 
+  it('bị cooldown chặn thì KHÔNG tiêu một slot của trần theo giờ', async () => {
+    const { service, redisService, eventsPublisher } = setup()
+    redisService.claimPasswordResetSlot.mockResolvedValueOnce(false)
+
+    await service.forgotPassword({ email: 'an@example.test', ip: '1.2.3.4' })
+
+    // Đếm request thay vì đếm email sẽ khiến vài cú bấm liên tiếp khoá tài
+    // khoản khỏi đường khôi phục cả tiếng, sau đúng một email gửi đi.
+    expect(redisService.claimPasswordResetHourlySlot).not.toHaveBeenCalled()
+    expect(eventsPublisher.publishUserPasswordReset).not.toHaveBeenCalled()
+  })
+
   it('vượt hạn mức IP: im lặng, và không tiêu tốn cả slot cooldown', async () => {
     const { service, eventsPublisher, redisService } = setup()
     redisService.claimPasswordResetIpSlot.mockResolvedValueOnce(false)
@@ -133,14 +145,16 @@ describe('UserService.forgotPassword', () => {
   })
 
   it('vượt trần theo giờ: im lặng, không phát sự kiện', async () => {
-    const { service, eventsPublisher, redisService } = setup()
+    const { service, userRepo, eventsPublisher, redisService } = setup()
     redisService.claimPasswordResetHourlySlot.mockResolvedValueOnce(false)
 
     await service.forgotPassword({ email: 'an@example.test', ip: '1.2.3.4' })
 
     expect(eventsPublisher.publishUserPasswordReset).not.toHaveBeenCalled()
-    // Return sớm không được tiêu tốn cả slot cooldown 60s.
-    expect(redisService.claimPasswordResetSlot).not.toHaveBeenCalled()
+    // Hourly được kiểm SAU cooldown (Fix 1) nên tới đây cooldown đã tiêu một
+    // slot rồi — đó là hành vi đúng, khác với bản trước khi sửa thứ tự.
+    expect(redisService.claimPasswordResetSlot).toHaveBeenCalledTimes(1)
+    expect(userRepo.findByEmail).not.toHaveBeenCalled()
   })
 
   it('không xác định được IP thật thì bỏ qua hạn mức IP, không khoá người dùng', async () => {

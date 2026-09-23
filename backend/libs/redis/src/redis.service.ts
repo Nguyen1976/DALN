@@ -237,6 +237,10 @@ export class RedisService {
     return `pwdreset:ip:${ip}`
   }
 
+  private passwordResetHourlyKey(email: string): string {
+    return `pwdreset:hourly:${email.trim().toLowerCase()}`
+  }
+
   /**
    * Cấp token mới và giết token cũ của cùng địa chỉ.
    *
@@ -331,7 +335,7 @@ export class RedisService {
     limit = 5,
     windowSeconds = 3600,
   ): Promise<boolean> {
-    const key = `pwdreset:hourly:${email.trim().toLowerCase()}`
+    const key = this.passwordResetHourlyKey(email)
     const count = await this.redisClient.incr(key)
     if (count === 1) await this.redisClient.expire(key, windowSeconds)
     return count <= limit

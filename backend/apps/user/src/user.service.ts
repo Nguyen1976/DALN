@@ -357,12 +357,26 @@ export class UserService {
         return
       }
 
-      // Trần tổng số theo địa chỉ: cooldown 60s bên dưới chỉ chặn được tần
-      // suất, không chặn kẻ rải đều một mail/phút suốt cả giờ.
-      if (!(await this.redisService.claimPasswordResetHourlySlot(data.email)))
-        return
-
+      // Cooldown 60s theo địa chỉ: chặn dội bom một hộp thư.
       if (!(await this.redisService.claimPasswordResetSlot(data.email))) return
+
+      // Trần tổng số theo địa chỉ: cooldown ở trên chỉ chặn được TẦN SUẤT,
+      // không chặn TỔNG SỐ (rải đều một mail/phút suốt cả giờ vẫn lọt).
+      //
+      // Đặt SAU cooldown chứ không trước — cố ý, đây từng là lỗi. Đặt trước
+      // thì một request bị cooldown chặn (không gửi mail nào) vẫn tiêu một
+      // slot của trần này, biến "trần mail mỗi giờ" thành "trần request mỗi
+      // giờ": chỉ vài cú bấm "Gửi lại" liên tiếp trong lúc cooldown còn hiệu
+      // lực — thứ UI hiện tại cho phép, vì nút "Dùng email khác" quay lại form
+      // mà không kiểm tra cooldown — đủ để khoá tài khoản khỏi đường khôi
+      // phục cả tiếng, dù chỉ đúng một mail thật sự được gửi.
+      if (!(await this.redisService.claimPasswordResetHourlySlot(data.email))) {
+        this.logger.warn('[user.forgot-password] hourly rate limit hit', {
+          // Không log email thô: đây là dữ liệu cá nhân, khác IP ở nhánh trên.
+          email: maskEmail(data.email),
+        })
+        return
+      }
 
       const user = await this.userRepo.findByEmail(data.email)
 
