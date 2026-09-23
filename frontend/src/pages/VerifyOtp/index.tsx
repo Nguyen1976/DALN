@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { verifyOtpAPI, resendOtpAPI } from "@/apis";
+import { useResendCountdown } from "@/hooks/useResendCountdown";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -30,34 +31,9 @@ const verifyOtpSchema = z.object({
     .regex(/^\d{6}$/, "Mã OTP phải gồm đúng 6 chữ số"),
 });
 
+// Hook mặc định đếm 60s (dùng cho quên mật khẩu) — trang này giữ nguyên mốc
+// 30s đã dùng từ trước để hành vi không đổi sau khi chuyển sang hook dùng chung.
 const RESEND_SECONDS = 30;
-/** Deadline is kept per address so switching accounts does not inherit a wait. */
-const resendDeadlineKey = (email: string) =>
-  `daln:otp-resend-until:${email.trim().toLowerCase()}`;
-
-function readResendDeadline(email: string): number {
-  if (!email) return 0;
-  try {
-    const raw = window.localStorage.getItem(resendDeadlineKey(email));
-    const at = raw ? Number(raw) : 0;
-    return Number.isFinite(at) ? at : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function writeResendDeadline(email: string, until: number) {
-  if (!email) return;
-  try {
-    window.localStorage.setItem(resendDeadlineKey(email), String(until));
-  } catch {
-    /* private mode: the countdown is a courtesy, the server still throttles */
-  }
-}
-
-function secondsLeft(until: number): number {
-  return Math.max(0, Math.ceil((until - Date.now()) / 1000));
-}
 
 export default function VerifyOtpPage() {
   const navigate = useNavigate();
@@ -69,10 +45,8 @@ export default function VerifyOtpPage() {
     return queryEmail || state?.email || "";
   }, [location.state, queryEmail]);
 
-  const [resendCountdown, setResendCountdown] = useState(0);
   const [resending, setResending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const intervalRef = useRef<number | null>(null);
 
   const form = useForm<z.infer<typeof verifyOtpSchema>>({
     resolver: zodResolver(verifyOtpSchema),
@@ -88,48 +62,14 @@ export default function VerifyOtpPage() {
     }
   }, [form, initialEmail]);
 
-
-  // The old countdown leaked its interval when the page unmounted mid-tick.
-  useEffect(
-    () => () => {
-      if (intervalRef.current) window.clearInterval(intervalRef.current);
-    },
-    [],
-  );
-
-  /**
-   * Tick against an absolute deadline rather than decrementing a counter.
-   *
-   * The old counter lived only in React state, so reloading the page reset it
-   * to zero and the wait could simply be skipped. The deadline is persisted,
-   * survives a reload, and is the same clock the server enforces.
-   */
-  const runCountdownUntil = useCallback((until: number) => {
-    if (intervalRef.current) window.clearInterval(intervalRef.current);
-    setResendCountdown(secondsLeft(until));
-    if (secondsLeft(until) <= 0) return;
-
-    intervalRef.current = window.setInterval(() => {
-      const left = secondsLeft(until);
-      setResendCountdown(left);
-      if (left <= 0 && intervalRef.current) {
-        window.clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    }, 500);
-  }, []);
-
-  // Pick the countdown back up after a reload.
-  useEffect(() => {
-    const until = readResendDeadline(initialEmail);
-    if (until > Date.now()) runCountdownUntil(until);
-  }, [initialEmail, runCountdownUntil]);
-
-  const startResendCountdown = (seconds = RESEND_SECONDS) => {
-    const until = Date.now() + seconds * 1000;
-    writeResendDeadline(form.getValues("email"), until);
-    runCountdownUntil(until);
-  };
+  // Giữ nguyên tiền tố cũ của trang này: đổi sang tiền tố khác sẽ bỏ rơi mốc
+  // thời gian của những người đang chờ dở lúc triển khai, và họ sẽ thấy nút
+  // "Gửi lại" mở khoá trong khi server vẫn chặn 429.
+  const { seconds: resendCountdown, start: startResendCountdown } =
+    useResendCountdown(
+      form.watch("email").trim().toLowerCase(),
+      "daln:otp-resend-until",
+    );
 
   const onSubmit = async (values: z.infer<typeof verifyOtpSchema>) => {
     setFormError(null);
@@ -158,7 +98,7 @@ export default function VerifyOtpPage() {
     try {
       await resendOtpAPI({ email });
       toast.success("Đã gửi lại mã OTP");
-      startResendCountdown();
+      startResendCountdown(RESEND_SECONDS);
     } catch (error) {
       // A 429 carries how long the server wants us to wait; mirroring it keeps
       // the button and the server from disagreeing about the cooldown.
