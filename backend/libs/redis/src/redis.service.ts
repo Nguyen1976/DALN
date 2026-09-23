@@ -293,14 +293,10 @@ export class RedisService {
     email: string,
     cooldownSeconds = 60,
   ): Promise<boolean> {
-    const won = await this.redisClient.set(
+    return await this.claimOnce(
       this.passwordResetCooldownKey(email),
-      '1',
-      'EX',
       cooldownSeconds,
-      'NX',
     )
-    return Boolean(won)
   }
 
   /**

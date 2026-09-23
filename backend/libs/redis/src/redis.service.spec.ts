@@ -118,6 +118,12 @@ describe('RedisService — token đặt lại mật khẩu', () => {
     expect(client.getdel).not.toHaveBeenCalled()
   })
 
+  it('dọn chỉ mục ngược theo email đã chuẩn hoá', async () => {
+    await service.clearPasswordResetIndex('  AN@Example.Test ')
+
+    expect(client.del).toHaveBeenCalledWith('pwdreset:email:an@example.test')
+  })
+
   it('cooldown theo email: lần đầu giành được, lần sau thua', async () => {
     client.set.mockResolvedValueOnce('OK')
     await expect(service.claimPasswordResetSlot('an@example.test')).resolves.toBe(true)
