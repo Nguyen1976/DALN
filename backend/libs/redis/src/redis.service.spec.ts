@@ -169,4 +169,11 @@ describe('RedisService — token đặt lại mật khẩu', () => {
       false,
     )
   })
+
+  it('trần theo email: quá 5 lần trong một giờ thì từ chối', async () => {
+    client.incr.mockResolvedValueOnce(6)
+    await expect(
+      service.claimPasswordResetHourlySlot('an@example.test'),
+    ).resolves.toBe(false)
+  })
 })

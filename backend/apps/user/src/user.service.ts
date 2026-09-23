@@ -357,6 +357,11 @@ export class UserService {
         return
       }
 
+      // Trần tổng số theo địa chỉ: cooldown 60s bên dưới chỉ chặn được tần
+      // suất, không chặn kẻ rải đều một mail/phút suốt cả giờ.
+      if (!(await this.redisService.claimPasswordResetHourlySlot(data.email)))
+        return
+
       if (!(await this.redisService.claimPasswordResetSlot(data.email))) return
 
       const user = await this.userRepo.findByEmail(data.email)

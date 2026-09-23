@@ -26,6 +26,7 @@ function setup(user: typeof activeUser | null = activeUser) {
   }
   const redisService = {
     claimPasswordResetIpSlot: jest.fn().mockResolvedValue(true),
+    claimPasswordResetHourlySlot: jest.fn().mockResolvedValue(true),
     claimPasswordResetSlot: jest.fn().mockResolvedValue(true),
     savePasswordResetToken: jest
       .fn<Promise<void>, [string, string, string, number?]>()
@@ -129,6 +130,15 @@ describe('UserService.forgotPassword', () => {
 
     expect(eventsPublisher.publishUserPasswordReset).not.toHaveBeenCalled()
     expect(redisService.claimPasswordResetSlot).not.toHaveBeenCalled()
+  })
+
+  it('vượt trần theo giờ: im lặng, không phát sự kiện', async () => {
+    const { service, eventsPublisher, redisService } = setup()
+    redisService.claimPasswordResetHourlySlot.mockResolvedValueOnce(false)
+
+    await service.forgotPassword({ email: 'an@example.test', ip: '1.2.3.4' })
+
+    expect(eventsPublisher.publishUserPasswordReset).not.toHaveBeenCalled()
   })
 
   it('không xác định được IP thật thì bỏ qua hạn mức IP, không khoá người dùng', async () => {

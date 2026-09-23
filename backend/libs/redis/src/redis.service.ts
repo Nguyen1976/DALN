@@ -317,6 +317,26 @@ export class RedisService {
     return count <= limit
   }
 
+  /**
+   * Trần tổng số mail đặt lại mật khẩu gửi tới MỘT địa chỉ trong một giờ, bất
+   * kể đến từ IP nào — cooldown theo email chặn được tần suất (60s/lần) nhưng
+   * không chặn tổng số, và hạn mức theo IP không chặn được kẻ đổi IP.
+   *
+   * Cùng khuôn với claimPasswordResetIpSlot: EXPIRE chỉ đặt ở lần đếm đầu
+   * tiên, nếu không mỗi request lại đẩy cửa sổ lùi thêm một giờ và bộ đếm
+   * không bao giờ được reset.
+   */
+  async claimPasswordResetHourlySlot(
+    email: string,
+    limit = 5,
+    windowSeconds = 3600,
+  ): Promise<boolean> {
+    const key = `pwdreset:hourly:${email.trim().toLowerCase()}`
+    const count = await this.redisClient.incr(key)
+    if (count === 1) await this.redisClient.expire(key, windowSeconds)
+    return count <= limit
+  }
+
   // Feature Hydration Cache methods
   private getFeaturesKey(userId: string): string {
     return `user:${userId}:features`
