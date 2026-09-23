@@ -96,34 +96,9 @@
 
 - [ ] **Step 1: Viết test trước**
 
-Thêm vào cuối `describe('RedisService', ...)` trong `libs/redis/src/redis.service.spec.ts`. Trước hết bổ sung stub — `redisStub` hiện chưa có `getdel`, `incr`, `expire`, `pipeline`:
+Thêm khối `describe` mới vào **cuối** `libs/redis/src/redis.service.spec.ts`, ngang cấp với `describe('RedisService', ...)` sẵn có.
 
-```ts
-  const pipelineStub = {
-    del: jest.fn().mockReturnThis(),
-    set: jest.fn().mockReturnThis(),
-    exec: jest.fn().mockResolvedValue([]),
-  }
-```
-
-Thêm các khoá này vào object `redisStub` sẵn có:
-
-```ts
-    getdel: jest.fn().mockResolvedValue(null),
-    incr: jest.fn().mockResolvedValue(1),
-    expire: jest.fn().mockResolvedValue(1),
-    pipeline: jest.fn(() => pipelineStub),
-```
-
-Và trong `beforeEach`, sau `jest.clearAllMocks()`, thêm:
-
-```ts
-    pipelineStub.del.mockReturnThis()
-    pipelineStub.set.mockReturnThis()
-    pipelineStub.exec.mockResolvedValue([])
-```
-
-Rồi thêm khối test mới:
+**Không** sửa `redisStub` của khối cũ: khối mới dưới đây tự mang stub riêng, nên thêm `getdel`/`incr`/`expire`/`pipeline` vào stub cũ chỉ tạo ra code chết.
 
 ```ts
 describe('RedisService — token đặt lại mật khẩu', () => {
@@ -1873,7 +1848,9 @@ git commit -m "feat(fe): add password reset APIs and validation schemas"
 **Interfaces:**
 - Produces:
   - `AuthShell({ children }: { children: React.ReactNode })`
-  - `useResendCountdown(key: string)` → `{ seconds: number; start: (seconds?: number) => void }`
+  - `useResendCountdown(key: string, storagePrefix: string)` → `{ seconds: number; start: (seconds?: number) => void }`
+
+`storagePrefix` là tham số chứ không hardcode: Task 17 chuyển `VerifyOtp` sang hook này, và trang đó đang lưu mốc dưới tiền tố `daln:otp-resend-until`. Hardcode một tiền tố duy nhất sẽ khiến người đang chờ dở ở màn OTP lúc triển khai thấy nút "Gửi lại" mở khoá trong khi server vẫn chặn 429.
 
 Ba trang xác thực dùng chung một khung; đó đúng là lúc nên tách. Tách xong `AuthPage` phải trông **y hệt** trước đó.
 
@@ -1946,13 +1923,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * là phép lịch sự — server mới là nơi thật sự chặn.
  *
  * Mốc lưu theo từng `key` (thường là địa chỉ email) để đổi tài khoản không
- * thừa hưởng thời gian chờ của tài khoản trước.
+ * thừa hưởng thời gian chờ của tài khoản trước. `storagePrefix` là tham số vì
+ * mỗi luồng có không gian key riêng — đổi tiền tố của một luồng đang chạy sẽ
+ * làm mất thời gian chờ của người đang đợi dở.
  */
-export function useResendCountdown(key: string) {
+export function useResendCountdown(key: string, storagePrefix: string) {
   const [seconds, setSeconds] = useState(0);
   const timerRef = useRef<number | null>(null);
 
-  const storageKey = key ? `daln:pwdreset-resend-until:${key}` : "";
+  const storageKey = key ? `${storagePrefix}:${key}` : "";
 
   const left = (until: number) => Math.max(0, Math.ceil((until - Date.now()) / 1000));
 
@@ -2069,12 +2048,22 @@ type Values = z.infer<typeof forgotPasswordScheme>;
 export default function ForgotPasswordPage() {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { seconds, start } = useResendCountdown(sentTo ?? "");
 
   const form = useForm<Values>({
     resolver: zodResolver(forgotPasswordScheme),
     defaultValues: { email: "" },
   });
+
+  // Khoá theo giá trị ĐANG GÕ, không theo `sentTo`.
+  //
+  // `start()` chạy ngay sau `setSentTo()`, lúc đó state chưa kịp cập nhật — lấy
+  // key từ `sentTo` thì hook vẫn đang giữ chuỗi rỗng, mốc thời gian không được
+  // ghi xuống đâu cả, và đếm ngược mất sạch sau mỗi lần tải lại trang.
+  const typedEmail = form.watch("email").trim().toLowerCase();
+  const { seconds, start } = useResendCountdown(
+    typedEmail,
+    "daln:pwdreset-resend-until",
+  );
 
   const submit = form.handleSubmit(async (values) => {
     setSubmitting(true);
@@ -2700,10 +2689,16 @@ Xoá `resendDeadlineKey`, `readResendDeadline`, `writeResendDeadline`, `secondsL
 
 ```tsx
 const { seconds: resendCountdown, start: startResendCountdown } =
-  useResendCountdown(form.watch("email"));
+  useResendCountdown(
+    form.watch("email").trim().toLowerCase(),
+    // Giữ nguyên tiền tố cũ của trang này: đổi sang tiền tố khác sẽ bỏ rơi mốc
+    // thời gian của những người đang chờ dở lúc triển khai, và họ sẽ thấy nút
+    // "Gửi lại" mở khoá trong khi server vẫn chặn 429.
+    "daln:otp-resend-until",
+  );
 ```
 
-Đổi tiền tố key trong `useResendCountdown` thành tham số để không mất thời gian chờ đang lưu dưới key cũ `daln:otp-resend-until:`, hoặc chấp nhận rằng người dùng đang chờ dở sẽ được reset một lần duy nhất khi triển khai.
+`VerifyOtp` hiện lưu mốc dưới key `daln:otp-resend-until:<email>` và chuẩn hoá email bằng `.trim().toLowerCase()` — giữ đúng cả hai thì thời gian chờ đang lưu vẫn đọc được sau khi triển khai.
 
 - [ ] **Step 2: QC trên trình duyệt**
 
