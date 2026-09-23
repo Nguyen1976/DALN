@@ -13,6 +13,10 @@ export class LoggerService {
     this.logger.info(msg, meta)
   }
 
+  warn(msg: string, meta?: Record<string, unknown>) {
+    this.logger.warn(msg, meta)
+  }
+
   error(msg: string, trace?: string) {
     this.logger.error(msg + (trace ? ` | ${trace}` : ''))
   }

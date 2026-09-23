@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto'
 import { S3StorageService } from '@app/storage-s3'
 import { UtilService } from '@app/util/util.service'
 import { Inject, Injectable } from '@nestjs/common'
@@ -73,6 +74,12 @@ interface ResendOtpRequest {
   email: string
 }
 
+interface ForgotPasswordRequest {
+  email: string
+  /** IP người gọi, nếu xác định được. Xem `forgotPassword`. */
+  ip?: string
+}
+
 interface MakeFriendRequest {
   inviterId: string
   inviterName: string
@@ -104,6 +111,9 @@ interface CompleteInterestOnboardingRequest {
 
 /** Friends a search answers with at most. */
 const SEARCH_LIMIT = 20
+
+/** Liên kết đặt lại mật khẩu sống bao lâu. Khớp TTL của key trong Redis. */
+const PASSWORD_RESET_TTL_MINUTES = 15
 
 @Injectable()
 export class UserService {
@@ -288,6 +298,79 @@ export class UserService {
       email: data.email,
       requiresOtpVerification: true,
     }
+  }
+
+  private hashResetToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex')
+  }
+
+  /**
+   * Sinh token đặt lại mật khẩu.
+   *
+   * `randomBytes` chứ không phải `Math.random`: cái sau không phải bộ sinh số
+   * ngẫu nhiên mật mã — trạng thái nội bộ của nó khôi phục được từ vài giá trị
+   * đầu ra, và đoán được trạng thái là đoán được mọi token sinh sau đó.
+   *
+   * `base64url` chứ không phải `hex` hay `base64`: bảng chữ cái của nó không có
+   * ký tự nào `encodeURIComponent` phải mã hoá, nên token vào URL nguyên vẹn;
+   * và 32 byte chỉ tốn 43 ký tự thay vì 64 như hex.
+   */
+  private generateResetToken(): string {
+    return randomBytes(32).toString('base64url')
+  }
+
+  /**
+   * Gửi liên kết đặt lại mật khẩu.
+   *
+   * KHÔNG BAO GIỜ ném lỗi và không bao giờ trả về gì khác nhau. Mọi nhánh —
+   * email lạ, tài khoản chưa kích hoạt, đang cooldown, vượt hạn mức — đều kết
+   * thúc bằng `return` im lặng, để người gọi không phân biệt được địa chỉ nào
+   * có tài khoản.
+   *
+   * Thứ tự các bước là một phần của bảo đảm đó: claim trước, tra sau. Tra cơ
+   * sở dữ liệu rồi mới claim thì hai nhánh tiêu tốn số thao tác khác nhau và
+   * thời gian phản hồi tố cáo sự khác biệt.
+   */
+  async forgotPassword(data: ForgotPasswordRequest): Promise<void> {
+    // Không dựng được IP nào thì bỏ qua lớp này thay vì chặn: cooldown theo
+    // email mới là lớp bảo vệ chính và nó không phụ thuộc IP.
+    //
+    // Lưu ý: nhánh này KHÔNG cứu được trường hợp `trust proxy` cấu hình sai —
+    // lúc đó mọi request đều mang cùng một IP nội bộ của Kong, `data.ip` vẫn
+    // có giá trị, và hạn mức biến thành trần toàn cục 10 lần/giờ cho cả hệ
+    // thống. Chỉ kiểm tra key `pwdreset:ip:*` sau khi triển khai mới phát hiện
+    // được, nên đừng bỏ bước đó.
+    if (
+      data.ip &&
+      !(await this.redisService.claimPasswordResetIpSlot(data.ip))
+    ) {
+      this.logger.warn('[user.forgot-password] ip rate limit hit', {
+        ip: data.ip,
+      })
+      return
+    }
+
+    if (!(await this.redisService.claimPasswordResetSlot(data.email))) return
+
+    const user = await this.userRepo.findByEmail(data.email)
+
+    // Tài khoản chưa kích hoạt thuộc về luồng verify-otp: gửi liên kết đặt lại
+    // mật khẩu cho một tài khoản chưa bao giờ mở là vô nghĩa.
+    if (!user || !user.isActive) return
+
+    const token = this.generateResetToken()
+    await this.redisService.savePasswordResetToken(
+      user.email,
+      user.id,
+      this.hashResetToken(token),
+    )
+
+    this.eventsPublisher.publishUserPasswordReset({
+      email: user.email,
+      username: user.username,
+      token,
+      expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+    })
   }
 
   async login(data: UserLoginRequest): Promise<AuthSession> {

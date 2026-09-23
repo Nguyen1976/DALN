@@ -61,6 +61,16 @@ export class UserErrors {
     throw new BadRequestException('Mã OTP không hợp lệ hoặc đã hết hạn')
   }
 
+  /**
+   * Một thông điệp duy nhất cho cả token sai lẫn token hết hạn: phân biệt hai
+   * trường hợp là nói cho người gọi biết token đó đã từng tồn tại.
+   */
+  static passwordResetTokenInvalid(): never {
+    throw new BadRequestException(
+      'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn',
+    )
+  }
+
   static usernameAlreadyExists(): never {
     throw new ConflictException('Tên người dùng đã được sử dụng')
   }
