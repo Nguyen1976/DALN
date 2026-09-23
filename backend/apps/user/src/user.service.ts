@@ -332,45 +332,55 @@ export class UserService {
    * thời gian phản hồi tố cáo sự khác biệt.
    */
   async forgotPassword(data: ForgotPasswordRequest): Promise<void> {
-    // Không dựng được IP nào thì bỏ qua lớp này thay vì chặn: cooldown theo
-    // email mới là lớp bảo vệ chính và nó không phụ thuộc IP.
-    //
-    // Lưu ý: nhánh này KHÔNG cứu được trường hợp `trust proxy` cấu hình sai —
-    // lúc đó mọi request đều mang cùng một IP nội bộ của Kong, `data.ip` vẫn
-    // có giá trị, và hạn mức biến thành trần toàn cục 10 lần/giờ cho cả hệ
-    // thống. Chỉ kiểm tra key `pwdreset:ip:*` sau khi triển khai mới phát hiện
-    // được, nên đừng bỏ bước đó.
-    if (
-      data.ip &&
-      !(await this.redisService.claimPasswordResetIpSlot(data.ip))
-    ) {
-      this.logger.warn('[user.forgot-password] ip rate limit hit', {
-        ip: data.ip,
+    try {
+      // Không dựng được IP nào thì bỏ qua lớp này thay vì chặn: cooldown theo
+      // email mới là lớp bảo vệ chính và nó không phụ thuộc IP.
+      //
+      // Lưu ý: nhánh này KHÔNG cứu được trường hợp `trust proxy` cấu hình sai —
+      // lúc đó mọi request đều mang cùng một IP nội bộ của Kong, `data.ip` vẫn
+      // có giá trị, và hạn mức biến thành trần toàn cục 10 lần/giờ cho cả hệ
+      // thống. Chỉ kiểm tra key `pwdreset:ip:*` sau khi triển khai mới phát hiện
+      // được, nên đừng bỏ bước đó.
+      if (
+        data.ip &&
+        !(await this.redisService.claimPasswordResetIpSlot(data.ip))
+      ) {
+        this.logger.warn('[user.forgot-password] ip rate limit hit', {
+          ip: data.ip,
+        })
+        return
+      }
+
+      if (!(await this.redisService.claimPasswordResetSlot(data.email))) return
+
+      const user = await this.userRepo.findByEmail(data.email)
+
+      // Tài khoản chưa kích hoạt thuộc về luồng verify-otp: gửi liên kết đặt lại
+      // mật khẩu cho một tài khoản chưa bao giờ mở là vô nghĩa.
+      if (!user || !user.isActive) return
+
+      const token = this.generateResetToken()
+      await this.redisService.savePasswordResetToken(
+        user.email,
+        user.id,
+        this.hashResetToken(token),
+      )
+
+      this.eventsPublisher.publishUserPasswordReset({
+        email: user.email,
+        username: user.username,
+        token,
+        expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
       })
-      return
+    } catch (error) {
+      // Hạ tầng lỗi cũng phải im lặng như mọi nhánh khác. savePasswordResetToken
+      // chỉ chạy cho tài khoản có thật và đã kích hoạt, nên để exception thoát ra
+      // là biến một sự cố Redis thành tín hiệu "địa chỉ này có tài khoản".
+      this.logger.error(
+        '[user.forgot-password] failed',
+        error instanceof Error ? error.stack : String(error),
+      )
     }
-
-    if (!(await this.redisService.claimPasswordResetSlot(data.email))) return
-
-    const user = await this.userRepo.findByEmail(data.email)
-
-    // Tài khoản chưa kích hoạt thuộc về luồng verify-otp: gửi liên kết đặt lại
-    // mật khẩu cho một tài khoản chưa bao giờ mở là vô nghĩa.
-    if (!user || !user.isActive) return
-
-    const token = this.generateResetToken()
-    await this.redisService.savePasswordResetToken(
-      user.email,
-      user.id,
-      this.hashResetToken(token),
-    )
-
-    this.eventsPublisher.publishUserPasswordReset({
-      email: user.email,
-      username: user.username,
-      token,
-      expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
-    })
   }
 
   async login(data: UserLoginRequest): Promise<AuthSession> {

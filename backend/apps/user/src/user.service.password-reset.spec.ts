@@ -140,4 +140,28 @@ describe('UserService.forgotPassword', () => {
     expect(redisService.claimPasswordResetIpSlot).not.toHaveBeenCalled()
     expect(eventsPublisher.publishUserPasswordReset).toHaveBeenCalledTimes(1)
   })
+
+  it('hạ tầng lỗi cũng im lặng — không được biến sự cố thành tín hiệu dò tài khoản', async () => {
+    const { service, redisService, eventsPublisher } = setup()
+    redisService.savePasswordResetToken.mockRejectedValueOnce(
+      new Error('redis down'),
+    )
+
+    await expect(
+      service.forgotPassword({ email: 'an@example.test', ip: '1.2.3.4' }),
+    ).resolves.toBeUndefined()
+
+    expect(eventsPublisher.publishUserPasswordReset).not.toHaveBeenCalled()
+  })
+
+  it('tra cơ sở dữ liệu lỗi cũng im lặng như mọi nhánh khác', async () => {
+    const { service, userRepo, eventsPublisher } = setup()
+    userRepo.findByEmail.mockRejectedValueOnce(new Error('db down'))
+
+    await expect(
+      service.forgotPassword({ email: 'an@example.test', ip: '1.2.3.4' }),
+    ).resolves.toBeUndefined()
+
+    expect(eventsPublisher.publishUserPasswordReset).not.toHaveBeenCalled()
+  })
 })
