@@ -165,3 +165,114 @@ describe('UserService.forgotPassword', () => {
     expect(eventsPublisher.publishUserPasswordReset).not.toHaveBeenCalled()
   })
 })
+
+describe('UserService.validatePasswordResetToken', () => {
+  it('token sống: trả valid và email đã che', async () => {
+    const { service, redisService } = setup()
+    redisService.peekPasswordResetToken.mockResolvedValueOnce(activeUser.id)
+
+    await expect(service.validatePasswordResetToken('tok')).resolves.toEqual({
+      valid: true,
+      maskedEmail: '**@example.test',
+    })
+  })
+
+  it('chỉ đọc — không được tiêu thụ token', async () => {
+    const { service, redisService } = setup()
+    redisService.peekPasswordResetToken.mockResolvedValueOnce(activeUser.id)
+
+    await service.validatePasswordResetToken('tok')
+
+    expect(redisService.consumePasswordResetToken).not.toHaveBeenCalled()
+  })
+
+  it('token chết: trả valid false, không kèm gì khác', async () => {
+    const { service, redisService } = setup()
+    redisService.peekPasswordResetToken.mockResolvedValueOnce(null)
+
+    await expect(service.validatePasswordResetToken('tok')).resolves.toEqual({
+      valid: false,
+    })
+  })
+
+  it('token trỏ tới user đã biến mất: coi như chết', async () => {
+    const { service, userRepo, redisService } = setup()
+    redisService.peekPasswordResetToken.mockResolvedValueOnce('u-mo-coi')
+    userRepo.findById.mockResolvedValueOnce(null)
+
+    await expect(service.validatePasswordResetToken('tok')).resolves.toEqual({
+      valid: false,
+    })
+  })
+})
+
+describe('UserService.resetPassword', () => {
+  it('đường hạnh phúc: băm mật khẩu mới, ghi, dọn chỉ mục, phát cảnh báo', async () => {
+    const { service, userRepo, utilService, eventsPublisher, redisService } =
+      setup()
+    redisService.consumePasswordResetToken.mockResolvedValueOnce(activeUser.id)
+
+    await service.resetPassword({ token: 'tok', password: 'MatKhauMoi1!' })
+
+    expect(utilService.hashPassword).toHaveBeenCalledWith('MatKhauMoi1!')
+    expect(userRepo.updatePasswordById).toHaveBeenCalledWith(
+      activeUser.id,
+      'hash-moi',
+    )
+    expect(redisService.clearPasswordResetIndex).toHaveBeenCalledWith(
+      'an@example.test',
+    )
+    expect(eventsPublisher.publishUserPasswordChanged).toHaveBeenCalledTimes(1)
+  })
+
+  it('tiêu thụ token TRƯỚC khi ghi mật khẩu', async () => {
+    const { service, userRepo, redisService } = setup()
+    const order: string[] = []
+    redisService.consumePasswordResetToken.mockImplementationOnce(() => {
+      order.push('consume')
+      return Promise.resolve(activeUser.id)
+    })
+    userRepo.updatePasswordById.mockImplementationOnce(() => {
+      order.push('write')
+      return Promise.resolve(activeUser)
+    })
+
+    await service.resetPassword({ token: 'tok', password: 'MatKhauMoi1!' })
+
+    // Ghi trước rồi mới tiêu thụ là mở lại đúng khe hở mà GETDEL vừa đóng.
+    expect(order).toEqual(['consume', 'write'])
+  })
+
+  it('token chết: ném 400 và không đụng tới mật khẩu', async () => {
+    const { service, userRepo, redisService } = setup()
+    redisService.consumePasswordResetToken.mockResolvedValueOnce(null)
+
+    await expect(
+      service.resetPassword({ token: 'tok', password: 'MatKhauMoi1!' }),
+    ).rejects.toThrow('Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn')
+
+    expect(userRepo.updatePasswordById).not.toHaveBeenCalled()
+  })
+
+  it('dùng lại đúng token lần hai: lần đầu qua, lần sau ném lỗi', async () => {
+    const { service, redisService } = setup()
+    redisService.consumePasswordResetToken
+      .mockResolvedValueOnce(activeUser.id)
+      .mockResolvedValueOnce(null)
+
+    await service.resetPassword({ token: 'tok', password: 'MatKhauMoi1!' })
+    await expect(
+      service.resetPassword({ token: 'tok', password: 'MatKhauMoi2!' }),
+    ).rejects.toThrow('Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn')
+  })
+
+  it('token trỏ tới user đã biến mất: ném 400', async () => {
+    const { service, userRepo, redisService } = setup()
+    redisService.consumePasswordResetToken.mockResolvedValueOnce('u-mo-coi')
+    userRepo.findById.mockResolvedValueOnce(null)
+
+    await expect(
+      service.resetPassword({ token: 'tok', password: 'MatKhauMoi1!' }),
+    ).rejects.toThrow('Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn')
+  })
+})

@@ -38,6 +38,7 @@ import {
   UserSummary,
 } from './domain/user.domain'
 import { RedisService } from '@app/redis/redis.service'
+import { maskEmail } from './domain/mask-email'
 import type { MemberProfile } from 'libs/constant/member-profile'
 import { internalFetch, serviceUrl } from '@app/common/http/internal-fetch'
 import {
@@ -78,6 +79,11 @@ interface ForgotPasswordRequest {
   email: string
   /** IP người gọi, nếu xác định được. Xem `forgotPassword`. */
   ip?: string
+}
+
+interface ResetPasswordRequest {
+  token: string
+  password: string
 }
 
 interface MakeFriendRequest {
@@ -381,6 +387,67 @@ export class UserService {
         error instanceof Error ? error.stack : String(error),
       )
     }
+  }
+
+  /**
+   * Kiểm tra liên kết còn sống không, KHÔNG tiêu thụ nó.
+   *
+   * Tồn tại để trang đặt lại mật khẩu phân biệt được liên kết hỏng trước khi
+   * bắt người dùng gõ xong mật khẩu rồi mới báo lỗi.
+   *
+   * Trả về email đã che: ai cầm token thì đằng nào cũng sắp đổi được mật khẩu,
+   * nên che một phần là đủ — mà vẫn cho họ biết đang đặt lại cho tài khoản nào.
+   */
+  async validatePasswordResetToken(
+    token: string,
+  ): Promise<{ valid: boolean; maskedEmail?: string }> {
+    const userId = await this.redisService.peekPasswordResetToken(
+      this.hashResetToken(token),
+    )
+    if (!userId) return { valid: false }
+
+    const user = await this.userRepo.findById(userId)
+    if (!user) return { valid: false }
+
+    return { valid: true, maskedEmail: maskEmail(user.email) }
+  }
+
+  /**
+   * Đặt mật khẩu mới.
+   *
+   * Token được tiêu thụ TRƯỚC khi ghi. `consumePasswordResetToken` dùng GETDEL
+   * nên đúng một caller nhận được `userId`; ghi trước rồi mới tiêu thụ là mở
+   * lại khe hở cho hai request cùng token cùng đổi được mật khẩu.
+   *
+   * Cố ý KHÔNG chặn đặt lại trùng mật khẩu cũ: người quên mật khẩu rồi chợt
+   * nhớ ra không có lý do gì bị chặn.
+   */
+  async resetPassword(data: ResetPasswordRequest): Promise<void> {
+    const userId = await this.redisService.consumePasswordResetToken(
+      this.hashResetToken(data.token),
+    )
+    if (!userId) UserErrors.passwordResetTokenInvalid()
+
+    const user = await this.userRepo.findById(userId)
+    if (!user) UserErrors.passwordResetTokenInvalid()
+
+    const hashedPassword = await this.utilService.hashPassword(data.password)
+    await this.userRepo.updatePasswordById(user.id, hashedPassword)
+
+    // Chỉ mục ngược chỉ là chỉ mục: xoá hụt cũng vô hại, nó tự hết hạn.
+    await this.redisService.clearPasswordResetIndex(user.email)
+
+    this.logger.info('[user.reset-password] password changed', {
+      userId: user.id,
+    })
+
+    // Kênh DUY NHẤT báo cho chủ tài khoản biết có người vừa đặt lại mật khẩu
+    // của họ — càng cần thiết khi phiên đăng nhập cũ chưa bị thu hồi.
+    this.eventsPublisher.publishUserPasswordChanged({
+      email: user.email,
+      username: user.username,
+      changedAt: new Date().toISOString(),
+    })
   }
 
   async login(data: UserLoginRequest): Promise<AuthSession> {
