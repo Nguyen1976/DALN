@@ -78,7 +78,18 @@ export default function ResetPasswordPage() {
       toast.success("Đặt lại mật khẩu thành công. Hãy đăng nhập lại.");
       navigate("/auth");
     } catch (error) {
-      // Token có thể chết giữa lúc người dùng đang gõ.
+      // 400 nghĩa là token đã chết (hết hạn hoặc bị thay bởi lần gửi khác)
+      // giữa lúc người dùng đang gõ — lỗi này nói về LIÊN KẾT, không phải mật
+      // khẩu, nên gắn nó vào field "password" khiến người dùng tưởng nhầm mật
+      // khẩu sai. Chuyển sang màn "invalid" sẵn có: nó nói đúng nguyên nhân và
+      // có nút "Xin liên kết mới" mà form không có. Phân biệt bằng status HTTP
+      // chứ không so khớp chuỗi message, để không vỡ khi backend đổi câu chữ.
+      const status = (error as { response?: { status?: number } }).response
+        ?.status;
+      if (status === 400) {
+        setStatus({ kind: "invalid" });
+        return;
+      }
       form.setError("password", { message: getErrorMessage(error) });
       setSubmitting(false);
     }
