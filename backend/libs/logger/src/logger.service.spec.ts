@@ -36,4 +36,9 @@ describe('LoggerService', () => {
     service.info('xin chao', { a: 1 })
     expect(winstonStub.info).toHaveBeenCalled()
   })
+
+  it('chuyển tiếp cảnh báo tới winston', () => {
+    service.warn('canh bao', { a: 1 })
+    expect(winstonStub.warn).toHaveBeenCalled()
+  })
 })

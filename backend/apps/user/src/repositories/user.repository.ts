@@ -127,6 +127,13 @@ export class UserRepository {
     })
   }
 
+  async updatePasswordById(id: string, password: string) {
+    return await this.prisma.user.update({
+      where: { id },
+      data: { password },
+    })
+  }
+
   /** Just what another service needs to show these users. */
   async findProfilesByIds(userIds: string[]) {
     return await this.prisma.user.findMany({

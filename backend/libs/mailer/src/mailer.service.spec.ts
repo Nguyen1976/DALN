@@ -54,12 +54,23 @@ describe('MailerService', () => {
       receiverName: 'an',
       friendRequestId: 'req 1',
     })
+    await service.sendPasswordReset({
+      email: 'an@example.test',
+      username: 'an',
+      token: 'kJ7-xQ2mN4pR8sT1vW3yZ5aB6cD9eF0gH2iJ4kL6mN8',
+      expiresInMinutes: 15,
+    })
+    await service.sendPasswordChanged({
+      email: 'an@example.test',
+      username: 'an',
+      changedAt: '2026-09-23T08:30:00.000Z',
+    })
   }
 
   it('điền đủ biến cho mọi template và nhúng logo', async () => {
     await sendAll()
 
-    expect(sendMail).toHaveBeenCalledTimes(3)
+    expect(sendMail).toHaveBeenCalledTimes(5)
     for (const [mail] of sendMail.mock.calls) {
       expect(mail.html).not.toMatch(/{{|}}/)
       expect(mail.html).toContain('src="cid:daln-mark"')
@@ -134,5 +145,66 @@ describe('MailerService', () => {
     })
 
     expect(lastMail().html).toContain('Chào $&amp;$1,')
+  })
+
+  describe('mail đặt lại mật khẩu', () => {
+    it('ghép liên kết từ FRONTEND_URL và mang đúng token', async () => {
+      await service.sendPasswordReset({
+        email: 'an@example.test',
+        username: 'an',
+        token: 'kJ7-xQ2mN4pR8sT1vW3yZ5aB6cD9eF0gH2iJ4kL6mN8',
+        expiresInMinutes: 15,
+      })
+
+      const mail = lastMail()
+      expect(mail.to).toBe('an@example.test')
+      expect(mail.html).toContain(
+        'https://chat.example.test/reset-password?token=kJ7-xQ2mN4pR8sT1vW3yZ5aB6cD9eF0gH2iJ4kL6mN8',
+      )
+    })
+
+    it('base64url đi qua encodeURIComponent nguyên vẹn, không sinh %2B %2F %3D', async () => {
+      await service.sendPasswordReset({
+        email: 'an@example.test',
+        username: 'an',
+        token: 'aB-_09zZ',
+        expiresInMinutes: 15,
+      })
+
+      expect(lastMail().html).toContain('?token=aB-_09zZ')
+      expect(lastMail().html).not.toContain('%2B')
+      expect(lastMail().html).not.toContain('%2F')
+    })
+
+    it('nói rõ thời hạn để người nhận biết mình có bao lâu', async () => {
+      await service.sendPasswordReset({
+        email: 'an@example.test',
+        username: 'an',
+        token: 'tok',
+        expiresInMinutes: 15,
+      })
+
+      expect(lastMail().html).toContain('15 phút')
+    })
+
+    it('mail cảnh báo mang mốc thời gian theo giờ Việt Nam', async () => {
+      await service.sendPasswordChanged({
+        email: 'an@example.test',
+        username: 'an',
+        changedAt: '2026-09-23T08:30:00.000Z',
+      })
+
+      const mail = lastMail()
+      // 08:30 UTC = 15:30 giờ Việt Nam.
+      expect(mail.html).toContain('15:30')
+      expect(mail.html).toContain('23/09/2026')
+    })
+
+    it('không có placeholder {{...}} nào sót lại', async () => {
+      await sendAll()
+      for (const call of sendMail.mock.calls) {
+        expect(call[0].html).not.toMatch(/\{\{\s*\w+\s*\}\}/)
+      }
+    })
   })
 })

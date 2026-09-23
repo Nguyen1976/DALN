@@ -208,6 +208,139 @@ export class RedisService {
     return await this.redisClient.get(key)
   }
 
+  /* ---------------- Token đặt lại mật khẩu ---------------- */
+
+  /**
+   * Token là KEY chứ không phải value.
+   *
+   * Khác luồng OTP (key là email, value là mã, nên phải so sánh): ở đây người
+   * gọi không khai mình là ai, chỉ đưa token. Nên token vừa phải chứng minh
+   * quyền vừa phải nói ra chủ nhân — một lần tra là xong cả hai, không có so
+   * sánh chuỗi nào để rò thời gian.
+   *
+   * Chỉ bản băm nằm lại đây. Ai đọc được Redis qua dump, log hay backup cũng
+   * không lần ngược ra được token thô để dùng.
+   */
+  private passwordResetKey(tokenHash: string): string {
+    return `pwdreset:${tokenHash}`
+  }
+
+  private passwordResetIndexKey(email: string): string {
+    return `pwdreset:email:${email.trim().toLowerCase()}`
+  }
+
+  private passwordResetCooldownKey(email: string): string {
+    return `pwdreset:cooldown:${email.trim().toLowerCase()}`
+  }
+
+  private passwordResetIpKey(ip: string): string {
+    return `pwdreset:ip:${ip}`
+  }
+
+  private passwordResetHourlyKey(email: string): string {
+    return `pwdreset:hourly:${email.trim().toLowerCase()}`
+  }
+
+  /**
+   * Cấp token mới và giết token cũ của cùng địa chỉ.
+   *
+   * Không giết thì mỗi lần bấm "gửi lại" để lại thêm một chìa khoá còn sống
+   * 15 phút nữa. Chỉ mục ngược tồn tại chỉ để làm được việc này: từ email tìm
+   * ra bản băm đang hiệu lực.
+   */
+  async savePasswordResetToken(
+    email: string,
+    userId: string,
+    tokenHash: string,
+    ttlSeconds = 900,
+  ): Promise<void> {
+    const indexKey = this.passwordResetIndexKey(email)
+    const previous = await this.redisClient.get(indexKey)
+
+    const pipeline = this.redisClient.pipeline()
+    if (previous) pipeline.del(this.passwordResetKey(previous))
+    pipeline.set(this.passwordResetKey(tokenHash), userId, 'EX', ttlSeconds)
+    pipeline.set(indexKey, tokenHash, 'EX', ttlSeconds)
+    await pipeline.exec()
+  }
+
+  /** Chỉ đọc — dùng cho màn kiểm tra liên kết, không được tiêu thụ token. */
+  async peekPasswordResetToken(tokenHash: string): Promise<string | null> {
+    return await this.redisClient.get(this.passwordResetKey(tokenHash))
+  }
+
+  /**
+   * Đọc và xoá trong MỘT lệnh.
+   *
+   * Tách thành GET rồi DEL là hở một khe: hai request mang cùng token có thể
+   * cùng vượt qua bước GET trước khi DEL đầu tiên kịp chạy, và token "một lần"
+   * dùng được hai lần. GETDEL (Redis 6.2+) đóng khe đó — đúng một caller nhận
+   * được userId.
+   */
+  async consumePasswordResetToken(tokenHash: string): Promise<string | null> {
+    return await this.redisClient.getdel(this.passwordResetKey(tokenHash))
+  }
+
+  /** Dọn chỉ mục sau khi token đã tiêu thụ. Sót lại cũng vô hại: nó tự hết hạn. */
+  async clearPasswordResetIndex(email: string): Promise<void> {
+    await this.redisClient.del(this.passwordResetIndexKey(email))
+  }
+
+  /**
+   * Giành quyền gửi một mail đặt lại mật khẩu cho `email`.
+   *
+   * Trả `true` khi được gửi. Khác `claimOtpResendSlot` ở chỗ không trả số giây
+   * còn lại: endpoint này luôn đáp 204, nên số giây đó không được phép rời
+   * khỏi server — nó tiết lộ rằng địa chỉ vừa có người xin đặt lại mật khẩu.
+   */
+  async claimPasswordResetSlot(
+    email: string,
+    cooldownSeconds = 60,
+  ): Promise<boolean> {
+    return await this.claimOnce(
+      this.passwordResetCooldownKey(email),
+      cooldownSeconds,
+    )
+  }
+
+  /**
+   * Trần theo IP — thứ cooldown theo email không chặn được: một nguồn quét
+   * hàng loạt địa chỉ khác nhau, mỗi địa chỉ đúng một lần.
+   *
+   * EXPIRE chỉ đặt ở lần đếm đầu tiên, nếu không mỗi request lại đẩy cửa sổ
+   * lùi thêm một giờ và bộ đếm không bao giờ được reset.
+   */
+  async claimPasswordResetIpSlot(
+    ip: string,
+    limit = 10,
+    windowSeconds = 3600,
+  ): Promise<boolean> {
+    const key = this.passwordResetIpKey(ip)
+    const count = await this.redisClient.incr(key)
+    if (count === 1) await this.redisClient.expire(key, windowSeconds)
+    return count <= limit
+  }
+
+  /**
+   * Trần tổng số mail đặt lại mật khẩu gửi tới MỘT địa chỉ trong một giờ, bất
+   * kể đến từ IP nào — cooldown theo email chặn được tần suất (60s/lần) nhưng
+   * không chặn tổng số, và hạn mức theo IP không chặn được kẻ đổi IP.
+   *
+   * Cùng khuôn với claimPasswordResetIpSlot: EXPIRE chỉ đặt ở lần đếm đầu
+   * tiên, nếu không mỗi request lại đẩy cửa sổ lùi thêm một giờ và bộ đếm
+   * không bao giờ được reset.
+   */
+  async claimPasswordResetHourlySlot(
+    email: string,
+    limit = 5,
+    windowSeconds = 3600,
+  ): Promise<boolean> {
+    const key = this.passwordResetHourlyKey(email)
+    const count = await this.redisClient.incr(key)
+    if (count === 1) await this.redisClient.expire(key, windowSeconds)
+    return count <= limit
+  }
+
   // Feature Hydration Cache methods
   private getFeaturesKey(userId: string): string {
     return `user:${userId}:features`

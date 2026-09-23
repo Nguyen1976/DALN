@@ -65,6 +65,27 @@ export const verifyOtpAPI = (data: { email: string; otp: string }) =>
 export const resendOtpAPI = (data: { email: string }) =>
   api.post("/user/resend-otp", { email: normalizeEmail(data.email) });
 
+/**
+ * Luôn nhận 204 — kể cả email không tồn tại hay đang trong cooldown. Đừng suy
+ * ra bất cứ điều gì về tài khoản từ phản hồi này; đó là chủ đích của server.
+ * `skipErrorToast` để lỗi mạng không bật toast đè lên màn "đã gửi".
+ */
+export const forgotPasswordAPI = (data: { email: string }) =>
+  api.post(
+    "/user/forgot-password",
+    { email: normalizeEmail(data.email) },
+    { skipErrorToast: true },
+  );
+
+export const validateResetTokenAPI = (token: string) =>
+  api.get<{ valid: boolean; maskedEmail?: string }>(
+    `/user/reset-password/validate?token=${encodeURIComponent(token)}`,
+    { skipErrorToast: true },
+  );
+
+export const resetPasswordAPI = (data: { token: string; password: string }) =>
+  api.post("/user/reset-password", data, { skipErrorToast: true });
+
 export const signInAPI = (data: { email: string; password: string }) =>
   api.post<UserState>("/user/login", {
     ...data,

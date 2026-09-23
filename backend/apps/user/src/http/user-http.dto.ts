@@ -100,6 +100,38 @@ export class ResendOtpDto {
   email: string
 }
 
+export class ForgotPasswordDto {
+  @Transform(toNormalizedEmail)
+  @IsEmail()
+  @IsNotEmpty({ message: 'Email must not be empty' })
+  email: string
+}
+
+export class ValidateResetTokenQueryDto {
+  @IsNotEmpty()
+  @IsString()
+  token: string
+}
+
+/**
+ * Ràng buộc mật khẩu phải khớp ĐÚNG `RegisterUserDto`: hai đường vào cùng một
+ * trường thì không được có hai luật khác nhau.
+ */
+export class ResetPasswordDto {
+  @IsNotEmpty()
+  @IsString()
+  token: string
+
+  @IsNotEmpty()
+  @MaxLength(20, {
+    message: 'Password is too long. Maximum length is $constraint1 characters',
+  })
+  @MinLength(6, {
+    message: 'Password is too short. Minimum length is $constraint1 characters',
+  })
+  password: string
+}
+
 /** Gửi lời mời theo email — ô "Thêm bạn" gõ email. */
 export class MakeFriendDto {
   @Transform(toNormalizedEmail)

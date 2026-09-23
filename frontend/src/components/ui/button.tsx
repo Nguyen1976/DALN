@@ -14,7 +14,11 @@ const buttonVariants = cva(
     "active:scale-[0.97]",
     "disabled:pointer-events-none disabled:opacity-55",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-    "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+    // Tailwind v4 đọc outline-style từ biến dùng chung `--tw-outline-style`.
+    // `outline-none` ghim biến đó về "none" không điều kiện, nên riêng
+    // `focus-visible:outline-2` (chỉ set width) không đủ để outline hiện ra
+    // khi focus — phải tự set lại style thành "solid" trong cùng biến thức.
+    "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
     "aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/30",
   ].join(" "),
   {

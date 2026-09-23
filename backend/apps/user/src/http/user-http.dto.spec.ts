@@ -2,11 +2,13 @@ import 'reflect-metadata'
 import { plainToInstance } from 'class-transformer'
 import { validate } from 'class-validator'
 import {
+  ForgotPasswordDto,
   LoginUserDto,
   MakeFriendByUsernameDto,
   MakeFriendDto,
   RegisterUserDto,
   ResendOtpDto,
+  ResetPasswordDto,
   VerifyOtpDto,
 } from './user-http.dto'
 
@@ -55,5 +57,51 @@ describe('MakeFriendByUsernameDto', () => {
   it('username chỉ toàn khoảng trắng -> báo lỗi', async () => {
     const dto = plainToInstance(MakeFriendByUsernameDto, { username: '   ' })
     expect(await invalidFields(dto)).toEqual(['username'])
+  })
+})
+
+describe('ForgotPasswordDto', () => {
+  it('chuẩn hoá email về chữ thường và cắt khoảng trắng', async () => {
+    const dto = plainToInstance(ForgotPasswordDto, {
+      email: '  NgMinh4205@Gmail.com ',
+    })
+    await expect(validate(dto)).resolves.toHaveLength(0)
+    expect(dto.email).toBe('ngminh4205@gmail.com')
+  })
+
+  it('email sai định dạng thì không qua', async () => {
+    const dto = plainToInstance(ForgotPasswordDto, { email: 'khong-phai' })
+    await expect(validate(dto)).resolves.not.toHaveLength(0)
+  })
+})
+
+describe('ResetPasswordDto', () => {
+  it('mật khẩu 6 ký tự là ngắn nhất được chấp nhận', async () => {
+    const dto = plainToInstance(ResetPasswordDto, {
+      token: 'tok',
+      password: '123456',
+    })
+    await expect(validate(dto)).resolves.toHaveLength(0)
+  })
+
+  it('5 ký tự thì bị từ chối', async () => {
+    const dto = plainToInstance(ResetPasswordDto, {
+      token: 'tok',
+      password: '12345',
+    })
+    await expect(validate(dto)).resolves.not.toHaveLength(0)
+  })
+
+  it('21 ký tự thì bị từ chối — khớp đúng ràng buộc của RegisterUserDto', async () => {
+    const dto = plainToInstance(ResetPasswordDto, {
+      token: 'tok',
+      password: 'a'.repeat(21),
+    })
+    await expect(validate(dto)).resolves.not.toHaveLength(0)
+  })
+
+  it('thiếu token thì bị từ chối', async () => {
+    const dto = plainToInstance(ResetPasswordDto, { password: '123456' })
+    await expect(validate(dto)).resolves.not.toHaveLength(0)
   })
 })
