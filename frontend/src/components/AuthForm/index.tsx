@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useFieldMorph } from "@/hooks/useFieldMorph";
+import { Link } from "react-router";
 
 import { PasswordField, PasswordStrength } from "./PasswordField";
 import { useAuthForm, type AuthMode } from "./useAuthForm";
@@ -32,6 +33,9 @@ export function AuthForm() {
   const isLogin = mode === "login";
   // Registering's own fields are on screen while they arrive or leave.
   const showExtras = !isLogin || leaving;
+  // Đối xứng với showExtras: phần chỉ tab đăng nhập có, vẫn nằm trên màn hình
+  // trong lúc nó rời đi để useFieldMorph kịp diễn hoạt.
+  const showLoginExtras = isLogin || leaving;
 
   const change = (next: AuthMode) => {
     if (next === mode) return;
@@ -153,7 +157,17 @@ export function AuthForm() {
                 name="password"
                 render={({ field }) => (
                   <FormItem data-morph="password">
-                    <FormLabel>Mật khẩu</FormLabel>
+                    <div className="flex items-center justify-between gap-2">
+                      <FormLabel>Mật khẩu</FormLabel>
+                      {showLoginExtras && (
+                        <Link
+                          to="/forgot-password"
+                          className="text-sm font-medium text-brand hover:underline"
+                        >
+                          Quên mật khẩu?
+                        </Link>
+                      )}
+                    </div>
                     <FormControl>
                       <PasswordField
                         autoComplete={

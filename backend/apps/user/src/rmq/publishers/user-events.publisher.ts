@@ -7,6 +7,8 @@ import {
   UserCreatedPayload,
   UserInterestsUpdatedPayload,
   UserMakeFriendPayload,
+  UserPasswordChangedPayload,
+  UserPasswordResetPayload,
   UserRegisterOtpPayload,
   UserUpdatedPayload,
   UserUpdateStatusMakeFriendPayload,
@@ -40,6 +42,22 @@ export class UserEventsPublisher {
     this.publish(
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_REGISTER_OTP,
+      payload,
+    )
+  }
+
+  publishUserPasswordReset(payload: UserPasswordResetPayload): void {
+    this.publish(
+      EXCHANGE_RMQ.USER_EVENTS,
+      ROUTING_RMQ.USER_PASSWORD_RESET,
+      payload,
+    )
+  }
+
+  publishUserPasswordChanged(payload: UserPasswordChangedPayload): void {
+    this.publish(
+      EXCHANGE_RMQ.USER_EVENTS,
+      ROUTING_RMQ.USER_PASSWORD_CHANGED,
       payload,
     )
   }

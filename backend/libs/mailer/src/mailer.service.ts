@@ -146,4 +146,56 @@ export class MailerService {
     })
     await this.send(data.email, 'Mã kích hoạt tài khoản DALN Chat', html)
   }
+
+  /**
+   * Mail mang liên kết đặt lại mật khẩu.
+   *
+   * URL ghép ở đây chứ không phải ở user-service: `FRONTEND_URL` chỉ sống
+   * trong service này, và đây là khuôn mẫu `sendRegistrationOtp` đang dùng.
+   *
+   * `encodeURIComponent` để lại token base64url nguyên vẹn — bảng chữ cái của
+   * nó (A–Z a–z 0–9 - _) không có ký tự nào cần mã hoá. Vẫn gọi để lỡ sau này
+   * đổi cách sinh token thì URL không hỏng.
+   */
+  async sendPasswordReset(data: {
+    email: string
+    username: string
+    token: string
+    expiresInMinutes: number
+  }) {
+    const html = this.render('password-reset.html', {
+      name: data.username,
+      email: data.email,
+      minutes: String(data.expiresInMinutes),
+      resetUrl: this.buildFrontendUrl(
+        `/reset-password?token=${encodeURIComponent(data.token)}`,
+      ),
+    })
+    await this.send(data.email, 'Đặt lại mật khẩu DALN Chat', html)
+  }
+
+  /**
+   * Mail này không phải trang trí: nó là kênh DUY NHẤT báo cho chủ tài khoản
+   * biết có người vừa đặt lại mật khẩu của họ. Càng cần thiết khi phiên đăng
+   * nhập cũ chưa bị thu hồi (xem §8.1 của spec).
+   */
+  async sendPasswordChanged(data: {
+    email: string
+    username: string
+    changedAt: string
+  }) {
+    const html = this.render('password-changed.html', {
+      name: data.username,
+      email: data.email,
+      changedAt: new Intl.DateTimeFormat('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }).format(new Date(data.changedAt)),
+    })
+    await this.send(data.email, 'Mật khẩu DALN Chat vừa được đổi', html)
+  }
 }

@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto'
 import { S3StorageService } from '@app/storage-s3'
 import { UtilService } from '@app/util/util.service'
 import { Inject, Injectable } from '@nestjs/common'
@@ -37,6 +38,7 @@ import {
   UserSummary,
 } from './domain/user.domain'
 import { RedisService } from '@app/redis/redis.service'
+import { maskEmail } from './domain/mask-email'
 import type { MemberProfile } from 'libs/constant/member-profile'
 import { internalFetch, serviceUrl } from '@app/common/http/internal-fetch'
 import {
@@ -73,6 +75,17 @@ interface ResendOtpRequest {
   email: string
 }
 
+interface ForgotPasswordRequest {
+  email: string
+  /** IP người gọi, nếu xác định được. Xem `forgotPassword`. */
+  ip?: string
+}
+
+interface ResetPasswordRequest {
+  token: string
+  password: string
+}
+
 interface MakeFriendRequest {
   inviterId: string
   inviterName: string
@@ -104,6 +117,9 @@ interface CompleteInterestOnboardingRequest {
 
 /** Friends a search answers with at most. */
 const SEARCH_LIMIT = 20
+
+/** Liên kết đặt lại mật khẩu sống bao lâu. Khớp TTL của key trong Redis. */
+const PASSWORD_RESET_TTL_MINUTES = 15
 
 @Injectable()
 export class UserService {
@@ -288,6 +304,169 @@ export class UserService {
       email: data.email,
       requiresOtpVerification: true,
     }
+  }
+
+  private hashResetToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex')
+  }
+
+  /**
+   * Sinh token đặt lại mật khẩu.
+   *
+   * `randomBytes` chứ không phải `Math.random`: cái sau không phải bộ sinh số
+   * ngẫu nhiên mật mã — trạng thái nội bộ của nó khôi phục được từ vài giá trị
+   * đầu ra, và đoán được trạng thái là đoán được mọi token sinh sau đó.
+   *
+   * `base64url` chứ không phải `hex` hay `base64`: bảng chữ cái của nó không có
+   * ký tự nào `encodeURIComponent` phải mã hoá, nên token vào URL nguyên vẹn;
+   * và 32 byte chỉ tốn 43 ký tự thay vì 64 như hex.
+   */
+  private generateResetToken(): string {
+    return randomBytes(32).toString('base64url')
+  }
+
+  /**
+   * Gửi liên kết đặt lại mật khẩu.
+   *
+   * KHÔNG BAO GIỜ ném lỗi và không bao giờ trả về gì khác nhau. Mọi nhánh —
+   * email lạ, tài khoản chưa kích hoạt, đang cooldown, vượt hạn mức — đều kết
+   * thúc bằng `return` im lặng, để người gọi không phân biệt được địa chỉ nào
+   * có tài khoản.
+   *
+   * Thứ tự các bước là một phần của bảo đảm đó: claim trước, tra sau. Tra cơ
+   * sở dữ liệu rồi mới claim thì hai nhánh tiêu tốn số thao tác khác nhau và
+   * thời gian phản hồi tố cáo sự khác biệt.
+   */
+  async forgotPassword(data: ForgotPasswordRequest): Promise<void> {
+    try {
+      // Không dựng được IP nào thì bỏ qua lớp này thay vì chặn: cooldown theo
+      // email mới là lớp bảo vệ chính và nó không phụ thuộc IP.
+      //
+      // Lưu ý: nhánh này KHÔNG cứu được trường hợp `trust proxy` cấu hình sai —
+      // lúc đó mọi request đều mang cùng một IP nội bộ của Kong, `data.ip` vẫn
+      // có giá trị, và hạn mức biến thành trần toàn cục 10 lần/giờ cho cả hệ
+      // thống. Chỉ kiểm tra key `pwdreset:ip:*` sau khi triển khai mới phát hiện
+      // được, nên đừng bỏ bước đó.
+      if (
+        data.ip &&
+        !(await this.redisService.claimPasswordResetIpSlot(data.ip))
+      ) {
+        this.logger.warn('[user.forgot-password] ip rate limit hit', {
+          ip: data.ip,
+        })
+        return
+      }
+
+      // Cooldown 60s theo địa chỉ: chặn dội bom một hộp thư.
+      if (!(await this.redisService.claimPasswordResetSlot(data.email))) return
+
+      // Trần tổng số theo địa chỉ: cooldown ở trên chỉ chặn được TẦN SUẤT,
+      // không chặn TỔNG SỐ (rải đều một mail/phút suốt cả giờ vẫn lọt).
+      //
+      // Đặt SAU cooldown chứ không trước — cố ý, đây từng là lỗi. Đặt trước
+      // thì một request bị cooldown chặn (không gửi mail nào) vẫn tiêu một
+      // slot của trần này, biến "trần mail mỗi giờ" thành "trần request mỗi
+      // giờ": chỉ vài cú bấm "Gửi lại" liên tiếp trong lúc cooldown còn hiệu
+      // lực — thứ UI hiện tại cho phép, vì nút "Dùng email khác" quay lại form
+      // mà không kiểm tra cooldown — đủ để khoá tài khoản khỏi đường khôi
+      // phục cả tiếng, dù chỉ đúng một mail thật sự được gửi.
+      if (!(await this.redisService.claimPasswordResetHourlySlot(data.email))) {
+        this.logger.warn('[user.forgot-password] hourly rate limit hit', {
+          // Không log email thô: đây là dữ liệu cá nhân, khác IP ở nhánh trên.
+          email: maskEmail(data.email),
+        })
+        return
+      }
+
+      const user = await this.userRepo.findByEmail(data.email)
+
+      // Tài khoản chưa kích hoạt thuộc về luồng verify-otp: gửi liên kết đặt lại
+      // mật khẩu cho một tài khoản chưa bao giờ mở là vô nghĩa.
+      if (!user || !user.isActive) return
+
+      const token = this.generateResetToken()
+      await this.redisService.savePasswordResetToken(
+        user.email,
+        user.id,
+        this.hashResetToken(token),
+      )
+
+      this.eventsPublisher.publishUserPasswordReset({
+        email: user.email,
+        username: user.username,
+        token,
+        expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+      })
+    } catch (error) {
+      // Hạ tầng lỗi cũng phải im lặng như mọi nhánh khác. savePasswordResetToken
+      // chỉ chạy cho tài khoản có thật và đã kích hoạt, nên để exception thoát ra
+      // là biến một sự cố Redis thành tín hiệu "địa chỉ này có tài khoản".
+      this.logger.error(
+        '[user.forgot-password] failed',
+        error instanceof Error ? error.stack : String(error),
+      )
+    }
+  }
+
+  /**
+   * Kiểm tra liên kết còn sống không, KHÔNG tiêu thụ nó.
+   *
+   * Tồn tại để trang đặt lại mật khẩu phân biệt được liên kết hỏng trước khi
+   * bắt người dùng gõ xong mật khẩu rồi mới báo lỗi.
+   *
+   * Trả về email đã che: ai cầm token thì đằng nào cũng sắp đổi được mật khẩu,
+   * nên che một phần là đủ — mà vẫn cho họ biết đang đặt lại cho tài khoản nào.
+   */
+  async validatePasswordResetToken(
+    token: string,
+  ): Promise<{ valid: boolean; maskedEmail?: string }> {
+    const userId = await this.redisService.peekPasswordResetToken(
+      this.hashResetToken(token),
+    )
+    if (!userId) return { valid: false }
+
+    const user = await this.userRepo.findById(userId)
+    if (!user) return { valid: false }
+
+    return { valid: true, maskedEmail: maskEmail(user.email) }
+  }
+
+  /**
+   * Đặt mật khẩu mới.
+   *
+   * Token được tiêu thụ TRƯỚC khi ghi. `consumePasswordResetToken` dùng GETDEL
+   * nên đúng một caller nhận được `userId`; ghi trước rồi mới tiêu thụ là mở
+   * lại khe hở cho hai request cùng token cùng đổi được mật khẩu.
+   *
+   * Cố ý KHÔNG chặn đặt lại trùng mật khẩu cũ: người quên mật khẩu rồi chợt
+   * nhớ ra không có lý do gì bị chặn.
+   */
+  async resetPassword(data: ResetPasswordRequest): Promise<void> {
+    const userId = await this.redisService.consumePasswordResetToken(
+      this.hashResetToken(data.token),
+    )
+    if (!userId) UserErrors.passwordResetTokenInvalid()
+
+    const user = await this.userRepo.findById(userId)
+    if (!user) UserErrors.passwordResetTokenInvalid()
+
+    const hashedPassword = await this.utilService.hashPassword(data.password)
+    await this.userRepo.updatePasswordById(user.id, hashedPassword)
+
+    // Chỉ mục ngược chỉ là chỉ mục: xoá hụt cũng vô hại, nó tự hết hạn.
+    await this.redisService.clearPasswordResetIndex(user.email)
+
+    this.logger.info('[user.reset-password] password changed', {
+      userId: user.id,
+    })
+
+    // Kênh DUY NHẤT báo cho chủ tài khoản biết có người vừa đặt lại mật khẩu
+    // của họ — càng cần thiết khi phiên đăng nhập cũ chưa bị thu hồi.
+    this.eventsPublisher.publishUserPasswordChanged({
+      email: user.email,
+      username: user.username,
+      changedAt: new Date().toISOString(),
+    })
   }
 
   async login(data: UserLoginRequest): Promise<AuthSession> {

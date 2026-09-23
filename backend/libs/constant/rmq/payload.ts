@@ -23,6 +23,28 @@ export interface UserRegisterOtpPayload {
   otp: string
 }
 
+/**
+ * Token đi ở dạng THÔ trong payload; chỉ bản băm nằm lại trong Redis.
+ *
+ * URL do notification-service ghép chứ không phải user-service: `FRONTEND_URL`
+ * chỉ được đọc trong `MailerService`, và user-service không import
+ * `MailerModule`. Đây cũng đúng khuôn mẫu sẵn có — `sendRegistrationOtp` nhận
+ * `email` rồi tự ghép `verifyUrl`.
+ */
+export interface UserPasswordResetPayload {
+  email: string
+  username: string
+  token: string
+  expiresInMinutes: number
+}
+
+export interface UserPasswordChangedPayload {
+  email: string
+  username: string
+  /** ISO 8601 */
+  changedAt: string
+}
+
 export interface UserMakeFriendPayload {
   inviterId: string
   inviterName: string

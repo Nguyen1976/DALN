@@ -2,6 +2,9 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
+  Ip,
   Param,
   Post,
   Query,
@@ -20,14 +23,17 @@ import {
 } from '@app/common/common.decorator'
 import { LoggerService } from '@app/logger'
 import {
+  ForgotPasswordDto,
   LoginUserDto,
   MakeFriendDto,
   MakeFriendByUsernameDto,
   ResendOtpDto,
+  ResetPasswordDto,
   RegisterUserDto,
   UpdateProfileDto,
   RespondFriendRequestDto,
   FriendRequestParamsDto,
+  ValidateResetTokenQueryDto,
   VerifyOtpDto,
   CompleteInterestOnboardingDto,
   FriendRequestsQueryDto,
@@ -98,6 +104,34 @@ export class UserHttpController {
   @WithoutLogin()
   async resendOtp(@Body() dto: ResendOtpDto) {
     await this.userService.resendRegistrationOtp(dto)
+  }
+
+  /**
+   * Luôn trả 204, không ngoại lệ nào.
+   *
+   * Kể cả khi đang trong cooldown — khác `resend-otp` vốn trả 429 kèm số giây
+   * còn lại. Ở luồng đăng ký, người dùng vừa tự tay xin mã và đang chờ nên con
+   * số đó có ích cho chính họ; ở đây nó nói cho người gọi biết "địa chỉ này vừa
+   * có người xin đặt lại mật khẩu". Countdown chuyển hẳn sang client.
+   */
+  @Post('forgot-password')
+  @WithoutLogin()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async forgotPassword(@Body() dto: ForgotPasswordDto, @Ip() ip: string) {
+    await this.userService.forgotPassword({ email: dto.email, ip })
+  }
+
+  @Get('reset-password/validate')
+  @WithoutLogin()
+  validateResetToken(@Query() query: ValidateResetTokenQueryDto) {
+    return this.userService.validatePasswordResetToken(query.token)
+  }
+
+  @Post('reset-password')
+  @WithoutLogin()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    await this.userService.resetPassword(dto)
   }
 
   @Post('login')

@@ -7,6 +7,10 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
+    <!-- Ghim mặc định của trình duyệt: request sang tên miền khác chỉ mang origin,
+         không mang đường dẫn và query. Trang /reset-password để token trên URL nên
+         đây là thứ giữ token không rò qua Referer. -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta
       name="description"
       content="Nhắn tin, gọi thoại và kết nối bạn bè theo gợi ý thông minh."
