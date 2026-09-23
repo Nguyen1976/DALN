@@ -2,10 +2,16 @@ name: CI/CD
 
 # Một workflow cho cả frontend + backend.
 #   - PR vào main  : chỉ kiểm tra (typecheck/test BE, lint/build FE) -> chặn merge nếu đỏ.
-#   - push vào main: kiểm tra xong -> SSH vào server, server kéo đúng commit này
-#                    về và build lại toàn bộ (xem deploy/deploy.sh).
-#   - Run workflow : deploy lại HEAD của main (vd. sau khi sửa env trên server),
-#                    hoặc điền SHA của commit cũ trên main để rollback.
+#   - push vào main: kiểm tra xong -> build 8 image SONG SONG rồi đẩy lên GHCR ->
+#                    SSH vào server, server chỉ `compose pull` + `up -d`.
+#   - Run workflow : deploy lại một commit trên main mà KHÔNG build lại — image đã
+#                    nằm sẵn trên GHCR theo tag là SHA. Dùng để redeploy sau khi sửa
+#                    env trên server, hoặc điền SHA cũ để rollback (tức thì).
+#
+# Vì sao build ở đây chứ không trên server: server là VPS 4 nhân, và nó vừa build
+# vừa phục vụ người dùng thật. Dockerfile backend `COPY libs libs` cho MỌI service,
+# nên chỉ cần một file trong libs/ đổi là cache của cả 7 image vỡ và server phải
+# build lại tuần tự — đo được 25-30 phút. Ở đây 8 image chạy trên 8 runner riêng.
 
 on:
   pull_request:
@@ -21,6 +27,8 @@ on:
 
 permissions:
   contents: read
+  # Job `images` đẩy image lên GHCR bằng GITHUB_TOKEN.
+  packages: write
 
 # PR: bản mới huỷ bản cũ. main: xếp hàng, không bao giờ huỷ một lượt deploy đang chạy.
 concurrency:
@@ -91,10 +99,111 @@ jobs:
       - name: Build
         run: npm run build
 
+  images:
+    name: Build & push ${{ matrix.service }}
+    needs: [backend, frontend]
+    # Chỉ build khi có code mới vào main. workflow_dispatch (redeploy / rollback)
+    # cố ý BỎ QUA job này: image của commit đó đã nằm trên GHCR theo tag SHA, nên
+    # rollback chỉ còn là kéo image cũ về — không phải build lại.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # Thấy hết service nào hỏng trong một lượt, thay vì sửa xong cái này mới lộ cái kia.
+      fail-fast: false
+      matrix:
+        include:
+          # db-push mang cả CLI migration (target `schema`), nên nó có devDeps và
+          # nặng hơn hẳn các image còn lại.
+          - service: db-push
+            context: backend
+            target: schema
+            build_args: ""
+          - service: user
+            context: backend
+            target: production
+            build_args: SERVICE=user
+          - service: chat
+            context: backend
+            target: production
+            build_args: SERVICE=chat
+          - service: notification
+            context: backend
+            target: production
+            build_args: SERVICE=notification
+          - service: realtime-gateway
+            context: backend
+            target: production
+            build_args: SERVICE=realtime-gateway
+          - service: recommendation
+            context: backend
+            target: production
+            build_args: SERVICE=recommendation
+          - service: saga-orchestrator
+            context: backend
+            target: production
+            build_args: SERVICE=saga-orchestrator
+          # VITE_* được nướng vào bundle lúc build, nên phải có mặt Ở ĐÂY chứ không
+          # phải trên server. Chúng không bí mật — bundle JS công khai mang chúng —
+          # nên để ở repo variables, không phải secrets.
+          - service: web
+            context: frontend
+            target: ""
+            build_args: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR bắt buộc tên image toàn chữ thường; owner là "Nguyen1976".
+      - name: Tên image
+        id: img
+        run: |
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "name=ghcr.io/${owner}/daln/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          target: ${{ matrix.target }}
+          push: true
+          # Tag theo SHA là bản ghi "server đang chạy đúng commit nào", và là thứ
+          # làm rollback thành một lần pull. `latest` chỉ để tiện xem bằng mắt.
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ github.sha }}
+            ${{ steps.img.outputs.name }}:latest
+          build-args: |
+            ${{ matrix.build_args }}
+            ${{ matrix.service == 'web' && format('VITE_API_ROOT={0}', vars.VITE_API_ROOT) || '' }}
+            ${{ matrix.service == 'web' && format('VITE_SOCKET_URL={0}', vars.VITE_SOCKET_URL) || '' }}
+          # Cache theo từng service: 7 image backend dùng chung stage `deps`
+          # (npm ci), nhưng scope riêng thì chúng không giẫm lên nhau.
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+
   deploy:
     name: Deploy lên server
-    needs: [backend, frontend]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [backend, frontend, images]
+    # `always()` vì job `images` bị BỎ QUA ở workflow_dispatch — không có nó thì
+    # `needs` sẽ chặn luôn deploy. Nhưng vẫn phải chặn khi images CHẠY và HỎNG.
+    if: |
+      always()
+      && needs.backend.result == 'success'
+      && needs.frontend.result == 'success'
+      && (needs.images.result == 'success' || needs.images.result == 'skipped')
+      && github.event_name != 'pull_request'
+      && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

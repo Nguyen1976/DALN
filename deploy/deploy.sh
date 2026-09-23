@@ -5,9 +5,12 @@
 # Gọi bởi /usr/local/bin/daln-deploy (CI/CD) sau khi đã reset về đúng commit,
 # hoặc chạy tay trên server:  bash deploy/deploy.sh
 #
+# Image KHÔNG được build ở đây nữa: CI dựng 8 image song song rồi đẩy lên GHCR theo
+# tag là commit SHA, script này chỉ `compose pull`. Build tại chỗ vẫn còn làm đường
+# dự phòng (pull hỏng, hoặc commit chưa qua CI) và ép được bằng DALN_BUILD_LOCAL=1.
+#
 # Chỉ phần có thay đổi mới tốn thời gian:
-#   - mỗi image build từ đúng file của nó; image không đổi thì ăn cache BuildKit,
-#     vài giây là xong;
+#   - pull chỉ tải layer khác; 7 image backend dùng chung layer base + npm ci;
 #   - `up -d` chỉ tạo lại container có image/cấu hình đổi;
 #   - Kong chỉ restart khi một service phía sau nó vừa được tạo lại.
 #
@@ -41,6 +44,21 @@ compose() {
 KONG_CONFIG_SHA="$(sha256sum kong/kong.yml | cut -c1-16)"
 export KONG_CONFIG_SHA
 
+# ---- Image: kéo từ registry, không build ở đây ----
+# CI build 8 image song song trên 8 runner rồi đẩy lên GHCR theo tag là commit SHA.
+# Server chỉ pull. Lý do: máy này 4 nhân và vừa build vừa phục vụ người dùng thật,
+# mà Dockerfile `COPY libs libs` cho MỌI service nên một file trong libs/ đổi là
+# cả 7 image phải build lại tuần tự — đo được 25-30 phút.
+#
+# Tag mặc định là commit đang checkout, tức đúng commit remote-entry.sh vừa reset
+# tới — nên không cần sửa gì bên phía script đã cài trên server.
+DALN_IMAGE_PREFIX="${DALN_IMAGE_PREFIX:-ghcr.io/nguyen1976/daln}"
+DALN_IMAGE_TAG="${DALN_IMAGE_TAG:-$(git -C "${ROOT}" rev-parse HEAD)}"
+export DALN_IMAGE_PREFIX DALN_IMAGE_TAG
+
+# Service có image riêng. Dùng chung cho cả đường pull lẫn đường build dự phòng.
+SERVICES="db-push user chat notification realtime-gateway recommendation saga-orchestrator web"
+
 # Backup Mongo trước khi chạy migration. Chạy tay có thể đổi chỗ bằng DALN_BACKUP_DIR.
 BACKUP_DIR="${DALN_BACKUP_DIR:-/root/backups/mongo}"
 BACKUP_KEEP=7
@@ -52,7 +70,8 @@ DOMAIN="${DALN_DOMAIN:-nguyen1976.xyz}"
 # image store (server đang dùng), .Id là digest của index và đổi sau mỗi lần build,
 # kể cả khi build ăn cache hoàn toàn.
 image_id() {
-  { docker image inspect -f '{{json .RootFS.Layers}}{{json .Config}}' "daln/$1:latest" 2>/dev/null || true; } |
+  { docker image inspect -f '{{json .RootFS.Layers}}{{json .Config}}' \
+    "${DALN_IMAGE_PREFIX}/$1:${DALN_IMAGE_TAG}" 2>/dev/null || true; } |
     sha256sum | cut -c1-16
 }
 
@@ -65,6 +84,7 @@ containers() {
 # Giá trị cho bảng tóm tắt. Khởi tạo từ đầu vì deploy có thể dừng giữa chừng.
 built=""
 recreated=""
+image_source="chưa tới bước này"
 kong="giữ nguyên"
 migration="không rõ"
 backup="bỏ qua"
@@ -85,8 +105,10 @@ dead_letters() {
 
 summary() {
   echo "[deploy] ===== Tóm tắt ====="
+  echo "[deploy] Nguồn image : ${image_source}"
   echo "[deploy] Image mới   :${built:- không có}"
   echo "[deploy] Tạo lại     : ${recreated:-không có}"
+  echo "[deploy] Đĩa         : $(df -h / | awk 'NR==2 {print $4" trống ("$5" đã dùng)"}')"
   echo "[deploy] Kong        : ${kong}"
   echo "[deploy] nginx       : ${nginx_state}"
   echo "[deploy] coturn      : ${coturn_state}"
@@ -135,19 +157,44 @@ backup_mongo() {
 
 echo "[deploy] Commit $(git -C "${ROOT}" log -1 --format='%h %s')"
 
-# Build TUẦN TỰ: máy 4 core / 8GB, build song song 8 image rất dễ OOM.
-for svc in db-push user chat notification realtime-gateway recommendation saga-orchestrator web; do
-  echo "[deploy] Build ${svc}"
-  started=${SECONDS}
-  before="$(image_id "${svc}")"
-  compose build "${svc}"
-  if [ "$(image_id "${svc}")" != "${before}" ]; then
-    built+=" ${svc}"
-    echo "[deploy] Build ${svc}: image mới ($((SECONDS - started))s)"
-  else
-    echo "[deploy] Build ${svc}: không đổi ($((SECONDS - started))s)"
-  fi
-done
+# ---- Lấy image ----
+# Đường chính: pull từ GHCR. Đường dự phòng: build tại chỗ — giữ lại để chạy tay
+# trên một commit chưa lên CI vẫn deploy được, và để một sự cố registry không làm
+# kẹt cứng việc phát hành. Ép build tại chỗ: DALN_BUILD_LOCAL=1 bash deploy/deploy.sh
+build_local() {
+  echo "[deploy] Build tại chỗ, TUẦN TỰ (máy 4 nhân, build song song 8 image rất dễ OOM)"
+  for svc in ${SERVICES}; do
+    started=${SECONDS}
+    before="$(image_id "${svc}")"
+    compose build "${svc}"
+    if [ "$(image_id "${svc}")" != "${before}" ]; then
+      built+=" ${svc}"
+      echo "[deploy] Build ${svc}: image mới ($((SECONDS - started))s)"
+    else
+      echo "[deploy] Build ${svc}: không đổi ($((SECONDS - started))s)"
+    fi
+  done
+}
+
+pull_started=${SECONDS}
+declare -A before_ids=()
+for svc in ${SERVICES}; do before_ids["${svc}"]="$(image_id "${svc}")"; done
+
+if [ -n "${DALN_BUILD_LOCAL:-}" ]; then
+  image_source="build tại chỗ (DALN_BUILD_LOCAL)"
+  build_local
+elif compose pull --quiet ${SERVICES}; then
+  image_source="pull ${DALN_IMAGE_PREFIX}:${DALN_IMAGE_TAG:0:7} ($((SECONDS - pull_started))s)"
+  echo "[deploy] Pull xong sau $((SECONDS - pull_started))s"
+  for svc in ${SERVICES}; do
+    [ "$(image_id "${svc}")" != "${before_ids[${svc}]}" ] && built+=" ${svc}"
+  done
+else
+  # Tag chưa có trên registry (commit chưa qua CI), mạng hỏng, hoặc GHCR sự cố.
+  echo "[deploy] Pull thất bại -> quay về build tại chỗ" >&2
+  image_source="pull THẤT BẠI -> build tại chỗ"
+  build_local
+fi
 
 before="$(containers)"
 
@@ -375,6 +422,23 @@ fi
 
 if [ "${failed}" -ne 0 ]; then
   fail "smoke check thất bại"
+fi
+
+# Image của các lần deploy TRƯỚC mang tag là SHA của chúng, nên chúng KHÔNG
+# dangling và `docker image prune` không đụng tới — đĩa sẽ đầy dần khoảng 6GB mỗi
+# lần phát hành. Xoá mọi tag daln khác tag đang chạy; cái nào còn container dùng
+# thì docker từ chối và bỏ qua. Rollback vẫn được: image nằm trên GHCR.
+docker image ls --filter "reference=${DALN_IMAGE_PREFIX}/*" --format '{{.Repository}}:{{.Tag}}' |
+  grep -v ":${DALN_IMAGE_TAG}\$" |
+  xargs -r docker rmi >/dev/null 2>&1 || true
+
+# Image build tại chỗ từ thời trước khi chuyển sang registry (daln/<svc>:latest).
+# Khi đang chạy bằng image từ registry thì chúng là ~6GB rác không ai tham chiếu,
+# và không tên nào trong số đó khớp bộ lọc ở trên. Chỉ dọn khi KHÔNG ở chế độ
+# build tại chỗ — ở chế độ đó chúng chính là image đang chạy.
+if [ "${DALN_IMAGE_PREFIX}" != "daln" ]; then
+  docker image ls --filter 'reference=daln/*' --format '{{.Repository}}:{{.Tag}}' |
+    xargs -r docker rmi >/dev/null 2>&1 || true
 fi
 
 docker image prune -f >/dev/null
