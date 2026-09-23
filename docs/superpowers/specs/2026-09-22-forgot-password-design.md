@@ -100,6 +100,7 @@ bấm "gửi lại liên kết" — không mất dữ liệu nào.
 | `pwdreset:email:<email>` | `sha256(token)` | 900s | Huỷ token cũ khi cấp token mới |
 | `pwdreset:cooldown:<email>` | `1` | 60s | Chặn dội bom một hộp thư |
 | `pwdreset:ip:<ip>` | bộ đếm | 3600s | Chặn quét hàng loạt địa chỉ |
+| `pwdreset:hourly:<email>` | bộ đếm | 3600s, limit 5 | Chặn tổng số mail/giờ tới một địa chỉ, bất kể IP |
 
 **Sinh token:** `randomBytes(32).toString('base64url')` → 43 ký tự, 256 bit
 entropy. An toàn trong URL, không cần escape.
@@ -165,13 +166,21 @@ Thứ tự thực hiện, và lý do của thứ tự đó:
    là 1. Quá 10 thì dừng, trả 204.
 2. **Cooldown theo email** — claim `SET NX EX 60`. Không giành được thì dừng,
    trả 204.
-3. **Tra user** — sau hai bước trên. Đây là đúng thứ tự mà
+3. **Trần theo giờ** — `INCR pwdreset:hourly:<email>`, đặt `EXPIRE 3600` khi
+   giá trị trả về là 1. Quá 5 thì dừng, trả 204. Đặt **sau** cooldown chứ không
+   trước: cooldown đã claim (bước 2) nghĩa là request này sắp thật sự gửi một
+   mail (nếu tài khoản tồn tại) — nên trần ở bước 3 đếm đúng *số mail*, không
+   phải *số request*. Đặt trước cooldown thì một request bị cooldown chặn —
+   không gửi mail nào — vẫn tiêu một slot của trần, và vài request dội liên
+   tiếp trong lúc cooldown còn hiệu lực đủ khoá tài khoản khỏi đường khôi phục
+   cả tiếng dù chỉ một mail thật sự gửi đi.
+4. **Tra user** — sau ba bước trên. Đây là đúng thứ tự mà
    `resendRegistrationOtp` đang dùng: claim trước khi tra, để email tồn tại và
    email không tồn tại đi qua cùng số lượng thao tác.
-4. Không tìm thấy, hoặc `isActive === false` → dừng, trả 204. Tài khoản chưa
+5. Không tìm thấy, hoặc `isActive === false` → dừng, trả 204. Tài khoản chưa
    kích hoạt thuộc về luồng `verify-otp`; gửi link đặt lại mật khẩu cho một tài
    khoản chưa bao giờ mở là vô nghĩa.
-5. Sinh token, huỷ token cũ, lưu hai key, publish `user.passwordReset`.
+6. Sinh token, huỷ token cũ, lưu hai key, publish `user.passwordReset`.
 
 **Tại sao cooldown trả 204 chứ không 429.** Đây là chỗ cố ý khác với
 `resendRegistrationOtp`. Ở luồng đăng ký, người dùng vừa tự tay yêu cầu mã và
@@ -430,6 +439,23 @@ token do đó **đã** được che sẵn. Thêm `<meta name="referrer"
 content="strict-origin-when-cross-origin">` không đổi hành vi, mà để ghim mặc
 định đó lại phòng khi một trình duyệt cũ hoặc một thay đổi cấu hình sau này làm
 hỏng nó.
+
+**Rủi ro chấp nhận thêm: token vào access log của nginx và Kong.**
+`GET /user/reset-password/validate?token=…` đặt nguyên token vào dòng request,
+và dòng đó nằm trong access log mặc định của cả nginx trước máy chủ lẫn Kong.
+Khác với lịch sử duyệt web hay `Referer` — nơi token chỉ rò cho chính trình
+duyệt của người dùng hoặc một trang đích họ chủ động ghé — log này nằm trên hạ
+tầng, nên bất cứ ai có quyền đọc log (hoặc một log shipper chuyển log ra ngoài)
+đều nằm trong phạm vi rò rỉ. Endpoint này cố ý **không** tiêu thụ token (xem
+§5.2), nên giá trị bị log vẫn còn dùng được cho tới khi người dùng bấm submit ở
+`/reset-password` — không phải một lần đọc log vô hại sau khi token đã chết.
+
+Chấp nhận, với cùng hai lớp giảm thiểu đã có: TTL 15 phút giới hạn cửa sổ token
+còn sống, và dùng một lần (`GETDEL` ở bước tiêu thụ) giới hạn thiệt hại nếu ai
+đó đọc được token từ log trong cửa sổ đó. Cách vá rẻ nếu cần đóng hẳn: một
+`map` trong nginx tách `token=` ra khỏi dòng request trước khi ghi log — không
+đổi endpoint, không đổi hợp đồng API. Đây chỉ là ghi nhận rủi ro; không đổi cấu
+hình nginx trong lần sửa này.
 
 ### 8.4 Hạn mức của Kong quá rộng
 

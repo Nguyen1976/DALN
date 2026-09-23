@@ -2660,9 +2660,16 @@ Thêm `claimPasswordResetHourlySlot: jest.fn().mockResolvedValue(true)` vào stu
 
 - [ ] **Step 3: Gắn vào `forgotPassword`**
 
-Ngay sau bước kiểm tra IP, trước `claimPasswordResetSlot`:
+Ngay SAU `claimPasswordResetSlot` (cooldown), không phải trước. Cooldown chặn
+trước nghĩa là mọi request đến bước này đều sắp thật sự thành một lần gửi (nếu
+tài khoản tồn tại) — nên bộ đếm giờ đếm đúng *số mail*, đúng như tên hàm
+`claimPasswordResetHourlySlot` hứa hẹn. Đặt trước cooldown (bản đầu tiên của
+kế hoạch này làm vậy — đã sửa lại ở nhánh vá lỗi sau đó) khiến một request bị
+cooldown chặn, không gửi mail nào, vẫn tiêu một slot của trần theo giờ:
 
 ```ts
+    if (!(await this.redisService.claimPasswordResetSlot(data.email))) return
+
     if (!(await this.redisService.claimPasswordResetHourlySlot(data.email))) return
 ```
 
