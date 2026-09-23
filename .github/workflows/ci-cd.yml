@@ -17,8 +17,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    # TEMP-TEST: nhánh ci/build-images-in-ci chỉ để chạy thử job images. GỠ TRƯỚC KHI MỞ PR.
-    branches: [main, ci/build-images-in-ci]
+    branches: [main]
   workflow_dispatch:
     inputs:
       sha:
@@ -106,8 +105,7 @@ jobs:
     # Chỉ build khi có code mới vào main. workflow_dispatch (redeploy / rollback)
     # cố ý BỎ QUA job này: image của commit đó đã nằm trên GHCR theo tag SHA, nên
     # rollback chỉ còn là kéo image cũ về — không phải build lại.
-    # TEMP-TEST: thêm nhánh thử nghiệm. GỠ TRƯỚC KHI MỞ PR.
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci/build-images-in-ci')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
