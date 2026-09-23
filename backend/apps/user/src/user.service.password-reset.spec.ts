@@ -139,6 +139,8 @@ describe('UserService.forgotPassword', () => {
     await service.forgotPassword({ email: 'an@example.test', ip: '1.2.3.4' })
 
     expect(eventsPublisher.publishUserPasswordReset).not.toHaveBeenCalled()
+    // Return sớm không được tiêu tốn cả slot cooldown 60s.
+    expect(redisService.claimPasswordResetSlot).not.toHaveBeenCalled()
   })
 
   it('không xác định được IP thật thì bỏ qua hạn mức IP, không khoá người dùng', async () => {

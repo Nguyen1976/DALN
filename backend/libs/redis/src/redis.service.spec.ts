@@ -170,6 +170,32 @@ describe('RedisService — token đặt lại mật khẩu', () => {
     )
   })
 
+  it('trần theo giờ: đặt EXPIRE đúng một lần, ở lần đếm đầu tiên', async () => {
+    client.incr.mockResolvedValueOnce(1)
+    await expect(
+      service.claimPasswordResetHourlySlot('an@example.test'),
+    ).resolves.toBe(true)
+    expect(client.expire).toHaveBeenCalledWith(
+      'pwdreset:hourly:an@example.test',
+      3600,
+    )
+
+    client.incr.mockResolvedValueOnce(2)
+    await expect(
+      service.claimPasswordResetHourlySlot('an@example.test'),
+    ).resolves.toBe(true)
+    // Đặt EXPIRE mỗi lần sẽ đẩy cửa sổ trượt mãi và bộ đếm không bao giờ reset
+    // — trần sẽ im lặng không bao giờ kích hoạt.
+    expect(client.expire).toHaveBeenCalledTimes(1)
+  })
+
+  it('trần theo email: đúng 5 lần trong một giờ thì vẫn cho qua', async () => {
+    client.incr.mockResolvedValueOnce(5)
+    await expect(
+      service.claimPasswordResetHourlySlot('an@example.test'),
+    ).resolves.toBe(true)
+  })
+
   it('trần theo email: quá 5 lần trong một giờ thì từ chối', async () => {
     client.incr.mockResolvedValueOnce(6)
     await expect(
