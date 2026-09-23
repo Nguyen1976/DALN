@@ -89,7 +89,12 @@ export function useResendCountdown(key: string, storagePrefix: string) {
 
   const start = useCallback(
     (duration = 60) => {
-      const until = Date.now() + duration * 1000;
+      // Không đặt lại một mốc đang còn sống. Server dùng SET NX EX: khi slot
+      // vẫn bị giữ thì TTL cũ chạy tiếp và yêu cầu mới bị bỏ qua lặng lẽ —
+      // reset ở client sẽ báo cho người dùng một khoảng chờ dài hơn thực tế.
+      const existing = readDeadline(storageKey);
+      const until =
+        existing > Date.now() ? existing : Date.now() + duration * 1000;
       // Ghi mốc TRƯỚC khi chạy tick, để tải lại trang ngay sau khi bấm vẫn
       // khôi phục đúng thời gian chờ còn lại.
       writeDeadline(storageKey, until);
