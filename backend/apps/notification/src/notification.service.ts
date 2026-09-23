@@ -10,6 +10,8 @@ import type {
   ChatMentionPayload,
   UserCreatedPayload,
   UserMakeFriendPayload,
+  UserPasswordChangedPayload,
+  UserPasswordResetPayload,
   UserRegisterOtpPayload,
   UserUpdateStatusMakeFriendPayload,
 } from 'libs/constant/rmq/payload'
@@ -98,6 +100,19 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
 
   async handleUserRegisterOtp(data: UserRegisterOtpPayload) {
     await this.mailerService.sendRegistrationOtp(data)
+  }
+
+  /**
+   * Mail bảo mật, không phải thông báo: không đi qua `deliver()` và không đọc
+   * cài đặt kênh. Người dùng tắt email thông báo vẫn phải nhận được liên kết
+   * đặt lại mật khẩu, nếu không họ mất luôn đường vào tài khoản.
+   */
+  async handleUserPasswordReset(data: UserPasswordResetPayload) {
+    await this.mailerService.sendPasswordReset(data)
+  }
+
+  async handleUserPasswordChanged(data: UserPasswordChangedPayload) {
+    await this.mailerService.sendPasswordChanged(data)
   }
 
   async handleMakeFriend(data: UserMakeFriendPayload) {
