@@ -45,19 +45,26 @@ function writeDeadline(storageKey: string, until: number) {
  * khi tiền tố đổi.
  */
 export function useResendCountdown(key: string, storagePrefix: string) {
-  const [seconds, setSeconds] = useState(0);
-  const timerRef = useRef<number | null>(null);
-
   // key rỗng (chưa biết email) thì không có gì để lưu/đọc — countdown chỉ
   // sống trong bộ nhớ của lần chạy hiện tại.
   const storageKey = key ? `${storagePrefix}:${key}` : "";
+
+  // Seed lười ngay từ lần render đầu tiên: nếu khởi tạo bằng 0 rồi sửa lại
+  // trong effect, trình duyệt có thể kịp vẽ khung hình với nút "Gửi lại" ở
+  // trạng thái mở khoá trước khi effect chạy và sửa lại số giây — người dùng
+  // thấy nút nhấp nháy như bấm được trong khi chưa hết hạn chờ.
+  const [seconds, setSeconds] = useState(() => secondsLeft(readDeadline(storageKey)));
+  const timerRef = useRef<number | null>(null);
 
   const run = useCallback((until: number) => {
     if (timerRef.current) window.clearInterval(timerRef.current);
 
     const remaining = secondsLeft(until);
     setSeconds(remaining);
-    if (remaining <= 0) return;
+    if (remaining <= 0) {
+      timerRef.current = null;
+      return;
+    }
 
     timerRef.current = window.setInterval(() => {
       const tick = secondsLeft(until);
@@ -67,6 +74,17 @@ export function useResendCountdown(key: string, storagePrefix: string) {
         timerRef.current = null;
       }
     }, 500);
+  }, []);
+
+  // Dừng hẳn: dọn interval đang chạy (nếu có) và đưa số giây về 0. Cần tách
+  // riêng khỏi run() vì "không có mốc nào đang chờ" và "còn 0 giây" là hai
+  // tình huống khác nhau — cái đầu phải chủ động dừng đồng hồ của key cũ.
+  const stop = useCallback(() => {
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setSeconds(0);
   }, []);
 
   const start = useCallback(
@@ -80,11 +98,15 @@ export function useResendCountdown(key: string, storagePrefix: string) {
     [run, storageKey],
   );
 
-  // Nhặt lại mốc đã lưu sau khi tải lại trang.
+  // Nhặt lại mốc đã lưu sau khi tải lại trang, HOẶC khi storageKey đổi (ví
+  // dụ người dùng gõ sang một email khác). Nếu key mới không có mốc nào còn
+  // hiệu lực, phải chủ động stop() — nếu không, đồng hồ của key cũ vẫn chạy
+  // và hiển thị nhầm lên key mới.
   useEffect(() => {
     const until = readDeadline(storageKey);
     if (until > Date.now()) run(until);
-  }, [run, storageKey]);
+    else stop();
+  }, [run, stop, storageKey]);
 
   // Interval bị rò khi component unmount giữa nhịp tick — đây chính là lỗi
   // VerifyOtp từng gặp trước khi có hook này.
