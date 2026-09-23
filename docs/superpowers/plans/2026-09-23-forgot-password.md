@@ -1643,7 +1643,7 @@ Chạy stack rồi gọi qua Kong và kiểm tra log:
 
 ```bash
 cd backend && docker compose up -d
-curl -i -X POST http://localhost:8000/user/forgot-password \
+curl -i -X POST http://localhost:8080/user/forgot-password \
   -H 'Content-Type: application/json' \
   -H 'X-Forwarded-For: 203.0.113.9' \
   -d '{"email":"khong-ton-tai@example.test"}'
@@ -1689,7 +1689,7 @@ cd backend && docker compose up -d
 Tạo một tài khoản đã kích hoạt (hoặc dùng tài khoản sẵn có), rồi:
 
 ```bash
-curl -i -X POST http://localhost:8000/user/forgot-password \
+curl -i -X POST http://localhost:8080/user/forgot-password \
   -H 'Content-Type: application/json' -d '{"email":"<email-that>"}'
 ```
 
@@ -1697,13 +1697,13 @@ Kỳ vọng: 204. Lấy token thô từ mail nhận được (hoặc từ log c�
 
 ```bash
 TOKEN='<token-tu-email>'
-curl -s "http://localhost:8000/user/reset-password/validate?token=$TOKEN"
+curl -s "http://localhost:8080/user/reset-password/validate?token=$TOKEN"
 ```
 
 Kỳ vọng: `{"valid":true,"maskedEmail":"..."}`.
 
 ```bash
-curl -i -X POST http://localhost:8000/user/reset-password \
+curl -i -X POST http://localhost:8080/user/reset-password \
   -H 'Content-Type: application/json' \
   -d "{\"token\":\"$TOKEN\",\"password\":\"MatKhauMoi1\"}"
 ```
@@ -1719,7 +1719,7 @@ Kỳ vọng: `400` với thông điệp `Liên kết đặt lại mật khẩu k
 - [ ] **Step 4: Xác minh đăng nhập bằng mật khẩu mới**
 
 ```bash
-curl -i -X POST http://localhost:8000/user/login \
+curl -i -X POST http://localhost:8080/user/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"<email-that>","password":"MatKhauMoi1"}'
 ```
