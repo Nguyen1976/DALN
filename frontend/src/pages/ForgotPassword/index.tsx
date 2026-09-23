@@ -8,7 +8,8 @@ import { forgotPasswordAPI } from "@/apis";
 import { forgotPasswordScheme } from "@/components/AuthForm/scheme";
 import { AuthShell } from "@/layouts/AuthShell";
 import { useResendCountdown } from "@/hooks/useResendCountdown";
-import { ArrowLeft, Loader2, MailCheck } from "@/components/icons";
+import { getErrorMessage } from "@/utils/getErrorMessage";
+import { AlertCircle, ArrowLeft, Loader2, MailCheck } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,6 +24,38 @@ import {
 type Values = z.infer<typeof forgotPasswordScheme>;
 
 /**
+ * Cùng một cách dịch lỗi cho cả gửi lần đầu lẫn "Gửi lại" — hai nơi gọi cùng
+ * một API nên không có lý do để đưa ra hai câu chữ khác nhau cho cùng một sự
+ * cố mạng.
+ */
+function describeSendError(error: unknown): string {
+  const message = getErrorMessage(
+    error,
+    "Không gửi được yêu cầu. Vui lòng thử lại.",
+  );
+  return message === "Network Error"
+    ? "Không thể kết nối đến máy chủ, vui lòng thử lại"
+    : message;
+}
+
+/**
+ * Cùng kiểu banner với `AuthForm` — hai trang khác nhau nhưng cùng một quy
+ * ước báo lỗi thì nên trông giống nhau, không bịa kiểu mới.
+ */
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div
+      key={message}
+      role="alert"
+      className="flex animate-shake items-start gap-2.5 rounded-lg border border-destructive/35 bg-destructive/10 px-3.5 py-3 text-sm text-destructive-text"
+    >
+      <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+/**
  * Hai trạng thái trong CÙNG một khung.
  *
  * Màn "đã gửi" hiện ra kể cả khi email không tồn tại — server trả 204 bất kể
@@ -32,6 +65,12 @@ type Values = z.infer<typeof forgotPasswordScheme>;
 export default function ForgotPasswordPage() {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
+  // `forgotPasswordAPI` gọi với `skipErrorToast: true` — quy ước ở
+  // authorizeAxios.ts là màn nào tắt toast chung thì tự chịu trách nhiệm báo
+  // lỗi. Không có banner này, một request lỗi mạng sẽ trôi qua im lặng và
+  // người dùng tưởng nhầm là đã gửi xong.
+  const [formError, setFormError] = useState<string | null>(null);
 
   const form = useForm<Values>({
     resolver: zodResolver(forgotPasswordScheme),
@@ -50,20 +89,34 @@ export default function ForgotPasswordPage() {
   );
 
   const submit = form.handleSubmit(async (values) => {
+    setFormError(null);
     setSubmitting(true);
     try {
       await forgotPasswordAPI(values);
       setSentTo(values.email.trim().toLowerCase());
       start(60);
+    } catch (error) {
+      setFormError(describeSendError(error));
     } finally {
       setSubmitting(false);
     }
   });
 
   const resend = async () => {
-    if (!sentTo || seconds > 0) return;
-    await forgotPasswordAPI({ email: sentTo });
-    start(60);
+    // `seconds > 0` chỉ chặn được sau khi request trước đã xong; giữa lúc
+    // request đang bay, `resending` mới là cái ngăn cú double-click bắn hai
+    // request chồng nhau.
+    if (!sentTo || seconds > 0 || resending) return;
+    setFormError(null);
+    setResending(true);
+    try {
+      await forgotPasswordAPI({ email: sentTo });
+      start(60);
+    } catch (error) {
+      setFormError(describeSendError(error));
+    } finally {
+      setResending(false);
+    }
   };
 
   return (
@@ -88,12 +141,13 @@ export default function ForgotPasswordPage() {
           <p className="text-sm text-muted-foreground">
             Không thấy thư? Hãy kiểm tra mục spam. Liên kết hết hạn sau 15 phút.
           </p>
+          {formError && <ErrorBanner message={formError} />}
           <div className="space-y-1.5">
             <Button
               type="button"
               variant="outline"
               className="w-full"
-              disabled={seconds > 0}
+              disabled={seconds > 0 || resending}
               onClick={resend}
             >
               <span role="status">
@@ -104,7 +158,10 @@ export default function ForgotPasswordPage() {
               type="button"
               variant="ghost"
               className="w-full"
-              onClick={() => setSentTo(null)}
+              onClick={() => {
+                setSentTo(null);
+                setFormError(null);
+              }}
             >
               Dùng email khác
             </Button>
@@ -143,12 +200,19 @@ export default function ForgotPasswordPage() {
                         inputMode="email"
                         autoComplete="email"
                         placeholder="ban@vidu.com"
+                        onChange={(event) => {
+                          field.onChange(event);
+                          // Sửa địa chỉ rồi thì lỗi của lần gửi trước không
+                          // còn nói đúng về địa chỉ đang hiện ra nữa.
+                          if (formError) setFormError(null);
+                        }}
                       />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              {formError && <ErrorBanner message={formError} />}
               <Button type="submit" disabled={submitting}>
                 {submitting && (
                   <Loader2 className="size-4 animate-spin" aria-hidden="true" />
