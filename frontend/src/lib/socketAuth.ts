@@ -1,6 +1,6 @@
 import { socket } from "@/lib/socket";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
-import authorizeAxiosInstance from "@/utils/authorizeAxios";
+import { refreshSession } from "@/utils/authorizeAxios";
 
 /**
  * Hồi phục kết nối socket sau khi bị SERVER ngắt.
@@ -12,12 +12,15 @@ import authorizeAxiosInstance from "@/utils/authorizeAxios";
  * cho tới khi người dùng F5.
  *
  * Chiến lược theo mã lỗi server gửi kèm:
- *   ACCESS_TOKEN_MISSING / REFRESH_TOKEN_MISSING / TOKEN_INVALID
- *     -> gọi một request HTTP rẻ; AuthGuard sẽ tự làm mới cookie nếu còn cứu
- *        được, rồi nối lại. Không cứu được thì lần sau sẽ ra REFRESH_TOKEN_INVALID.
- *   REFRESH_TOKEN_INVALID
- *     -> phiên chấm dứt thật, ngừng thử lại. Request HTTP kế tiếp sẽ nhận 401
- *        và interceptor lo phần đăng xuất.
+ *   ACCESS_TOKEN_EXPIRED / ACCESS_TOKEN_MISSING / TOKEN_INVALID
+ *     -> access token hết hạn hoặc đã bị trình duyệt xoá, nhưng phiên có thể
+ *        vẫn sống: gọi /user/refresh rồi nối lại. Không cứu được thì chính lời
+ *        gọi đó nhận 401 và interceptor lo phần đăng xuất.
+ *   SESSION_CHECK_UNAVAILABLE
+ *     -> hạ tầng lỗi, không phải phiên chết: thử lại theo backoff.
+ *   SESSION_REVOKED
+ *     -> phiên bị thu hồi thật (đăng xuất, đổi mật khẩu, token bị dùng lại).
+ *        Ngừng hẳn: thử lại chỉ là đập vào server.
  */
 
 type AuthErrorPayload = { code?: string };
@@ -32,8 +35,14 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let lastAuthErrorCode: string | null = null;
 let installed = false;
 
-/** Mã lỗi mà thử lại cũng vô ích. */
-const FATAL_CODES = new Set(["REFRESH_TOKEN_INVALID"]);
+/**
+ * Mã lỗi mà thử lại cũng vô ích.
+ *
+ * Cố ý CHỈ có SESSION_REVOKED. Các mã còn lại — kể cả TOKEN_INVALID — đều có
+ * thể cứu được bằng một lần làm mới, vì phiên vẫn còn sống ở server; đóng cửa
+ * sớm với chúng là bắt người dùng F5 vô cớ.
+ */
+const FATAL_CODES = new Set(["SESSION_REVOKED"]);
 
 function clearRetry() {
   if (retryTimer) {
@@ -55,12 +64,11 @@ async function refreshSessionThenReconnect() {
   clearRetry();
   retryTimer = setTimeout(async () => {
     try {
-      // Chạm một endpoint cần đăng nhập: AuthGuard thấy access hết hạn sẽ
-      // verify refresh và set cookie access mới. skipErrorToast để người dùng
-      // không thấy toast lỗi cho một thao tác nền.
-      await authorizeAxiosInstance.get("/user/me", { skipErrorToast: true });
+      // Đúng endpoint làm mới, và dùng chung single-flight với interceptor HTTP
+      // nên một lần socket hồi phục không phát thêm lời gọi refresh song song.
+      await refreshSession();
     } catch {
-      // 401 ở đây nghĩa là hết đường cứu; interceptor đã lo đăng xuất.
+      // Hết đường cứu; interceptor đã lo phần đăng xuất.
       return;
     }
     socket.connect();

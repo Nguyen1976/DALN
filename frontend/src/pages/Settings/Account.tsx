@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router";
 
@@ -17,6 +17,14 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Switch } from "@/components/ui/switch";
 import { logoutAPI, selectUser } from "@/redux/slices/userSlice";
+import {
+  listSessionsAPI,
+  logoutAllAPI,
+  revokeSessionAPI,
+  type UserSession,
+} from "@/apis/user";
+import { formatRelativeTime } from "@/utils/formatDateTime";
+import { toast } from "sonner";
 import type { AppDispatch } from "@/redux/store";
 import { SettingRow, SettingsCard, SettingsSection } from "./parts";
 
@@ -56,7 +64,49 @@ export default function AccountSettings() {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
   const device = describeThisDevice(navigator.userAgent);
+
+  // `null` = chưa tải xong, khác hẳn `[]` = đã tải và không có thiết bị nào
+  // khác. Gộp hai trạng thái đó lại sẽ hiện "chỉ có thiết bị này" trong lúc
+  // danh sách còn đang về.
+  const [sessions, setSessions] = useState<UserSession[] | null>(null);
+  const [revokingSid, setRevokingSid] = useState<string | null>(null);
+
+  const loadSessions = useCallback(async () => {
+    try {
+      setSessions(await listSessionsAPI());
+    } catch {
+      // Interceptor đã hiện lỗi; ở đây chỉ cần thoát khỏi trạng thái tải.
+      setSessions([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  const otherDevices = (sessions ?? []).filter((session) => !session.current);
+
+  const revokeOne = async (session: UserSession) => {
+    setRevokingSid(session.sid);
+    try {
+      await revokeSessionAPI(session.sid);
+      toast.success("Đã đăng xuất thiết bị đó.");
+      await loadSessions();
+    } finally {
+      setRevokingSid(null);
+    }
+  };
+
+  const logoutEverywhere = async () => {
+    // Endpoint này giết CẢ phiên hiện tại, nên sau đó phải tự dọn state và
+    // đưa người dùng về trang đăng nhập — không thì giao diện còn hiện như
+    // đang đăng nhập cho tới request kế tiếp.
+    await logoutAllAPI();
+    await dispatch(logoutAPI());
+    navigate("/auth", { replace: true });
+  };
 
   return (
     <>
@@ -129,12 +179,69 @@ export default function AccountSettings() {
               Đăng xuất
             </Button>
           </SettingRow>
-          <SettingRow
-            icon={MonitorSmartphone}
-            title="Các thiết bị khác"
-            description="Xem và đăng xuất từ xa khỏi những thiết bị bạn không dùng nữa."
-            soon
-          />
+          {sessions === null && (
+            <SettingRow
+              icon={MonitorSmartphone}
+              title="Các thiết bị khác"
+              description="Đang tải danh sách…"
+            />
+          )}
+
+          {sessions !== null && otherDevices.length === 0 && (
+            <SettingRow
+              icon={MonitorSmartphone}
+              title="Các thiết bị khác"
+              description="Không có thiết bị nào khác đang đăng nhập."
+            />
+          )}
+
+          {otherDevices.map((session) => {
+            const other = describeThisDevice(session.userAgent ?? "");
+            return (
+              <SettingRow
+                key={session.sid}
+                icon={other.mobile ? Smartphone : Monitor}
+                title={other.name}
+                description={
+                  <span className="break-all">
+                    {session.ip ?? "IP không rõ"} · hoạt động{" "}
+                    {formatRelativeTime(
+                      new Date(session.lastSeenAt).toISOString(),
+                    )}
+                  </span>
+                }
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={revokingSid === session.sid}
+                  onClick={() => void revokeOne(session)}
+                  className="hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive-text"
+                >
+                  <LogOut aria-hidden="true" />
+                  Đăng xuất
+                </Button>
+              </SettingRow>
+            );
+          })}
+
+          {otherDevices.length > 0 && (
+            <SettingRow
+              icon={MonitorSmartphone}
+              title="Đăng xuất khỏi mọi thiết bị"
+              description="Dùng khi bạn nghi tài khoản bị người khác dùng. Thiết bị này cũng sẽ bị đăng xuất."
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmLogoutAll(true)}
+                className="hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive-text"
+              >
+                <LogOut aria-hidden="true" />
+                Đăng xuất tất cả
+              </Button>
+            </SettingRow>
+          )}
         </SettingsCard>
       </SettingsSection>
 
@@ -148,6 +255,18 @@ export default function AccountSettings() {
           setConfirmLogout(false);
           dispatch(logoutAPI());
           navigate("/auth");
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmLogoutAll}
+        onOpenChange={setConfirmLogoutAll}
+        title="Đăng xuất khỏi mọi thiết bị?"
+        description="Mọi phiên đăng nhập sẽ bị thu hồi ngay, kể cả thiết bị này. Dùng khi bạn nghi có người khác đang dùng tài khoản của mình."
+        confirmLabel="Đăng xuất tất cả"
+        onConfirm={() => {
+          setConfirmLogoutAll(false);
+          void logoutEverywhere();
         }}
       />
     </>

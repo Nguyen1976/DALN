@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vòng đời một phiên đăng nhập · State machine</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Noto Serif', 'Instrument Serif', Georgia, serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1100px; width: 100%; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 840px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">State machine · DALN · Auth v2</p>
+    <h1>Vòng đời một phiên — sống lại được, hoặc chết thật</h1>
+
+    <svg viewBox="0 0 960 716" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="session-state-title session-state-desc">
+      <title id="session-state-title">Vòng đời một phiên đăng nhập</title>
+      <desc id="session-state-desc">Phiên đi từ đang hoạt động sang access hết hạn, rồi qua bước rotate để quay lại hoạt động; ba đường dẫn tới trạng thái chấm dứt là đăng xuất hoặc đổi mật khẩu, refresh token hết hạn, và phát hiện refresh token bị dùng lại.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ================================================================
+           TRANSITIONS (vẽ trước các hộp)
+           ================================================================ -->
+      <!-- T1 · Start → Đang hoạt động -->
+      <line x1="64" y1="192" x2="104" y2="192" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- T2 · Đang hoạt động → Access hết hạn -->
+      <line x1="280" y1="192" x2="392" y2="192" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- T3 · Access hết hạn → Đang rotate -->
+      <line x1="568" y1="192" x2="680" y2="192" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- T4 · Đang rotate → Đang hoạt động (đường sống lại, coral) -->
+      <path d="M 768 152 C 768 72, 192 72, 192 152" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+
+      <!-- T5 · Đang hoạt động → Phiên chấm dứt -->
+      <path d="M 240 232 V 412 Q 240 420 248 420 H 392" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- T6 · Đang rotate → Phiên chấm dứt -->
+      <path d="M 768 232 V 412 Q 768 420 760 420 H 568" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- T7 · Access hết hạn → Phiên chấm dứt -->
+      <line x1="480" y1="232" x2="480" y2="384" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- T8 · Phiên chấm dứt → End -->
+      <line x1="480" y1="472" x2="480" y2="504" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- ================================================================
+           NHÃN CHUYỂN TRẠNG THÁI
+           ================================================================ -->
+      <rect x="64" y="172" width="36" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="82" y="181" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">LOGIN</text>
+
+      <rect x="302" y="172" width="68" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="336" y="181" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">EXP +15M</text>
+
+      <rect x="578" y="172" width="92" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="624" y="181" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">POST /REFRESH</text>
+
+      <rect x="418" y="72" width="124" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="480" y="81" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RTHASH OK · ROTATE</text>
+
+      <rect x="124" y="314" width="108" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="178" y="323" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">LOGOUT · PWD CHANGE</text>
+
+      <rect x="776" y="314" width="108" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="830" y="323" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RTHASH MISMATCH</text>
+
+      <rect x="488" y="296" width="104" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="540" y="305" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">REFRESH EXPIRED</text>
+
+      <rect x="488" y="482" width="88" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="532" y="491" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SESS DELETED</text>
+
+      <!-- ================================================================
+           START DOT
+           ================================================================ -->
+      <circle cx="56" cy="192" r="6" fill="#2d3142"/>
+
+      <!-- ================================================================
+           STATES
+           ================================================================ -->
+      <!-- Đang hoạt động -->
+      <rect x="104" y="152" width="176" height="80" rx="8" fill="#f5f5f5"/>
+      <rect x="104" y="152" width="176" height="80" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="112" y="160" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="132" y="169" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+      <text x="192" y="198" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Đang hoạt động</text>
+      <text x="192" y="216" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">access ≤ 15m</text>
+
+      <!-- Access hết hạn -->
+      <rect x="392" y="152" width="176" height="80" rx="8" fill="#f5f5f5"/>
+      <rect x="392" y="152" width="176" height="80" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="400" y="160" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="420" y="169" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+      <text x="480" y="198" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Access hết hạn</text>
+      <text x="480" y="216" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">refresh ≤ 7d</text>
+
+      <!-- Đang rotate -->
+      <rect x="680" y="152" width="176" height="80" rx="8" fill="#f5f5f5"/>
+      <rect x="680" y="152" width="176" height="80" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="688" y="160" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="708" y="169" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+      <text x="768" y="198" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Đang rotate</text>
+      <text x="768" y="216" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">grace 30s</text>
+
+      <!-- Phiên chấm dứt (focal) -->
+      <rect x="392" y="384" width="176" height="88" rx="8" fill="#f5f5f5"/>
+      <rect x="392" y="384" width="176" height="88" rx="8" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <rect x="400" y="392" width="40" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="420" y="401" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+      <text x="480" y="430" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Phiên chấm dứt</text>
+      <text x="480" y="448" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">sess deleted</text>
+      <text x="480" y="462" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">socket disconnected</text>
+
+      <!-- End ring -->
+      <circle cx="480" cy="512" r="8" fill="none" stroke="#2d3142" stroke-width="1"/>
+      <circle cx="480" cy="512" r="5" fill="#2d3142"/>
+
+      <!-- ================================================================
+           HAI CÁI ĐỒNG HỒ CHẠY SONG SONG
+           ================================================================ -->
+      <rect x="40" y="552" width="424" height="80" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="48" y="560" width="36" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+      <text x="66" y="569" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">IDLE</text>
+      <text x="48" y="592" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Đồng hồ trượt — 7 ngày</text>
+      <text x="48" y="608" fill="#4f5d75" font-size="9.5" font-family="'Geist', sans-serif">Mỗi lần rotate đẩy hạn refresh thêm 7 ngày, nên người</text>
+      <text x="48" y="622" fill="#4f5d75" font-size="9.5" font-family="'Geist', sans-serif">dùng thường xuyên không bị đá ra giữa lúc đang dùng.</text>
+
+      <rect x="496" y="552" width="424" height="80" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="504" y="560" width="36" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+      <text x="522" y="569" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ABS</text>
+      <text x="504" y="592" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Đồng hồ cứng — 30 ngày</text>
+      <text x="504" y="608" fill="#4f5d75" font-size="9.5" font-family="'Geist', sans-serif">Bất kể hoạt động, 30 ngày là buộc đăng nhập lại — đúng</text>
+      <text x="504" y="622" fill="#4f5d75" font-size="9.5" font-family="'Geist', sans-serif">mức trần NIST 800-63B khuyến nghị cho AAL1.</text>
+
+      <!-- ================================================================
+           LEGEND
+           ================================================================ -->
+      <line x1="40" y1="664" x2="920" y2="664" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="680" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <circle cx="46" cy="696" r="5" fill="#2d3142"/>
+      <text x="60" y="700" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Bắt đầu / kết thúc</text>
+
+      <line x1="240" y1="696" x2="268" y2="696" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="276" y="700" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Chuyển trạng thái</text>
+
+      <line x1="440" y1="696" x2="468" y2="696" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="476" y="700" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Đường sống lại</text>
+
+      <rect x="640" y="690" width="14" height="10" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="660" y="700" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Trạng thái cần để ý</text>
+    </svg>
+  </div>
+</body>
+</html>

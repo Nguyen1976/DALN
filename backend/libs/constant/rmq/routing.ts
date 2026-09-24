@@ -18,4 +18,6 @@ export const ROUTING_RMQ = {
   UPDATE_MESSAGE_READ: 'message.updateRead',
   CALL_ENDED: 'call.ended',
   CHAT_MENTION: 'chat.mention',
+  /** Một hoặc mọi phiên của user vừa bị thu hồi -> gateway ngắt socket. */
+  AUTH_SESSION_REVOKED: 'auth.session.revoked',
 }

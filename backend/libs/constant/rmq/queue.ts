@@ -10,6 +10,8 @@ export const QUEUE_RMQ = {
     'notification_queue_user_updateStatusMakeFriend',
   CHAT_USER_UPDATED: 'chat_queue_user_updated',
   REALTIME_EMIT_EVENT: 'realtime_queue_emit_event',
+  REALTIME_AUTH_SESSION_REVOKED: 'realtime_queue_auth_session_revoked',
+  NOTIFICATION_AUTH_SESSION_REVOKED: 'notification_queue_auth_session_revoked',
   CHAT_SEND_MESSAGE: 'chat_queue_send_message',
   USER_ONLINE: 'user_online_queue',
   USER_OFFLINE: 'user_offline_queue',

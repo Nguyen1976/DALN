@@ -104,6 +104,7 @@ describe('NotificationService — mail bảo mật (đặt lại mật khẩu)',
       sendMakeFriendNotification: jest.fn().mockResolvedValue(undefined),
       sendPasswordReset: jest.fn().mockResolvedValue(undefined),
       sendPasswordChanged: jest.fn().mockResolvedValue(undefined),
+      sendSessionRevoked: jest.fn().mockResolvedValue(undefined),
     }
     const redis = { isOnline: jest.fn().mockResolvedValue(false) }
     const notificationRepo = {
@@ -125,6 +126,71 @@ describe('NotificationService — mail bảo mật (đặt lại mật khẩu)',
     )
     return { service, mailer, redis, preferenceRepo }
   }
+
+  describe('cảnh báo phiên bị thu hồi', () => {
+    const revoked = {
+      userId: 'u1',
+      sids: ['s1'],
+      revokedAt: '2026-09-24T10:00:00.000Z',
+      recipient: { email: 'an@example.test', username: 'an' },
+    }
+
+    it('token bị dùng lại -> gửi cảnh báo', async () => {
+      const { service, mailer } = setup()
+
+      await service.handleSessionRevoked({ ...revoked, reason: 'token-reuse' })
+
+      expect(mailer.sendSessionRevoked).toHaveBeenCalledWith({
+        email: 'an@example.test',
+        username: 'an',
+        revokedAt: '2026-09-24T10:00:00.000Z',
+      })
+    })
+
+    // Gửi mail cho việc người dùng tự làm là dạy họ bỏ qua email của hệ thống
+    // — để rồi bỏ qua đúng cái cảnh báo thật.
+    it.each([['logout'], ['logout-all'], ['password-changed']] as const)(
+      'lý do %s -> KHÔNG gửi mail',
+      async (reason) => {
+        const { service, mailer } = setup()
+
+        await service.handleSessionRevoked({
+          ...revoked,
+          reason: reason as 'logout',
+        })
+
+        expect(mailer.sendSessionRevoked).not.toHaveBeenCalled()
+      },
+    )
+
+    it('không có người nhận -> bỏ qua, không crash', async () => {
+      const { service, mailer } = setup()
+
+      await service.handleSessionRevoked({
+        userId: 'u1',
+        sids: ['s1'],
+        reason: 'token-reuse',
+      })
+
+      expect(mailer.sendSessionRevoked).not.toHaveBeenCalled()
+    })
+
+    it('thiếu revokedAt -> tự điền thời điểm hiện tại', async () => {
+      const { service, mailer } = setup()
+
+      await service.handleSessionRevoked({
+        userId: 'u1',
+        sids: ['s1'],
+        reason: 'token-reuse',
+        recipient: revoked.recipient,
+      })
+
+      const [arg] = mailer.sendSessionRevoked.mock.calls[0] as [
+        { revokedAt: string },
+      ]
+      expect(new Date(arg.revokedAt).getTime()).toBeGreaterThan(0)
+    })
+  })
 
   describe('mail đặt lại mật khẩu', () => {
     it('chuyển thẳng payload sang MailerService, không qua cài đặt thông báo', async () => {

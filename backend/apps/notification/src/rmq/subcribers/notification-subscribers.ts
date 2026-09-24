@@ -5,6 +5,7 @@ import type {
   ChatMentionPayload,
   UserCreatedPayload,
   UserMakeFriendPayload,
+  SessionRevokedPayload,
   UserPasswordChangedPayload,
   UserPasswordResetPayload,
   UserRegisterOtpPayload,
@@ -17,6 +18,21 @@ import { NotificationService } from '../../notification.service'
 @Injectable()
 export class NotificationSubscriber {
   constructor(private readonly notificationService: NotificationService) {}
+
+  /**
+   * Cảnh báo phiên bị thu hồi vì nghi token bị đánh cắp.
+   *
+   * Cùng routing key với hàng đợi của realtime gateway: exchange là topic nên
+   * mỗi queue nhận một bản, gateway lo ngắt socket còn ở đây lo báo cho người.
+   */
+  @RabbitSubscribeWithRetry({
+    exchange: EXCHANGE_RMQ.USER_EVENTS,
+    routingKey: ROUTING_RMQ.AUTH_SESSION_REVOKED,
+    queue: QUEUE_RMQ.NOTIFICATION_AUTH_SESSION_REVOKED,
+  })
+  async handleSessionRevoked(data: SessionRevokedPayload): Promise<void> {
+    await this.notificationService.handleSessionRevoked(data)
+  }
 
   @RabbitSubscribeWithRetry({
     exchange: EXCHANGE_RMQ.USER_EVENTS,

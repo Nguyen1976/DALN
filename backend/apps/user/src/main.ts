@@ -1,7 +1,12 @@
 import { NestFactory } from '@nestjs/core'
 import { UserModule } from './user.module'
 import { ValidationPipe } from '@nestjs/common'
-import { AppHttpExceptionFilter, validationExceptionFactory } from '@app/common'
+import {
+  AppHttpExceptionFilter,
+  validationExceptionFactory,
+  corsOptions,
+  securityHeaders,
+} from '@app/common'
 import { NestExpressApplication } from '@nestjs/platform-express'
 import cookieParser from 'cookie-parser'
 
@@ -16,6 +21,7 @@ async function bootstrap() {
   // một xô. Chạy trực tiếp lúc dev không có X-Forwarded-For nên vẫn đúng.
   app.set('trust proxy', 2)
 
+  app.use(securityHeaders())
   app.use(cookieParser())
   app.useGlobalPipes(
     new ValidationPipe({
@@ -25,10 +31,7 @@ async function bootstrap() {
     }),
   )
   app.useGlobalFilters(new AppHttpExceptionFilter())
-  app.enableCors({
-    origin: true,
-    credentials: true,
-  })
+  app.enableCors(corsOptions())
 
   await app.listen(process.env.PORT ?? 3002)
 }

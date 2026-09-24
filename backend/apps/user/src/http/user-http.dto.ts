@@ -12,7 +12,9 @@ import {
   MaxLength,
   MinLength,
   ValidateNested,
+  IsNumberString,
 } from 'class-validator'
+import { MaxBytes } from '@app/common/http/max-bytes.validator'
 import { Transform, Type, type TransformFnParams } from 'class-transformer'
 import { PageQueryDto } from '@app/common/http/page-query.dto'
 
@@ -47,10 +49,15 @@ export class RegisterUserDto {
   email: string
 
   @IsNotEmpty()
-  @MaxLength(20, {
+  // Trần 20 ký tự cũ chặn cả passphrase, mà passphrase là cách người dùng
+  // thường tạo được mật khẩu mạnh nhất. OWASP yêu cầu cho phép ít nhất 64.
+  @MaxLength(64, {
     message: 'Password is too long. Maximum length is $constraint1 characters',
   })
-  @MinLength(6, {
+  @MaxBytes(72, {
+    message: 'Mật khẩu quá dài (tối đa 72 byte)',
+  })
+  @MinLength(8, {
     message: 'Password is too short. Minimum length is $constraint1 characters',
   })
   password: string
@@ -76,6 +83,12 @@ export class LoginUserDto {
   @IsNotEmpty({ message: 'Email must not be empty' })
   email: string
 
+  // KHÔNG có trần ở đây nghĩa là một chuỗi 100KB đi thẳng vào bcrypt.compare:
+  // mỗi request như vậy chiếm CPU rất lâu, và đó là một cách làm sập server rẻ
+  // tiền. Trần rộng hơn chính sách đăng ký để người có mật khẩu cũ vẫn vào được.
+  @MaxLength(200, {
+    message: 'Password is too long. Maximum length is $constraint1 characters',
+  })
   @IsNotEmpty({ message: 'Password must not be empty' })
   password: string
 }
@@ -87,7 +100,9 @@ export class VerifyOtpDto {
   email: string
 
   @IsNotEmpty({ message: 'OTP must not be empty' })
-  @IsString()
+  // `@IsString()` một mình cho qua cả "abcdef": mã chỉ gồm chữ số nên nói
+  // đúng điều đó, và loại bớt rác trước khi nó tốn một lượt thử.
+  @IsNumberString({}, { message: 'OTP must be 6 digits' })
   @MinLength(6, { message: 'OTP must be 6 characters' })
   @MaxLength(6, { message: 'OTP must be 6 characters' })
   otp: string
@@ -123,10 +138,15 @@ export class ResetPasswordDto {
   token: string
 
   @IsNotEmpty()
-  @MaxLength(20, {
+  // Trần 20 ký tự cũ chặn cả passphrase, mà passphrase là cách người dùng
+  // thường tạo được mật khẩu mạnh nhất. OWASP yêu cầu cho phép ít nhất 64.
+  @MaxLength(64, {
     message: 'Password is too long. Maximum length is $constraint1 characters',
   })
-  @MinLength(6, {
+  @MaxBytes(72, {
+    message: 'Mật khẩu quá dài (tối đa 72 byte)',
+  })
+  @MinLength(8, {
     message: 'Password is too short. Minimum length is $constraint1 characters',
   })
   password: string
@@ -202,4 +222,11 @@ export class MemberProfilesDto {
   @ArrayMaxSize(200)
   @IsMongoId({ each: true })
   ids!: string[]
+}
+
+export class RevokeSessionDto {
+  @IsNotEmpty({ message: 'sid must not be empty' })
+  @IsString()
+  @MaxLength(64)
+  sid: string
 }

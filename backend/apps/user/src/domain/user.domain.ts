@@ -48,6 +48,31 @@ export interface AuthSession {
   refreshToken: string
 }
 
+/**
+ * Kết cục của một lần làm mới phiên.
+ *
+ * `grace` cố ý KHÔNG mang refreshToken: nó là request đến sau trong một cặp
+ * song song, bản refresh mới đã nằm ở trình duyệt từ request thắng cuộc rotate.
+ * `terminated` gộp cả "cookie sai" và "token bị dùng lại" — controller xử lý
+ * giống nhau (xoá cookie + 401), còn việc giết phiên đã làm ở service.
+ */
+/** Một thiết bị đang đăng nhập, như trang "Phiên đăng nhập" cần hiển thị. */
+export interface SessionListItem {
+  /** Định danh phiên — không phải bí mật, nó chỉ là phần tra key của cookie. */
+  sid: string
+  createdAt: number
+  lastSeenAt: number
+  userAgent: string | null
+  ip: string | null
+  /** Đúng thiết bị đang xem trang này. */
+  current: boolean
+}
+
+export type RefreshResult =
+  | { status: 'rotated'; accessToken: string; refreshToken: string }
+  | { status: 'grace'; accessToken: string }
+  | { status: 'terminated' }
+
 /** Another user as a row in a list: the friend list, search, requests. */
 export interface UserSummary {
   id: string

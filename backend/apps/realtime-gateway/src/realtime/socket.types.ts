@@ -4,6 +4,12 @@ import type { MessageSendPayload } from 'libs/constant/rmq/payload'
 /** What a socket carries; `userId` is set once the handshake cookie checks out. */
 export interface ClientData {
   userId?: string
+  /**
+   * Phiên mà socket này bắt tay bằng. Nhờ nó, "đăng xuất thiết bị này" ngắt
+   * đúng socket của thiết bị đó chứ không đá luôn các thiết bị khác của cùng
+   * người dùng.
+   */
+  sid?: string
 }
 
 export type ClientSocket = Socket<

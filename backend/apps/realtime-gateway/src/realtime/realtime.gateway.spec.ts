@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { JwtService } from '@nestjs/jwt'
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
+import { SessionStore } from '@app/common'
 import type { Server } from 'socket.io'
 import { EVENT_TYPE_HEADER, EVENT_VERSION_HEADER } from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
@@ -102,6 +103,11 @@ describe('RealtimeGateway', () => {
       .mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }),
   }
 
+  /** Phiên còn sống hay không — handshake hỏi Redis qua đây. */
+  const sessionStub = {
+    isAlive: jest.fn<Promise<boolean>, [string]>().mockResolvedValue(true),
+  }
+
   /** What the chat service answers, as `internalFetch` reads it. */
   const fetchMock = jest.fn<
     Promise<Pick<Response, 'ok' | 'status' | 'text'>>,
@@ -130,6 +136,7 @@ describe('RealtimeGateway', () => {
         { provide: JwtService, useValue: { verify: jest.fn() } },
         { provide: 'REDIS_CLIENT', useValue: redisStub },
         { provide: AmqpConnection, useValue: amqpStub },
+        { provide: SessionStore, useValue: sessionStub },
       ],
     }).compile()
 
@@ -141,6 +148,214 @@ describe('RealtimeGateway', () => {
     fetchMock.mockReset()
     global.fetch = fetchMock as unknown as typeof fetch
     process.env.INTERNAL_API_TOKEN = 'test-token'
+  })
+
+  /**
+   * Socket là kết nối dài hạn được xác thực MỘT LẦN lúc handshake, nên đây là
+   * chỗ duy nhất chặn được kẻ mang token đã bị thu hồi — và cũng là chỗ dễ để
+   * hở nhất: trước đây nó chấp nhận cả refresh token.
+   */
+  describe('handshake xác thực', () => {
+    const jwtForTest = new JwtService({ secret: 'gw-test-secret' })
+
+    const signAccess = (extra: Record<string, unknown> = {}) =>
+      jwtForTest.sign(
+        {
+          userId: 'u1',
+          email: 'e',
+          username: 'u',
+          sid: 's1',
+          typ: 'at',
+          ...extra,
+        },
+        { expiresIn: '15m' },
+      )
+
+    const fakeClient = (cookie?: string) =>
+      ({
+        id: 'sock-1',
+        data: {} as Record<string, unknown>,
+        handshake: { headers: { cookie } },
+        join: jest.fn().mockResolvedValue(undefined),
+        emit: jest.fn(),
+        disconnect: jest.fn(),
+        conn: { on: jest.fn() },
+      }) as unknown as ClientSocket & { emit: jest.Mock; join: jest.Mock }
+
+    const codeEmitted = (client: { emit: jest.Mock }): string | undefined => {
+      const calls = client.emit.mock.calls as unknown as [
+        string,
+        { code?: string },
+      ][]
+      return calls.find(([event]) => event === 'auth:error')?.[1]?.code
+    }
+
+    beforeEach(() => {
+      ;(
+        gateway as unknown as { jwtService: { verify: jest.Mock } }
+      ).jwtService.verify.mockImplementation((token: string): unknown =>
+        jwtForTest.verify(token),
+      )
+      sessionStub.isAlive.mockResolvedValue(true)
+    })
+
+    it('access hợp lệ + phiên còn sống -> vào phòng và ghi nhớ sid', async () => {
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      await gateway.handleConnection(client)
+
+      expect(sessionStub.isAlive).toHaveBeenCalledWith('s1')
+      expect(client.join).toHaveBeenCalledWith('user:u1')
+      expect(client.data.userId).toBe('u1')
+      expect(client.data.sid).toBe('s1')
+      expect(codeEmitted(client)).toBeUndefined()
+    })
+
+    // Hồi quy quan trọng nhất của thay đổi này: refresh token KHÔNG còn xác
+    // thực được socket. Trước đây nó làm được, và cookie của nó còn được gửi
+    // kèm cả handshake.
+    it('chỉ có refresh cookie -> từ chối ACCESS_TOKEN_MISSING', async () => {
+      const client = fakeClient('refreshToken=s1.verifier')
+
+      await gateway.handleConnection(client)
+
+      expect(codeEmitted(client)).toBe('ACCESS_TOKEN_MISSING')
+      expect(client.join).not.toHaveBeenCalled()
+      expect(sessionStub.isAlive).not.toHaveBeenCalled()
+    })
+
+    it('không có cookie nào -> ACCESS_TOKEN_MISSING', async () => {
+      const client = fakeClient(undefined)
+      await gateway.handleConnection(client)
+      expect(codeEmitted(client)).toBe('ACCESS_TOKEN_MISSING')
+    })
+
+    it('access hết hạn -> ACCESS_TOKEN_EXPIRED (client tự refresh rồi nối lại)', async () => {
+      const expired = jwtForTest.sign({
+        userId: 'u1',
+        sid: 's1',
+        typ: 'at',
+        exp: Math.floor(Date.now() / 1000) - 60,
+      })
+      const client = fakeClient(`accessToken=${expired}`)
+
+      await gateway.handleConnection(client)
+
+      expect(codeEmitted(client)).toBe('ACCESS_TOKEN_EXPIRED')
+    })
+
+    it('token thiếu sid -> TOKEN_INVALID', async () => {
+      const legacy = jwtForTest.sign(
+        { userId: 'u1', email: 'e', username: 'u', typ: 'at' },
+        { expiresIn: '15m' },
+      )
+      const client = fakeClient(`accessToken=${legacy}`)
+
+      await gateway.handleConnection(client)
+
+      expect(codeEmitted(client)).toBe('TOKEN_INVALID')
+    })
+
+    it('phiên đã bị thu hồi -> SESSION_REVOKED dù token còn hạn', async () => {
+      sessionStub.isAlive.mockResolvedValue(false)
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      await gateway.handleConnection(client)
+
+      expect(codeEmitted(client)).toBe('SESSION_REVOKED')
+      expect(client.join).not.toHaveBeenCalled()
+    })
+
+    it('không kiểm tra được phiên -> SESSION_CHECK_UNAVAILABLE, fail-closed', async () => {
+      sessionStub.isAlive.mockRejectedValue(new Error('ECONNREFUSED'))
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      await gateway.handleConnection(client)
+
+      expect(codeEmitted(client)).toBe('SESSION_CHECK_UNAVAILABLE')
+      expect(client.join).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('thu hồi phiên -> ngắt socket', () => {
+    const socketFor = (sid?: string) => ({
+      data: sid ? { sid } : {},
+      emit: jest.fn(),
+      disconnect: jest.fn(),
+    })
+
+    const withSockets = (sockets: unknown[]) => {
+      const fetchSockets = jest.fn().mockResolvedValue(sockets)
+      const inRoom = jest.fn().mockReturnValue({ fetchSockets })
+      gateway.server = { to, in: inRoom } as unknown as Server
+      return { fetchSockets, inRoom }
+    }
+
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    it('chỉ ngắt socket thuộc sid bị thu hồi', async () => {
+      const revoked = socketFor('s1')
+      const other = socketFor('s2')
+      withSockets([revoked, other])
+
+      await gateway.handleSessionRevoked({
+        userId: 'u1',
+        sids: ['s1'],
+        reason: 'logout',
+      })
+      jest.advanceTimersByTime(100)
+
+      expect(revoked.emit).toHaveBeenCalledWith('auth:error', {
+        code: 'SESSION_REVOKED',
+      })
+      expect(revoked.disconnect).toHaveBeenCalledWith(true)
+      // Đăng xuất một thiết bị không được đá thiết bị khác của cùng người.
+      expect(other.emit).not.toHaveBeenCalled()
+      expect(other.disconnect).not.toHaveBeenCalled()
+    })
+
+    it('thu hồi nhiều sid cùng lúc (đổi mật khẩu) -> ngắt hết', async () => {
+      const a = socketFor('s1')
+      const b = socketFor('s2')
+      withSockets([a, b])
+
+      await gateway.handleSessionRevoked({
+        userId: 'u1',
+        sids: ['s1', 's2'],
+        reason: 'password-changed',
+      })
+      jest.advanceTimersByTime(100)
+
+      expect(a.disconnect).toHaveBeenCalled()
+      expect(b.disconnect).toHaveBeenCalled()
+    })
+
+    it('socket không có sid (bản trước khi deploy) -> vẫn ngắt', async () => {
+      const legacy = socketFor(undefined)
+      withSockets([legacy])
+
+      await gateway.handleSessionRevoked({
+        userId: 'u1',
+        sids: ['s1'],
+        reason: 'logout',
+      })
+      jest.advanceTimersByTime(100)
+
+      expect(legacy.disconnect).toHaveBeenCalled()
+    })
+
+    it('chỉ hỏi phòng của đúng user đó', async () => {
+      const { inRoom } = withSockets([])
+
+      await gateway.handleSessionRevoked({
+        userId: 'u9',
+        sids: ['s1'],
+        reason: 'logout-all',
+      })
+
+      expect(inRoom).toHaveBeenCalledWith('user:u9')
+    })
   })
 
   /**

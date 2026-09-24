@@ -4,32 +4,15 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { Reflector } from '@nestjs/core'
-import { Request, Response } from 'express'
-import { readCookie, resolveTokens } from './resolve-tokens'
+import { Request } from 'express'
+import { readCookie, resolveAccessToken } from './resolve-tokens'
+import { SessionStore } from './session.store'
 import { timingSafeEqual } from 'crypto'
-
-/** Thời hạn access token — phải khớp với lúc đăng nhập ở user service. */
-export const ACCESS_TOKEN_TTL = '15m'
-export const ACCESS_TOKEN_MAX_AGE_MS = 15 * 60 * 1000
-export const REFRESH_TOKEN_TTL = '7d'
-export const REFRESH_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-
-/**
- * Cookie phiên có gắn cờ Secure hay không. Mặc định bật khi NODE_ENV=production.
- * COOKIE_SECURE=false cho phép production chạy qua HTTP thuần (truy cập bằng IP,
- * chưa có TLS): trên origin http:// trình duyệt lặng lẽ bỏ cookie Secure, và đăng
- * nhập trông như hỏng mà không có lỗi nào.
- */
-export function isSecureCookie(): boolean {
-  const flag = process.env.COOKIE_SECURE?.trim().toLowerCase()
-  if (flag === 'true') return true
-  if (flag === 'false') return false
-  return process.env.NODE_ENV === 'production'
-}
 
 /** So sánh chuỗi theo thời gian hằng định để không rò rỉ độ dài/nội dung token. */
 function timingSafeEqualStr(a: string, b: string): boolean {
@@ -39,6 +22,19 @@ function timingSafeEqualStr(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB)
 }
 
+/**
+ * Cửa vào duy nhất của mọi request HTTP có đăng nhập.
+ *
+ * Guard này TỪNG tự cấp lại access token khi thấy access hết hạn mà refresh còn
+ * hạn. Việc đó đã chuyển sang `POST /user/refresh`: làm mới ngầm trên request
+ * bất kỳ khiến refresh token không thể rotate, vì N request song song sau mốc
+ * 15 phút đều mang token cũ và mỗi cái lại tự set một cookie mới.
+ *
+ * Đổi lại, guard nhận một việc mới: hỏi Redis xem phiên còn sống không. Đó là
+ * cái giá của việc thu hồi có hiệu lực NGAY — một round-trip mỗi request. Không
+ * có bước này thì xoá phiên chỉ giết được refresh token, còn access token đã
+ * phát ra vẫn gọi API được tới 15 phút nữa.
+ */
 @Injectable()
 export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name)
@@ -46,16 +42,16 @@ export class AuthGuard implements CanActivate {
   constructor(
     private jwtService: JwtService,
     private reflector: Reflector,
+    private sessions: SessionStore,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     if (context.getType() !== 'http') {
       return true
     }
 
     const request = context.switchToHttp().getRequest<Request>()
-    const response = context.switchToHttp().getResponse<Response>()
-    if (request.url === '/metrics') {
+    if (request?.url === '/metrics') {
       return true
     }
     if (!request) {
@@ -79,6 +75,8 @@ export class AuthGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     )
 
+    // Endpoint công khai không được chạm Redis: đăng nhập và quên mật khẩu phải
+    // dùng được cả khi tầng phiên đang có sự cố.
     if (withoutLogin) return true
 
     // cookie-parser fills `cookies` where it is mounted; the raw header is
@@ -86,10 +84,8 @@ export class AuthGuard implements CanActivate {
     const cookies = (request.cookies ?? {}) as Partial<Record<string, string>>
     const accessToken =
       cookies.accessToken || readCookie(request.headers?.cookie, 'accessToken')
-    const refreshToken =
-      cookies.refreshToken ||
-      readCookie(request.headers?.cookie, 'refreshToken')
-    const resolved = resolveTokens(this.jwtService, accessToken, refreshToken)
+
+    const resolved = resolveAccessToken(this.jwtService, accessToken)
 
     if (!resolved.ok) {
       throw new UnauthorizedException({
@@ -98,32 +94,39 @@ export class AuthGuard implements CanActivate {
       })
     }
 
-    // Access hết hạn nhưng refresh còn hạn -> cấp access mới qua cookie.
-    // Đây là phần RIÊNG của HTTP: handshake WebSocket không có Response nên
-    // gateway chỉ dùng kết quả phân giải, không cấp lại token.
-    if (resolved.usedRefresh) {
-      // Bản thay thế phải ngắn hạn đúng bằng bản nó thay. Cấp access 7 ngày ở
-      // đây từng biến mỗi lần refresh ngầm thành một chứng chỉ sống cả tuần.
-      const newAccessToken = this.jwtService.sign(
-        {
-          userId: resolved.payload.userId,
-          email: resolved.payload.email,
-          username: resolved.payload.username,
-        },
-        { expiresIn: ACCESS_TOKEN_TTL },
-      )
-
-      response.cookie('accessToken', newAccessToken, {
-        httpOnly: true,
-        secure: isSecureCookie(),
-        sameSite: 'lax',
-        maxAge: ACCESS_TOKEN_MAX_AGE_MS,
-        path: '/',
-      })
-    }
+    await this.assertSessionAlive(resolved.payload.sid)
 
     request['user'] = resolved.payload
     return true
+  }
+
+  /**
+   * Phiên còn sống không — và quan trọng hơn: phân biệt "đã bị thu hồi" với
+   * "không kiểm tra được".
+   *
+   * Trả 401 cho cả hai sẽ khiến một cú nấc của Redis đăng xuất toàn bộ người
+   * dùng, vì interceptor của frontend coi mọi 401 là phiên chấm dứt. 503 nói
+   * đúng sự thật — lỗi ở phía chúng ta, hãy thử lại — nên không ai bị đá ra, mà
+   * việc thu hồi cũng không hề bị bỏ qua âm thầm.
+   */
+  private async assertSessionAlive(sid: string): Promise<void> {
+    let alive: boolean
+    try {
+      alive = await this.sessions.isAlive(sid)
+    } catch (error) {
+      this.logger.error(`không kiểm tra được phiên ${sid}`, error)
+      throw new ServiceUnavailableException({
+        message: 'SESSION_CHECK_UNAVAILABLE',
+        code: 'SESSION_CHECK_UNAVAILABLE',
+      })
+    }
+
+    if (!alive) {
+      throw new UnauthorizedException({
+        message: 'UNAUTHORIZED',
+        code: 'SESSION_REVOKED',
+      })
+    }
   }
 
   /**

@@ -332,6 +332,13 @@ services:
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      # Không có ba dòng này, `limit_by: ip` của plugin rate-limiting nhìn thấy
+      # IP của host nginx cho MỌI request: 200/phút biến thành một cái xô dùng
+      # chung cho toàn hệ thống thay vì per-client. An toàn ở đây vì cổng proxy
+      # của Kong chỉ bind 127.0.0.1, nên chỉ nginx tới được nó.
+      KONG_TRUSTED_IPS: 0.0.0.0/0,::/0
+      KONG_REAL_IP_HEADER: X-Forwarded-For
+      KONG_REAL_IP_RECURSIVE: "on"
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomInt } from 'node:crypto'
 import { S3StorageService } from '@app/storage-s3'
 import { UtilService } from '@app/util/util.service'
 import { Inject, Injectable } from '@nestjs/common'
@@ -30,6 +30,8 @@ import {
   FriendRequestView,
   FriendView,
   PublicProfile,
+  RefreshResult,
+  SessionListItem,
   RequestPerson,
   SessionUser,
   toSessionUser,
@@ -42,6 +44,12 @@ import { maskEmail } from './domain/mask-email'
 import type { MemberProfile } from 'libs/constant/member-profile'
 import { internalFetch, serviceUrl } from '@app/common/http/internal-fetch'
 import {
+  ACCESS_TOKEN_TTL,
+  ACCESS_TOKEN_TYPE,
+  SessionStore,
+  type SessionMeta,
+} from '@app/common'
+import {
   buildKeysetCursor,
   parseKeysetCursor,
   toGeoPoint,
@@ -49,6 +57,24 @@ import {
   type Page,
 } from '@app/util'
 import { Status } from '../src/generated'
+
+/**
+ * Khoá tài khoản: 10 lần sai trong 15 phút.
+ *
+ * Đếm theo TÀI KHOẢN chứ không theo IP, vì tấn công thật là nhiều IP dội vào
+ * một tài khoản. Đánh đổi đã biết: nó mở ra khả năng làm khó một tài khoản cụ
+ * thể, nhưng đổi lại là chặn được dò mật khẩu phân tán — và OWASP chọn chiều
+ * này. Đăng nhập đúng sẽ xoá bộ đếm nên người dùng thật gần như không gặp.
+ */
+const LOGIN_LOCKOUT_THRESHOLD = 10
+const LOGIN_LOCKOUT_WINDOW_SECONDS = 15 * 60
+
+/**
+ * Hash bcrypt của một chuỗi cố định, chỉ dùng để nhánh "email không tồn tại"
+ * tốn đúng lượng CPU như nhánh có thật. Không phải bí mật.
+ */
+const TIMING_EQUALIZER_HASH =
+  '$2b$10$DTB0fFg1DxGu3WT4mxauuOLWB0Xd7LbWwTW0aD5HohFytr3JFbvMS'
 
 // Type definitions for service methods
 interface UserRegisterRequest {
@@ -140,10 +166,19 @@ export class UserService {
     private readonly redisService: RedisService,
     private readonly logger: LoggerService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    private readonly sessions: SessionStore,
   ) {}
 
+  /**
+   * Mã OTP từ nguồn ngẫu nhiên MẬT MÃ.
+   *
+   * `Math.random()` không phải CSPRNG: trạng thái của nó suy ra được từ vài
+   * giá trị đã phát, nên mã tiếp theo là đoán được thay vì phải dò. Token đặt
+   * lại mật khẩu trong cùng file này đã dùng `randomBytes` và có comment giải
+   * thích đúng điều đó — mã kích hoạt tài khoản không có lý do gì yếu hơn.
+   */
   private generateOtp(length = 6): string {
-    return Array.from({ length }, () => Math.floor(Math.random() * 10)).join('')
+    return Array.from({ length }, () => randomInt(0, 10)).join('')
   }
 
   /**
@@ -243,8 +278,16 @@ export class UserService {
   async verifyRegistrationOtp(
     data: VerifyOtpRequest,
   ): Promise<{ success: true }> {
-    const currentOtp = await this.redisService.getOTP(data.email)
-    if (!currentOtp || currentOtp !== data.otp) {
+    const matches = await this.redisService.verifyOTP(data.email, data.otp)
+    if (!matches) {
+      // Sai thì TỐN một lượt. Không có bước này thì cả không gian 10^6 mở
+      // trong 5 phút và mỗi lần đoán sai không mất gì cả.
+      const burned = await this.redisService.claimOtpAttempt(data.email)
+      if (burned) {
+        this.logger.warn('[user.verify-otp] vượt số lần thử, đã huỷ mã', {
+          email: maskEmail(data.email),
+        })
+      }
       UserErrors.otpInvalidOrExpired()
     }
 
@@ -460,8 +503,23 @@ export class UserService {
       userId: user.id,
     })
 
-    // Kênh DUY NHẤT báo cho chủ tài khoản biết có người vừa đặt lại mật khẩu
-    // của họ — càng cần thiết khi phiên đăng nhập cũ chưa bị thu hồi.
+    // Đặt lại mật khẩu mà không thu hồi phiên thì tính năng này không giành
+    // lại được tài khoản: kẻ đang chiếm vẫn còn nguyên phiên của nó.
+    //
+    // Nhưng KHÔNG để nó làm sập cả request: mật khẩu đã ghi xong và token đặt
+    // lại đã tiêu, nên ném lỗi ở đây sẽ để lại trạng thái nửa vời — người dùng
+    // tưởng thất bại trong khi mật khẩu đã đổi, và cái link thì không dùng lại
+    // được. Thu hồi hụt thì log to, phiên cũ sẽ chết khi hết hạn idle, và email
+    // cảnh báo vẫn đi.
+    try {
+      await this.revokeEverySession(user.id, 'password-changed')
+    } catch (error) {
+      this.logger.error(
+        '[user.reset-password] không thu hồi được phiên sau khi đổi mật khẩu',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+
     this.eventsPublisher.publishUserPasswordChanged({
       email: user.email,
       username: user.username,
@@ -469,19 +527,38 @@ export class UserService {
     })
   }
 
-  async login(data: UserLoginRequest): Promise<AuthSession> {
+  async login(
+    data: UserLoginRequest,
+    meta: SessionMeta = {},
+  ): Promise<AuthSession> {
+    // Tài khoản đang bị khoá thì trả về ĐÚNG thông điệp của mật khẩu sai.
+    // OWASP yêu cầu mọi nhánh nói giống nhau: nói "đang bị khoá" là xác nhận
+    // địa chỉ này có tồn tại, và biến trang đăng nhập thành máy dò tài khoản.
+    if (await this.isLoginLocked(data.email)) {
+      UserErrors.invalidCredentials()
+    }
+
     const user = await this.userRepo.findByEmail(data.email)
 
     // An unknown address and a wrong password must be indistinguishable, so a
     // missing user falls through to the same "invalid credentials" answer
     // rather than a 404 that confirms the address is unregistered.
-    const isPasswordValid = user
-      ? await this.utilService.comparePassword(data.password, user.password)
-      : false
+    //
+    // Nhánh "không có user" vẫn phải chạy bcrypt: bỏ qua nó làm email chưa
+    // đăng ký trả lời nhanh hơn email đã đăng ký một cách đo được, và chênh
+    // lệch đó chính là câu trả lời mà thông điệp giống nhau đang cố che.
+    const isPasswordValid = await this.utilService.comparePassword(
+      data.password,
+      user?.password ?? TIMING_EQUALIZER_HASH,
+    )
 
     if (!user || !isPasswordValid) {
+      await this.recordLoginFailure(data.email)
       UserErrors.invalidCredentials()
     }
+
+    // Mật khẩu đã đúng: người dùng thật không được tích luỹ bộ đếm khoá.
+    await this.clearLoginFailures(data.email)
 
     // Only now — once the caller has proven the password — is it safe to say
     // the account is pending, and to spend an email on a fresh code. The
@@ -494,22 +571,231 @@ export class UserService {
       UserErrors.accountNotActivated()
     }
 
-    const payload = {
+    // Phiên có danh tính riêng (`sid`) và state ở Redis, nên thu hồi được. Đây
+    // là thứ thiết kế cũ không có: hai JWT cùng secret, cùng payload, không có
+    // gì để xoá nên logout chỉ xoá được cookie ở máy người tử tế.
+    const { sid, refreshToken } = await this.sessions.create(user.id, meta)
+
+    return {
+      user: toSessionUser(user),
+      accessToken: this.signAccessToken({
+        userId: user.id,
+        email: user.email,
+        username: user.username,
+        sid,
+      }),
+      refreshToken,
+    }
+  }
+
+  /**
+   * Khoá tài khoản sau quá nhiều lần sai, và fail-OPEN nếu Redis lỗi.
+   *
+   * Fail-open có chủ ý: bản thân đăng nhập đã cần Redis để tạo phiên, nên chặn
+   * thêm ở đây không bảo vệ được gì mà chỉ làm lỗi khó đọc hơn.
+   */
+  private async isLoginLocked(email: string): Promise<boolean> {
+    try {
+      return (
+        (await this.redisService.loginFailureCount(email)) >=
+        LOGIN_LOCKOUT_THRESHOLD
+      )
+    } catch (error) {
+      this.logger.error(
+        '[user.login] không đọc được bộ đếm khoá — cho qua',
+        error instanceof Error ? error.message : String(error),
+      )
+      return false
+    }
+  }
+
+  private async recordLoginFailure(email: string): Promise<void> {
+    try {
+      const failures = await this.redisService.countLoginFailure(
+        email,
+        LOGIN_LOCKOUT_WINDOW_SECONDS,
+      )
+      if (failures === LOGIN_LOCKOUT_THRESHOLD) {
+        this.logger.warn('[user.login] tài khoản bị khoá tạm thời', {
+          email: maskEmail(email),
+          failures,
+          windowSeconds: LOGIN_LOCKOUT_WINDOW_SECONDS,
+        })
+      }
+    } catch {
+      /* bộ đếm lỗi không được che mất lỗi đăng nhập thật */
+    }
+  }
+
+  private async clearLoginFailures(email: string): Promise<void> {
+    try {
+      await this.redisService.clearLoginFailures(email)
+    } catch {
+      /* bộ đếm tự hết hạn, xoá hụt là vô hại */
+    }
+  }
+
+  /**
+   * Access token luôn được ký ở đúng một chỗ.
+   *
+   * Trước đây TTL '15m' bị viết tay ở đây trong khi hằng số cùng tên nằm trong
+   * guard, và chỉ có một dòng comment giữ cho hai chỗ khớp nhau.
+   */
+  private signAccessToken(claims: {
+    userId: string
+    email: string
+    username: string
+    sid: string
+  }): string {
+    return this.jwtService.sign(
+      { ...claims, typ: ACCESS_TOKEN_TYPE },
+      { expiresIn: ACCESS_TOKEN_TTL },
+    )
+  }
+
+  /**
+   * Làm mới phiên. Đây là chỗ DUY NHẤT cấp lại cookie — trước đây guard tự làm
+   * việc này trên request bất kỳ, và chính vì thế refresh token không thể rotate.
+   */
+  async refreshSession(refreshCookie?: string | null): Promise<RefreshResult> {
+    const outcome = await this.sessions.consume(refreshCookie)
+
+    if (outcome.status === 'invalid') {
+      return { status: 'terminated' }
+    }
+
+    // Token đã tiêu mà còn được trình lại sau cửa sổ ân hạn: có hai bên cùng
+    // giữ nó. Không biết bên nào là chủ thật, nên giết cả phiên của user.
+    if (outcome.status === 'replayed') {
+      this.logger.warn('[user.refresh] refresh token bị dùng lại', {
+        userId: outcome.userId,
+        sid: outcome.sid,
+      })
+      // Lấy người nhận TRƯỚC khi thu hồi: cảnh báo này là thứ duy nhất cho
+      // chủ tài khoản biết vì sao mình vừa bị đăng xuất, và biết rằng nên đổi
+      // mật khẩu. Không tra được thì vẫn thu hồi, chỉ là không gửi mail.
+      const owner = await this.userRepo
+        .findSessionFieldsById(outcome.userId)
+        .catch(() => null)
+
+      // Thu hồi hụt cũng vẫn từ chối request này — hướng an toàn.
+      try {
+        await this.revokeEverySession(
+          outcome.userId,
+          'token-reuse',
+          owner ? { email: owner.email, username: owner.username } : undefined,
+        )
+      } catch (error) {
+        this.logger.error(
+          '[user.refresh] không thu hồi được phiên sau khi phát hiện replay',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+      return { status: 'terminated' }
+    }
+
+    const user = await this.userRepo.findSessionFieldsById(outcome.userId)
+    if (!user) {
+      // Tài khoản không còn: phiên cũng không có lý do tồn tại.
+      await this.sessions.revokeSession(outcome.userId, outcome.sid)
+      return { status: 'terminated' }
+    }
+
+    const accessToken = this.signAccessToken({
       userId: user.id,
       email: user.email,
       username: user.username,
-    }
-
-    const accessToken = this.jwtService.sign(payload, {
-      expiresIn: '15m',
+      sid: outcome.sid,
     })
 
-    // refresh token
-    const refreshToken = this.jwtService.sign(payload, {
-      expiresIn: '7d',
-    })
+    // Nhánh ân hạn KHÔNG trả cookie refresh mới: bản mới đã nằm ở trình duyệt
+    // từ request thắng cuộc rotate, và server chỉ giữ hash nên cũng không thể
+    // phát lại bản đó.
+    return outcome.status === 'rotated'
+      ? { status: 'rotated', accessToken, refreshToken: outcome.refreshToken }
+      : { status: 'grace', accessToken }
+  }
 
-    return { user: toSessionUser(user), accessToken, refreshToken }
+  /**
+   * Đăng xuất thiết bị hiện tại.
+   *
+   * Idempotent theo thiết kế: cookie hỏng hay phiên đã chết thì vẫn coi như
+   * xong, vì việc người dùng cần là cookie bị xoá — và controller làm việc đó
+   * bất kể ở đây trả gì.
+   */
+  async logout(refreshCookie?: string | null): Promise<void> {
+    const outcome = await this.sessions.consume(refreshCookie)
+    if (outcome.status === 'invalid') return
+
+    await this.sessions.revokeSession(outcome.userId, outcome.sid)
+    this.eventsPublisher.publishSessionRevoked({
+      userId: outcome.userId,
+      sids: [outcome.sid],
+      reason: 'logout',
+    })
+  }
+
+  /**
+   * Các thiết bị đang đăng nhập của chính người dùng.
+   *
+   * Mới nhất lên trước, và đánh dấu thiết bị đang xem — không có dấu đó thì
+   * người dùng không biết dòng nào là mình và rất dễ tự đăng xuất chính mình.
+   */
+  async listOwnSessions(
+    userId: string,
+    currentSid: string,
+  ): Promise<SessionListItem[]> {
+    const sessions = await this.sessions.listSessions(userId)
+    return sessions
+      .map((session) => ({ ...session, current: session.sid === currentSid }))
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+  }
+
+  /**
+   * Đăng xuất một thiết bị cụ thể.
+   *
+   * Trả `false` khi sid không thuộc người gọi — `SessionStore` kiểm quyền sở
+   * hữu bằng chính `SREM` trên chỉ mục của user, nên không có đường nào đổi
+   * tham số để thu hồi phiên của người khác.
+   */
+  async revokeOwnSession(userId: string, sid: string): Promise<boolean> {
+    const revoked = await this.sessions.revokeSession(userId, sid)
+    if (!revoked) return false
+
+    this.eventsPublisher.publishSessionRevoked({
+      userId,
+      sids: [sid],
+      reason: 'logout',
+    })
+    return true
+  }
+
+  /** Đăng xuất mọi thiết bị của chính mình. */
+  async logoutAll(userId: string): Promise<void> {
+    await this.revokeEverySession(userId, 'logout-all')
+  }
+
+  /**
+   * Xoá mọi phiên của một user rồi báo cho gateway ngắt socket.
+   *
+   * Không có bước publish thì thu hồi chỉ có hiệu lực với HTTP: socket đã bắt
+   * tay xong vẫn nhận tin nhắn, vì nó chỉ được xác thực một lần lúc handshake.
+   */
+  private async revokeEverySession(
+    userId: string,
+    reason: 'logout-all' | 'password-changed' | 'token-reuse',
+    recipient?: { email: string; username: string },
+  ): Promise<void> {
+    const sids = await this.sessions.revokeAllForUser(userId)
+    if (!sids.length) return
+
+    this.eventsPublisher.publishSessionRevoked({
+      userId,
+      sids,
+      reason,
+      revokedAt: new Date().toISOString(),
+      ...(recipient ? { recipient } : {}),
+    })
   }
 
   async getMemberProfiles(userIds: string[]): Promise<MemberProfile[]> {

@@ -10,6 +10,7 @@ import type {
   ChatMentionPayload,
   UserCreatedPayload,
   UserMakeFriendPayload,
+  SessionRevokedPayload,
   UserPasswordChangedPayload,
   UserPasswordResetPayload,
   UserRegisterOtpPayload,
@@ -113,6 +114,24 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
 
   async handleUserPasswordChanged(data: UserPasswordChangedPayload) {
     await this.mailerService.sendPasswordChanged(data)
+  }
+
+  /**
+   * Chỉ gửi mail khi lý do là token bị dùng lại.
+   *
+   * Đăng xuất bình thường, đăng xuất mọi nơi hay đổi mật khẩu đều là việc
+   * người dùng tự làm và đã có phản hồi ngay trên giao diện — gửi mail cho
+   * chúng là dạy người dùng bỏ qua email của hệ thống, để rồi bỏ qua đúng cái
+   * cảnh báo thật.
+   */
+  async handleSessionRevoked(data: SessionRevokedPayload) {
+    if (data.reason !== 'token-reuse' || !data.recipient) return
+
+    await this.mailerService.sendSessionRevoked({
+      email: data.recipient.email,
+      username: data.recipient.username,
+      revokedAt: data.revokedAt ?? new Date().toISOString(),
+    })
   }
 
   async handleMakeFriend(data: UserMakeFriendPayload) {

@@ -175,3 +175,28 @@ export interface ChatMentionPayload {
   /** Trích đoạn nội dung để hiện trong thông báo. */
   preview: string
 }
+
+/**
+ * Phiên đăng nhập vừa bị thu hồi.
+ *
+ * Guard chỉ chặn được HTTP; socket đã bắt tay xong thì sống tới khi có ai đó
+ * ngắt nó. Event này là kênh duy nhất để việc thu hồi có hiệu lực với realtime.
+ */
+export interface SessionRevokedPayload {
+  userId: string
+  /**
+   * Các phiên bị thu hồi. Gateway chỉ ngắt socket thuộc những sid này, nên
+   * đăng xuất một thiết bị không đá luôn các thiết bị khác của cùng người.
+   */
+  sids: string[]
+  reason: 'logout' | 'logout-all' | 'password-changed' | 'token-reuse'
+  /** Thời điểm thu hồi, ISO. */
+  revokedAt?: string
+  /**
+   * Người nhận cảnh báo — chỉ đi kèm khi lý do là `token-reuse`.
+   *
+   * Gửi sẵn thay vì để notification tự tra: đây là đường cảnh báo bảo mật, nó
+   * không nên phụ thuộc vào một lời gọi HTTP nội bộ có thể đang lỗi.
+   */
+  recipient?: { email: string; username: string }
+}

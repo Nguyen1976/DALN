@@ -198,4 +198,36 @@ export class MailerService {
     })
     await this.send(data.email, 'Mật khẩu DALN Chat vừa được đổi', html)
   }
+
+  /**
+   * Cảnh báo khi phát hiện refresh token bị dùng lại.
+   *
+   * Rotation biến việc trộm token từ im lặng thành ồn ào, nhưng cái ồn ào đó
+   * chỉ có ích nếu tới được chủ tài khoản. Không có mail này thì người dùng chỉ
+   * thấy mình bị đăng xuất mà không biết vì sao — và không biết rằng nên đổi
+   * mật khẩu.
+   */
+  async sendSessionRevoked(data: {
+    email: string
+    username: string
+    revokedAt: string
+  }) {
+    const html = this.render('session-revoked.html', {
+      name: data.username,
+      email: data.email,
+      revokedAt: new Intl.DateTimeFormat('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }).format(new Date(data.revokedAt)),
+    })
+    await this.send(
+      data.email,
+      'Phiên đăng nhập DALN Chat vừa bị thu hồi',
+      html,
+    )
+  }
 }

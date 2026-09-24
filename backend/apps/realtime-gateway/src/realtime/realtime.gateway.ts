@@ -21,8 +21,14 @@ import { UserStatusStore } from './user-status.store'
 import type {
   EmitToUserPayload,
   MessageSendPayload,
+  SessionRevokedPayload,
 } from 'libs/constant/rmq/payload'
-import { readCookie, resolveTokens } from '@app/common'
+import {
+  allowedOrigins,
+  readCookie,
+  resolveAccessToken,
+  SessionStore,
+} from '@app/common'
 import { randomUUID } from 'crypto'
 import { buildIceConfig } from './turn-credentials'
 import { CallSession, CallSessionStore, isCallId } from './call-session.store'
@@ -58,6 +64,14 @@ export type CallAck =
   | ({ ok: true } & Record<string, unknown>)
   | { ok: false; code: string; message: string }
 
+/** Đọc `sid` từ `socket.data` của một socket lấy qua `fetchSockets()`. */
+function sidOf(socket: { data?: unknown }): string | undefined {
+  const data = socket.data
+  if (!data || typeof data !== 'object') return undefined
+  const sid = (data as Record<string, unknown>).sid
+  return typeof sid === 'string' ? sid : undefined
+}
+
 function callError(code: string, message: string): CallAck {
   return { ok: false, code, message }
 }
@@ -65,11 +79,14 @@ function callError(code: string, message: string): CallAck {
 //nếu k đặt tên cổng thì nó sẽ trùng với cổng của http
 @Injectable()
 @WebSocketGateway({
+  // `origin: '*'` cộng với handshake xác thực bằng cookie là một cặp sai: mọi
+  // trang đều mở được socket kèm cookie của người dùng. `credentials` cũng
+  // từng nằm ở tầng ngoài, nơi Socket.IO không đọc tới.
   cors: {
-    origin: '*',
+    origin: allowedOrigins(),
+    credentials: true,
   },
   namespace: 'realtime',
-  credentials: true,
   pingInterval: 40000,
   pingTimeout: 10000,
 })
@@ -182,6 +199,7 @@ export class RealtimeGateway
     @Inject('REDIS_CLIENT')
     private readonly redisClient: Redis,
     private readonly amqpConnection: AmqpConnection,
+    private readonly sessions: SessionStore,
   ) {
     this.userStatusStore = new UserStatusStore(this.redisClient)
     this.callSessionStore = new CallSessionStore(this.redisClient)
@@ -194,31 +212,45 @@ export class RealtimeGateway
     try {
       const rawCookie = client.handshake.headers.cookie
 
-      // Dùng CHUNG hàm phân giải với AuthGuard. Trước đây chỗ này chỉ verify
-      // accessToken và không đụng tới refreshToken — dù nó nằm sẵn trong cùng
-      // handshake header. Access hết hạn (tab mở > 15 phút) là socket bị ngắt,
-      // mà Socket.IO KHÔNG tự nối lại sau `io server disconnect`, nên realtime
-      // chết hẳn tới khi người dùng tải lại trang.
+      // Dùng CHUNG hàm phân giải với AuthGuard, và chỉ chấp nhận access token.
       //
-      // Socket là kết nối dài hạn nên chấp nhận cả refreshToken là hợp lý: nó
-      // vốn đã được trình duyệt gửi kèm mọi request (cookie path=/), nên không
-      // hề mở rộng bề mặt lộ lọt.
-      const resolved = resolveTokens(
+      // Chỗ này từng nhận cả refreshToken để socket sống qua mốc 15 phút. Giờ
+      // không còn cần: refresh token không phải JWT nữa, và cookie của nó cũng
+      // không còn được gửi tới đây (path=/user). Client nào bị từ chối vì
+      // ACCESS_TOKEN_EXPIRED thì gọi POST /user/refresh rồi nối lại — đúng
+      // đường mà HTTP đang đi.
+      const resolved = resolveAccessToken(
         this.jwtService,
         readCookie(rawCookie, 'accessToken'),
-        readCookie(rawCookie, 'refreshToken'),
       )
 
-      if (!resolved.ok || !resolved.payload?.userId) {
-        this.rejectConnection(
-          client,
-          resolved.ok ? 'TOKEN_INVALID' : resolved.code,
-        )
+      if (!resolved.ok) {
+        this.rejectConnection(client, resolved.code)
         return
       }
 
       const userId = resolved.payload.userId
+      const sid = resolved.payload.sid
+
+      // Chữ ký hợp lệ chưa đủ: phiên có thể đã bị thu hồi từ một thiết bị khác
+      // trong khi token này còn hạn. Redis lỗi thì từ chối — fail-closed, và
+      // client sẽ thử lại theo backoff đã có.
+      let alive: boolean
+      try {
+        alive = await this.sessions.isAlive(sid)
+      } catch (error) {
+        this.logger.error(`không kiểm tra được phiên ${sid}`, error)
+        this.rejectConnection(client, 'SESSION_CHECK_UNAVAILABLE')
+        return
+      }
+
+      if (!alive) {
+        this.rejectConnection(client, 'SESSION_REVOKED')
+        return
+      }
+
       client.data.userId = userId
+      client.data.sid = sid
 
       const prevOnline = await this.userStatusStore.isOnline(userId)
 
@@ -371,6 +403,35 @@ export class RealtimeGateway
   })
   emitToUser({ userIds, event, data }: EmitToUserPayload) {
     this.emitToUserSockets(userIds, event, data)
+  }
+
+  /**
+   * Phiên vừa bị thu hồi -> ngắt đúng những socket thuộc phiên đó.
+   *
+   * Không có đường này thì thu hồi chỉ có hiệu lực với HTTP: socket được xác
+   * thực MỘT LẦN lúc handshake rồi sống mãi, nên người vừa bị đăng xuất vẫn
+   * nhận tin nhắn cho tới khi transport tự đứt.
+   */
+  @RabbitSubscribeWithRetry({
+    exchange: EXCHANGE_RMQ.USER_EVENTS,
+    routingKey: ROUTING_RMQ.AUTH_SESSION_REVOKED,
+    queue: QUEUE_RMQ.REALTIME_AUTH_SESSION_REVOKED,
+  })
+  async handleSessionRevoked({ userId, sids }: SessionRevokedPayload) {
+    const revoked = new Set(sids ?? [])
+    const sockets = await this.server.in(`user:${userId}`).fetchSockets()
+
+    for (const socket of sockets) {
+      // Lọc theo sid để đăng xuất một thiết bị không đá các thiết bị khác.
+      // Socket không có sid là bản cũ trước khi deploy — cũng ngắt luôn.
+      const sid = sidOf(socket)
+      if (sid && revoked.size && !revoked.has(sid)) continue
+
+      // Gửi mã lý do TRƯỚC khi đóng: client cần phân biệt "phải đăng nhập lại"
+      // với "token hết hạn, làm mới rồi nối lại".
+      socket.emit(SOCKET_EVENTS.AUTH.ERROR, { code: 'SESSION_REVOKED' })
+      setTimeout(() => socket.disconnect(true), 50)
+    }
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_CREATE)

@@ -1,4 +1,4 @@
-import { isSecureCookie } from './auth.guard'
+import { isSecureCookie } from './session.constants'
 
 describe('isSecureCookie', () => {
   const originalEnv = { ...process.env }
