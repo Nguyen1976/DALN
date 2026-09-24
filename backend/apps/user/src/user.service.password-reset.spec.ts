@@ -23,6 +23,7 @@ function setup(user: typeof activeUser | null = activeUser) {
   const eventsPublisher = {
     publishUserPasswordReset: jest.fn<void, [UserPasswordResetPayload]>(),
     publishUserPasswordChanged: jest.fn(),
+    publishSessionRevoked: jest.fn(),
   }
   const redisService = {
     claimPasswordResetIpSlot: jest.fn().mockResolvedValue(true),
@@ -36,6 +37,10 @@ function setup(user: typeof activeUser | null = activeUser) {
     clearPasswordResetIndex: jest.fn().mockResolvedValue(undefined),
   }
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() }
+  const sessions = {
+    revokeAllForUser: jest.fn().mockResolvedValue(['s1', 's2']),
+    revokeSession: jest.fn().mockResolvedValue(undefined),
+  }
 
   const service = new UserService(
     userRepo as never,
@@ -48,8 +53,16 @@ function setup(user: typeof activeUser | null = activeUser) {
     redisService as never,
     logger as never,
     {} as never,
+    sessions as never,
   )
-  return { service, userRepo, utilService, eventsPublisher, redisService }
+  return {
+    service,
+    userRepo,
+    utilService,
+    eventsPublisher,
+    redisService,
+    sessions,
+  }
 }
 
 describe('UserService.forgotPassword', () => {
@@ -249,6 +262,53 @@ describe('UserService.resetPassword', () => {
       'an@example.test',
     )
     expect(eventsPublisher.publishUserPasswordChanged).toHaveBeenCalledTimes(1)
+  })
+
+  // Đây là lý do tồn tại của tính năng "quên mật khẩu": giành lại tài khoản.
+  // Đổi mật khẩu mà phiên của kẻ đang chiếm vẫn sống thì không giành lại được gì.
+  it('thu hồi MỌI phiên của tài khoản và báo đi ngắt socket', async () => {
+    const { service, sessions, eventsPublisher, redisService } = setup()
+    redisService.consumePasswordResetToken.mockResolvedValueOnce(activeUser.id)
+
+    await service.resetPassword({ token: 'tok', password: 'MatKhauMoi1!' })
+
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(activeUser.id)
+    expect(eventsPublisher.publishSessionRevoked).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: activeUser.id,
+        sids: ['s1', 's2'],
+        reason: 'password-changed',
+      }),
+    )
+  })
+
+  it('thu hồi phiên TRƯỚC khi gửi email cảnh báo', async () => {
+    const { service, sessions, eventsPublisher, redisService } = setup()
+    redisService.consumePasswordResetToken.mockResolvedValueOnce(activeUser.id)
+    const order: string[] = []
+    sessions.revokeAllForUser.mockImplementationOnce(() => {
+      order.push('revoke')
+      return Promise.resolve(['s1'])
+    })
+    eventsPublisher.publishUserPasswordChanged.mockImplementationOnce(() => {
+      order.push('email')
+    })
+
+    await service.resetPassword({ token: 'tok', password: 'MatKhauMoi1!' })
+
+    // Email nói "mật khẩu của bạn vừa bị đổi" nên khi nó tới thì phiên cũ phải
+    // đã chết rồi, không phải sắp chết.
+    expect(order).toEqual(['revoke', 'email'])
+  })
+
+  it('token sai -> không thu hồi phiên của ai', async () => {
+    const { service, sessions, redisService } = setup()
+    redisService.consumePasswordResetToken.mockResolvedValueOnce(null)
+
+    await expect(
+      service.resetPassword({ token: 'sai', password: 'MatKhauMoi1!' }),
+    ).rejects.toBeDefined()
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled()
   })
 
   it('tiêu thụ token TRƯỚC khi ghi mật khẩu', async () => {

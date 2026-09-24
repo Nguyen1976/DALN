@@ -164,3 +164,24 @@ export const respondToFriendRequestAPI = (
   requestId: string,
   status: "ACCEPTED" | "REJECTED",
 ) => api.post(`/user/friend-requests/${requestId}/respond`, { status });
+
+/** Một thiết bị đang đăng nhập, như trang "Phiên đăng nhập" hiển thị. */
+export interface UserSession {
+  /** Định danh phiên — không phải bí mật, chỉ là phần tra key của cookie. */
+  sid: string;
+  createdAt: number;
+  lastSeenAt: number;
+  userAgent: string | null;
+  ip: string | null;
+  /** Đúng thiết bị đang xem trang này. */
+  current: boolean;
+}
+
+export const listSessionsAPI = () => api.get<UserSession[]>("/user/sessions");
+
+/** Đăng xuất một thiết bị cụ thể. 404 nếu sid không thuộc mình. */
+export const revokeSessionAPI = (sid: string) =>
+  api.post("/user/sessions/revoke", { sid });
+
+/** Đăng xuất khỏi MỌI thiết bị, kể cả thiết bị đang dùng. */
+export const logoutAllAPI = () => api.post("/user/logout-all");

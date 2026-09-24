@@ -174,7 +174,7 @@ export function AuthForm() {
                           isLogin ? "current-password" : "new-password"
                         }
                         placeholder={
-                          isLogin ? "Nhập mật khẩu" : "Ít nhất 6 ký tự"
+                          isLogin ? "Nhập mật khẩu" : "Ít nhất 8 ký tự"
                         }
                         {...field}
                       />

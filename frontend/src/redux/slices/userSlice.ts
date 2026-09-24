@@ -7,6 +7,8 @@ import {
 } from "@/apis/user";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
+import { socket } from "@/lib/socket";
+import { resetSocketAuthRetries } from "@/lib/socketAuth";
 
 export interface UserState {
   id: string;
@@ -55,7 +57,18 @@ export const loginAPI = createAsyncThunk(
   },
 );
 
-export const logoutAPI = createAsyncThunk(`/user/logout`, () => signOutAPI());
+export const logoutAPI = createAsyncThunk(`/user/logout`, async () => {
+  try {
+    await signOutAPI();
+  } finally {
+    // Guard chỉ chặn được HTTP: socket đã bắt tay xong vẫn nhận tin nhắn cho
+    // tới khi có ai đó ngắt nó. Server cũng đẩy lệnh ngắt qua RMQ, nhưng cắt
+    // ngay tại client thì người vừa bấm đăng xuất không phải chờ vòng qua
+    // broker — và `finally` để việc đó xảy ra cả khi lời gọi logout thất bại.
+    socket.disconnect();
+    resetSocketAuthRetries();
+  }
+});
 
 export const fetchCurrentUserAPI = createAsyncThunk(
   `user/me`,

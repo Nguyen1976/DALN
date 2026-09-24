@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common'
 import { UserService } from './user.service'
 import { RedisModule } from '@app/redis'
-import { AuthGuard, CommonModule } from '@app/common'
+import { AuthGuard, CommonModule, RateLimitGuard } from '@app/common'
 import { UtilModule } from '@app/util'
 import {
   MessageHandlerErrorBehavior,
@@ -76,6 +76,13 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus'
   ],
   controllers: [UserHttpController],
   providers: [
+    // Thứ tự có ý nghĩa: guard đăng ký trước chạy trước. Hạn mức phải đứng
+    // trước mọi việc tốn kém (đọc DB, bcrypt, gửi mail) mới có tác dụng chặn
+    // flood — đặt sau thì công vẫn bị làm rồi mới bị từ chối.
+    {
+      provide: APP_GUARD,
+      useClass: RateLimitGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: AuthGuard,

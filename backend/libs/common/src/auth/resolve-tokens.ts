@@ -2,96 +2,105 @@ import { JwtService } from '@nestjs/jwt'
 import { TokenExpiredError } from 'jsonwebtoken'
 
 /**
- * Phân giải cặp cookie (accessToken, refreshToken) thành danh tính người dùng.
+ * Phân giải cookie access token thành danh tính người dùng.
  *
- * Vì sao tách ra: logic này từng nằm ở HAI nơi — AuthGuard (có nhánh refresh)
- * và RealtimeGateway (không có). Kết quả là access token hết hạn thì HTTP tự
- * làm mới bình thường, còn WebSocket bị ngắt thẳng, và vì Socket.IO không tự
- * nối lại sau `io server disconnect` nên realtime chết hẳn tới khi tải lại
- * trang. Gộp về một hàm để hai đường không thể lệch nhau nữa.
+ * Hàm này TỪNG nhận cả cặp (access, refresh) và tự lùi sang refresh khi access
+ * hết hạn. Việc đó đã chuyển hẳn sang `POST /user/refresh`, vì làm mới ngầm trên
+ * một request bất kỳ khiến không thể rotate refresh token: N request song song
+ * sau mốc 15 phút đều mang token cũ, và mỗi cái lại tự cấp cookie mới.
  *
- * Hàm này CỐ Ý không cấp token mới: nó chỉ trả lời "ai đây, và có cần làm mới
- * không". Việc set cookie là đặc thù HTTP nên để AuthGuard làm — handshake
- * WebSocket không có `Response` để set.
+ * Nên ở đây chỉ còn đúng một việc: token này có hợp lệ không, và nếu có thì là
+ * ai. Việc phiên còn sống hay đã bị thu hồi thuộc `SessionStore` — đó là state,
+ * không phải chữ ký.
  */
 
-/** What the user service signs into both session tokens. */
+/** Những gì user-service ký vào access token. */
 export type JwtPayload = {
   userId: string
   email: string
   username: string
+  /** Phiên mà token này thuộc về. Thu hồi phiên là xoá `sess:<sid>`. */
+  sid: string
 }
 
-export type TokenResolution =
-  | {
-      ok: true
-      payload: JwtPayload
-      /** true = access hết hạn hoặc không còn, danh tính lấy từ refresh token -> nên cấp access mới. */
-      usedRefresh: boolean
-    }
+export type AccessTokenResolution =
+  | { ok: true; payload: JwtPayload }
   | { ok: false; code: TokenErrorCode }
 
 export type TokenErrorCode =
-  /** Không có cookie phiên nào — cả access lẫn refresh. Chưa đăng nhập. */
+  /** Không có cookie access nào. Chưa đăng nhập, hoặc đã quá 15 phút. */
   | 'ACCESS_TOKEN_MISSING'
-  /** Access hết hạn và không có refresh token đi kèm. */
-  | 'REFRESH_TOKEN_MISSING'
-  /** Phải dựa vào refresh, nhưng refresh hỏng hoặc hết hạn -> phiên chấm dứt thật. */
-  | 'REFRESH_TOKEN_INVALID'
-  /** Access sai chữ ký / méo mó (không phải hết hạn). */
+  /** Còn cookie nhưng đã hết hạn -> client gọi /user/refresh rồi thử lại. */
+  | 'ACCESS_TOKEN_EXPIRED'
+  /** Sai chữ ký, méo mó, thiếu `sid`, hoặc không phải access token. */
   | 'TOKEN_INVALID'
 
-export function resolveTokens(
+/** Lỗi thuộc về state của phiên, không thuộc về chữ ký của token. */
+export type SessionErrorCode =
+  /** Phiên đã bị thu hồi hoặc chết già -> đăng xuất. */
+  | 'SESSION_REVOKED'
+  /** Không kiểm tra được vì hạ tầng lỗi -> 503, client thử lại, KHÔNG đăng xuất. */
+  | 'SESSION_CHECK_UNAVAILABLE'
+
+export type AuthErrorCode = TokenErrorCode | SessionErrorCode
+
+/** Giá trị claim `typ` của access token. Refresh token không còn là JWT. */
+export const ACCESS_TOKEN_TYPE = 'at'
+
+export function resolveAccessToken(
   jwtService: JwtService,
   accessToken?: string | null,
-  refreshToken?: string | null,
-): TokenResolution {
+): AccessTokenResolution {
   if (!accessToken) {
-    // Cookie accessToken có maxAge đúng bằng TTL của JWT, nên trình duyệt xoá
-    // nó đúng lúc token hết hạn: từ phút thứ 15 mọi request chỉ còn mang
-    // refreshToken. "Không có access" vì thế thường là "access đã hết hạn",
-    // không phải "chưa đăng nhập" — trả ACCESS_TOKEN_MISSING ở đây từng đá
-    // người dùng ra ngoài dù refresh còn hạn 7 ngày.
-    if (!refreshToken) {
-      return { ok: false, code: 'ACCESS_TOKEN_MISSING' }
-    }
-    return resolveFromRefresh(jwtService, refreshToken)
+    return { ok: false, code: 'ACCESS_TOKEN_MISSING' }
   }
 
+  let decoded: unknown
   try {
-    return {
-      ok: true,
-      payload: jwtService.verify(accessToken),
-      usedRefresh: false,
-    }
+    decoded = jwtService.verify(accessToken)
   } catch (err) {
-    // CHỈ hết hạn mới được đi tiếp sang refresh. Chữ ký sai là dấu hiệu token
-    // bị giả mạo, không phải phiên cũ -> từ chối luôn.
-    if (!(err instanceof TokenExpiredError)) {
-      return { ok: false, code: 'TOKEN_INVALID' }
+    // Hết hạn là chuyện bình thường mỗi 15 phút và có đường cứu (refresh).
+    // Sai chữ ký thì không: đó là token bị giả mạo, trả lời khác đi.
+    return {
+      ok: false,
+      code:
+        err instanceof TokenExpiredError
+          ? 'ACCESS_TOKEN_EXPIRED'
+          : 'TOKEN_INVALID',
     }
-
-    if (!refreshToken) {
-      return { ok: false, code: 'REFRESH_TOKEN_MISSING' }
-    }
-
-    return resolveFromRefresh(jwtService, refreshToken)
   }
+
+  const payload = toJwtPayload(decoded)
+  if (!payload) {
+    return { ok: false, code: 'TOKEN_INVALID' }
+  }
+
+  return { ok: true, payload }
 }
 
-/** Nhánh làm mới dùng chung cho "access hết hạn" và "access đã bị xoá". */
-function resolveFromRefresh(
-  jwtService: JwtService,
-  refreshToken: string,
-): TokenResolution {
-  try {
-    return {
-      ok: true,
-      payload: jwtService.verify(refreshToken),
-      usedRefresh: true,
-    }
-  } catch {
-    return { ok: false, code: 'REFRESH_TOKEN_INVALID' }
+/**
+ * Chỉ nhận token đúng hình dạng ta ký ra.
+ *
+ * `typ` phải là access: hai token từng dùng chung secret và chung payload nên
+ * hoán đổi được cho nhau — đưa refresh token vào chỗ access là dùng được. Giờ
+ * refresh không còn là JWT nữa, nhưng claim này khoá lại khả năng đó vĩnh viễn.
+ *
+ * `sid` phải có: token cấp trước khi có cơ chế phiên thì không thu hồi được, và
+ * "không thu hồi được" phải là 401 chứ không phải một ngoại lệ được dung thứ.
+ */
+function toJwtPayload(decoded: unknown): JwtPayload | null {
+  if (!decoded || typeof decoded !== 'object') return null
+  const raw = decoded as Record<string, unknown>
+
+  if (raw.typ !== ACCESS_TOKEN_TYPE) return null
+  if (typeof raw.userId !== 'string' || !raw.userId) return null
+  if (typeof raw.sid !== 'string' || !raw.sid) return null
+
+  return {
+    userId: raw.userId,
+    email: typeof raw.email === 'string' ? raw.email : '',
+    username: typeof raw.username === 'string' ? raw.username : '',
+    sid: raw.sid,
   }
 }
 

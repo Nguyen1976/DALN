@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { Inject, Injectable } from '@nestjs/common'
 import type Redis from 'ioredis'
 
@@ -148,33 +149,79 @@ export class RedisService {
     return `otp:reg:${email.trim().toLowerCase()}`
   }
 
+  /**
+   * Lưu BẢN BĂM của OTP, không lưu mã thô.
+   *
+   * Trước đây mã 6 số nằm cleartext trong Redis — trong khi token đặt lại mật
+   * khẩu ngay dưới đây đã được băm, kèm cả comment giải thích vì sao. Cùng một
+   * hệ thống, cùng một loại bí mật, hai chuẩn khác nhau.
+   */
   async saveOTP(email: string, otp: string, ttl = 300): Promise<void> {
     const key = this.getRegistrationOtpKey(email)
-    await this.redisClient.set(key, otp, 'EX', ttl)
+    await this.redisClient.set(key, this.hashOtp(otp), 'EX', ttl)
+    await this.redisClient.del(this.getOtpAttemptKey(email))
   }
 
-  async getOTP(email: string): Promise<string | null> {
-    const key = this.getRegistrationOtpKey(email)
-    return await this.redisClient.get(key)
+  /**
+   * So khớp OTP người dùng gửi, theo thời gian hằng định.
+   *
+   * `!==` trên chuỗi thoát ngay ở ký tự đầu khác nhau. Với mã 6 số thì việc đo
+   * được thời gian đó qua mạng là khó, nhưng repo đã có `timingSafeEqual` sẵn
+   * cho token nội bộ — dùng chuẩn cao hơn không tốn gì.
+   */
+  async verifyOTP(email: string, otp: string): Promise<boolean> {
+    const stored = await this.redisClient.get(this.getRegistrationOtpKey(email))
+    if (!stored) return false
+
+    const a = Buffer.from(stored, 'hex')
+    const b = Buffer.from(this.hashOtp(otp), 'hex')
+    if (a.length !== b.length || a.length === 0) return false
+    return timingSafeEqual(a, b)
   }
 
   async deleteOTP(email: string): Promise<void> {
-    const key = this.getRegistrationOtpKey(email)
-    await this.redisClient.del(key)
+    await this.redisClient.del(
+      this.getRegistrationOtpKey(email),
+      this.getOtpAttemptKey(email),
+    )
+  }
+
+  private getOtpAttemptKey(email: string): string {
+    return `otp:attempts:${email.trim().toLowerCase()}`
+  }
+
+  private hashOtp(otp: string): string {
+    return createHash('sha256').update(otp.trim()).digest('hex')
+  }
+
+  /**
+   * Đếm một lần thử OTP sai. Trả `true` nếu đã vượt hạn và mã bị TIÊU HUỶ.
+   *
+   * Không có bước này thì toàn bộ không gian 10^6 mở trong 5 phút, và một lần
+   * đoán sai không mất gì cả: mã vẫn nằm đó cho lần đoán tiếp theo.
+   */
+  async claimOtpAttempt(email: string, limit = 5): Promise<boolean> {
+    const attempts = Number(
+      await this.redisClient.eval(
+        `local n = redis.call('INCR', KEYS[1])
+         if n == 1 then redis.call('EXPIRE', KEYS[1], 900) end
+         return n`,
+        1,
+        this.getOtpAttemptKey(email),
+      ),
+    )
+
+    if (attempts >= limit) {
+      await this.deleteOTP(email)
+      return true
+    }
+    return false
   }
 
   private getOtpResendKey(email: string): string {
     return `otp:resend:${email.trim().toLowerCase()}`
   }
 
-  /**
-   * Claim the right to send one registration OTP for `email`.
-   *
-   * Returns 0 when the caller may send, or the number of seconds still left on
-   * the cooldown when it may not. The claim is a single atomic SET NX EX, so
-   * two concurrent requests cannot both win it. Enforcing this server side is
-   * the point: the countdown in the browser is a courtesy, not a control.
-   */
   async claimOtpResendSlot(
     email: string,
     cooldownSeconds = 30,
@@ -206,6 +253,51 @@ export class RedisService {
 
   async get(key: string): Promise<string | null> {
     return await this.redisClient.get(key)
+  }
+
+  /** Key có tồn tại không — dùng cho việc kiểm phiên còn sống ở AuthGuard. */
+  async exists(key: string): Promise<boolean> {
+    return (await this.redisClient.exists(key)) === 1
+  }
+
+  /* ---------------- Khoá tài khoản sau nhiều lần sai ---------------- */
+
+  private loginFailureKey(email: string): string {
+    return `login:fail:${email.trim().toLowerCase()}`
+  }
+
+  /**
+   * Cộng một lần đăng nhập sai và trả về tổng trong cửa sổ hiện tại.
+   *
+   * Đếm theo TÀI KHOẢN, không theo IP: tấn công thật là nhiều IP dội vào một
+   * tài khoản, nên bộ đếm theo IP không thấy gì cả. OWASP cũng khuyến nghị
+   * đúng chiều này.
+   *
+   * INCR + EXPIRE trong một Lua để không có khe: hai request cùng thấy n==1
+   * rồi cùng đặt hạn, hoặc một request tăng bộ đếm rồi chết trước khi đặt hạn
+   * — để lại bộ đếm không bao giờ hết hạn, khoá tài khoản vĩnh viễn.
+   */
+  async countLoginFailure(email: string, windowSeconds = 900): Promise<number> {
+    const result = await this.redisClient.eval(
+      `local n = redis.call('INCR', KEYS[1])
+       if n == 1 then redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1])) end
+       return n`,
+      1,
+      this.loginFailureKey(email),
+      String(windowSeconds),
+    )
+    return Number(result) || 0
+  }
+
+  /** Số lần sai hiện tại, KHÔNG làm tăng bộ đếm. */
+  async loginFailureCount(email: string): Promise<number> {
+    const value = await this.redisClient.get(this.loginFailureKey(email))
+    return Number(value) || 0
+  }
+
+  /** Đăng nhập đúng thì xoá bộ đếm — người dùng thật không bị tích luỹ. */
+  async clearLoginFailures(email: string): Promise<void> {
+    await this.redisClient.del(this.loginFailureKey(email))
   }
 
   /* ---------------- Token đặt lại mật khẩu ---------------- */

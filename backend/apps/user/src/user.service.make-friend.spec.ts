@@ -35,6 +35,7 @@ function setup(
     {} as never, // redisService
     {} as never, // logger
     {} as never, // prisma
+    {} as never, // sessions
   )
   return { service, userRepo, friendRequestRepo, eventsPublisher }
 }
@@ -138,6 +139,7 @@ describe('UserService.detailMakeFriend', () => {
       {} as never, // redisService
       {} as never, // logger
       {} as never, // prisma
+      {} as never, // sessions
     )
     return { service, userRepo }
   }
@@ -197,6 +199,7 @@ describe('UserService.respondToFriendRequest', () => {
       {} as never, // redisService
       {} as never, // logger
       prisma as never,
+      {} as never, // sessions
     )
     return { service, friendRequestRepo, eventsPublisher, prisma }
   }

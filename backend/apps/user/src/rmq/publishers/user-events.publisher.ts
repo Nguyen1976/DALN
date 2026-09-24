@@ -9,6 +9,7 @@ import {
   UserMakeFriendPayload,
   UserPasswordChangedPayload,
   UserPasswordResetPayload,
+  SessionRevokedPayload,
   UserRegisterOtpPayload,
   UserUpdatedPayload,
   UserUpdateStatusMakeFriendPayload,
@@ -50,6 +51,14 @@ export class UserEventsPublisher {
     this.publish(
       EXCHANGE_RMQ.USER_EVENTS,
       ROUTING_RMQ.USER_PASSWORD_RESET,
+      payload,
+    )
+  }
+
+  publishSessionRevoked(payload: SessionRevokedPayload): void {
+    this.publish(
+      EXCHANGE_RMQ.USER_EVENTS,
+      ROUTING_RMQ.AUTH_SESSION_REVOKED,
       payload,
     )
   }

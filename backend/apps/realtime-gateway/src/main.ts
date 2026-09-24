@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core'
 import { raw } from 'express'
+import { corsOptions, securityHeaders } from '@app/common'
 import { RealtimeGatewayModule } from './realtime-gateway.module'
 import { RedisIoAdapter } from './realtime/redis.adapter'
 async function bootstrap() {
@@ -11,7 +12,11 @@ async function bootstrap() {
   // `application/webhook+json`, mà JSON parser mặc định của Nest bỏ qua
   // content-type này). Gắn raw parser CHỈ cho đúng path webhook — mọi route
   // khác và socket.io (transport riêng, không qua body parser) không ảnh hưởng.
-  app.use('/livekit/webhook', raw({ type: () => true }))
+  // `limit` là thứ trước đây thiếu: parser này nhận MỌI content-type nên không
+  // có trần thì một request vài trăm MB cũng được đọc hết vào bộ nhớ.
+  app.use('/livekit/webhook', raw({ type: () => true, limit: '256kb' }))
+  app.use(securityHeaders())
+  app.enableCors(corsOptions())
   const redisIoAdapter = new RedisIoAdapter(app)
   await redisIoAdapter.connectToRedis()
 
