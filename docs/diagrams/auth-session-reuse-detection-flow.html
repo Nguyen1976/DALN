@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phát hiện refresh token bị dùng lại · Sequence</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Noto Serif', 'Instrument Serif', Georgia, serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1100px; width: 100%; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 840px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · DALN · Auth v2</p>
+    <h1>Token bị trộm — lần dùng thứ hai là lần tự tố giác</h1>
+
+    <svg viewBox="0 0 960 648" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="reuse-flow-title reuse-flow-desc">
+      <title id="reuse-flow-title">Phát hiện refresh token bị dùng lại</title>
+      <desc id="reuse-flow-desc">Kẻ trộm dùng một refresh token đã bị rotate, hash không khớp bản hiện tại và đã hết cửa sổ ân hạn, nên user-service xoá cả phiên đó trong Redis, trả 401 cho kẻ trộm và báo động tới chủ tài khoản kèm ngắt socket.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+        </marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+        </marker>
+        <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ================================================================
+           LIFELINES — Kẻ trộm 120 · user-svc 360 · Redis 600 · Chủ 840
+           ================================================================ -->
+      <line x1="120" y1="128" x2="120" y2="456" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="360" y1="128" x2="360" y2="456" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="600" y1="128" x2="600" y2="456" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="840" y1="128" x2="840" y2="456" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+
+      <!-- ================================================================
+           ACTIVATION BARS
+           ================================================================ -->
+      <rect x="116" y="168" width="8" height="192" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="356" y="168" width="8" height="248" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="596" y="208" width="8" height="104" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="836" y="392" width="8" height="40" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+
+      <!-- M1 · Kẻ trộm → user-svc — dùng bản copy đã bị rotate -->
+      <line x1="124" y1="176" x2="356" y2="176" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <rect x="182" y="156" width="116" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="240" y="165" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">POST /USER/REFRESH</text>
+
+      <!-- M2 · user-svc → Redis -->
+      <line x1="364" y1="216" x2="596" y2="216" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="430" y="196" width="100" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="480" y="205" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HGET SESS:&lt;SID&gt;</text>
+
+      <!-- M3 · Redis → user-svc — hash không khớp, đã hết ân hạn -->
+      <line x1="596" y1="256" x2="364" y2="256" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="424" y="236" width="112" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="480" y="245" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RTHASH MISMATCH</text>
+
+      <!-- M4 · user-svc → Redis — GIẾT CẢ PHIÊN (headline) -->
+      <line x1="364" y1="304" x2="596" y2="304" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <rect x="418" y="284" width="124" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="480" y="293" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DEL SESS · INCR VER</text>
+
+      <!-- M5 · user-svc → Kẻ trộm -->
+      <line x1="356" y1="352" x2="124" y2="352" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="178" y="332" width="124" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="240" y="341" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">401 SESSION_REVOKED</text>
+
+      <!-- M6 · user-svc → Chủ tài khoản — async, qua RMQ (xem diagram revoke) -->
+      <line x1="364" y1="400" x2="836" y2="400" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <rect x="658" y="380" width="124" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="720" y="389" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">EMAIL + KILL SOCKET</text>
+
+      <!-- ================================================================
+           ACTORS
+           ================================================================ -->
+      <rect x="48" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="48" y="72" width="144" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1" stroke-dasharray="4,3"/>
+      <rect x="56" y="80" width="44" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/>
+      <text x="78" y="89" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">THREAT</text>
+      <text x="120" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Kẻ trộm cookie</text>
+      <text x="120" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">stale rt</text>
+
+      <rect x="288" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="288" y="72" width="144" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <rect x="296" y="80" width="32" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="312" y="89" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+      <text x="360" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">user-service</text>
+      <text x="360" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">/user/refresh</text>
+
+      <rect x="528" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="528" y="72" width="144" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="536" y="80" width="28" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+      <text x="550" y="89" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">KV</text>
+      <text x="600" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Redis</text>
+      <text x="600" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">sess · usersess</text>
+
+      <rect x="768" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="768" y="72" width="144" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+      <rect x="776" y="80" width="32" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.40)" stroke-width="0.8"/>
+      <text x="792" y="89" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">USER</text>
+      <text x="840" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Chủ tài khoản</text>
+      <text x="840" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">mail · socket</text>
+
+      <!-- ================================================================
+           HAI Ý CHÍNH
+           ================================================================ -->
+      <rect x="48" y="480" width="416" height="80" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="56" y="488" width="52" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+      <text x="82" y="497" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CƠ CHẾ</text>
+      <text x="56" y="520" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Token đã tiêu chỉ dùng được một lần</text>
+      <text x="56" y="536" fill="#4f5d75" font-size="9.5" font-family="'Geist', sans-serif">Lần dùng thứ hai — dù là kẻ trộm hay chủ thật —</text>
+      <text x="56" y="550" fill="#4f5d75" font-size="9.5" font-family="'Geist', sans-serif">đều là bằng chứng có hai bên cùng giữ token.</text>
+
+      <rect x="496" y="480" width="416" height="80" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="504" y="488" width="52" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+      <text x="530" y="497" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HỆ QUẢ</text>
+      <text x="504" y="520" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Giết cả phiên, không chỉ một token</text>
+      <text x="504" y="536" fill="#4f5d75" font-size="9.5" font-family="'Geist', sans-serif">Xoá sid đó nên mọi bản từng rotate trước đây đều</text>
+      <text x="504" y="550" fill="#4f5d75" font-size="9.5" font-family="'Geist', sans-serif">chết theo; kênh ngắt socket xem diagram thu hồi.</text>
+
+      <!-- ================================================================
+           LEGEND
+           ================================================================ -->
+      <line x1="48" y1="592" x2="912" y2="592" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="48" y="608" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <line x1="48" y1="624" x2="76" y2="624" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <text x="84" y="628" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Gọi HTTP</text>
+
+      <line x1="208" y1="624" x2="236" y2="624" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="244" y="628" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Gọi nội bộ</text>
+
+      <line x1="368" y1="624" x2="396" y2="624" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <text x="404" y="628" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Trả về</text>
+
+      <line x1="528" y1="624" x2="556" y2="624" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <text x="564" y="628" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Bất đồng bộ</text>
+
+      <line x1="688" y1="624" x2="716" y2="624" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="724" y="628" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Thu hồi</text>
+    </svg>
+  </div>
+</body>
+</html>

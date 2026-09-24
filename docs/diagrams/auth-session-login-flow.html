@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Đăng nhập — tạo phiên có sid · Sequence</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Noto Serif', 'Instrument Serif', Georgia, serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1100px; width: 100%; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 840px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · DALN · Auth v2</p>
+    <h1>Đăng nhập — phiên có danh tính, thu hồi được</h1>
+
+    <svg viewBox="0 0 960 760" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="login-flow-title login-flow-desc">
+      <title id="login-flow-title">Đăng nhập — tạo phiên có sid</title>
+      <desc id="login-flow-desc">Trình duyệt gửi thông tin đăng nhập, user-service tạo một bản ghi phiên có sid trong Redis rồi trả về hai cookie khác nhau về bản chất và về path; sau đó WebSocket bắt tay chỉ bằng access token và gateway kiểm tra phiên còn sống.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+        </marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+        </marker>
+        <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ================================================================
+           LIFELINES — Browser 120 · user-svc 360 · Redis 600 · Gateway 840
+           ================================================================ -->
+      <line x1="120" y1="128" x2="120" y2="592" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="360" y1="128" x2="360" y2="592" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="600" y1="128" x2="600" y2="592" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="840" y1="128" x2="840" y2="592" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+
+      <!-- ================================================================
+           ACTIVATION BARS
+           ================================================================ -->
+      <rect x="116" y="168" width="8" height="152" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="356" y="168" width="8" height="152" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="596" y="216" width="8" height="56" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="116" y="432" width="8" height="136" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="836" y="432" width="8" height="136" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="596" y="472" width="8" height="56" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+
+      <!-- ================================================================
+           M1 · Browser → user-svc — đăng nhập
+           ================================================================ -->
+      <line x1="124" y1="176" x2="356" y2="176" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <rect x="186" y="156" width="104" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="238" y="165" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">POST /USER/LOGIN</text>
+
+      <!-- M2 · user-svc → Redis — tạo bản ghi phiên -->
+      <line x1="364" y1="224" x2="596" y2="224" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="425" y="204" width="110" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="480" y="213" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CREATE SESS:&lt;SID&gt;</text>
+
+      <!-- M3 · Redis → user-svc — trả về -->
+      <line x1="596" y1="264" x2="364" y2="264" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="440" y="244" width="80" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="480" y="253" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SID · TTL 7D</text>
+
+      <!-- M4 · user-svc → Browser — HEADLINE -->
+      <line x1="356" y1="312" x2="124" y2="312" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <rect x="180" y="292" width="124" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="242" y="301" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">200 · SET-COOKIE ×2</text>
+
+      <!-- M5 · Browser → Gateway — bắt tay socket -->
+      <line x1="124" y1="440" x2="836" y2="440" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <rect x="418" y="420" width="124" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="480" y="429" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">WS CONNECT · ACCESS</text>
+
+      <!-- M6 · Gateway → Redis — phiên còn sống? -->
+      <line x1="836" y1="480" x2="604" y2="480" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="665" y="460" width="110" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="720" y="469" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">EXISTS SESS:&lt;SID&gt;</text>
+
+      <!-- M7 · Redis → Gateway -->
+      <line x1="604" y1="520" x2="836" y2="520" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="698" y="500" width="44" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="720" y="509" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ALIVE</text>
+
+      <!-- M8 · Gateway → Browser -->
+      <line x1="836" y1="560" x2="124" y2="560" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="432" y="540" width="96" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="480" y="549" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">JOIN USER:&lt;ID&gt;</text>
+
+      <!-- ================================================================
+           ACTORS — drawn after arrows
+           ================================================================ -->
+      <!-- Browser -->
+      <rect x="48" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="48" y="72" width="144" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+      <rect x="56" y="80" width="32" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.40)" stroke-width="0.8"/>
+      <text x="72" y="89" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SPA</text>
+      <text x="120" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Trình duyệt</text>
+      <text x="120" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">cookie only</text>
+
+      <!-- user-service (focal) -->
+      <rect x="288" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="288" y="72" width="144" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <rect x="296" y="80" width="32" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="312" y="89" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+      <text x="360" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">user-service</text>
+      <text x="360" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">bcrypt · sign</text>
+
+      <!-- Redis -->
+      <rect x="528" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="528" y="72" width="144" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="536" y="80" width="28" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+      <text x="550" y="89" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">KV</text>
+      <text x="600" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Redis</text>
+      <text x="600" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">sess · usersess</text>
+
+      <!-- realtime-gateway -->
+      <rect x="768" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="768" y="72" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="776" y="80" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/>
+      <text x="790" y="89" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">WS</text>
+      <text x="840" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">realtime-gw</text>
+      <text x="840" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">handshake</text>
+
+      <!-- ================================================================
+           KẾT QUẢ — hai cookie, hai bản chất khác nhau
+           ================================================================ -->
+      <rect x="48" y="616" width="416" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="56" y="624" width="64" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+      <text x="88" y="633" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">COOKIE 1</text>
+      <text x="56" y="656" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">accessToken — JWT tự chứa</text>
+      <text x="56" y="671" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">15m · path=/ · sub sid ver typ=at</text>
+
+      <rect x="496" y="616" width="416" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="504" y="624" width="64" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+      <text x="536" y="633" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">COOKIE 2</text>
+      <text x="504" y="656" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">refreshToken — opaque, không phải JWT</text>
+      <text x="504" y="671" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">7d · path=/user/refresh · hash trong Redis</text>
+
+      <!-- ================================================================
+           LEGEND
+           ================================================================ -->
+      <line x1="48" y1="704" x2="912" y2="704" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="48" y="720" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <line x1="48" y1="736" x2="76" y2="736" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <text x="84" y="740" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Gọi HTTP</text>
+
+      <line x1="208" y1="736" x2="236" y2="736" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="244" y="740" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Gọi nội bộ</text>
+
+      <line x1="368" y1="736" x2="396" y2="736" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <text x="404" y="740" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Trả về</text>
+
+      <line x1="528" y1="736" x2="556" y2="736" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="564" y="740" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Kết quả chính</text>
+
+      <rect x="688" y="730" width="14" height="10" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <text x="708" y="740" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Nơi giữ state</text>
+    </svg>
+  </div>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "daln-qc",
+  "private": true,
+  "type": "module",
+  "description": "Bộ QC chạy tay cho luồng xác thực: API matrix + trình duyệt thật",
+  "scripts": {
+    "api": "bash ./auth-api.sh",
+    "browser": "node ./auth-browser.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}
