@@ -52,27 +52,39 @@ env_val() { grep -E "^$1=" .env.production | tail -n1 | cut -d= -f2- || true; }
 # server thì request đó chỉ là "không mang cookie".
 #
 # Đã xảy ra thật: VITE_API_ROOT đổi sang https://DOMAIN/api còn cookie vẫn
-# Path=/user. Kiểm ở đây vì đây là nơi hai giá trị đó gặp nhau, và vì nó chặn
-# TRƯỚC khi container mới lên.
+# Path=/user. Nên giá trị đúng được SUY RA từ chính VITE_API_ROOT thay vì bắt
+# người deploy nhớ hai biến phải khớp nhau — một nguồn sự thật, không có đường
+# nào lệch. REFRESH_COOKIE_PATH trong .env.production vẫn là biến ghi đè, và
+# nếu nó mâu thuẫn với URL trình duyệt gọi thì deploy dừng ở đây, TRƯỚC khi
+# container mới lên.
 api_root="$(env_val VITE_API_ROOT)"
-cookie_path="$(env_val REFRESH_COOKIE_PATH)"
 # Bỏ scheme + host, còn lại là tiền tố đường dẫn ('' khi API ở domain riêng).
 api_prefix="$(printf '%s' "${api_root}" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]*##; s#/+$##')"
 want_cookie_path="${api_prefix}/user"
-# Chuẩn hoá y như refreshCookiePath() ở backend, để hai bên không lệch luật.
-have_cookie_path="$(printf '%s' "${cookie_path}" | sed -E 's#^ +| +$##g; s#/+$##')"
-[ -n "${have_cookie_path}" ] || have_cookie_path=/user
-case "${have_cookie_path}" in /*) ;; *) have_cookie_path="/${have_cookie_path}" ;; esac
 
-if [ "${have_cookie_path}" != "${want_cookie_path}" ]; then
-  echo "[deploy] DỪNG: REFRESH_COOKIE_PATH không khớp VITE_API_ROOT." >&2
-  echo "[deploy]   VITE_API_ROOT       = ${api_root:-<trống>}" >&2
-  echo "[deploy]   REFRESH_COOKIE_PATH = ${cookie_path:-<trống>} (hiểu thành ${have_cookie_path})" >&2
-  echo "[deploy]   cần                 = ${want_cookie_path}" >&2
-  echo "[deploy] Trình duyệt sẽ không gửi cookie refresh, mọi người dùng bị đăng xuất sau 15 phút." >&2
-  exit 1
+cookie_path="$(env_val REFRESH_COOKIE_PATH)"
+if [ -z "${cookie_path}" ]; then
+  REFRESH_COOKIE_PATH="${want_cookie_path}"
+  echo "[deploy] Cookie refresh: Path=${REFRESH_COOKIE_PATH} (suy ra từ ${api_root:-<domain riêng>})"
+else
+  # Chuẩn hoá y như refreshCookiePath() ở backend, để hai bên không lệch luật.
+  have_cookie_path="$(printf '%s' "${cookie_path}" | sed -E 's#^ +| +$##g; s#/+$##')"
+  case "${have_cookie_path}" in /*) ;; *) have_cookie_path="/${have_cookie_path}" ;; esac
+  [ "${have_cookie_path}" != "" ] || have_cookie_path=/user
+
+  if [ "${have_cookie_path}" != "${want_cookie_path}" ]; then
+    echo "[deploy] DỪNG: REFRESH_COOKIE_PATH không khớp VITE_API_ROOT." >&2
+    echo "[deploy]   VITE_API_ROOT       = ${api_root:-<trống>}" >&2
+    echo "[deploy]   REFRESH_COOKIE_PATH = ${cookie_path} (hiểu thành ${have_cookie_path})" >&2
+    echo "[deploy]   cần                 = ${want_cookie_path}" >&2
+    echo "[deploy] Trình duyệt sẽ không gửi cookie refresh, mọi người dùng bị đăng xuất sau 15 phút." >&2
+    exit 1
+  fi
+  REFRESH_COOKIE_PATH="${have_cookie_path}"
+  echo "[deploy] Cookie refresh: Path=${REFRESH_COOKIE_PATH} khớp ${api_root:-<domain riêng>}"
 fi
-echo "[deploy] Cookie refresh: Path=${have_cookie_path} khớp ${api_root:-<domain riêng>}"
+# docker-compose.prod.yml nội suy biến này vào container user (khuôn KONG_CONFIG_SHA).
+export REFRESH_COOKIE_PATH
 
 
 # Label của Kong mang hash này (docker-compose.prod.yml): đổi kong.yml thì compose
