@@ -69,11 +69,53 @@ const resetPasswordScheme = z
     path: ["confirmPassword"],
   });
 
+/**
+ * Đổi mật khẩu trong Cài đặt: đúng MỘT cách tự chứng minh, khớp với
+ * `ChangePasswordDto` của backend.
+ *
+ * `method` là trường của riêng form, không gửi đi — nó quyết định ô nào bắt
+ * buộc. Bọc trong `superRefine` thay vì `.refine` để lỗi gắn được vào đúng ô
+ * người dùng đang bỏ trống, thay vì một thông báo chung ở đầu form.
+ */
+const changePasswordScheme = z
+  .object({
+    method: z.enum(['current-password', 'otp']),
+    currentPassword: z.string(),
+    otp: z.string(),
+    newPassword: password,
+    confirmPassword: z.string().min(1, 'Vui lòng nhập lại mật khẩu'),
+    revokeOtherSessions: z.boolean(),
+  })
+  .superRefine((values, ctx) => {
+    if (values.method === 'current-password' && !values.currentPassword) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['currentPassword'],
+        message: 'Vui lòng nhập mật khẩu hiện tại',
+      })
+    }
+    if (values.method === 'otp' && values.otp.length !== 6) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['otp'],
+        message: 'Mã gồm 6 chữ số',
+      })
+    }
+    if (values.newPassword !== values.confirmPassword) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['confirmPassword'],
+        message: 'Mật khẩu xác nhận không khớp',
+      })
+    }
+  })
+
 export {
   formLoginScheme,
   formRegisterScheme,
   forgotPasswordScheme,
   resetPasswordScheme,
+  changePasswordScheme,
   PASSWORD_MIN,
   PASSWORD_MAX,
 };

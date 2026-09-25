@@ -57,6 +57,22 @@ export class UserErrors {
     )
   }
 
+  /**
+   * Mật khẩu hiện tại sai khi ĐỔI mật khẩu — 400, không phải 401.
+   *
+   * Tách khỏi `invalidCredentials()` vì hai câu trả lời này sống ở hai thế
+   * giới khác nhau: ở trang đăng nhập chưa có phiên nào nên 401 là đúng, còn
+   * ở đây người dùng đang đăng nhập hợp lệ và chỉ gõ nhầm một ô. Client nào
+   * cũng hiểu 401 trên một endpoint cần đăng nhập là "phiên hỏng" và sẽ đá
+   * người dùng ra — đúng lỗi QC trình duyệt bắt được.
+   */
+  static currentPasswordInvalid(): never {
+    throw new BadRequestException({
+      message: 'Mật khẩu hiện tại không đúng',
+      code: 'CURRENT_PASSWORD_INVALID',
+    })
+  }
+
   static otpInvalidOrExpired(): never {
     throw new BadRequestException('Mã OTP không hợp lệ hoặc đã hết hạn')
   }

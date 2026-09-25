@@ -232,3 +232,37 @@ describe('NotificationService — mail bảo mật (đặt lại mật khẩu)',
     })
   })
 })
+
+/**
+ * Mã đổi mật khẩu là mail BẢO MẬT, không phải thông báo.
+ *
+ * Cùng lý lẽ với `handleUserPasswordReset`: người tắt email thông báo vẫn phải
+ * nhận được mã, nếu không họ mất đường đổi mật khẩu. Nên nó không đi qua
+ * `deliver()` và không đọc cài đặt kênh.
+ */
+describe('NotificationService.handleUserChangePasswordOtp', () => {
+  const payload = {
+    email: 'an@example.test',
+    username: 'an',
+    otp: '123456',
+  }
+
+  it('gửi thẳng mail, không đọc cài đặt kênh của người dùng', async () => {
+    const mailer = {
+      sendChangePasswordOtp: jest.fn().mockResolvedValue(undefined),
+    }
+    const preferenceRepo = { findByUserId: jest.fn(), create: jest.fn() }
+    const service = new NotificationService(
+      mailer as unknown as Deps[0],
+      {} as unknown as Deps[1],
+      {} as unknown as Deps[2],
+      preferenceRepo as unknown as Deps[3],
+      {} as unknown as Deps[4],
+    )
+
+    await service.handleUserChangePasswordOtp(payload)
+
+    expect(mailer.sendChangePasswordOtp).toHaveBeenCalledWith(payload)
+    expect(preferenceRepo.findByUserId).not.toHaveBeenCalled()
+  })
+})

@@ -9,6 +9,18 @@ export interface CachedFeatures {
   interests: string[]
 }
 
+/**
+ * Ba khoá Redis của một luồng OTP: mã, bộ đếm lần thử sai, khe chống gửi lại.
+ *
+ * Mỗi luồng khai riêng để hai luồng không bao giờ đọc trúng mã của nhau — mã
+ * kích hoạt tài khoản không được dùng để đổi mật khẩu và ngược lại.
+ */
+interface OtpNamespace {
+  code: (subject: string) => string
+  attempts: (subject: string) => string
+  resend: (subject: string) => string
+}
+
 /** Set chỉ mục các user đang online — phải khớp với UserStatusStore. */
 const ONLINE_USERS_KEY = 'online:users'
 
@@ -145,8 +157,26 @@ export class RedisService {
     return await this.redisClient.eval(script, keys.length, ...keys, ...args)
   }
 
-  private getRegistrationOtpKey(email: string): string {
-    return `otp:reg:${email.trim().toLowerCase()}`
+  /**
+   * Một luồng OTP = một bộ ba khoá tách biệt.
+   *
+   * Vì sao là object chứ không phải chuỗi tiền tố ghép tay: luồng đăng ký đã
+   * chạy trên production với khuôn khoá `otp:attempts:<email>` (không có tên
+   * luồng ở giữa). Ép nó vào một khuôn "đẹp hơn" sẽ làm mọi mã và mọi bộ đếm
+   * đang sống mất dấu ngay lúc deploy. Mỗi luồng tự khai khoá của mình, nên
+   * luồng mới sạch sẽ mà luồng cũ không phải đổi gì.
+   */
+  private static readonly REGISTRATION_OTP: OtpNamespace = {
+    code: (subject) => `otp:reg:${subject.trim().toLowerCase()}`,
+    attempts: (subject) => `otp:attempts:${subject.trim().toLowerCase()}`,
+    resend: (subject) => `otp:resend:${subject.trim().toLowerCase()}`,
+  }
+
+  /** Khoá theo userId — hành động của người đã đăng nhập, không theo email. */
+  private static readonly CHANGE_PASSWORD_OTP: OtpNamespace = {
+    code: (subject) => `otp:chpw:${subject.trim()}`,
+    attempts: (subject) => `otp:chpw:attempts:${subject.trim()}`,
+    resend: (subject) => `otp:chpw:resend:${subject.trim()}`,
   }
 
   /**
@@ -156,10 +186,14 @@ export class RedisService {
    * khẩu ngay dưới đây đã được băm, kèm cả comment giải thích vì sao. Cùng một
    * hệ thống, cùng một loại bí mật, hai chuẩn khác nhau.
    */
-  async saveOTP(email: string, otp: string, ttl = 300): Promise<void> {
-    const key = this.getRegistrationOtpKey(email)
-    await this.redisClient.set(key, this.hashOtp(otp), 'EX', ttl)
-    await this.redisClient.del(this.getOtpAttemptKey(email))
+  private async saveOtpIn(
+    ns: OtpNamespace,
+    subject: string,
+    otp: string,
+    ttl: number,
+  ): Promise<void> {
+    await this.redisClient.set(ns.code(subject), this.hashOtp(otp), 'EX', ttl)
+    await this.redisClient.del(ns.attempts(subject))
   }
 
   /**
@@ -169,8 +203,12 @@ export class RedisService {
    * được thời gian đó qua mạng là khó, nhưng repo đã có `timingSafeEqual` sẵn
    * cho token nội bộ — dùng chuẩn cao hơn không tốn gì.
    */
-  async verifyOTP(email: string, otp: string): Promise<boolean> {
-    const stored = await this.redisClient.get(this.getRegistrationOtpKey(email))
+  private async verifyOtpIn(
+    ns: OtpNamespace,
+    subject: string,
+    otp: string,
+  ): Promise<boolean> {
+    const stored = await this.redisClient.get(ns.code(subject))
     if (!stored) return false
 
     const a = Buffer.from(stored, 'hex')
@@ -179,19 +217,8 @@ export class RedisService {
     return timingSafeEqual(a, b)
   }
 
-  async deleteOTP(email: string): Promise<void> {
-    await this.redisClient.del(
-      this.getRegistrationOtpKey(email),
-      this.getOtpAttemptKey(email),
-    )
-  }
-
-  private getOtpAttemptKey(email: string): string {
-    return `otp:attempts:${email.trim().toLowerCase()}`
-  }
-
-  private hashOtp(otp: string): string {
-    return createHash('sha256').update(otp.trim()).digest('hex')
+  private async deleteOtpIn(ns: OtpNamespace, subject: string): Promise<void> {
+    await this.redisClient.del(ns.code(subject), ns.attempts(subject))
   }
 
   /**
@@ -200,33 +227,35 @@ export class RedisService {
    * Không có bước này thì toàn bộ không gian 10^6 mở trong 5 phút, và một lần
    * đoán sai không mất gì cả: mã vẫn nằm đó cho lần đoán tiếp theo.
    */
-  async claimOtpAttempt(email: string, limit = 5): Promise<boolean> {
+  private async claimOtpAttemptIn(
+    ns: OtpNamespace,
+    subject: string,
+    limit: number,
+  ): Promise<boolean> {
     const attempts = Number(
       await this.redisClient.eval(
         `local n = redis.call('INCR', KEYS[1])
          if n == 1 then redis.call('EXPIRE', KEYS[1], 900) end
          return n`,
         1,
-        this.getOtpAttemptKey(email),
+        ns.attempts(subject),
       ),
     )
 
     if (attempts >= limit) {
-      await this.deleteOTP(email)
+      await this.deleteOtpIn(ns, subject)
       return true
     }
     return false
   }
 
-  private getOtpResendKey(email: string): string {
-    return `otp:resend:${email.trim().toLowerCase()}`
-  }
-
-  async claimOtpResendSlot(
-    email: string,
-    cooldownSeconds = 30,
+  /** Khe gửi lại: 0 nghĩa là được gửi, số dương là số giây còn phải chờ. */
+  private async claimOtpResendSlotIn(
+    ns: OtpNamespace,
+    subject: string,
+    cooldownSeconds: number,
   ): Promise<number> {
-    const key = this.getOtpResendKey(email)
+    const key = ns.resend(subject)
     const won = await this.redisClient.set(
       key,
       '1',
@@ -237,6 +266,89 @@ export class RedisService {
     if (won) return 0
     const ttl = await this.redisClient.ttl(key)
     return ttl > 0 ? ttl : cooldownSeconds
+  }
+
+  private hashOtp(otp: string): string {
+    return createHash('sha256').update(otp.trim()).digest('hex')
+  }
+
+  // --- OTP kích hoạt tài khoản (khoá theo email) ---
+
+  async saveOTP(email: string, otp: string, ttl = 300): Promise<void> {
+    await this.saveOtpIn(RedisService.REGISTRATION_OTP, email, otp, ttl)
+  }
+
+  async verifyOTP(email: string, otp: string): Promise<boolean> {
+    return await this.verifyOtpIn(RedisService.REGISTRATION_OTP, email, otp)
+  }
+
+  async deleteOTP(email: string): Promise<void> {
+    await this.deleteOtpIn(RedisService.REGISTRATION_OTP, email)
+  }
+
+  async claimOtpAttempt(email: string, limit = 5): Promise<boolean> {
+    return await this.claimOtpAttemptIn(
+      RedisService.REGISTRATION_OTP,
+      email,
+      limit,
+    )
+  }
+
+  async claimOtpResendSlot(
+    email: string,
+    cooldownSeconds = 30,
+  ): Promise<number> {
+    return await this.claimOtpResendSlotIn(
+      RedisService.REGISTRATION_OTP,
+      email,
+      cooldownSeconds,
+    )
+  }
+
+  // --- OTP đổi mật khẩu (khoá theo userId) ---
+
+  async saveChangePasswordOtp(
+    userId: string,
+    otp: string,
+    ttl = 300,
+  ): Promise<void> {
+    await this.saveOtpIn(RedisService.CHANGE_PASSWORD_OTP, userId, otp, ttl)
+  }
+
+  async verifyChangePasswordOtp(userId: string, otp: string): Promise<boolean> {
+    return await this.verifyOtpIn(RedisService.CHANGE_PASSWORD_OTP, userId, otp)
+  }
+
+  async deleteChangePasswordOtp(userId: string): Promise<void> {
+    await this.deleteOtpIn(RedisService.CHANGE_PASSWORD_OTP, userId)
+  }
+
+  async claimChangePasswordOtpAttempt(
+    userId: string,
+    limit = 5,
+  ): Promise<boolean> {
+    return await this.claimOtpAttemptIn(
+      RedisService.CHANGE_PASSWORD_OTP,
+      userId,
+      limit,
+    )
+  }
+
+  /**
+   * Khe gửi lại 60s — dài gấp đôi luồng đăng ký.
+   *
+   * Người đăng ký đang đứng chờ để vào được tài khoản; người đổi mật khẩu thì
+   * không, và mỗi lần bấm là một lá thư vào hộp thư của chính họ.
+   */
+  async claimChangePasswordOtpResendSlot(
+    userId: string,
+    cooldownSeconds = 60,
+  ): Promise<number> {
+    return await this.claimOtpResendSlotIn(
+      RedisService.CHANGE_PASSWORD_OTP,
+      userId,
+      cooldownSeconds,
+    )
   }
 
   /**

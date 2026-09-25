@@ -34,6 +34,7 @@ import {
   MakeFriendByUsernameDto,
   ResendOtpDto,
   ResetPasswordDto,
+  ChangePasswordDto,
   RevokeSessionDto,
   RegisterUserDto,
   UpdateProfileDto,
@@ -328,6 +329,50 @@ export class UserHttpController {
       }
       throw error
     }
+  }
+
+  /**
+   * Xin mã đổi mật khẩu. Không nhận email từ body — xem `sendChangePasswordOtp`.
+   */
+  @Post('change-password/otp')
+  /** Khe 60s theo user đã chặn chính người dùng; trần này chặn một máy dội
+   * bằng nhiều tài khoản. */
+  @RateLimit({
+    bucket: 'change-password-otp',
+    limit: 20,
+    windowSeconds: 300,
+    by: ['ip'],
+  })
+  @RequireLogin()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async requestChangePasswordOtp(@UserInfo() user: JwtPayload) {
+    await this.userService.sendChangePasswordOtp(user.userId)
+  }
+
+  /**
+   * Đổi mật khẩu bằng mật khẩu hiện tại HOẶC mã OTP — `ChangePasswordDto` bảo
+   * đảm đúng một trong hai.
+   *
+   * `sid` lấy từ access token chứ không phải body: nó quyết định phiên nào
+   * được giữ lại, và để client tự khai thì người dùng có thể bị lừa giữ lại
+   * đúng phiên của kẻ đang chiếm tài khoản.
+   */
+  @Post('change-password')
+  @RateLimit({
+    bucket: 'change-password',
+    limit: 20,
+    windowSeconds: 300,
+    by: ['ip'],
+  })
+  @RequireLogin()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async changePassword(
+    @Body() dto: ChangePasswordDto,
+    @UserInfo() user: JwtPayload,
+  ) {
+    await this.withStoreErrors(() =>
+      this.userService.changePassword(user.userId, user.sid, dto),
+    )
   }
 
   /** Các thiết bị đang đăng nhập của chính mình. */

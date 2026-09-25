@@ -295,6 +295,34 @@ export class SessionStore {
   }
 
   /**
+   * Thu hồi mọi phiên của user TRỪ một phiên — "đăng xuất các thiết bị khác".
+   *
+   * Khác `revokeAllForUser` ở chỗ chỉ mục phải sống sót: nó còn giữ phiên hiện
+   * tại. Nên ở đây là `SREM` đúng những sid vừa giết, không phải `DEL` cả key —
+   * xoá cả chỉ mục sẽ làm phiên đang dùng biến mất khỏi trang "Thiết bị đang
+   * đăng nhập" dù nó vẫn sống, và `revokeSession` sau đó không còn kiểm được
+   * quyền sở hữu vì phép kiểm ấy dựa vào chính chỉ mục này.
+   */
+  async revokeAllExcept(userId: string, keepSid: string): Promise<string[]> {
+    const sids = await this.bounded(
+      'revokeAllExcept.read',
+      this.redis.smembers(sessionIndexKey(userId)),
+    )
+    const doomed = sids.filter((sid) => sid !== keepSid)
+    if (!doomed.length) return []
+
+    await this.bounded(
+      'revokeAllExcept.del',
+      this.redis.delMany(doomed.map(sessionKey)),
+    )
+    await this.bounded(
+      'revokeAllExcept.index',
+      this.redis.srem(sessionIndexKey(userId), ...doomed),
+    )
+    return doomed
+  }
+
+  /**
    * Các phiên còn sống của một user.
    *
    * Chỉ mục có thể còn sid đã hết TTL (phiên chết già, không ai xoá khỏi set),

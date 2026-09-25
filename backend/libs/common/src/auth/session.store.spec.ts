@@ -400,3 +400,41 @@ describe('SessionStore — lệnh treo', () => {
     await expect(store.isAlive('sid1')).resolves.toBe(true)
   })
 })
+
+describe('SessionStore.revokeAllExcept', () => {
+  it('giết mọi phiên khác và để nguyên phiên đang thao tác', async () => {
+    const { redis, store } = makeRedis({
+      smembers: jest
+        .fn()
+        .mockResolvedValue(['dien-thoai', 'may-nay', 'tablet']),
+    })
+
+    await expect(store.revokeAllExcept('u1', 'may-nay')).resolves.toEqual([
+      'dien-thoai',
+      'tablet',
+    ])
+
+    expect(redis.delMany).toHaveBeenCalledWith([
+      sessionKey('dien-thoai'),
+      sessionKey('tablet'),
+    ])
+    // Chỉ mục phải giữ lại phiên hiện tại, nên KHÔNG được xoá cả key như
+    // revokeAllForUser: chỉ gỡ đúng những sid vừa giết.
+    expect(redis.srem).toHaveBeenCalledWith(
+      sessionIndexKey('u1'),
+      'dien-thoai',
+      'tablet',
+    )
+    expect(redis.del).not.toHaveBeenCalled()
+  })
+
+  it('chỉ có mỗi phiên hiện tại -> không đụng gì tới Redis', async () => {
+    const { redis, store } = makeRedis({
+      smembers: jest.fn().mockResolvedValue(['may-nay']),
+    })
+
+    await expect(store.revokeAllExcept('u1', 'may-nay')).resolves.toEqual([])
+    expect(redis.delMany).not.toHaveBeenCalled()
+    expect(redis.srem).not.toHaveBeenCalled()
+  })
+})

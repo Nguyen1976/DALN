@@ -16,8 +16,9 @@ cd qc && npm install                    # chỉ cần cho bộ browser
 ## Chạy
 
 ```bash
-./auth-api.sh          # 18 nhóm, ~61 phép kiểm, không cần trình duyệt
-node auth-browser.mjs  # 8 nhóm trên Chrome thật, ảnh lưu ở shots/
+./auth-api.sh                    # 20 nhóm, ~92 phép kiểm, không cần trình duyệt
+node auth-browser.mjs            # 8 nhóm trên Chrome thật, ảnh lưu ở shots/
+node change-password-browser.mjs # 7 nhóm cho hộp thoại đổi mật khẩu
 ```
 
 Ghi đè được bằng biến môi trường: `API`, `DIRECT`, `APP`, `CHROME_PATH`,
@@ -33,7 +34,8 @@ Ghi đè được bằng biến môi trường: `API`, `DIRECT`, `APP`, `CHROME_
 | Chống lạm dụng | hạn mức theo IP, khoá tài khoản sau 10 lần sai, OTP hết lượt thử |
 | Đầu vào | chính sách mật khẩu (8–64 ký tự, trần 72 byte), OTP chỉ chữ số |
 | Hardening | header bảo mật, CORS không phản chiếu Origin lạ |
-| Trình duyệt | làm mới ngầm ở mốc 15 phút, socket bị ngắt khi thu hồi, UI danh sách thiết bị |
+| Đổi mật khẩu | hai đường xác thực (mật khẩu cũ / OTP), mã dùng một lần, khe gửi lại 60s, tuỳ chọn đá thiết bị khác |
+| Trình duyệt | làm mới ngầm ở mốc 15 phút, socket bị ngắt khi thu hồi, UI danh sách thiết bị, hộp thoại đổi mật khẩu |
 
 ## Hai cái bẫy đã gặp, để không mất thời gian lại
 

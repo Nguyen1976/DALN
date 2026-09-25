@@ -112,6 +112,15 @@ interface ResetPasswordRequest {
   password: string
 }
 
+interface ChangePasswordRequest {
+  newPassword: string
+  /** Cách 1: biết mật khẩu hiện tại. */
+  currentPassword?: string
+  /** Cách 2: đọc được hộp thư. DTO đã bảo đảm đúng một trong hai có mặt. */
+  otp?: string
+  revokeOtherSessions: boolean
+}
+
 interface MakeFriendRequest {
   inviterId: string
   inviterName: string
@@ -524,6 +533,132 @@ export class UserService {
       email: user.email,
       username: user.username,
       changedAt: new Date().toISOString(),
+    })
+  }
+
+  /**
+   * Gửi mã xác nhận đổi mật khẩu tới hộp thư của CHÍNH người đang đăng nhập.
+   *
+   * Địa chỉ lấy từ userId trong access token, không nhận từ body: một endpoint
+   * gửi mail tới địa chỉ do client đọc lên là một khẩu súng chĩa vào hộp thư
+   * người khác, và `forgotPassword` ngay trên đây phải dựng cả một tầng hạn
+   * mức theo email + IP chính vì nó buộc phải nhận địa chỉ từ ngoài.
+   */
+  async sendChangePasswordOtp(userId: string): Promise<void> {
+    const user = await this.userRepo.findById(userId)
+    if (!user) UserErrors.userNotFound()
+
+    // Khe chờ giành TRƯỚC khi sinh mã: thắng khe rồi mới được làm việc tốn
+    // kém. Ngược lại thì mỗi lần bấm hụt vẫn ghi đè mã cũ trong Redis, và
+    // người dùng đang cầm mã trong tay bỗng thấy nó sai.
+    const waitSeconds =
+      await this.redisService.claimChangePasswordOtpResendSlot(userId)
+    if (waitSeconds > 0) UserErrors.otpResendTooSoon(waitSeconds)
+
+    const otp = this.generateOtp()
+    await this.redisService.saveChangePasswordOtp(userId, otp)
+
+    this.eventsPublisher.publishUserChangePasswordOtp({
+      email: user.email,
+      username: user.username,
+      otp,
+    })
+
+    this.logger.info('[user.change-password] otp queued', { userId })
+  }
+
+  /**
+   * Đổi mật khẩu từ trang Cài đặt.
+   *
+   * Người dùng tự chứng minh bằng MỘT trong hai đường — mật khẩu hiện tại hoặc
+   * mã gửi qua mail — chứ không phải cả hai. Đường nào cũng phải chặn được
+   * người chỉ mượn được phiên đăng nhập: không có bước này thì một máy bỏ quên
+   * ở trạng thái đã đăng nhập là mất tài khoản vĩnh viễn, vì kẻ ngồi xuống chỉ
+   * cần đặt mật khẩu mới.
+   */
+  async changePassword(
+    userId: string,
+    currentSid: string,
+    data: ChangePasswordRequest,
+  ): Promise<void> {
+    const user = await this.userRepo.findById(userId)
+    if (!user) UserErrors.userNotFound()
+
+    if (data.otp !== undefined) {
+      await this.assertChangePasswordOtp(userId, data.otp)
+    } else {
+      const matches = await this.utilService.comparePassword(
+        data.currentPassword ?? '',
+        user.password,
+      )
+      if (!matches) UserErrors.currentPasswordInvalid()
+    }
+
+    const hashedPassword = await this.utilService.hashPassword(data.newPassword)
+    await this.userRepo.updatePasswordById(user.id, hashedPassword)
+
+    // Mã đã đổi được một mật khẩu thì không được đổi thêm cái nữa. Xoá cả khi
+    // người dùng đi đường mật khẩu cũ: mã đang treo trong Redis lúc này chỉ là
+    // rác, và rác biết đổi mật khẩu thì không nên để nằm đó.
+    await this.redisService.deleteChangePasswordOtp(userId)
+
+    this.logger.info('[user.change-password] password changed', {
+      userId: user.id,
+      via: data.otp !== undefined ? 'otp' : 'current-password',
+      revokeOtherSessions: data.revokeOtherSessions,
+    })
+
+    if (data.revokeOtherSessions) {
+      // Cùng lý lẽ với resetPassword: mật khẩu đã ghi xong, nên hỏng ở đây
+      // phải log to chứ không được ném ra ngoài. Ném lỗi sẽ để người dùng
+      // tưởng thất bại rồi đi thử lại bằng mật khẩu cũ đã không còn dùng được.
+      try {
+        await this.revokeOtherSessions(user.id, currentSid)
+      } catch (error) {
+        this.logger.error(
+          '[user.change-password] không thu hồi được các phiên khác',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+    }
+
+    this.eventsPublisher.publishUserPasswordChanged({
+      email: user.email,
+      username: user.username,
+      changedAt: new Date().toISOString(),
+    })
+  }
+
+  /** Mã sai thì tính một lần thử — 5 lần là mã bị tiêu huỷ, như luồng đăng ký. */
+  private async assertChangePasswordOtp(
+    userId: string,
+    otp: string,
+  ): Promise<void> {
+    const matches = await this.redisService.verifyChangePasswordOtp(userId, otp)
+    if (matches) return
+
+    const burned = await this.redisService.claimChangePasswordOtpAttempt(userId)
+    if (burned) {
+      this.logger.warn('[user.change-password] vượt số lần thử, đã huỷ mã', {
+        userId,
+      })
+    }
+    UserErrors.otpInvalidOrExpired()
+  }
+
+  /** Đá mọi thiết bị khác rồi báo gateway ngắt socket của đúng những sid đó. */
+  private async revokeOtherSessions(
+    userId: string,
+    keepSid: string,
+  ): Promise<void> {
+    const sids = await this.sessions.revokeAllExcept(userId, keepSid)
+    if (!sids.length) return
+
+    this.eventsPublisher.publishSessionRevoked({
+      userId,
+      sids,
+      reason: 'password-changed',
+      revokedAt: new Date().toISOString(),
     })
   }
 

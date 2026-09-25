@@ -11,6 +11,7 @@ import type {
   UserCreatedPayload,
   UserMakeFriendPayload,
   SessionRevokedPayload,
+  UserChangePasswordOtpPayload,
   UserPasswordChangedPayload,
   UserPasswordResetPayload,
   UserRegisterOtpPayload,
@@ -110,6 +111,11 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
    */
   async handleUserPasswordReset(data: UserPasswordResetPayload) {
     await this.mailerService.sendPasswordReset(data)
+  }
+
+  /** Mã đổi mật khẩu — mail bảo mật, cùng lý lẽ với handleUserPasswordReset. */
+  async handleUserChangePasswordOtp(data: UserChangePasswordOtpPayload) {
+    await this.mailerService.sendChangePasswordOtp(data)
   }
 
   async handleUserPasswordChanged(data: UserPasswordChangedPayload) {
