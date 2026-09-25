@@ -39,6 +39,42 @@ compose() {
   docker compose -f docker-compose.prod.yml --env-file .env.production "$@"
 }
 
+# Lấy một biến từ .env.production (tail -n1: dòng cuối thắng). Cả pipeline có
+# `|| true` nên grep không khớp (thiếu biến) không làm dừng deploy.
+env_val() { grep -E "^$1=" .env.production | tail -n1 | cut -d= -f2- || true; }
+
+# ---- Cookie refresh phải khớp đường mà TRÌNH DUYỆT gọi ----
+#
+# nginx phục vụ API dưới tiền tố của VITE_API_ROOT rồi CẮT tiền tố đi, nên
+# user-service chỉ thấy /user/refresh và không có cách nào tự đoán ra tiền tố.
+# Lệch nhau là cookie refresh không bao giờ được gửi, và MỌI người dùng bị đăng
+# xuất đúng 15 phút sau khi đăng nhập — không có lỗi nào trong log, vì với
+# server thì request đó chỉ là "không mang cookie".
+#
+# Đã xảy ra thật: VITE_API_ROOT đổi sang https://DOMAIN/api còn cookie vẫn
+# Path=/user. Kiểm ở đây vì đây là nơi hai giá trị đó gặp nhau, và vì nó chặn
+# TRƯỚC khi container mới lên.
+api_root="$(env_val VITE_API_ROOT)"
+cookie_path="$(env_val REFRESH_COOKIE_PATH)"
+# Bỏ scheme + host, còn lại là tiền tố đường dẫn ('' khi API ở domain riêng).
+api_prefix="$(printf '%s' "${api_root}" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]*##; s#/+$##')"
+want_cookie_path="${api_prefix}/user"
+# Chuẩn hoá y như refreshCookiePath() ở backend, để hai bên không lệch luật.
+have_cookie_path="$(printf '%s' "${cookie_path}" | sed -E 's#^ +| +$##g; s#/+$##')"
+[ -n "${have_cookie_path}" ] || have_cookie_path=/user
+case "${have_cookie_path}" in /*) ;; *) have_cookie_path="/${have_cookie_path}" ;; esac
+
+if [ "${have_cookie_path}" != "${want_cookie_path}" ]; then
+  echo "[deploy] DỪNG: REFRESH_COOKIE_PATH không khớp VITE_API_ROOT." >&2
+  echo "[deploy]   VITE_API_ROOT       = ${api_root:-<trống>}" >&2
+  echo "[deploy]   REFRESH_COOKIE_PATH = ${cookie_path:-<trống>} (hiểu thành ${have_cookie_path})" >&2
+  echo "[deploy]   cần                 = ${want_cookie_path}" >&2
+  echo "[deploy] Trình duyệt sẽ không gửi cookie refresh, mọi người dùng bị đăng xuất sau 15 phút." >&2
+  exit 1
+fi
+echo "[deploy] Cookie refresh: Path=${have_cookie_path} khớp ${api_root:-<domain riêng>}"
+
+
 # Label của Kong mang hash này (docker-compose.prod.yml): đổi kong.yml thì compose
 # tạo lại Kong. Bind mount một file không tự nạp lại khi git thay file đó.
 KONG_CONFIG_SHA="$(sha256sum kong/kong.yml | cut -c1-16)"
@@ -258,9 +294,6 @@ fi
 if command -v turnserver >/dev/null 2>&1; then
   turn_tpl="${ROOT}/deploy/coturn/turnserver.conf"
   turn_conf=/etc/turnserver.conf
-  # Lấy 3 biến cần cho config từ .env.production (tail -n1: dòng cuối thắng). Cả
-  # pipeline có `|| true` nên grep không khớp (thiếu biến) không làm dừng deploy.
-  env_val() { grep -E "^$1=" .env.production | tail -n1 | cut -d= -f2- || true; }
   TURN_SECRET="$(env_val TURN_SECRET)"
   TURN_REALM="$(env_val TURN_REALM)"
   TURN_HOST="$(env_val TURN_HOST)"
