@@ -41,7 +41,10 @@ compose() {
 
 # Lấy một biến từ .env.production (tail -n1: dòng cuối thắng). Cả pipeline có
 # `|| true` nên grep không khớp (thiếu biến) không làm dừng deploy.
-env_val() { grep -E "^$1=" .env.production | tail -n1 | cut -d= -f2- || true; }
+# `tr -d '\r'`: một dòng env lưu kiểu Windows để lại CR ở cuối giá trị, và
+# CR lọt vào đường dẫn cookie hay secret TURN là loại hỏng không nhìn thấy
+# được — chuỗi in ra trông y hệt chuỗi đúng.
+env_val() { grep -E "^$1=" .env.production | tail -n1 | cut -d= -f2- | tr -d '\r' || true; }
 
 # ---- Cookie refresh phải khớp đường mà TRÌNH DUYỆT gọi ----
 #
