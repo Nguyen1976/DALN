@@ -40,6 +40,18 @@ post_code() { # $1 = path, $2 = body JSON, $@ = thêm tham số curl
     -H 'Content-Type: application/json' -d "$body" "$@"
 }
 
+# Như post_code nhưng có mang cookie đăng nhập.
+#
+# Cả hai đều bắt gọi bằng BIẾN chứ không viết JSON thẳng vào chỗ gọi: bên trong
+# `check "$(curl ... -d "{\"a\":\"b\"}")"`, lớp nháy kép ngoài cùng bóc mất
+# các dấu escape, để lại `{a,b}` cho bash bung thành nhiều tham số — curl khi đó
+# chạy ba lần với ba mảnh JSON và `check` nhận lệch tham số. Đây là biến thể của
+# đúng cái bẫy "đừng tin phép đo trước khi tin code" ghi trong README.
+post_auth() { # $1 = path, $2 = body JSON, $3 = cookie jar
+  curl -s -o /dev/null -w '%{http_code}' -X POST "$API$1" \
+    -H 'Content-Type: application/json' -d "$2" -b "$3"
+}
+
 # Dọn xô hạn mức của chính harness.
 #
 # Bộ QC này gọi đăng nhập nhiều hơn hạn mức thật (30 lần / 5 phút / IP) — nếu
@@ -254,7 +266,107 @@ R del "login:fail:$EMAIL4" > /dev/null
 UNLOCKED=$(post_code /user/login "$(printf '{"email":"%s","password":"%s"}' "$EMAIL4" "$PASS_WORD")")
 check "$UNLOCKED" "201" "hết cửa sổ khoá thì vào lại được"
 
-echo "== 18. Hạn mức theo IP (nhóm này làm cạn xô đăng nhập — để cuối) =="
+echo "== 18. Đổi mật khẩu: hai đường xác thực =="
+reset_limits
+EMAIL5="qcchpw$(date +%s)@example.test"
+check "$(activate "$EMAIL5" "qcchpw$(date +%s)" "$PASS_WORD")" "201" "tài khoản QC được kích hoạt"
+LOGIN_BODY=$(printf '{"email":"%s","password":"%s"}' "$EMAIL5" "$PASS_WORD")
+curl -s -o /dev/null -c jarP.txt -X POST $API/user/login \
+  -H 'Content-Type: application/json' -d "$LOGIN_BODY"
+SIDP=$(grep refreshToken jarP.txt | awk '{print $7}'); SIDP="${SIDP%%.*}"
+UIDP=$(R hget "sess:$SIDP" uid | tr -d '\r')
+[ -n "$UIDP" ] && ok "đăng nhập được, uid = $UIDP" || bad "không lấy được phiên"
+
+# Đầu vào: đúng MỘT cách xác thực, chặn ngay ở DTO.
+BODY=$(printf '{"newPassword":"MatKhauMoi123","currentPassword":"%s","otp":"135790"}' "$PASS_WORD")
+check "$(post_auth /user/change-password "$BODY" jarP.txt)" "400" "gửi cả mật khẩu cũ lẫn OTP -> 400"
+BODY='{"newPassword":"MatKhauMoi123"}'
+check "$(post_auth /user/change-password "$BODY" jarP.txt)" "400" "không gửi cách xác thực nào -> 400"
+BODY='{"newPassword":"MatKhauMoi123","otp":"135790"}'
+check "$(post_code /user/change-password "$BODY")" "401" "chưa đăng nhập -> 401"
+BODY='{"newPassword":"ngan","currentPassword":"x"}'
+check "$(post_auth /user/change-password "$BODY" jarP.txt)" "400" "mật khẩu mới dưới 8 ký tự -> 400"
+
+# Đường 1: mật khẩu hiện tại.
+# 400 chứ KHÔNG phải 401: endpoint này đã yêu cầu đăng nhập, nên 401 trên nó
+# chỉ được mang nghĩa "phiên hỏng". Trả 401 cho một ô gõ nhầm làm interceptor
+# của web đăng xuất người dùng — QC trình duyệt đã bắt đúng cảnh đó.
+BODY='{"newPassword":"MatKhauMoi123","currentPassword":"sai-be-troi"}'
+WRONG=$(curl -s -b jarP.txt -X POST $API/user/change-password \
+  -H 'Content-Type: application/json' -d "$BODY" -w '|%{http_code}')
+check "${WRONG##*|}" "400" "mật khẩu hiện tại sai -> 400"
+echo "${WRONG%%|*}" | grep -q '"code":"CURRENT_PASSWORD_INVALID"' \
+  && ok "kèm mã CURRENT_PASSWORD_INVALID để client gắn lỗi vào đúng ô" \
+  || bad "body: ${WRONG%%|*}"
+BODY=$(printf '{"newPassword":"MatKhauMoi123","currentPassword":"%s"}' "$PASS_WORD")
+check "$(post_auth /user/change-password "$BODY" jarP.txt)" "204" "đổi bằng mật khẩu hiện tại -> 204"
+check "$(post_code /user/login "$(printf '{"email":"%s","password":"MatKhauMoi123"}' "$EMAIL5")")" \
+  "201" "đăng nhập được bằng mật khẩu MỚI"
+check "$(post_code /user/login "$(printf '{"email":"%s","password":"%s"}' "$EMAIL5" "$PASS_WORD")")" \
+  "401" "mật khẩu CŨ không dùng được nữa"
+
+# Đường 2: OTP. Redis chỉ giữ hash nên harness ghi hash của một mã biết trước,
+# vẫn đi qua đúng đường verify thật — cùng thủ thuật với OTP đăng ký.
+reset_limits
+CHPW_OTP=246802
+R set "otp:chpw:$UIDP" "$(printf '%s' "$CHPW_OTP" | openssl dgst -sha256 | awk '{print $NF}')" EX 300 > /dev/null
+BODY='{"newPassword":"MatKhauBa123","otp":"000000"}'
+check "$(post_auth /user/change-password "$BODY" jarP.txt)" "400" "OTP sai -> 400"
+BODY=$(printf '{"newPassword":"MatKhauBa123","otp":"%s"}' "$CHPW_OTP")
+check "$(post_auth /user/change-password "$BODY" jarP.txt)" "204" "đổi bằng OTP -> 204"
+check "$(R exists "otp:chpw:$UIDP" | tr -d '\r')" "0" "mã bị TIÊU sau khi dùng"
+check "$(post_code /user/login "$(printf '{"email":"%s","password":"MatKhauBa123"}' "$EMAIL5")")" \
+  "201" "đăng nhập bằng mật khẩu đặt qua đường OTP"
+
+# Mã đăng ký KHÔNG được dùng chéo sang đổi mật khẩu.
+reset_limits
+set_otp "$EMAIL5" "$QC_OTP"
+BODY=$(printf '{"newPassword":"MatKhauCheo123","otp":"%s"}' "$QC_OTP")
+check "$(post_auth /user/change-password "$BODY" jarP.txt)" "400" "mã kích hoạt tài khoản không đổi được mật khẩu"
+
+# Xin mã: gửi tới email của CHÍNH phiên, và có khe chờ 60s.
+reset_limits
+R del "otp:chpw:resend:$UIDP" > /dev/null
+check "$(curl -s -o /dev/null -w '%{http_code}' -b jarP.txt -X POST $API/user/change-password/otp)" \
+  "204" "xin mã -> 204"
+check "$(R exists "otp:chpw:$UIDP" | tr -d '\r')" "1" "mã mới nằm trong Redis"
+R get "otp:chpw:$UIDP" | grep -qE '^[0-9a-f]{64}' && ok "Redis chỉ giữ hash, không giữ mã thô" || bad "mã nằm dạng thô"
+check "$(curl -s -o /dev/null -w '%{http_code}' -b jarP.txt -X POST $API/user/change-password/otp)" \
+  "429" "bấm lại ngay -> 429 (khe chờ 60s)"
+check "$(curl -s -o /dev/null -w '%{http_code}' -X POST $API/user/change-password/otp)" \
+  "401" "xin mã khi chưa đăng nhập -> 401"
+
+echo "== 19. Đổi mật khẩu: thu hồi các thiết bị KHÁC =="
+reset_limits
+# Ba thiết bị của cùng một người: P (đang thao tác) + hai máy nữa.
+LOGIN3=$(printf '{"email":"%s","password":"MatKhauBa123"}' "$EMAIL5")
+# Đếm từ MỐC chứ không phải số cứng: mỗi phép kiểm "đăng nhập được bằng mật
+# khẩu mới" ở nhóm 18 cũng tạo một phiên thật, nên con số tuyệt đối ở đây phụ
+# thuộc vào số phép kiểm phía trên — đúng loại ràng buộc ngầm làm bộ QC đỏ mỗi
+# lần có người thêm một dòng check vô hại.
+BEFORE=$(R scard "sess:idx:$UIDP" | tr -d '\r')
+curl -s -o /dev/null -c jarQ.txt -X POST $API/user/login -H 'Content-Type: application/json' -d "$LOGIN3"
+curl -s -o /dev/null -c jarR.txt -X POST $API/user/login -H 'Content-Type: application/json' -d "$LOGIN3"
+SIDQ=$(grep refreshToken jarQ.txt | awk '{print $7}'); SIDQ="${SIDQ%%.*}"
+SIDR=$(grep refreshToken jarR.txt | awk '{print $7}'); SIDR="${SIDR%%.*}"
+check "$(R scard "sess:idx:$UIDP" | tr -d '\r')" "$((BEFORE + 2))" "thêm hai thiết bị vào chỉ mục"
+
+# Không tích: không phiên nào được đụng tới.
+BODY='{"newPassword":"MatKhauBon123","currentPassword":"MatKhauBa123","revokeOtherSessions":false}'
+check "$(post_auth /user/change-password "$BODY" jarQ.txt)" "204" "đổi mà KHÔNG tích thu hồi"
+check "$(R scard "sess:idx:$UIDP" | tr -d '\r')" "$((BEFORE + 2))" "không phiên nào bị đụng tới"
+
+# Có tích: hai phiên kia chết, phiên đang thao tác sống.
+BODY='{"newPassword":"MatKhauNam123","currentPassword":"MatKhauBon123","revokeOtherSessions":true}'
+check "$(post_auth /user/change-password "$BODY" jarQ.txt)" "204" "đổi VÀ tích thu hồi"
+check "$(R exists "sess:$SIDQ" | tr -d '\r')" "1" "phiên đang thao tác còn sống"
+check "$(R exists "sess:$SIDP" | tr -d '\r')" "0" "thiết bị khác bị giết"
+check "$(R exists "sess:$SIDR" | tr -d '\r')" "0" "thiết bị khác nữa cũng bị giết"
+check "$(R scard "sess:idx:$UIDP" | tr -d '\r')" "1" "chỉ mục còn đúng phiên hiện tại"
+check "$(curl -s -o /dev/null -w '%{http_code}' -b jarQ.txt $API/user/me)" "200" "máy vừa đổi vẫn dùng được ngay"
+check "$(curl -s -o /dev/null -w '%{http_code}' -b jarP.txt $API/user/me)" "401" "máy bị đá phải nhận 401"
+
+echo "== 20. Hạn mức theo IP (nhóm này làm cạn xô đăng nhập — để cuối) =="
 reset_limits
 LIMITED=""
 for i in $(seq 1 40); do
