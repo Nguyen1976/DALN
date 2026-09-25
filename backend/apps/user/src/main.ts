@@ -1,11 +1,12 @@
 import { NestFactory } from '@nestjs/core'
 import { UserModule } from './user.module'
-import { ValidationPipe } from '@nestjs/common'
+import { Logger, ValidationPipe } from '@nestjs/common'
 import {
   AppHttpExceptionFilter,
   validationExceptionFactory,
   corsOptions,
   securityHeaders,
+  refreshCookiePathWarning,
 } from '@app/common'
 import { NestExpressApplication } from '@nestjs/platform-express'
 import cookieParser from 'cookie-parser'
@@ -20,6 +21,14 @@ async function bootstrap() {
   // Kong cho MỌI request, và hạn mức theo IP sẽ khoá toàn bộ người dùng chung
   // một xô. Chạy trực tiếp lúc dev không có X-Forwarded-For nên vẫn đúng.
   app.set('trust proxy', 2)
+
+  // Sai đường dẫn cookie refresh là một lỗi KHÔNG để lại dấu vết nào ngoài
+  // việc người dùng bị đăng xuất sau 15 phút, nên nó phải kêu ở đúng chỗ người
+  // deploy nhìn: log khởi động.
+  const cookiePathWarning = refreshCookiePathWarning()
+  if (cookiePathWarning) {
+    new Logger('UserBootstrap').error(cookiePathWarning)
+  }
 
   app.use(securityHeaders())
   app.use(cookieParser())

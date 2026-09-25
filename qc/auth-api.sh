@@ -88,7 +88,15 @@ reset_limits
 HDRS=$(curl -s -D - -o /dev/null -c jarA.txt -X POST $API/user/login \
   -H 'Content-Type: application/json' -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS_WORD\"}")
 echo "$HDRS" | grep -qi 'set-cookie: accessToken=.*Path=/;' && ok "accessToken Path=/" || bad "accessToken sai path"
-echo "$HDRS" | grep -qi 'set-cookie: refreshToken=.*Path=/user' && ok "refreshToken Path=/user" || bad "refreshToken sai path"
+# Path của cookie refresh phải khớp đường mà CLIENT gọi, không phải một hằng số.
+# Hardcode '/user' ở đây là lý do bộ QC từng xanh trong khi production đăng xuất
+# mọi người dùng sau 15 phút: prod phục vụ API dưới /api/ rồi cắt tiền tố đi,
+# nên service đặt Path=/user còn trình duyệt gọi /api/user/refresh.
+API_PREFIX=$(printf '%s' "$API" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]*##; s#/+$##')
+WANT_COOKIE_PATH="${API_PREFIX}/user"
+echo "$HDRS" | grep -qiE "set-cookie: refreshToken=.*Path=${WANT_COOKIE_PATH}(;|\$)" \
+  && ok "refreshToken Path=${WANT_COOKIE_PATH} khớp đường client gọi" \
+  || bad "refreshToken sai path — cần ${WANT_COOKIE_PATH}, nhận: $(echo "$HDRS" | grep -i 'set-cookie: refreshToken' | grep -oiE 'path=[^;]*')"
 echo "$HDRS" | grep -qi 'set-cookie: accessToken=.*HttpOnly' && ok "accessToken HttpOnly" || bad "thiếu HttpOnly"
 RT=$(grep refreshToken jarA.txt | awk '{print $7}')
 SID="${RT%%.*}"

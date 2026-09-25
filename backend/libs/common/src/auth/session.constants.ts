@@ -48,11 +48,53 @@ export const ROTATION_GRACE_MS = 30 * 1000
  * và logout mất đường xác định phiên cần xoá. Bấm đăng xuất mà phiên vẫn sống
  * trong Redis là đúng cái bug ta đang đi sửa.
  *
- * `/user` vẫn giữ phần thắng lớn nhất: chat, notification, recommendation và
- * handshake WebSocket không còn thấy refresh token. Kong route `/user` dùng
- * `strip_path: false` nên đường trình duyệt gọi đúng là tiền tố này.
+ * Vì sao đọc từ env chứ không phải hằng số: path này thuộc về TRÌNH DUYỆT, và
+ * trình duyệt so nó với URL công khai — thứ mà service không có cách nào tự
+ * biết. Trên production, nginx phục vụ API dưới `/api/` rồi CẮT tiền tố trước
+ * khi chuyển tiếp, nên service thấy `/user/refresh` và đặt `Path=/user` trong
+ * khi trình duyệt gọi `/api/user/refresh`. Hai đường không khớp, cookie nằm lại
+ * trong trình duyệt, và đúng 15 phút sau khi đăng nhập — lúc access cookie tự
+ * hết hạn — mọi người dùng bị đăng xuất. Dev không bao giờ thấy vì ở đó không
+ * có tiền tố nào.
+ *
+ * Đặt `REFRESH_COOKIE_PATH=/api/user` ở môi trường nào mount API sau tiền tố.
  */
-export const REFRESH_COOKIE_PATH = '/user'
+const DEFAULT_REFRESH_COOKIE_PATH = '/user'
+
+export function refreshCookiePath(): string {
+  const raw = process.env.REFRESH_COOKIE_PATH?.trim()
+  if (!raw) return DEFAULT_REFRESH_COOKIE_PATH
+
+  // Chuẩn hoá ba kiểu gõ nhầm im lặng: thiếu `/` đầu, thừa `/` cuối, thừa
+  // khoảng trắng. Cả ba đều làm cookie không được gửi mà không báo lỗi gì.
+  const withLeadingSlash = raw.startsWith('/') ? raw : `/${raw}`
+  const normalized = withLeadingSlash.replace(/\/+$/, '')
+
+  // `/` rỗng sau khi chuẩn hoá nghĩa là ai đó đặt đúng một dấu gạch: đó là
+  // cookie đi khắp nơi, tức bỏ hẳn lớp phòng vệ mà biến này sinh ra để giữ.
+  return normalized || DEFAULT_REFRESH_COOKIE_PATH
+}
+
+/**
+ * Câu cảnh báo khi giá trị cấu hình trông sai, hoặc `null` khi ổn.
+ *
+ * Service không tự biết nó được mount ở đâu nên không kiểm được giá trị ĐÚNG,
+ * nhưng hình dạng thì kiểm được: mọi route của user-service nằm dưới `/user`,
+ * nên đường dẫn cookie bắt buộc kết thúc bằng `/user`. Tách khỏi
+ * `refreshCookiePath()` để hàm kia thuần tuý, và để lời cảnh báo phát đúng một
+ * lần lúc khởi động — nơi người deploy thực sự nhìn.
+ */
+export function refreshCookiePathWarning(): string | null {
+  const path = refreshCookiePath()
+  if (path.endsWith(DEFAULT_REFRESH_COOKIE_PATH)) return null
+
+  return (
+    `REFRESH_COOKIE_PATH=${path} không kết thúc bằng '${DEFAULT_REFRESH_COOKIE_PATH}'. ` +
+    'Mọi route của user-service nằm dưới /user, nên trình duyệt sẽ không gửi ' +
+    'cookie refresh tới /user/refresh — người dùng bị đăng xuất sau 15 phút. ' +
+    'API mount sau tiền tố thì đặt cả tiền tố, ví dụ /api/user.'
+  )
+}
 
 /**
  * Cookie phiên có gắn cờ Secure hay không. Mặc định bật khi NODE_ENV=production.

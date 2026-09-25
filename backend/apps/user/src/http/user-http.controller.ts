@@ -52,7 +52,7 @@ import type { MultipartFile } from '@app/common/http/multipart-file'
 import { readCookie, type JwtPayload } from '@app/common/auth/resolve-tokens'
 import {
   ACCESS_TOKEN_MAX_AGE_MS,
-  REFRESH_COOKIE_PATH,
+  refreshCookiePath,
   REFRESH_TOKEN_MAX_AGE_MS,
   isSecureCookie,
 } from '@app/common/auth/session.constants'
@@ -80,10 +80,10 @@ const BASE_COOKIE_OPTIONS = {
 /** Access token phải đi cùng mọi request, tới mọi service. */
 const ACCESS_COOKIE_OPTIONS = { ...BASE_COOKIE_OPTIONS, path: '/' } as const
 
-/** Refresh token chỉ cần tới user-service — xem REFRESH_COOKIE_PATH. */
+/** Refresh token chỉ cần tới user-service — xem `refreshCookiePath`. */
 const REFRESH_COOKIE_OPTIONS = {
   ...BASE_COOKIE_OPTIONS,
-  path: REFRESH_COOKIE_PATH,
+  path: refreshCookiePath(),
 } as const
 
 @Controller('user')

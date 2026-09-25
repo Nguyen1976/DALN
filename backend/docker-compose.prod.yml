@@ -303,6 +303,10 @@ services:
       SERVICE: user
       PORT: 3002
       DATABASE_URL: mongodb://mongo:27017/user-service?replicaSet=rs0
+      # deploy/deploy.sh suy ra từ VITE_API_ROOT (hoặc lấy giá trị ghi đè trong
+      # .env.production) rồi export. Đường dẫn này thuộc về TRÌNH DUYỆT: nó phải
+      # khớp URL công khai, thứ mà service không tự biết vì nginx cắt tiền tố.
+      REFRESH_COOKIE_PATH: ${REFRESH_COOKIE_PATH:-/user}
 
   chat:
     <<: *app
