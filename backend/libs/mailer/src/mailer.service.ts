@@ -148,6 +148,27 @@ export class MailerService {
   }
 
   /**
+   * Mã xác nhận đổi mật khẩu.
+   *
+   * Không có nút bấm nào như mail kích hoạt: người nhận đang đứng sẵn ở hộp
+   * thoại đổi mật khẩu trong ứng dụng. Thêm một liên kết ở đây chỉ dạy người
+   * dùng thói quen bấm vào link trong thư nói về mật khẩu — đúng thứ mà mọi
+   * trang lừa đảo đang trông chờ.
+   */
+  async sendChangePasswordOtp(data: {
+    email: string
+    username: string
+    otp: string
+  }) {
+    const html = this.render('change-password-otp.html', {
+      name: data.username,
+      otp: data.otp,
+      email: data.email,
+    })
+    await this.send(data.email, 'Mã xác nhận đổi mật khẩu DALN Chat', html)
+  }
+
+  /**
    * Mail mang liên kết đặt lại mật khẩu.
    *
    * URL ghép ở đây chứ không phải ở user-service: `FRONTEND_URL` chỉ sống

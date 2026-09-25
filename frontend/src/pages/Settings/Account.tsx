@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { Switch } from "@/components/ui/switch";
 import { logoutAPI, selectUser } from "@/redux/slices/userSlice";
 import {
@@ -64,6 +65,7 @@ export default function AccountSettings() {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
   const device = describeThisDevice(navigator.userAgent);
 
@@ -132,9 +134,12 @@ export default function AccountSettings() {
             icon={KeyRound}
             title="Mật khẩu"
             description="Đổi mật khẩu định kỳ giúp tài khoản an toàn hơn."
-            soon
           >
-            <Button variant="outline" size="sm" disabled>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setChangingPassword(true)}
+            >
               Đổi mật khẩu
             </Button>
           </SettingRow>
@@ -244,6 +249,13 @@ export default function AccountSettings() {
           )}
         </SettingsCard>
       </SettingsSection>
+
+      <ChangePasswordDialog
+        open={changingPassword}
+        onOpenChange={setChangingPassword}
+        // Tích "đăng xuất thiết bị khác" thì danh sách ngay trên đây vừa đổi.
+        onChanged={() => void loadSessions()}
+      />
 
       <ConfirmDialog
         open={confirmLogout}

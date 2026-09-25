@@ -6,6 +6,7 @@ import type {
   UserCreatedPayload,
   UserMakeFriendPayload,
   SessionRevokedPayload,
+  UserChangePasswordOtpPayload,
   UserPasswordChangedPayload,
   UserPasswordResetPayload,
   UserRegisterOtpPayload,
@@ -59,6 +60,17 @@ export class NotificationSubscriber {
   })
   async handleUserPasswordReset(data: UserPasswordResetPayload): Promise<void> {
     await this.notificationService.handleUserPasswordReset(data)
+  }
+
+  @RabbitSubscribeWithRetry({
+    exchange: EXCHANGE_RMQ.USER_EVENTS,
+    routingKey: ROUTING_RMQ.USER_CHANGE_PASSWORD_OTP,
+    queue: QUEUE_RMQ.NOTIFICATION_USER_CHANGE_PASSWORD_OTP,
+  })
+  async handleUserChangePasswordOtp(
+    data: UserChangePasswordOtpPayload,
+  ): Promise<void> {
+    await this.notificationService.handleUserChangePasswordOtp(data)
   }
 
   @RabbitSubscribeWithRetry({

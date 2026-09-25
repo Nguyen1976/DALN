@@ -182,3 +182,96 @@ describeRedis('RedisService — khoá tài khoản sau nhiều lần sai', () =>
     await expect(redis.loginFailureCount('b@example.test')).resolves.toBe(0)
   })
 })
+
+/**
+ * OTP đổi mật khẩu — cùng máy móc với OTP đăng ký nhưng KHÁC không gian khoá.
+ *
+ * Khoá theo userId chứ không theo email: đây là hành động của người đã đăng
+ * nhập, và server không nhận email từ body nên không có gì để nhầm.
+ */
+describeRedis('RedisService — OTP đổi mật khẩu', () => {
+  let client: Redis
+  let redis: RedisService
+
+  beforeAll(() => {
+    client = new Redis({ host: HOST, port: PORT, db: TEST_DB })
+    redis = new RedisService(client)
+  })
+
+  afterAll(async () => {
+    await client.flushdb()
+    await client.quit()
+  })
+
+  beforeEach(async () => {
+    await client.flushdb()
+  })
+
+  const userId = '6ab52bb2fc90004fcac0f585'
+
+  it('lưu BẢN BĂM dưới khoá riêng, TTL 5 phút', async () => {
+    await redis.saveChangePasswordOtp(userId, '123456')
+
+    const stored = await client.get(`otp:chpw:${userId}`)
+    expect(stored).not.toBe('123456')
+    expect(stored).toHaveLength(64)
+    const ttl = await client.ttl(`otp:chpw:${userId}`)
+    expect(ttl).toBeGreaterThan(290)
+    expect(ttl).toBeLessThanOrEqual(300)
+  })
+
+  it('mã đúng -> true, mã sai -> false', async () => {
+    await redis.saveChangePasswordOtp(userId, '123456')
+
+    await expect(redis.verifyChangePasswordOtp(userId, '123456')).resolves.toBe(
+      true,
+    )
+    await expect(redis.verifyChangePasswordOtp(userId, '654321')).resolves.toBe(
+      false,
+    )
+  })
+
+  // Điểm chính của việc tách namespace: mã kích hoạt tài khoản KHÔNG được
+  // dùng chéo sang đổi mật khẩu, và ngược lại.
+  it('mã đăng ký không dùng được để đổi mật khẩu', async () => {
+    await redis.saveOTP(userId, '123456')
+
+    await expect(redis.verifyChangePasswordOtp(userId, '123456')).resolves.toBe(
+      false,
+    )
+  })
+
+  it('quá 5 lần thử -> mã bị TIÊU HUỶ', async () => {
+    await redis.saveChangePasswordOtp(userId, '123456')
+
+    const burned: boolean[] = []
+    for (let i = 0; i < 5; i += 1) {
+      burned.push(await redis.claimChangePasswordOtpAttempt(userId))
+    }
+
+    expect(burned).toEqual([false, false, false, false, true])
+    await expect(redis.verifyChangePasswordOtp(userId, '123456')).resolves.toBe(
+      false,
+    )
+  })
+
+  it('deleteChangePasswordOtp xoá cả mã và bộ đếm lần thử', async () => {
+    await redis.saveChangePasswordOtp(userId, '123456')
+    await redis.claimChangePasswordOtpAttempt(userId)
+
+    await redis.deleteChangePasswordOtp(userId)
+
+    expect(await client.exists(`otp:chpw:${userId}`)).toBe(0)
+    expect(await client.exists(`otp:chpw:attempts:${userId}`)).toBe(0)
+  })
+
+  it('khe gửi lại: lần đầu được, lần hai phải chờ', async () => {
+    await expect(redis.claimChangePasswordOtpResendSlot(userId)).resolves.toBe(
+      0,
+    )
+
+    const wait = await redis.claimChangePasswordOtpResendSlot(userId)
+    expect(wait).toBeGreaterThan(0)
+    expect(wait).toBeLessThanOrEqual(60)
+  })
+})

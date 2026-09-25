@@ -1,5 +1,7 @@
 import {
   ArrayMaxSize,
+  IsBoolean,
+  ValidateIf,
   ArrayUnique,
   IsArray,
   IsEmail,
@@ -15,6 +17,7 @@ import {
   IsNumberString,
 } from 'class-validator'
 import { MaxBytes } from '@app/common/http/max-bytes.validator'
+import { ExactlyOneOf } from '@app/common/http/exactly-one-of.validator'
 import { Transform, Type, type TransformFnParams } from 'class-transformer'
 import { PageQueryDto } from '@app/common/http/page-query.dto'
 
@@ -222,6 +225,57 @@ export class MemberProfilesDto {
   @ArrayMaxSize(200)
   @IsMongoId({ each: true })
   ids!: string[]
+}
+
+/**
+ * Đổi mật khẩu từ trang Cài đặt.
+ *
+ * Hai cách tự chứng minh, chọn MỘT: biết mật khẩu hiện tại, hoặc đọc được hộp
+ * thư. Người quên mật khẩu cũ vẫn đổi được mà không phải đăng xuất đi làm
+ * "quên mật khẩu"; người không mở được mail vẫn đổi được bằng mật khẩu cũ.
+ */
+export class ChangePasswordDto {
+  @IsNotEmpty()
+  // Cùng trần với ResetPasswordDto: 64 ký tự cho passphrase, và 72 byte vì
+  // bcrypt lặng lẽ bỏ phần vượt quá.
+  @MaxLength(64, {
+    message: 'Password is too long. Maximum length is $constraint1 characters',
+  })
+  @MaxBytes(72, { message: 'Mật khẩu quá dài (tối đa 72 byte)' })
+  @MinLength(8, {
+    message: 'Password is too short. Minimum length is $constraint1 characters',
+  })
+  newPassword: string
+
+  /** Cách 1. `ExactlyOneOf` nằm ở đây và chỉ ở đây để lỗi báo về một chỗ. */
+  @ExactlyOneOf(['otp'], {
+    message: 'Cần đúng một trong: mật khẩu hiện tại hoặc mã OTP',
+  })
+  // Đọc là: "bỏ qua ô này khi người dùng đã chọn đường OTP". Không thể dùng
+  // `@IsOptional()` hay điều kiện chỉ-khi-có-mặt: `@ValidateIf` tắt MỌI ràng
+  // buộc của thuộc tính, kể cả `ExactlyOneOf` — và thế thì body không gửi cách
+  // xác thực nào sẽ lọt qua, còn body gửi cả hai cũng lọt.
+  @ValidateIf(
+    (o: ChangePasswordDto) =>
+      o.currentPassword !== undefined || o.otp === undefined,
+  )
+  @IsString()
+  @MaxBytes(72, { message: 'Mật khẩu quá dài (tối đa 72 byte)' })
+  currentPassword?: string
+
+  /** Cách 2 — cùng khuôn với VerifyOtpDto, mã 6 chữ số. */
+  @ValidateIf((o: ChangePasswordDto) => o.otp !== undefined)
+  @IsNumberString({}, { message: 'OTP must be 6 digits' })
+  @MinLength(6, { message: 'OTP must be 6 characters' })
+  @MaxLength(6, { message: 'OTP must be 6 characters' })
+  otp?: string
+
+  /**
+   * Bỏ trống = false. Một cờ thiếu không bao giờ được hiểu thành hành động
+   * phá huỷ: người dùng phải chủ động tích thì các thiết bị khác mới bị đá.
+   */
+  @IsBoolean()
+  revokeOtherSessions: boolean = false
 }
 
 export class RevokeSessionDto {

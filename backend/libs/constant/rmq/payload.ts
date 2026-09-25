@@ -38,6 +38,19 @@ export interface UserPasswordResetPayload {
   expiresInMinutes: number
 }
 
+/**
+ * Mã xác nhận đổi mật khẩu.
+ *
+ * Cùng hình dạng với `UserRegisterOtpPayload` nhưng là một sự kiện riêng: hai
+ * lá thư nói hai việc khác nhau, và gộp chúng lại nghĩa là thư đổi mật khẩu
+ * sẽ mời người dùng bấm nút "kích hoạt tài khoản".
+ */
+export interface UserChangePasswordOtpPayload {
+  email: string
+  username: string
+  otp: string
+}
+
 export interface UserPasswordChangedPayload {
   email: string
   username: string

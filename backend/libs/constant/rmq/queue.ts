@@ -5,6 +5,8 @@ export const QUEUE_RMQ = {
   NOTIFICATION_USER_PASSWORD_RESET: 'notification_queue_user_password_reset',
   NOTIFICATION_USER_PASSWORD_CHANGED:
     'notification_queue_user_password_changed',
+  NOTIFICATION_USER_CHANGE_PASSWORD_OTP:
+    'notification_queue_user_change_password_otp',
   NOTIFICATION_USER_MAKE_FRIEND: 'notification_queue_user_makeFriend',
   NOTIFICATION_USER_UPDATE_STATUS_MAKE_FRIEND:
     'notification_queue_user_updateStatusMakeFriend',

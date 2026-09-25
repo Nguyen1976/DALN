@@ -2,6 +2,7 @@ import 'reflect-metadata'
 import { plainToInstance } from 'class-transformer'
 import { validate } from 'class-validator'
 import {
+  ChangePasswordDto,
   ForgotPasswordDto,
   LoginUserDto,
   MakeFriendByUsernameDto,
@@ -162,5 +163,83 @@ describe('VerifyOtpDto — mã chỉ gồm chữ số', () => {
   ])('từ chối %s — không để rác tốn một lượt thử', async (_label, otp) => {
     const dto = plainToInstance(VerifyOtpDto, { email: 'a@b.test', otp })
     await expect(validate(dto)).resolves.not.toHaveLength(0)
+  })
+})
+
+/**
+ * Đổi mật khẩu: đúng MỘT cách xác thực.
+ *
+ * Chặn ở tầng validate chứ không phải trong service — gửi cả hai thứ là đầu
+ * vào vô nghĩa, và để service tự chọn lấy một cái nghĩa là hành vi phụ thuộc
+ * vào thứ tự if, thứ mà không ai đọc controller mà đoán ra được.
+ */
+describe('ChangePasswordDto', () => {
+  const newPassword = 'matkhaumoi123'
+
+  it('chỉ mật khẩu hiện tại -> hợp lệ', async () => {
+    const dto = plainToInstance(ChangePasswordDto, {
+      newPassword,
+      currentPassword: 'matkhaucu123',
+      revokeOtherSessions: true,
+    })
+    // Không có dòng này thì lúc lớp DTO chưa tồn tại, plainToInstance trả
+    // object trơn và validate() thấy 0 ràng buộc -> test xanh mà chẳng
+    // kiểm được gì.
+    expect(dto).toBeInstanceOf(ChangePasswordDto)
+    expect(await invalidFields(dto)).toEqual([])
+  })
+
+  it('chỉ OTP -> hợp lệ', async () => {
+    const dto = plainToInstance(ChangePasswordDto, {
+      newPassword,
+      otp: '123456',
+      revokeOtherSessions: false,
+    })
+    // Không có dòng này thì lúc lớp DTO chưa tồn tại, plainToInstance trả
+    // object trơn và validate() thấy 0 ràng buộc -> test xanh mà chẳng
+    // kiểm được gì.
+    expect(dto).toBeInstanceOf(ChangePasswordDto)
+    expect(await invalidFields(dto)).toEqual([])
+  })
+
+  it('gửi CẢ HAI -> bị chặn', async () => {
+    const dto = plainToInstance(ChangePasswordDto, {
+      newPassword,
+      currentPassword: 'matkhaucu123',
+      otp: '123456',
+    })
+    expect(await invalidFields(dto)).not.toEqual([])
+  })
+
+  it('không gửi cách xác thực nào -> bị chặn', async () => {
+    const dto = plainToInstance(ChangePasswordDto, { newPassword })
+    expect(await invalidFields(dto)).not.toEqual([])
+  })
+
+  it('mật khẩu mới ngắn hơn 8 ký tự -> bị chặn', async () => {
+    const dto = plainToInstance(ChangePasswordDto, {
+      newPassword: 'ngan',
+      currentPassword: 'matkhaucu123',
+    })
+    expect(await invalidFields(dto)).toContain('newPassword')
+  })
+
+  it('OTP không phải 6 chữ số -> bị chặn', async () => {
+    const dto = plainToInstance(ChangePasswordDto, {
+      newPassword,
+      otp: 'abcdef',
+    })
+    expect(await invalidFields(dto)).toContain('otp')
+  })
+
+  // Mặc định là KHÔNG đăng xuất thiết bị khác: bỏ trống một cờ không bao giờ
+  // được hiểu thành hành động phá huỷ.
+  it('thiếu revokeOtherSessions -> mặc định false', async () => {
+    const dto = plainToInstance(ChangePasswordDto, {
+      newPassword,
+      currentPassword: 'matkhaucu123',
+    })
+    expect(dto.revokeOtherSessions).toBe(false)
+    expect(await invalidFields(dto)).toEqual([])
   })
 })

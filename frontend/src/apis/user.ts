@@ -185,3 +185,23 @@ export const revokeSessionAPI = (sid: string) =>
 
 /** Đăng xuất khỏi MỌI thiết bị, kể cả thiết bị đang dùng. */
 export const logoutAllAPI = () => api.post("/user/logout-all");
+
+/**
+ * Xin mã xác nhận đổi mật khẩu.
+ *
+ * Không nhận email: server gửi tới địa chỉ của chính phiên đang đăng nhập.
+ * 429 kèm `retryAfterSeconds` khi bấm lại quá sớm.
+ */
+export const requestChangePasswordOtpAPI = () =>
+  api.post("/user/change-password/otp", undefined, { skipErrorToast: true });
+
+/** Đổi mật khẩu — gửi ĐÚNG MỘT trong `currentPassword` | `otp`. */
+export const changePasswordAPI = (payload: {
+  newPassword: string;
+  currentPassword?: string;
+  otp?: string;
+  revokeOtherSessions: boolean;
+}) =>
+  // Hộp thoại gắn lỗi vào đúng ô (mật khẩu hiện tại / mã OTP), nên để
+  // interceptor toast thêm một lần nữa là nói với người dùng hai lần.
+  api.post("/user/change-password", payload, { skipErrorToast: true });
