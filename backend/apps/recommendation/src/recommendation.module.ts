@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { UserFeaturesCache } from './services/user-features.cache'
 import { APP_GUARD } from '@nestjs/core'
 import { ScheduleModule } from '@nestjs/schedule'
 import { RecommendationController } from './recommendation.controller'
@@ -78,6 +79,7 @@ import { TrainingProcessor } from './background-jobs/training/training.processor
       useClass: AuthGuard,
     },
     RecommendationService,
+    UserFeaturesCache,
     RecommendationDirtyService,
     FriendGraphService,
     EmbeddingService,
