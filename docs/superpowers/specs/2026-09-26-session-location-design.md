@@ -216,7 +216,10 @@ Dữ liệu vị trí: GeoLite2 (MaxMind) · Bản đồ © Esri
 ```
 
 - Bản đồ, bán kính trong nhãn và link Maps đều lấy từ **cùng một** vị trí:
-  `lastLocation ?? location`, tức là thiết bị đang ở đâu.
+  `lastLocation`, tức là thiết bị đang ở đâu. Cố ý **không** lùi về `location`:
+  khi IP gần nhất không tra được, vẽ nơi đăng nhập cũ là nói sai rằng thiết bị
+  vẫn ở đó. Server đã tính `lastLocation` theo `lastIp || ip`, nên phiên chưa
+  đổi IP vẫn có bản đồ. (Sửa sau review cuối, 2026-09-26.)
 - Nếu `location` và `lastLocation` đều `null` thì bỏ bản đồ, link và dòng ghi
   công, hiện "Không xác định được vị trí". Hai dòng thời gian và IP vẫn giữ.
 - Một IP không có vị trí thì phần vị trí của dòng đó bị bỏ, IP vẫn hiện.

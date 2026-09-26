@@ -95,8 +95,12 @@ export function SessionRow({
 }
 
 function SessionDetails({ id, session }: { id: string; session: UserSession }) {
-  // Bản đồ, bán kính và link cùng một nguồn: thiết bị đang ở đâu.
-  const shown = session.lastLocation ?? session.location;
+  // Bản đồ, bán kính và link cùng một nguồn: thiết bị đang ở đâu. Cố ý KHÔNG
+  // lùi về vị trí lúc đăng nhập — IP gần nhất không tra được thì vẽ nơi cũ
+  // chẳng khác gì nói "thiết bị vẫn ở đó", đúng loại an tâm giả trang này phải
+  // tránh. Server đã trả lastLocation theo `lastIp || ip`, nên phiên chưa từng
+  // đổi IP vẫn có bản đồ.
+  const shown = session.lastLocation;
   // `?? session.ip`: API cũ trong lúc deploy chưa có lastIp.
   const lastIp = session.lastIp ?? session.ip;
 
@@ -133,7 +137,7 @@ function SessionDetails({ id, session }: { id: string; session: UserSession }) {
       <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr] sm:gap-y-2">
         <dt className="text-muted-foreground">Đăng nhập lần đầu</dt>
         <dd
-          className="break-words text-foreground"
+          className="min-w-0 break-words text-foreground"
           title={fullTime(session.createdAt)}
         >
           {joinParts(
@@ -144,7 +148,7 @@ function SessionDetails({ id, session }: { id: string; session: UserSession }) {
         </dd>
         <dt className="text-muted-foreground">Hoạt động gần nhất</dt>
         <dd
-          className="break-words text-foreground"
+          className="min-w-0 break-words text-foreground"
           title={fullTime(session.lastSeenAt)}
         >
           {joinParts(

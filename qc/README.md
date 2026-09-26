@@ -20,7 +20,7 @@ cp backend/apps/user/src/geoip/__fixtures__/GeoIP2-City-Test.mmdb backend/geoip/
 ./auth-api.sh                    # 20 nhóm, ~92 phép kiểm, không cần trình duyệt
 node auth-browser.mjs            # 8 nhóm trên Chrome thật, ảnh lưu ở shots/
 node change-password-browser.mjs # 7 nhóm cho hộp thoại đổi mật khẩu
-node session-location-browser.mjs # 12 nhóm: IP, vị trí, bản đồ mini, hai mốc thời gian
+node session-location-browser.mjs # 13 nhóm: IP, vị trí, bản đồ mini, hai mốc thời gian, IPv6 dài
 ```
 
 Ghi đè được bằng biến môi trường: `API`, `DIRECT`, `APP`, `CHROME_PATH`,

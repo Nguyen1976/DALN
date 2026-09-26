@@ -129,6 +129,10 @@ const UA = {
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36',
   edgeWin:
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0',
+  operaWin:
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 OPR/115.0',
+  androidChrome:
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36',
 }
 
 /** Một "thiết bị khác": đăng nhập bằng curl, trả sid của phiên vừa tạo. */
@@ -169,6 +173,19 @@ is(
 // Giả một phiên tạo trước khi có field lastIp.
 R(`hdel sess:${E.sid} lastIp`)
 is(R(`hexists sess:${E.sid} lastIp`), '0', 'E giờ là phiên "cũ", không có lastIp')
+// F: IPv6 đầy đủ, không có trong DB — dài nhất có thể, để thử bề rộng.
+const LONG_V6 = '2402:800:6314:1234:abcd:ef01:2345:6789'
+const F = loginDevice('jarLocF.txt', UA.operaWin, LONG_V6)
+// G: đăng nhập ở London, rồi refresh từ một IP không tra được vị trí.
+const G = loginDevice('jarLocG.txt', UA.androidChrome, '81.2.69.142')
+const gRefresh = sh(
+  `curl -s -o /dev/null -w '%{http_code}' -b ${G.jar} -c ${G.jar} -X POST ${API}/user/refresh -H 'User-Agent: ${UA.androidChrome}' -H 'X-Forwarded-For: 10.1.2.3'`,
+).trim()
+is(
+  `${F.code},${G.code},${gRefresh}`,
+  '201,201,204',
+  'F (IPv6 dài) và G (IP gần nhất không tra được) sẵn sàng',
+)
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
@@ -440,6 +457,45 @@ const tileFilter = await page.evaluate(() => {
 })
 is(/brightness/.test(tileFilter ?? ''), true, `dark mode làm dịu tile (${tileFilter})`)
 await page.screenshot({ path: 'shots/loc-11-mobile-dark.png', fullPage: true })
+
+console.log('\n== 13. IPv6 dài ở 320px, IP gần nhất không tra được ==')
+await page.setViewport({ width: 320, height: 720 })
+await openSettings()
+const v6 = await openPanel('Opera trên Windows')
+has(v6?.text, `IP ${LONG_V6}`, 'IPv6 dài hiện đủ trong panel')
+// Ở 320px, thanh tab của trang Cài đặt đã ép cột nội dung rộng ~390px (có từ
+// trước, ngoài tính năng này), nên card chưa bao giờ đủ hẹp để lộ lỗi. Ép riêng
+// panel về 240px để thử chính nó: ô <dd> trong grid mà giữ min-width:auto thì
+// không co lại được, và card overflow-hidden sẽ CẮT mất đuôi địa chỉ IP.
+const clipped = await page.evaluate((t) => {
+  const b = [...document.querySelectorAll('button[aria-expanded]')].find((n) =>
+    n.innerText.includes(t),
+  )
+  const panel = b && document.getElementById(b.getAttribute('aria-controls') ?? '')
+  if (!panel) return null
+  panel.style.width = '240px'
+  const dl = panel.querySelector('dl')
+  const overflow = Math.max(
+    panel.scrollWidth - panel.clientWidth,
+    dl ? dl.scrollWidth - dl.clientWidth : 0,
+  )
+  panel.style.width = ''
+  return overflow
+}, 'Opera trên Windows')
+is(clipped === 0, true, `IPv6 dài không tràn panel hẹp 240px (tràn ${clipped}px)`)
+await page.screenshot({ path: 'shots/loc-13-ipv6-320.png', fullPage: true })
+const unknownNow = await openPanel('Chrome trên Android')
+is(
+  unknownNow?.hasMap,
+  false,
+  'không vẽ nơi đăng nhập cũ như thể thiết bị đang ở đó',
+)
+has(unknownNow?.text, 'Không xác định được vị trí', 'nói rõ không biết thiết bị đang ở đâu')
+has(
+  unknownNow?.text?.split('Hoạt động gần nhất')[0],
+  'London, United Kingdom',
+  'nơi đăng nhập lần đầu vẫn được ghi',
+)
 
 console.log('\n== 12. Console sạch ==')
 const realErrors = consoleErrors.filter(
