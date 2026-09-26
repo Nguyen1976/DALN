@@ -18,10 +18,13 @@ Mongo, Redis, RabbitMQ, Qdrant, Kong admin và các cổng 3001–3005 **không*
 ## Luồng CI/CD — `.github/workflows/ci-cd.yml`
 
 - **PR vào `main`**: kiểm tra BE (typecheck + unit test) và FE (lint + build).
-- **Merge vào `main`**: kiểm tra xong → Actions SSH vào server bằng key deploy → server kéo
-  đúng commit đó (`deploy/remote-entry.sh`) → `deploy/deploy.sh` build lại, chạy, smoke check.
+- **Merge vào `main`**: kiểm tra và build 8 image chạy cùng lúc (image đẩy lên GHCR theo tag
+  SHA) → cả hai xanh thì Actions SSH vào server bằng key deploy → server kéo đúng commit đó
+  (`deploy/remote-entry.sh`) → `deploy/deploy.sh` pull image, chạy, smoke check.
+- **Merge chỉ đổi tài liệu** (`docs/**`, `*.md`): không chạy gì, không deploy.
 - **Run workflow** (tab Actions): để trống = deploy lại HEAD của `main`; điền SHA đủ 40 ký tự
-  của một commit cũ trên `main` = rollback.
+  của một commit cũ trên `main` = rollback. Chỉ chọn commit có lượt CI xanh — commit test đỏ
+  vẫn có image trên GHCR (build chạy song song với test) nhưng chưa từng được kiểm.
 
 Cấu hình trên GitHub: secret `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`; variable `DEPLOY_HOST`.
 
