@@ -389,25 +389,27 @@ describe('SessionStore.listSessions', () => {
   it('trả lastIp riêng khi phiên đã refresh từ nơi khác', async () => {
     const { store } = makeRedis({
       smembers: jest.fn().mockResolvedValue(['s1']),
-      pipeline: jest.fn().mockResolvedValue([
-        [
-          null,
+      pipeline: jest
+        .fn()
+        .mockResolvedValue([
           [
-            'uid',
-            'u1',
-            'createdAt',
-            '1000',
-            'lastSeenAt',
-            '2000',
-            'ua',
-            'Chrome',
-            'ip',
-            '81.2.69.142',
-            'lastIp',
-            '89.160.20.112',
+            null,
+            [
+              'uid',
+              'u1',
+              'createdAt',
+              '1000',
+              'lastSeenAt',
+              '2000',
+              'ua',
+              'Chrome',
+              'ip',
+              '81.2.69.142',
+              'lastIp',
+              '89.160.20.112',
+            ],
           ],
-        ],
-      ]),
+        ]),
     })
 
     const [session] = await store.listSessions('u1')
