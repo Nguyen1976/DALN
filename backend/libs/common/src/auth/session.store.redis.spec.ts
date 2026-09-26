@@ -265,4 +265,71 @@ describeRedis('SessionStore trên Redis thật', () => {
     })
     expect(await client.smembers(sessionIndexKey('u1'))).toEqual([alive.sid])
   })
+
+  it('lastIp: create ghi bằng ip; rotate và ân hạn cập nhật lastIp, ip giữ nguyên', async () => {
+    const { sid, refreshToken } = await store.create('u1', {
+      ip: '81.2.69.142',
+    })
+    expect(await client.hmget(sessionKey(sid), 'ip', 'lastIp')).toEqual([
+      '81.2.69.142',
+      '81.2.69.142',
+    ])
+
+    const rotated = await store.consume(refreshToken, { ip: '89.160.20.112' })
+    expect(rotated.status).toBe('rotated')
+    expect(await client.hmget(sessionKey(sid), 'ip', 'lastIp')).toEqual([
+      '81.2.69.142',
+      '89.160.20.112',
+    ])
+
+    // Cùng token cũ, trong cửa sổ ân hạn: vẫn là thiết bị thật, vẫn ghi.
+    const grace = await store.consume(refreshToken, { ip: '175.16.199.0' })
+    expect(grace.status).toBe('grace')
+    expect(await client.hmget(sessionKey(sid), 'ip', 'lastIp')).toEqual([
+      '81.2.69.142',
+      '175.16.199.0',
+    ])
+  })
+
+  it('refresh không biết IP -> lastIp cũ KHÔNG bị xoá', async () => {
+    const { sid, refreshToken } = await store.create('u1', {
+      ip: '81.2.69.142',
+    })
+
+    await store.consume(refreshToken)
+
+    expect(await client.hget(sessionKey(sid), 'lastIp')).toBe('81.2.69.142')
+  })
+
+  it('replayed KHÔNG ghi IP của bên đang trình token bị đánh cắp', async () => {
+    const { sid, refreshToken } = await store.create('u1', {
+      ip: '81.2.69.142',
+    })
+    await store.consume(refreshToken, { ip: '89.160.20.112' })
+    await client.hset(sessionKey(sid), 'prevUntil', String(Date.now() - 1))
+
+    const outcome = await store.consume(refreshToken, { ip: '67.43.156.0' })
+
+    expect(outcome.status).toBe('replayed')
+    expect(await client.hget(sessionKey(sid), 'lastIp')).toBe('89.160.20.112')
+  })
+
+  it('listSessions trả lastIp; hash cũ chưa có lastIp thì lấy ip', async () => {
+    const moved = await store.create('u1', { ip: '81.2.69.142' })
+    await store.consume(moved.refreshToken, { ip: '89.160.20.112' })
+    const legacy = await store.create('u1', { ip: '175.16.199.0' })
+    await client.hdel(sessionKey(legacy.sid), 'lastIp')
+
+    const sessions = await store.listSessions('u1')
+    const bySid = Object.fromEntries(sessions.map((s) => [s.sid, s]))
+
+    expect(bySid[moved.sid]).toMatchObject({
+      ip: '81.2.69.142',
+      lastIp: '89.160.20.112',
+    })
+    expect(bySid[legacy.sid]).toMatchObject({
+      ip: '175.16.199.0',
+      lastIp: '175.16.199.0',
+    })
+  })
 })
