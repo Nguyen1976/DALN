@@ -226,9 +226,10 @@ echo "[deploy] $(docker compose version)"
 # Đường chính: pull từ GHCR. Đường dự phòng: build tại chỗ — giữ lại để chạy tay
 # trên một commit chưa lên CI vẫn deploy được, và để một sự cố registry không làm
 # kẹt cứng việc phát hành. Ép build tại chỗ: DALN_BUILD_LOCAL=1 bash deploy/deploy.sh
-build_local() {
+build_local() { # build_local [service...] — mặc định: mọi image
   echo "[deploy] Build tại chỗ, TUẦN TỰ (máy 4 nhân, build song song 8 image rất dễ OOM)"
-  for svc in ${SERVICES}; do
+  local list="${*:-${SERVICES}}"
+  for svc in ${list}; do
     started=${SECONDS}
     before="$(image_id "${svc}")"
     compose build "${svc}"
@@ -245,14 +246,20 @@ pull_started=${SECONDS}
 if [ -n "${DALN_BUILD_LOCAL:-}" ]; then
   image_source="build tại chỗ (DALN_BUILD_LOCAL)"
   build_local
-elif compose pull --quiet ${SERVICES}; then
+elif retry 3 15 compose pull --quiet ${SERVICES}; then
   image_source="pull ${DALN_IMAGE_PREFIX}:${DALN_IMAGE_TAG:0:7} ($((SECONDS - pull_started))s)"
   echo "[deploy] Pull xong sau $((SECONDS - pull_started))s"
 else
   # Tag chưa có trên registry (commit chưa qua CI), mạng hỏng, hoặc GHCR sự cố.
-  echo "[deploy] Pull thất bại -> quay về build tại chỗ" >&2
-  image_source="pull THẤT BẠI -> build tại chỗ"
-  build_local
+  # Chỉ build tại chỗ image nào thật sự chưa pull được: một image hỏng (thường là
+  # db-push, lớn nhất) từng kéo theo build lại cả 8, ~30 phút.
+  pull_failed=""
+  for svc in ${SERVICES}; do
+    compose pull --quiet "${svc}" >/dev/null 2>&1 || pull_failed+=" ${svc}"
+  done
+  echo "[deploy] Pull thất bại:${pull_failed:- (không rõ)} -> build tại chỗ phần đó" >&2
+  image_source="pull thiếu${pull_failed:- ?} -> build tại chỗ"
+  build_local ${pull_failed:-${SERVICES}}
 fi
 
 # ---- Chọn tag từng image: giữ tag đang chạy khi nội dung không đổi ----

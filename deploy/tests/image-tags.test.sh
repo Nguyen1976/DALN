@@ -93,6 +93,25 @@ is "$(switching svc svc old)" 1 "đang chạy đúng tag đó -> không đổi i
 is "$(switching svc svc new)" 0 "tag khác -> đổi image"
 is "$(switching svc chua-co-container new)" 0 "chưa có container -> tạo mới"
 
+echo "== retry"
+# Lệnh giả: hỏng N lần đầu rồi mới được. Đếm số lần gọi qua file vì retry chạy
+# lệnh trong tiến trình con.
+flaky() {
+  local n
+  n=$(($(cat "${WORK}/calls" 2>/dev/null || echo 0) + 1))
+  echo "${n}" >"${WORK}/calls"
+  [ "${n}" -gt "$1" ]
+}
+rm -f "${WORK}/calls"
+retry 3 0 flaky 2 >/dev/null 2>&1
+is "$?/$(cat "${WORK}/calls")" "0/3" "hỏng 2 lần rồi được -> thành công ở lần 3"
+rm -f "${WORK}/calls"
+retry 3 0 flaky 5 >/dev/null 2>&1
+is "$?/$(cat "${WORK}/calls")" "1/3" "hỏng mãi -> dừng sau đúng 3 lần, trả lỗi"
+rm -f "${WORK}/calls"
+retry 3 0 flaky 0 >/dev/null 2>&1
+is "$?/$(cat "${WORK}/calls")" "0/1" "được ngay -> không thử lại"
+
 echo
 echo "TỔNG: ${pass} pass / ${fail} fail"
 [ "${fail}" -eq 0 ]
