@@ -73,3 +73,18 @@ choose_image_tag() {
 image_switching() {
   [ "$(running_image_ref "$2")" != "${DALN_IMAGE_PREFIX}/$1:$3" ]
 }
+
+# retry <số lần> <giây chờ gốc> <lệnh...>: chạy lại lệnh khi hỏng, chờ tăng dần
+# (gốc × lần thử). Dùng cho pull: layer lớn tải qua mạng hay bị reset giữa chừng,
+# còn containerd giữ phần đã tải xong nên lần sau chỉ tải tiếp phần thiếu.
+retry() {
+  local times="$1" wait="$2" attempt=1
+  shift 2
+  while :; do
+    "$@" && return 0
+    [ "${attempt}" -ge "${times}" ] && return 1
+    echo "[retry] lỗi lần ${attempt}/${times}: $*" >&2
+    sleep $((wait * attempt))
+    attempt=$((attempt + 1))
+  done
+}
