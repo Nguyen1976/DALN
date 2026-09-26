@@ -303,7 +303,23 @@ tham số `authStore`.
 | PR #48 (`a3a1216`) | pull hỏng (`db-push`, connection reset qua IPv6) → build tại chỗ | cả 8 | tất cả (dự kiến: quy tắc timestamp đổi) |
 | Chạy lại `a3a1216` | pull hỏng lần 2, vẫn `db-push` → build tại chỗ | cả 8 | tất cả |
 | PR #49 (`a1d51b1`, thử lại pull + chỉ build image hỏng) | pull thành công, 114s | cả 8 (chuyển từ image build tại server sang image CI) | tất cả |
-| PR này (chỉ tài liệu) | xem PR | kỳ vọng: không có | kỳ vọng: không có |
+| PR #50 (`03a71af`, chỉ tài liệu) | pull 3s | không có | không có; Kong giữ nguyên |
+| PR #51 (`7c599b7`, build-context + dời 7 mục) | pull 70s | 7 backend (sửa `package.json`, `tsconfig.json`) | 10 container backend; `web` giữ nguyên |
+| PR #52 (`f6b1e62`, chỉ workflow) | pull 4s | không có | không có; Kong giữ nguyên |
 
 Compose trên server là v5.5.1, thế được biến lồng nhau. Build cache của hai lần build
 tại chỗ để lại 63 GB trên đĩa; đã dọn bằng `docker builder prune -af`.
+
+### 8.1 Build song song với test, bỏ qua push chỉ đổi tài liệu (PR #52)
+
+Job `images` không còn `needs: [backend, frontend]`; `deploy` vẫn cần cả ba xanh. Push vào
+`main` chỉ đổi `docs/**` hoặc `*.md` không chạy workflow. Tag `latest` bỏ vì giờ có thể trỏ
+vào commit test đỏ.
+
+| Lượt chạy trên `main` | Test | Build (job chậm nhất) | Deploy | Tổng |
+|---|---|---|---|---|
+| PR #50, build đợi test | 89s | 73s, bắt đầu sau test | 38s | 3 phút 28 giây |
+| PR #52, build song song | 73s | 98s, bắt đầu cùng lúc với test | 52s | 2 phút 36 giây |
+
+Job chậm nhất khi mọi bước trúng cache là `db-push` và `recommendation` (68–98s), nên với
+commit không đổi image thì build, chứ không phải test, quyết định thời gian trước deploy.
