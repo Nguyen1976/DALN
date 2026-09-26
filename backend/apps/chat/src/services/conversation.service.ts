@@ -9,12 +9,8 @@ import { ChatErrors } from '../errors/chat.errors'
 import { ChatEventsPublisher } from '../rmq/publishers/chat-events.publisher'
 import { conversationType } from '../generated'
 import { MessageMediaService } from './message-media.service'
-import {
-  buildKeysetCursor,
-  isObjectId,
-  parseKeysetCursor,
-  toPage,
-} from '@app/util'
+import { buildKeysetCursor, parseKeysetCursor, toPage } from '@app/util'
+import { isObjectId } from '../domain/object-id'
 import { UserDirectoryClient } from '../clients/user-directory.client'
 import { requireGroupManager } from './group-access'
 

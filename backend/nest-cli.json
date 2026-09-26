@@ -64,15 +64,6 @@
         "tsConfigPath": "apps/notification/tsconfig.app.json"
       }
     },
-    "qdrant": {
-      "type": "library",
-      "root": "libs/qdrant",
-      "entryFile": "index",
-      "sourceRoot": "libs/qdrant/src",
-      "compilerOptions": {
-        "tsConfigPath": "libs/qdrant/tsconfig.lib.json"
-      }
-    },
     "realtime-gateway": {
       "type": "application",
       "root": "apps/realtime-gateway",

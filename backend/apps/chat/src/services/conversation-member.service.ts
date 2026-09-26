@@ -1,6 +1,6 @@
 import { UserDirectoryClient } from '../clients/user-directory.client'
 import { Injectable } from '@nestjs/common'
-import { displayNameOf } from '@app/util'
+import { displayNameOf } from '../domain/display-name'
 import {
   ConversationRepository,
   ConversationMemberRepository,

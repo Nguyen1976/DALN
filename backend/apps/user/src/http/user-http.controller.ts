@@ -25,7 +25,7 @@ import {
   UserInfo,
   WithoutLogin,
 } from '@app/common/common.decorator'
-import { RateLimit } from '@app/common/http/rate-limit'
+import { RateLimit } from './rate-limit'
 import { LoggerService } from '@app/logger'
 import {
   ForgotPasswordDto,

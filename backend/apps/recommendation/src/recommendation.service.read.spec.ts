@@ -1,6 +1,6 @@
 import { RecommendationService } from './recommendation.service'
 
-jest.mock('@app/qdrant/qdrant.service', () => ({ QdrantService: class {} }))
+jest.mock('./qdrant/qdrant.service', () => ({ QdrantService: class {} }))
 
 const ME = 'me'
 const snapshot = (userId: string, extra: Record<string, unknown> = {}) => ({

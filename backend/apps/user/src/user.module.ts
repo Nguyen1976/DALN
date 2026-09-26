@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common'
 import { UserService } from './user.service'
 import { RedisModule } from '@app/redis'
-import { AuthGuard, CommonModule, RateLimitGuard } from '@app/common'
+import { AuthGuard, CommonModule } from '@app/common'
+import { RateLimitGuard } from './http/rate-limit'
 import { UtilModule } from '@app/util'
 import {
   MessageHandlerErrorBehavior,

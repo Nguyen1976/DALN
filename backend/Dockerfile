@@ -71,6 +71,20 @@ EXPOSE 3001 3002 3003 3004 3005
 ENTRYPOINT ["entrypoint.sh"]
 
 # ----------------------------------------------------------------------------
+# Build context của MỘT service: chỉ các lib nó thật sự import (docker/service-libs.js).
+# Stage này chạy lại khi bất kỳ lib nào đổi, nhưng chỉ tốn vài giây; COPY --from
+# ở stage build tính cache theo NỘI DUNG, nên khi lib vừa sửa không thuộc service
+# này thì npm run build phía sau vẫn ăn cache.
+# ----------------------------------------------------------------------------
+FROM base AS build-context
+ARG SERVICE
+WORKDIR /ctx
+COPY libs libs
+COPY apps/${SERVICE} apps/${SERVICE}
+COPY docker/service-libs.js /tmp/service-libs.js
+RUN test -n "${SERVICE}" && node /tmp/service-libs.js "${SERVICE}" --prune
+
+# ----------------------------------------------------------------------------
 # Build: build 1 service cụ thể (production)
 # ----------------------------------------------------------------------------
 FROM base AS build
@@ -85,8 +99,8 @@ COPY --from=deps /app/node_modules ./node_modules
 # build lại service thật sự đổi. An toàn vì không app nào import code của app
 # khác — chỉ import libs/.
 COPY package.json package-lock.json nest-cli.json tsconfig*.json webpack.config.js ./
-COPY libs libs
-COPY apps/${SERVICE} apps/${SERVICE}
+COPY --from=build-context /ctx/libs libs
+COPY --from=build-context /ctx/apps/${SERVICE} apps/${SERVICE}
 # Prisma: chỉ sinh query engine cho OS/arch của image (không ship native/darwin).
 RUN if [ -f "apps/${SERVICE}/prisma/schema.prisma" ]; then \
       rm -rf "apps/${SERVICE}/src/generated" && \

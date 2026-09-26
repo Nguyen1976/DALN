@@ -1,4 +1,4 @@
-import { displayNameOf } from '@app/util'
+import { displayNameOf } from './display-name'
 import type { message, messageMedia, poll } from '../generated'
 
 /**
