@@ -384,7 +384,7 @@ dc logs user | grep geoip     # mong thấy "[geoip] đã nạp dữ liệu vị
 - Cập nhật: MaxMind ra bản mới hằng tuần và điều khoản GeoLite2 yêu cầu dùng
   bản mới. Hiện làm tay bằng cách lặp lại hai bước trên; cron `geoipupdate` là
   việc để sau.
-- Dòng ghi công MaxMind và OpenStreetMap đã có sẵn trong panel chi tiết thiết bị.
+- Dòng ghi công MaxMind và Esri (nguồn tile bản đồ) đã có sẵn trong panel chi tiết thiết bị.
 
 ## Env
 

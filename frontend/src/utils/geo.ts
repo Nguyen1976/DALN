@@ -2,9 +2,16 @@ import type { GeoLocation } from "@/apis/user";
 
 /**
  * Toán cho bản đồ mini ở trang "Thiết bị đang đăng nhập": Web Mercator và
- * lưới tile 256px của OpenStreetMap. Hàm thuần, không thư viện — cả bản đồ
- * chỉ là vài ảnh tile ghép lại cộng một vòng tròn.
+ * lưới tile 256px. Hàm thuần, không thư viện — cả bản đồ chỉ là vài ảnh tile
+ * ghép lại cộng một vòng tròn.
+ *
+ * Tile lấy từ Esri World Street Map chứ không phải OpenStreetMap: một số mạng
+ * ở Việt Nam reset kết nối TLS tới openstreetmap.org, và người dùng trên mạng
+ * đó sẽ không bao giờ thấy bản đồ. Esri cùng lưới Web Mercator, không cần key.
  */
+
+const TILE_URL =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile";
 
 export const TILE_SIZE = 256;
 
@@ -100,7 +107,8 @@ export function tilesAround(
       const wrapped = ((col % count) + count) % count;
       tiles.push({
         key: `${zoom}/${col}/${row}`,
-        url: `https://tile.openstreetmap.org/${zoom}/${wrapped}/${row}.png`,
+        // Esri đặt hàng (y) trước cột (x).
+        url: `${TILE_URL}/${zoom}/${row}/${wrapped}`,
         left: col * TILE_SIZE - center.x,
         top: row * TILE_SIZE - center.y,
       });

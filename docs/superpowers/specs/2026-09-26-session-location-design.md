@@ -212,7 +212,7 @@ trên fixture:**
 Ước tính từ IP · bán kính ~76 km      Mở trên Google Maps ↗
 Đăng nhập lần đầu    15/09/2026 lúc 08:12 · London, United Kingdom · IP 81.2.69.142
 Hoạt động gần nhất   3 giờ trước · Linköping, Sweden · IP 89.160.20.112
-Dữ liệu vị trí: GeoLite2 (MaxMind) · Bản đồ © OpenStreetMap
+Dữ liệu vị trí: GeoLite2 (MaxMind) · Bản đồ © Esri
 ```
 
 - Bản đồ, bán kính trong nhãn và link Maps đều lấy từ **cùng một** vị trí:
@@ -240,8 +240,15 @@ Dữ liệu vị trí: GeoLite2 (MaxMind) · Bản đồ © OpenStreetMap
 - **Tile:** điểm chiếu ra pixel toàn cầu `(px, py)` ở zoom z (Web Mercator).
   Dải tile cần tải là `floor((px ± 160)/256)` × `floor((py ± 80)/256)`,
   thường 4–6 tile. `x` lấy modulo `2^z`, `y` bị kẹp vào `[0, 2^z − 1]`. Mỗi tile
-  là `<img loading="lazy">` lấy từ `https://tile.openstreetmap.org/{z}/{x}/{y}.png`,
-  đặt tuyệt đối theo `tx·256 − px`.
+  là một `<img>` lấy từ Esri World Street Map,
+  `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}`
+  (hàng `y` đứng trước cột `x`), đặt tuyệt đối theo `tx·256 − px`.
+- **Vì sao Esri, không phải OpenStreetMap** (đổi lúc QC, 2026-09-26): trên mạng
+  của máy dev ở Việt Nam, kết nối TLS tới `tile.openstreetmap.org` và
+  `www.openstreetmap.org` bị reset ngay ở bước Client Hello, kể cả ngoài sandbox.
+  Người dùng trên mạng đó sẽ không bao giờ thấy bản đồ. CARTO vẫn trả 200 nhưng
+  ảnh là "API KEY REQUIRED". OSM France tải được nhưng ghi nhãn tiếng Pháp. Esri
+  tải được, không cần key, nhãn tiếng Anh, cùng lưới Web Mercator.
 - **Vòng tròn:** đỏ, nền đỏ trong suốt, có chấm nhỏ ở tâm.
 - Tile nào `onError` thì ẩn cả khối bản đồ; chữ vẫn còn.
 - Ở dark mode, tile được giảm sáng bằng CSS `filter`.
@@ -308,9 +315,9 @@ Việc tra diễn ra lúc đọc, nên nếu dải IP đổi chủ trong vòng 3
 phiên thì vị trí lúc đăng nhập sẽ lệch. Hiếm gặp; đánh đổi này để Redis không
 phải lưu vị trí và các phiên cũ có vị trí ngay khi deploy.
 
-### 9.4 OpenStreetMap thấy vùng xem
+### 9.4 Nhà cung cấp tile thấy vùng xem
 
-Trình duyệt tải tile trực tiếp từ OSM, nên OSM biết IP của người xem và vùng
+Trình duyệt tải tile trực tiếp từ Esri, nên Esri biết IP của người xem và vùng
 bản đồ họ xem, tức là vị trí ước tính **của chính họ**. Tile chỉ tải khi mở
 panel. Không gửi IP của phiên. Rủi ro thấp; ghi lại vì lý do chọn GeoIP local
 là giữ IP trong hệ thống.

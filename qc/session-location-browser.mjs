@@ -5,7 +5,7 @@
  *
  * Cần: backend đang chạy và đã nạp DB kiểm thử của MaxMind ở backend/geoip
  * (README, mục "Chuẩn bị"), frontend dev server ở origin Kong cho phép
- * (5173/5174), Chrome, và mạng tới tile.openstreetmap.org.
+ * (5173/5174), Chrome, và mạng tới server.arcgisonline.com (tile Esri).
  *
  * "Thiết bị khác" đăng nhập bằng curl qua Kong kèm X-Forwarded-For: service đặt
  * `trust proxy 2`, nên IP trong header chính là IP được ghi vào phiên. Mọi IP
@@ -74,6 +74,9 @@ async function realClickByText(page, selector, pattern) {
         re.test(n.textContent ?? ''),
       )
       if (!el) return null
+      // Chuột thật bấm theo toạ độ màn hình: dòng nằm dưới mép cửa sổ thì
+      // phải cuộn tới trước, không thì cú bấm rơi ra ngoài.
+      el.scrollIntoView({ block: 'center' })
       const r = el.getBoundingClientRect()
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
     },
@@ -202,7 +205,7 @@ const panelInfo = (title) =>
       button && document.getElementById(button.getAttribute('aria-controls') ?? '')
     if (!panel) return null
     const map = panel.querySelector('[role="img"]')
-    const tiles = [...panel.querySelectorAll('img[src*="tile.openstreetmap.org"]')]
+    const tiles = [...panel.querySelectorAll('img[src*="server.arcgisonline.com"]')]
     const circle = panel.querySelector('[data-accuracy-circle]')
     const link = panel.querySelector('a[href^="https://www.google.com/maps/"]')
     let circleOffset = null
@@ -271,7 +274,7 @@ has(london?.text, 'London, United Kingdom · IP 81.2.69.142', 'nơi và IP lúc 
 has(london?.text, 'Vừa xong', 'hoạt động gần nhất, viết hoa đầu dòng')
 has(london?.text, 'Ước tính từ IP · bán kính ~10 km', 'nói rõ là ước tính, kèm bán kính')
 is(
-  london?.tileSrcs?.includes('https://tile.openstreetmap.org/8/127/85.png'),
+  london?.tileSrcs?.includes('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/8/85/127'),
   true,
   'có tile chứa London ở zoom 8',
 )
@@ -293,7 +296,7 @@ is(
 )
 is(london?.mapsTarget, '_blank', 'link mở tab mới')
 has(london?.text, 'GeoLite2', 'ghi công MaxMind')
-has(london?.text, 'OpenStreetMap', 'ghi công OpenStreetMap')
+has(london?.text, 'Esri', 'ghi công Esri')
 await page.screenshot({ path: 'shots/loc-03-london.png' })
 
 console.log('\n== 4. B refresh từ nơi khác: IP gần nhất đổi, IP lúc đăng nhập giữ ==')
@@ -315,7 +318,7 @@ is(
   'bản đồ và link theo nơi gần nhất',
 )
 is(
-  moved?.tileSrcs?.includes('https://tile.openstreetmap.org/5/17/9.png'),
+  moved?.tileSrcs?.includes('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/5/9/17'),
   true,
   'tile Linköping ở zoom 5',
 )
@@ -326,7 +329,7 @@ const bhutan = await openPanel('Firefox trên Windows')
 has(bhutan?.text, 'Bhutan · IP 67.43.156.0', 'chỉ ghi quốc gia')
 has(bhutan?.text, 'bán kính ~534 km', 'bán kính lớn được nói ra')
 is(
-  bhutan?.tileSrcs?.includes('https://tile.openstreetmap.org/3/6/3.png'),
+  bhutan?.tileSrcs?.includes('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/3/3/6'),
   true,
   'zoom 3 — thấy cả vùng quốc gia',
 )
@@ -361,20 +364,29 @@ has(mine?.text, `${today} lúc`, 'ngày đăng nhập của thiết bị này')
 await page.screenshot({ path: 'shots/loc-08-all-open.png', fullPage: true })
 
 console.log('\n== 9. Không tải được tile: mất hình, không mất chữ ==')
-const blockTiles = (req) =>
-  req.url().includes('tile.openstreetmap.org') ? req.abort() : req.continue()
+let abortedTiles = 0
+const blockTiles = (req) => {
+  if (!req.url().includes('server.arcgisonline.com')) return req.continue()
+  abortedTiles++
+  return req.abort()
+}
+// Tile đã tải ở các mục trước nằm trong cache của trình duyệt và không đi qua
+// bộ chặn — phải tắt cache thì phép thử "tile lỗi" mới là thật.
+await page.setCacheEnabled(false)
 await page.setRequestInterception(true)
 page.on('request', blockTiles)
 await openSettings()
 await realClickByText(page, 'button[aria-expanded]', /Safari trên iOS/)
 await until(async () => (await panelInfo('Safari trên iOS'))?.hasMap === false, 6000)
 const blocked = await panelInfo('Safari trên iOS')
+is(abortedTiles > 0, true, `request tile thật sự bị chặn (${abortedTiles})`)
 is(blocked?.hasMap, false, 'khối bản đồ biến mất khi tile lỗi')
 has(blocked?.text, 'Ước tính từ IP', 'nhãn bán kính vẫn còn')
 is(Boolean(blocked?.mapsHref), true, 'link Google Maps vẫn còn')
 has(blocked?.text, 'Hoạt động gần nhất', 'hai mốc thời gian vẫn còn')
 page.off('request', blockTiles)
 await page.setRequestInterception(false)
+await page.setCacheEnabled(true)
 
 console.log('\n== 10. API cũ trong lúc deploy (chưa có lastIp/location) ==')
 const origin = new URL(APP).origin
