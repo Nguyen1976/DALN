@@ -129,6 +129,42 @@ describe('GeoIpService — không dùng được file dữ liệu', () => {
   })
 })
 
+/**
+ * Bản ghi MaxMind không đúng hình dạng mong đợi. File thật không có ca này,
+ * nhưng một lần ném ở đây là 500 cho cả danh sách thiết bị, và toạ độ thiếu
+ * thì giao diện vẽ NaN — nên cài một reader giả chỉ trả đúng bản ghi đó.
+ */
+describe('GeoIpService — bản ghi méo', () => {
+  function withRecord(record: unknown) {
+    const { service } = makeService()
+    Object.assign(service, { reader: { get: () => record } })
+    return service
+  }
+
+  it('city không có names -> không ném, city null', () => {
+    const service = withRecord({
+      city: {},
+      country: { names: { en: 'Vietnam' } },
+      location: { latitude: 21, longitude: 105.8, accuracy_radius: 50 },
+    })
+
+    expect(() => service.lookup('1.2.3.4')).not.toThrow()
+    expect(service.lookup('1.2.3.4')).toMatchObject({
+      city: null,
+      country: 'Vietnam',
+    })
+  })
+
+  it.each([
+    ['thiếu latitude', { longitude: 105.8, accuracy_radius: 50 }],
+    ['thiếu longitude', { latitude: 21, accuracy_radius: 50 }],
+    ['thiếu accuracy_radius', { latitude: 21, longitude: 105.8 }],
+  ])('location %s -> null thay vì toạ độ NaN', (_label, location) => {
+    const service = withRecord({ location })
+    expect(service.lookup('1.2.3.4')).toBeNull()
+  })
+})
+
 describe('geoIpDbPath', () => {
   const original = process.env.GEOIP_DB_PATH
 

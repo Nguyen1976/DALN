@@ -56,23 +56,35 @@ export class GeoIpService implements OnModuleInit {
   lookup(ip: string | null | undefined): GeoLocation | null {
     if (!ip || !this.reader) return null
 
-    let record: CityResponse | null
+    // Cả phần đọc lẫn phần chuyển đổi nằm trong try: bản ghi méo mà làm ném ở
+    // đây thì cả danh sách thiết bị thành 500.
     try {
-      record = this.reader.get(ip)
+      const record: CityResponse | null = this.reader.get(ip)
+      const location = record?.location
+      if (!record || !location) return null
+
+      // Thiếu bất kỳ số nào thì giao diện vẽ NaN — thà không có vị trí.
+      const { latitude, longitude, accuracy_radius } = location
+      if (
+        typeof latitude !== 'number' ||
+        typeof longitude !== 'number' ||
+        typeof accuracy_radius !== 'number'
+      ) {
+        return null
+      }
+
+      return {
+        city: record.city?.names?.en ?? null,
+        country:
+          record.country?.names?.en ??
+          record.registered_country?.names?.en ??
+          null,
+        latitude,
+        longitude,
+        accuracyRadiusKm: accuracy_radius,
+      }
     } catch {
       return null
-    }
-
-    const location = record?.location
-    if (!record || !location) return null
-
-    return {
-      city: record.city?.names.en ?? null,
-      country:
-        record.country?.names.en ?? record.registered_country?.names.en ?? null,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      accuracyRadiusKm: location.accuracy_radius,
     }
   }
 }
