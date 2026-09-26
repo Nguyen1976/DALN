@@ -28,7 +28,10 @@ RUN apk add --no-cache openssl bash && rm -f /var/log/apk.log
 # ----------------------------------------------------------------------------
 FROM base AS deps
 COPY package.json package-lock.json ./
-RUN npm ci
+# Xoá /root/.npm: log và index cache của npm mang giờ chạy trong TÊN và NỘI DUNG
+# file (rewrite-timestamp chỉ cố định mtime), làm image db-push khác nhau giữa
+# hai lần build cùng input. Image production chỉ lấy node_modules nên không đổi.
+RUN npm ci && rm -rf /root/.npm
 
 # ----------------------------------------------------------------------------
 # Schema: chạy TRƯỚC app ở mỗi lần deploy (docker-compose.prod.yml):
