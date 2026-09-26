@@ -239,9 +239,12 @@ export class UserHttpController {
   async refresh(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
+    @Ip() ip: string,
   ) {
+    // IP gần nhất của phiên đi theo đúng lần refresh này: trang Thiết bị cần
+    // biết thiết bị đang ở đâu, không chỉ nơi nó đăng nhập.
     const result: RefreshResult = await this.withStoreErrors(() =>
-      this.userService.refreshSession(this.readRefreshCookie(request)),
+      this.userService.refreshSession(this.readRefreshCookie(request), { ip }),
     )
 
     if (result.status === 'terminated') {

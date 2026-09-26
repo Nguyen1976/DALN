@@ -24,7 +24,9 @@ import {
   revokeSessionAPI,
   type UserSession,
 } from "@/apis/user";
-import { formatRelativeTime } from "@/utils/formatDateTime";
+import { formatLastActive } from "@/utils/formatDateTime";
+import { formatPlace } from "@/utils/geo";
+import { SessionRow } from "./SessionRow";
 import { toast } from "sonner";
 import type { AppDispatch } from "@/redux/store";
 import { SettingRow, SettingsCard, SettingsSection } from "./parts";
@@ -89,6 +91,8 @@ export default function AccountSettings() {
   }, [loadSessions]);
 
   const otherDevices = (sessions ?? []).filter((session) => !session.current);
+  const currentSession =
+    (sessions ?? []).find((session) => session.current) ?? null;
 
   const revokeOne = async (session: UserSession) => {
     setRevokingSid(session.sid);
@@ -161,10 +165,11 @@ export default function AccountSettings() {
 
       <SettingsSection title="Phiên đăng nhập" step={2}>
         <SettingsCard>
-          <SettingRow
+          <SessionRow
             icon={device.mobile ? Smartphone : Monitor}
             title={device.name}
-            description={
+            session={currentSession}
+            summary={
               <span className="flex items-center gap-1.5">
                 <span
                   aria-hidden="true"
@@ -183,7 +188,7 @@ export default function AccountSettings() {
               <LogOut aria-hidden="true" />
               Đăng xuất
             </Button>
-          </SettingRow>
+          </SessionRow>
           {sessions === null && (
             <SettingRow
               icon={MonitorSmartphone}
@@ -202,19 +207,21 @@ export default function AccountSettings() {
 
           {otherDevices.map((session) => {
             const other = describeThisDevice(session.userAgent ?? "");
+            // Thiết bị đang ở đâu: vị trí của IP gần nhất, không tra được thì
+            // chính IP đó. `?? session.ip` giữ trang chạy được với API cũ
+            // trong lúc deploy, khi chưa có lastIp.
+            const where =
+              formatPlace(session.lastLocation) ??
+              session.lastIp ??
+              session.ip ??
+              "IP không rõ";
             return (
-              <SettingRow
+              <SessionRow
                 key={session.sid}
                 icon={other.mobile ? Smartphone : Monitor}
                 title={other.name}
-                description={
-                  <span className="break-all">
-                    {session.ip ?? "IP không rõ"} · hoạt động{" "}
-                    {formatRelativeTime(
-                      new Date(session.lastSeenAt).toISOString(),
-                    )}
-                  </span>
-                }
+                session={session}
+                summary={`${where} · hoạt động ${formatLastActive(session.lastSeenAt)}`}
               >
                 <Button
                   variant="outline"
@@ -226,7 +233,7 @@ export default function AccountSettings() {
                   <LogOut aria-hidden="true" />
                   Đăng xuất
                 </Button>
-              </SettingRow>
+              </SessionRow>
             );
           })}
 

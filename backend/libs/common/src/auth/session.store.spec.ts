@@ -136,6 +136,15 @@ describe('SessionStore.create', () => {
     expect(hset).toMatchObject({ uid: 'u1', ua: 'Chrome/1', ip: '10.0.0.9' })
     expect(Number(hset.absExp)).toBeGreaterThan(Date.now())
   })
+
+  it('lastIp bắt đầu bằng đúng IP lúc đăng nhập', async () => {
+    const { redis, store } = makeRedis()
+
+    await store.create('u1', { userAgent: 'Chrome/1', ip: '10.0.0.9' })
+    const hset = commandAsHash(pipelineArgs(redis.pipeline!)[0])
+
+    expect(hset.lastIp).toBe('10.0.0.9')
+  })
 })
 
 describe('SessionStore.consume', () => {
@@ -232,6 +241,26 @@ describe('SessionStore.consume', () => {
     await expect(store.consume('sid1.v')).rejects.toThrow(
       SessionStoreUnavailableError,
     )
+  })
+
+  it('truyền IP của request refresh vào script làm ARGV[6]', async () => {
+    const { redis, store } = makeRedis({
+      eval: jest.fn().mockResolvedValue('rotated|u1'),
+    })
+
+    await store.consume('sid1.old-verifier', { ip: '81.2.69.142' })
+
+    expect(evalArgs(redis.eval!)[5]).toBe('81.2.69.142')
+  })
+
+  it('không biết IP -> ARGV[6] rỗng để script KHÔNG đè IP cũ', async () => {
+    const { redis, store } = makeRedis({
+      eval: jest.fn().mockResolvedValue('rotated|u1'),
+    })
+
+    await store.consume('sid1.old-verifier')
+
+    expect(evalArgs(redis.eval!)[5]).toBe('')
   })
 })
 
@@ -340,6 +369,9 @@ describe('SessionStore.listSessions', () => {
         lastSeenAt: 2000,
         userAgent: 'Chrome',
         ip: '10.0.0.1',
+        // Hash này chưa có lastIp (phiên tạo trước tính năng): nơi gần nhất
+        // mà ta biết chính là nơi đăng nhập.
+        lastIp: '10.0.0.1',
       },
     ])
     expect(redis.srem).toHaveBeenCalledWith(sessionIndexKey('u1'), 'dead')
@@ -352,6 +384,40 @@ describe('SessionStore.listSessions', () => {
 
     await expect(store.listSessions('u1')).resolves.toEqual([])
     expect(redis.pipeline).not.toHaveBeenCalled()
+  })
+
+  it('trả lastIp riêng khi phiên đã refresh từ nơi khác', async () => {
+    const { store } = makeRedis({
+      smembers: jest.fn().mockResolvedValue(['s1']),
+      pipeline: jest
+        .fn()
+        .mockResolvedValue([
+          [
+            null,
+            [
+              'uid',
+              'u1',
+              'createdAt',
+              '1000',
+              'lastSeenAt',
+              '2000',
+              'ua',
+              'Chrome',
+              'ip',
+              '81.2.69.142',
+              'lastIp',
+              '89.160.20.112',
+            ],
+          ],
+        ]),
+    })
+
+    const [session] = await store.listSessions('u1')
+
+    expect(session).toMatchObject({
+      ip: '81.2.69.142',
+      lastIp: '89.160.20.112',
+    })
   })
 })
 

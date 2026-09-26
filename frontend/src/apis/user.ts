@@ -165,14 +165,36 @@ export const respondToFriendRequestAPI = (
   status: "ACCEPTED" | "REJECTED",
 ) => api.post(`/user/friend-requests/${requestId}/respond`, { status });
 
+/**
+ * Vị trí ước tính từ IP (GeoLite2). Chỉ là ước tính: `accuracyRadiusKm` là
+ * bán kính bất định, và bản đồ vẽ đúng vùng đó chứ không cắm một điểm.
+ */
+export interface GeoLocation {
+  /** null khi dữ liệu chỉ biết tới quốc gia. */
+  city: string | null;
+  country: string | null;
+  latitude: number;
+  longitude: number;
+  accuracyRadiusKm: number;
+}
+
 /** Một thiết bị đang đăng nhập, như trang "Phiên đăng nhập" hiển thị. */
 export interface UserSession {
   /** Định danh phiên — không phải bí mật, chỉ là phần tra key của cookie. */
   sid: string;
+  /** Lúc đăng nhập (ms) — "Đăng nhập lần đầu". */
   createdAt: number;
+  /** Lần refresh gần nhất (ms) — "Hoạt động gần nhất", lệch tối đa 15 phút. */
   lastSeenAt: number;
   userAgent: string | null;
+  /** IP lúc đăng nhập. */
   ip: string | null;
+  /** IP của lần refresh gần nhất. */
+  lastIp: string | null;
+  /** Vị trí ước tính của `ip`. */
+  location: GeoLocation | null;
+  /** Vị trí ước tính của `lastIp` — thiết bị đang ở đâu. */
+  lastLocation: GeoLocation | null;
   /** Đúng thiết bị đang xem trang này. */
   current: boolean;
 }

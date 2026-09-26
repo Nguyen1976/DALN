@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import Redis from 'ioredis'
-import { RedisService } from './redis.service'
+import { RedisService } from '@app/redis/redis.service'
+import { UserAuthStore } from './user-auth.store'
 
 /**
  * OTP và bộ đếm khoá tài khoản, chạy trên REDIS THẬT.
@@ -35,13 +36,13 @@ function redisReachable(): boolean {
 
 const describeRedis = redisReachable() ? describe : describe.skip
 
-describeRedis('RedisService — OTP đăng ký', () => {
+describeRedis('UserAuthStore — OTP đăng ký', () => {
   let client: Redis
-  let redis: RedisService
+  let redis: UserAuthStore
 
   beforeAll(() => {
     client = new Redis({ host: HOST, port: PORT, db: TEST_DB })
-    redis = new RedisService(client)
+    redis = new UserAuthStore(client, new RedisService(client))
   })
 
   afterAll(async () => {
@@ -124,13 +125,13 @@ describeRedis('RedisService — OTP đăng ký', () => {
   })
 })
 
-describeRedis('RedisService — khoá tài khoản sau nhiều lần sai', () => {
+describeRedis('UserAuthStore — khoá tài khoản sau nhiều lần sai', () => {
   let client: Redis
-  let redis: RedisService
+  let redis: UserAuthStore
 
   beforeAll(() => {
     client = new Redis({ host: HOST, port: PORT, db: TEST_DB })
-    redis = new RedisService(client)
+    redis = new UserAuthStore(client, new RedisService(client))
   })
 
   afterAll(async () => {
@@ -189,13 +190,13 @@ describeRedis('RedisService — khoá tài khoản sau nhiều lần sai', () =>
  * Khoá theo userId chứ không theo email: đây là hành động của người đã đăng
  * nhập, và server không nhận email từ body nên không có gì để nhầm.
  */
-describeRedis('RedisService — OTP đổi mật khẩu', () => {
+describeRedis('UserAuthStore — OTP đổi mật khẩu', () => {
   let client: Redis
-  let redis: RedisService
+  let redis: UserAuthStore
 
   beforeAll(() => {
     client = new Redis({ host: HOST, port: PORT, db: TEST_DB })
-    redis = new RedisService(client)
+    redis = new UserAuthStore(client, new RedisService(client))
   })
 
   afterAll(async () => {

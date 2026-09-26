@@ -133,6 +133,50 @@ export const formatRelativeTime = (dateStr?: string) => {
   return date.toLocaleDateString(VI, { day: "2-digit", month: "2-digit" });
 };
 
+/**
+ * "Hoạt động gần nhất" của một phiên đăng nhập. Tương đối trong một tuần, sau
+ * đó là ngày đủ năm: "20/09" của `formatRelativeTime` không cho biết năm nào,
+ * mà phiên sống được tới 30 ngày.
+ *
+ * Chữ thường để đứng giữa câu ("hoạt động vừa xong"); đầu dòng thì nơi gọi tự
+ * viết hoa.
+ */
+export const formatLastActive = (ms: number) => {
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return "";
+
+  // Đồng hồ máy khách chậm hơn server vài giây thì `seconds` âm — vẫn là "vừa xong".
+  const seconds = Math.round((Date.now() - ms) / 1000);
+  if (seconds < 60) return "vừa xong";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} phút trước`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} giờ trước`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)} ngày trước`;
+
+  return date.toLocaleDateString(VI, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+};
+
+/** "15/09/2026 lúc 08:12" — lúc một phiên đăng nhập bắt đầu. */
+export const formatSignInDate = (ms: number) => {
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const day = date.toLocaleDateString(VI, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+  const time = date.toLocaleTimeString(VI, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `${day} lúc ${time}`;
+};
+
 /** Full timestamp for tooltips / title attributes. */
 export const formatFullDateTime = (dateStr?: string) => {
   if (!dateStr) return "";

@@ -36,6 +36,8 @@ function setup(
     {} as never, // logger
     {} as never, // prisma
     {} as never, // sessions
+    {} as never, // geoIp
+    {} as never, // authStore
   )
   return { service, userRepo, friendRequestRepo, eventsPublisher }
 }
@@ -140,6 +142,8 @@ describe('UserService.detailMakeFriend', () => {
       {} as never, // logger
       {} as never, // prisma
       {} as never, // sessions
+      {} as never, // geoIp
+      {} as never, // authStore
     )
     return { service, userRepo }
   }
@@ -200,6 +204,8 @@ describe('UserService.respondToFriendRequest', () => {
       {} as never, // logger
       prisma as never,
       {} as never, // sessions
+      {} as never, // geoIp
+      {} as never, // authStore
     )
     return { service, friendRequestRepo, eventsPublisher, prisma }
   }

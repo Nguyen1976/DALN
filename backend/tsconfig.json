@@ -40,12 +40,6 @@
       "@app/logger/*": [
         "libs/logger/src/*"
       ],
-      "@app/mailer": [
-        "libs/mailer/src"
-      ],
-      "@app/mailer/*": [
-        "libs/mailer/src/*"
-      ],
       "@app/migrations": [
         "libs/migrations/src"
       ],

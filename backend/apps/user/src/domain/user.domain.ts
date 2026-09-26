@@ -56,14 +56,36 @@ export interface AuthSession {
  * `terminated` gộp cả "cookie sai" và "token bị dùng lại" — controller xử lý
  * giống nhau (xoá cookie + 401), còn việc giết phiên đã làm ở service.
  */
+/**
+ * Vị trí ước tính từ IP (GeoLite2). Chỉ là ước tính: `accuracyRadiusKm` là
+ * bán kính bất định, và giao diện vẽ đúng vùng đó chứ không cắm một điểm.
+ */
+export interface GeoLocation {
+  /** null khi dữ liệu chỉ biết tới quốc gia. */
+  city: string | null
+  country: string | null
+  latitude: number
+  longitude: number
+  accuracyRadiusKm: number
+}
+
 /** Một thiết bị đang đăng nhập, như trang "Phiên đăng nhập" cần hiển thị. */
 export interface SessionListItem {
   /** Định danh phiên — không phải bí mật, nó chỉ là phần tra key của cookie. */
   sid: string
+  /** Lúc đăng nhập (ms). */
   createdAt: number
+  /** Lần refresh gần nhất (ms) — lệch tối đa 15 phút so với request thật. */
   lastSeenAt: number
   userAgent: string | null
+  /** IP lúc đăng nhập — không bao giờ bị ghi lại. */
   ip: string | null
+  /** IP của lần refresh gần nhất. */
+  lastIp: string | null
+  /** Vị trí ước tính của `ip`; null khi không tra được. */
+  location: GeoLocation | null
+  /** Vị trí ước tính của `lastIp` — thiết bị đang ở đâu. */
+  lastLocation: GeoLocation | null
   /** Đúng thiết bị đang xem trang này. */
   current: boolean
 }

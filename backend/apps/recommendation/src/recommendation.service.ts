@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { RecommendationDirtyService } from './services/recommendation-dirty.service'
+import { UserFeaturesCache } from './services/user-features.cache'
 import { QdrantService } from '@app/qdrant/qdrant.service'
 import { UtilService } from '@app/util/util.service'
 import { RedisService } from '@app/redis/redis.service'
@@ -62,6 +63,7 @@ export class RecommendationService {
     private readonly userSnapshotHydrate: UserSnapshotHydrateService,
     private readonly friendGraph: FriendGraphService,
     private readonly dirty: RecommendationDirtyService,
+    private readonly featuresCache: UserFeaturesCache,
   ) {}
 
   private tokenizeBio(text: string): Set<string> {
@@ -769,7 +771,7 @@ export class RecommendationService {
 
     // Giai đoạn 7a: Fetch từ Redis cache (batch)
     const cachedFeatures =
-      await this.redisService.getUserFeaturesBatch(allCandidateIds)
+      await this.featuresCache.getUserFeaturesBatch(allCandidateIds)
     const missingIds = allCandidateIds.filter((id) => !cachedFeatures[id])
 
     // Giai đoạn 7b: Query Prisma cho những ID bị thiếu
@@ -782,7 +784,7 @@ export class RecommendationService {
 
       // Warm-up cache: lưu ngược trở lại Redis để tránh cache-miss cho lần tiếp theo
       if (missingProfiles.length > 0) {
-        await this.redisService.setUserFeaturesBatch(
+        await this.featuresCache.setUserFeaturesBatch(
           missingProfiles.map((profile) => ({
             id: profile.userId,
             bio: profile.bio,

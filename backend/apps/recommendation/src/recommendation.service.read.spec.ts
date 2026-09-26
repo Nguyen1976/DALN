@@ -57,6 +57,7 @@ function setup({
     {} as never, // snapshot hydrate
     friendGraph as never,
     {} as never, // dirty queue
+    {} as never, // features cache
   )
   return { service, prisma }
 }

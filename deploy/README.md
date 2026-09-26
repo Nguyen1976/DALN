@@ -51,19 +51,30 @@ của `backend/Dockerfile`), chỉ khác entrypoint/command.
 
 ## Deploy chỉ làm lại phần có thay đổi
 
-| Sửa ở đâu | Deploy làm gì |
-|---|---|
-| `backend/apps/<svc>/` | build + tạo lại đúng `<svc>`; restart Kong nếu `<svc>` nằm sau Kong |
-| `backend/apps/*/prisma/` | như trên, cộng db-push đồng bộ index |
-| `backend/migrations/` | chỉ build lại image `db-push`; có migration chờ thì backup Mongo + chạy migrate trước khi đụng tới app |
-| `backend/libs/`, `backend/docker/`, `package*.json`, `tsconfig*.json`, `nest-cli.json`, `Dockerfile` | build lại cả 6 service backend; chỉ service ra image khác mới bị tạo lại |
-| `frontend/` | chỉ build + tạo lại `web`, API không gián đoạn |
-| `backend/kong/kong.yml` | chỉ tạo lại Kong |
-| docs, `backend/scripts/`, `deploy/` | không build lại gì |
+CI build đủ 8 image cho mỗi commit (song song, có cache) và build **tái lập được**
+(`SOURCE_DATE_EPOCH=0` + `rewrite-timestamp`): cùng input ra cùng image. Mỗi image có
+biến tag riêng trong compose (`DALN_TAG_USER`, `DALN_TAG_DB_PUSH`, …).
+`deploy.sh` so nội dung image mới với image container đang chạy
+(`deploy/lib/image-tags.sh`): giống hệt thì giữ tag cũ, nên `up -d` không đụng tới
+container đó.
 
-Cuối log deploy có bảng tóm tắt: image nào mới, container nào được tạo lại, Kong có
-restart không, migration, backup, số message dead-letter, tổng thời gian. Lần đầu sau khi
-sửa `Dockerfile` thì build lại tất cả.
+| Sửa ở đâu | Container bị tạo lại |
+|---|---|
+| `backend/apps/<svc>/` | chỉ `<svc>`; restart Kong nếu `<svc>` nằm sau Kong |
+| `backend/apps/*/prisma/` | như trên, cộng db-push đồng bộ index |
+| `backend/migrations/` | chỉ `db-push`/`migrate`; có migration chờ thì backup Mongo + chạy migrate trước khi đụng tới app |
+| `backend/libs/<lib>/` | chỉ các service có bundle chứa đúng file vừa sửa. Barrel `@app/common`, `@app/util` kéo cả lib vào bundle |
+| `backend/docker/`, `package*.json`, `tsconfig*.json`, `nest-cli.json`, `Dockerfile` | thường là cả 6 service backend |
+| `frontend/` | chỉ `web`, API không gián đoạn |
+| `backend/kong/kong.yml` | chỉ Kong |
+| docs, `backend/scripts/`, `deploy/` | không container nào |
+
+Cuối log deploy có bảng tóm tắt:
+- `Image mới` là các image thật sự đổi;
+- `Giữ nguyên` là các image giữ tag cũ, kèm 7 ký tự đầu của tag;
+- sau đó là container được tạo lại, Kong, migration, backup, dead-letter, thời gian.
+
+Lần deploy đầu tiên sau khi bật build tái lập, mọi image khác một lần.
 
 Chạy tay `dc up -d` (không qua `deploy.sh`) thì Kong bị tạo lại một lần, vì label
 `daln.kong-config` thành `manual`. Vô hại. Nhưng `dc up -d` chạy migrate **không backup**
@@ -358,6 +369,33 @@ Từ trình duyệt: mở hội thoại NHÓM, bấm gọi; `chrome://webrtc-int
 `nguyen1976.xyz` (ICE) và candidate `srflx`/`host` của server. Có `livekit-cli` thì
 `livekit-cli list-rooms --url wss://nguyen1976.xyz/livekit --api-key daln --api-secret <secret>`
 liệt kê phòng đang mở.
+
+## GeoIP — vị trí trên trang "Thiết bị đang đăng nhập"
+
+Service `user` tra vị trí ước tính của IP từ file MaxMind **GeoLite2-City** đặt
+ngay trên server, không gọi API ngoài. File không nằm trong git. Thiếu file thì
+mọi thứ vẫn chạy; trang chỉ không có vị trí và bản đồ.
+
+```bash
+# 1. Máy local: đăng ký tài khoản miễn phí ở maxmind.com → GeoLite → Download
+#    Databases → "GeoLite2 City" (GZIP). Giải nén lấy GeoLite2-City.mmdb.
+tar -xzf GeoLite2-City_*.tar.gz
+ssh root@<SERVER> mkdir -p /root/workspace/DALN/backend/geoip
+scp GeoLite2-City_*/GeoLite2-City.mmdb root@<SERVER>:/root/workspace/DALN/backend/geoip/
+
+# 2. Server (alias dc ở mục Vận hành): service chỉ đọc file lúc khởi động.
+#    Restart cả kong vì Kong giữ IP upstream cũ trong cache, restart riêng
+#    user sẽ nhận 502.
+dc restart user kong
+dc logs user | grep geoip     # mong thấy "[geoip] đã nạp dữ liệu vị trí"
+```
+
+- Đặt file **trước** lần deploy đầu tiên có tính năng này thì bỏ qua bước 2,
+  vì deploy đó tạo lại container `user`.
+- Cập nhật: MaxMind ra bản mới hằng tuần và điều khoản GeoLite2 yêu cầu dùng
+  bản mới. Hiện làm tay bằng cách lặp lại hai bước trên; cron `geoipupdate` là
+  việc để sau.
+- Dòng ghi công MaxMind và Esri (nguồn tile bản đồ) đã có sẵn trong panel chi tiết thiết bị.
 
 ## Env
 

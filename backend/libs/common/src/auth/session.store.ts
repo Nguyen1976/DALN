@@ -64,7 +64,13 @@ export interface SessionSummary {
   createdAt: number
   lastSeenAt: number
   userAgent: string | null
+  /** IP lúc đăng nhập — không bao giờ bị ghi lại. */
   ip: string | null
+  /**
+   * IP của lần refresh gần nhất. Phiên tạo trước khi có field này thì bằng
+   * `ip`: nơi gần nhất mà ta biết chính là nơi đăng nhập.
+   */
+  lastIp: string | null
 }
 
 export interface SessionMeta {
@@ -102,10 +108,15 @@ export function parseRefreshCookie(
  * xuống nhánh ân hạn vì `prevHash` lúc đó đã chính là token nó đang cầm.
  *
  * KEYS[1] = sess:<sid>
- * ARGV    = [hash(đang trình), hash(cấp mới), now(ms), graceMs, idleTtlSeconds]
+ * ARGV    = [hash(đang trình), hash(cấp mới), now(ms), graceMs, idleTtlSeconds, ip]
+ *
+ * `ip` là IP của request refresh, '' khi không biết. Chỉ hai nhánh còn sống được
+ * ghi nó vào `lastIp`: nhánh replayed là token bị đánh cắp, và IP của bên đó
+ * không được đè lên nơi thiết bị thật đang ở. '' không bao giờ xoá IP đã biết.
  */
 const ROTATE_SCRIPT = `
 local now = tonumber(ARGV[3])
+local ip = ARGV[6] or ''
 local data = redis.call('HMGET', KEYS[1], 'uid', 'rtHash', 'prevHash', 'prevUntil', 'absExp')
 local uid, rtHash, prevHash, prevUntil, absExp = data[1], data[2], data[3], data[4], data[5]
 
@@ -122,12 +133,14 @@ if rtHash == ARGV[1] then
     'prevHash', rtHash,
     'prevUntil', now + tonumber(ARGV[4]),
     'lastSeenAt', now)
+  if ip ~= '' then redis.call('HSET', KEYS[1], 'lastIp', ip) end
   redis.call('EXPIRE', KEYS[1], tonumber(ARGV[5]))
   return 'rotated|' .. uid
 end
 
 if prevHash and prevHash == ARGV[1] and tonumber(prevUntil or '0') > now then
   redis.call('HSET', KEYS[1], 'lastSeenAt', now)
+  if ip ~= '' then redis.call('HSET', KEYS[1], 'lastIp', ip) end
   return 'grace|' .. uid
 end
 
@@ -166,6 +179,8 @@ export class SessionStore {
           'ua',
           meta.userAgent ?? '',
           'ip',
+          meta.ip ?? '',
+          'lastIp',
           meta.ip ?? '',
         ],
         ['expire', sessionKey(sid), REFRESH_TOKEN_TTL_SECONDS],
@@ -212,7 +227,10 @@ export class SessionStore {
    * Trình refresh token: rotate nếu đúng, ân hạn nếu vừa bị thay, còn lại là
    * dấu hiệu token bị đánh cắp.
    */
-  async consume(cookieValue?: string | null): Promise<RefreshOutcome> {
+  async consume(
+    cookieValue?: string | null,
+    meta: Pick<SessionMeta, 'ip'> = {},
+  ): Promise<RefreshOutcome> {
     const parsed = parseRefreshCookie(cookieValue)
     if (!parsed) return { status: 'invalid' }
 
@@ -228,6 +246,7 @@ export class SessionStore {
           String(Date.now()),
           String(ROTATION_GRACE_MS),
           String(REFRESH_TOKEN_TTL_SECONDS),
+          meta.ip ?? '',
         ],
       ),
     )
@@ -356,6 +375,7 @@ export class SessionStore {
         lastSeenAt: Number(fields.lastSeenAt ?? 0),
         userAgent: fields.ua || null,
         ip: fields.ip || null,
+        lastIp: fields.lastIp || fields.ip || null,
       })
     })
 

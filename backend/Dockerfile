@@ -19,14 +19,19 @@ ARG NODE_IMAGE=node:20-alpine
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 # openssl: Prisma engine cần trên alpine. bash: chạy entrypoint script.
-RUN apk add --no-cache openssl bash
+# Xoá apk.log: nó ghi GIỜ cài gói, là thứ duy nhất làm layer này khác nhau giữa
+# hai lần build cùng input — mà CI cần build tái lập (deploy/lib/image-tags.sh).
+RUN apk add --no-cache openssl bash && rm -f /var/log/apk.log
 
 # ----------------------------------------------------------------------------
 # Deps: cài node_modules (cache theo package*.json) - dùng cho dev & build
 # ----------------------------------------------------------------------------
 FROM base AS deps
 COPY package.json package-lock.json ./
-RUN npm ci
+# Xoá /root/.npm: log và index cache của npm mang giờ chạy trong TÊN và NỘI DUNG
+# file (rewrite-timestamp chỉ cố định mtime), làm image db-push khác nhau giữa
+# hai lần build cùng input. Image production chỉ lấy node_modules nên không đổi.
+RUN npm ci && rm -rf /root/.npm
 
 # ----------------------------------------------------------------------------
 # Schema: chạy TRƯỚC app ở mỗi lần deploy (docker-compose.prod.yml):
@@ -79,7 +84,7 @@ COPY --from=deps /app/node_modules ./node_modules
 # scripts/, kong/, compose...) không làm mất cache của image này, nên deploy chỉ
 # build lại service thật sự đổi. An toàn vì không app nào import code của app
 # khác — chỉ import libs/.
-COPY package.json package-lock.json nest-cli.json tsconfig*.json ./
+COPY package.json package-lock.json nest-cli.json tsconfig*.json webpack.config.js ./
 COPY libs libs
 COPY apps/${SERVICE} apps/${SERVICE}
 # Prisma: chỉ sinh query engine cho OS/arch của image (không ship native/darwin).
@@ -120,8 +125,6 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# Email HTML templates (notification service reads at runtime)
-COPY --from=build /app/libs/mailer/src/templates ./libs/mailer/src/templates
 COPY docker/link-prisma-generated.sh /tmp/link-prisma-generated.sh
 RUN chmod +x /tmp/link-prisma-generated.sh \
     && /tmp/link-prisma-generated.sh "${SERVICE}"

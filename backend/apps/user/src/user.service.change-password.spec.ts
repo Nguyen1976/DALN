@@ -69,6 +69,8 @@ function setup(
     logger as never,
     {} as never,
     sessions as never,
+    {} as never, // geoIp
+    redisService as never, // authStore: cùng stub, đã có đủ các phương thức đã dời
   )
 
   return {

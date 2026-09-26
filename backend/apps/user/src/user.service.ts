@@ -41,6 +41,8 @@ import {
 } from './domain/user.domain'
 import { RedisService } from '@app/redis/redis.service'
 import { maskEmail } from './domain/mask-email'
+import { GeoIpService } from './geoip/geoip.service'
+import { UserAuthStore } from './auth-store/user-auth.store'
 import type { MemberProfile } from 'libs/constant/member-profile'
 import { internalFetch, serviceUrl } from '@app/common/http/internal-fetch'
 import {
@@ -176,6 +178,8 @@ export class UserService {
     private readonly logger: LoggerService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly sessions: SessionStore,
+    private readonly geoIp: GeoIpService,
+    private readonly authStore: UserAuthStore,
   ) {}
 
   /**
@@ -203,7 +207,7 @@ export class UserService {
     username: string,
   ): Promise<void> {
     const otp = this.generateOtp()
-    await this.redisService.saveOTP(email, otp)
+    await this.authStore.saveOTP(email, otp)
     this.eventsPublisher.publishUserRegisterOtp({
       email,
       username,
@@ -287,11 +291,11 @@ export class UserService {
   async verifyRegistrationOtp(
     data: VerifyOtpRequest,
   ): Promise<{ success: true }> {
-    const matches = await this.redisService.verifyOTP(data.email, data.otp)
+    const matches = await this.authStore.verifyOTP(data.email, data.otp)
     if (!matches) {
       // Sai thì TỐN một lượt. Không có bước này thì cả không gian 10^6 mở
       // trong 5 phút và mỗi lần đoán sai không mất gì cả.
-      const burned = await this.redisService.claimOtpAttempt(data.email)
+      const burned = await this.authStore.claimOtpAttempt(data.email)
       if (burned) {
         this.logger.warn('[user.verify-otp] vượt số lần thử, đã huỷ mã', {
           email: maskEmail(data.email),
@@ -306,7 +310,7 @@ export class UserService {
     }
 
     await this.userRepo.activateByEmail(data.email)
-    await this.redisService.deleteOTP(data.email)
+    await this.authStore.deleteOTP(data.email)
 
     this.eventsPublisher.publishUserCreated({
       userId: user.id,
@@ -338,7 +342,7 @@ export class UserService {
     // The cooldown is claimed before the lookup so the endpoint behaves
     // identically for addresses that exist and ones that do not — neither the
     // status code nor the response time may reveal which is which.
-    const waitSeconds = await this.redisService.claimOtpResendSlot(data.email)
+    const waitSeconds = await this.authStore.claimOtpResendSlot(data.email)
     if (waitSeconds > 0) {
       UserErrors.otpResendTooSoon(waitSeconds)
     }
@@ -401,7 +405,7 @@ export class UserService {
       // được, nên đừng bỏ bước đó.
       if (
         data.ip &&
-        !(await this.redisService.claimPasswordResetIpSlot(data.ip))
+        !(await this.authStore.claimPasswordResetIpSlot(data.ip))
       ) {
         this.logger.warn('[user.forgot-password] ip rate limit hit', {
           ip: data.ip,
@@ -410,7 +414,7 @@ export class UserService {
       }
 
       // Cooldown 60s theo địa chỉ: chặn dội bom một hộp thư.
-      if (!(await this.redisService.claimPasswordResetSlot(data.email))) return
+      if (!(await this.authStore.claimPasswordResetSlot(data.email))) return
 
       // Trần tổng số theo địa chỉ: cooldown ở trên chỉ chặn được TẦN SUẤT,
       // không chặn TỔNG SỐ (rải đều một mail/phút suốt cả giờ vẫn lọt).
@@ -422,7 +426,7 @@ export class UserService {
       // lực — thứ UI hiện tại cho phép, vì nút "Dùng email khác" quay lại form
       // mà không kiểm tra cooldown — đủ để khoá tài khoản khỏi đường khôi
       // phục cả tiếng, dù chỉ đúng một mail thật sự được gửi.
-      if (!(await this.redisService.claimPasswordResetHourlySlot(data.email))) {
+      if (!(await this.authStore.claimPasswordResetHourlySlot(data.email))) {
         this.logger.warn('[user.forgot-password] hourly rate limit hit', {
           // Không log email thô: đây là dữ liệu cá nhân, khác IP ở nhánh trên.
           email: maskEmail(data.email),
@@ -437,7 +441,7 @@ export class UserService {
       if (!user || !user.isActive) return
 
       const token = this.generateResetToken()
-      await this.redisService.savePasswordResetToken(
+      await this.authStore.savePasswordResetToken(
         user.email,
         user.id,
         this.hashResetToken(token),
@@ -472,7 +476,7 @@ export class UserService {
   async validatePasswordResetToken(
     token: string,
   ): Promise<{ valid: boolean; maskedEmail?: string }> {
-    const userId = await this.redisService.peekPasswordResetToken(
+    const userId = await this.authStore.peekPasswordResetToken(
       this.hashResetToken(token),
     )
     if (!userId) return { valid: false }
@@ -494,7 +498,7 @@ export class UserService {
    * nhớ ra không có lý do gì bị chặn.
    */
   async resetPassword(data: ResetPasswordRequest): Promise<void> {
-    const userId = await this.redisService.consumePasswordResetToken(
+    const userId = await this.authStore.consumePasswordResetToken(
       this.hashResetToken(data.token),
     )
     if (!userId) UserErrors.passwordResetTokenInvalid()
@@ -506,7 +510,7 @@ export class UserService {
     await this.userRepo.updatePasswordById(user.id, hashedPassword)
 
     // Chỉ mục ngược chỉ là chỉ mục: xoá hụt cũng vô hại, nó tự hết hạn.
-    await this.redisService.clearPasswordResetIndex(user.email)
+    await this.authStore.clearPasswordResetIndex(user.email)
 
     this.logger.info('[user.reset-password] password changed', {
       userId: user.id,
@@ -552,11 +556,11 @@ export class UserService {
     // kém. Ngược lại thì mỗi lần bấm hụt vẫn ghi đè mã cũ trong Redis, và
     // người dùng đang cầm mã trong tay bỗng thấy nó sai.
     const waitSeconds =
-      await this.redisService.claimChangePasswordOtpResendSlot(userId)
+      await this.authStore.claimChangePasswordOtpResendSlot(userId)
     if (waitSeconds > 0) UserErrors.otpResendTooSoon(waitSeconds)
 
     const otp = this.generateOtp()
-    await this.redisService.saveChangePasswordOtp(userId, otp)
+    await this.authStore.saveChangePasswordOtp(userId, otp)
 
     this.eventsPublisher.publishUserChangePasswordOtp({
       email: user.email,
@@ -600,7 +604,7 @@ export class UserService {
     // Mã đã đổi được một mật khẩu thì không được đổi thêm cái nữa. Xoá cả khi
     // người dùng đi đường mật khẩu cũ: mã đang treo trong Redis lúc này chỉ là
     // rác, và rác biết đổi mật khẩu thì không nên để nằm đó.
-    await this.redisService.deleteChangePasswordOtp(userId)
+    await this.authStore.deleteChangePasswordOtp(userId)
 
     this.logger.info('[user.change-password] password changed', {
       userId: user.id,
@@ -634,10 +638,10 @@ export class UserService {
     userId: string,
     otp: string,
   ): Promise<void> {
-    const matches = await this.redisService.verifyChangePasswordOtp(userId, otp)
+    const matches = await this.authStore.verifyChangePasswordOtp(userId, otp)
     if (matches) return
 
-    const burned = await this.redisService.claimChangePasswordOtpAttempt(userId)
+    const burned = await this.authStore.claimChangePasswordOtpAttempt(userId)
     if (burned) {
       this.logger.warn('[user.change-password] vượt số lần thử, đã huỷ mã', {
         userId,
@@ -699,7 +703,7 @@ export class UserService {
     // the account is pending, and to spend an email on a fresh code. The
     // cooldown keeps a login-retry loop from turning into a mail flood.
     if (!user.isActive) {
-      const waitSeconds = await this.redisService.claimOtpResendSlot(user.email)
+      const waitSeconds = await this.authStore.claimOtpResendSlot(user.email)
       if (waitSeconds === 0) {
         await this.sendRegistrationOtp(user.email, user.username)
       }
@@ -732,7 +736,7 @@ export class UserService {
   private async isLoginLocked(email: string): Promise<boolean> {
     try {
       return (
-        (await this.redisService.loginFailureCount(email)) >=
+        (await this.authStore.loginFailureCount(email)) >=
         LOGIN_LOCKOUT_THRESHOLD
       )
     } catch (error) {
@@ -746,7 +750,7 @@ export class UserService {
 
   private async recordLoginFailure(email: string): Promise<void> {
     try {
-      const failures = await this.redisService.countLoginFailure(
+      const failures = await this.authStore.countLoginFailure(
         email,
         LOGIN_LOCKOUT_WINDOW_SECONDS,
       )
@@ -764,7 +768,7 @@ export class UserService {
 
   private async clearLoginFailures(email: string): Promise<void> {
     try {
-      await this.redisService.clearLoginFailures(email)
+      await this.authStore.clearLoginFailures(email)
     } catch {
       /* bộ đếm tự hết hạn, xoá hụt là vô hại */
     }
@@ -792,8 +796,11 @@ export class UserService {
    * Làm mới phiên. Đây là chỗ DUY NHẤT cấp lại cookie — trước đây guard tự làm
    * việc này trên request bất kỳ, và chính vì thế refresh token không thể rotate.
    */
-  async refreshSession(refreshCookie?: string | null): Promise<RefreshResult> {
-    const outcome = await this.sessions.consume(refreshCookie)
+  async refreshSession(
+    refreshCookie?: string | null,
+    meta: Pick<SessionMeta, 'ip'> = {},
+  ): Promise<RefreshResult> {
+    const outcome = await this.sessions.consume(refreshCookie, meta)
 
     if (outcome.status === 'invalid') {
       return { status: 'terminated' }
@@ -881,8 +888,15 @@ export class UserService {
     currentSid: string,
   ): Promise<SessionListItem[]> {
     const sessions = await this.sessions.listSessions(userId)
+    // Tra lúc đọc chứ không lúc ghi: đường refresh không phải làm thêm gì, và
+    // phiên có từ trước tính năng này cũng có vị trí ngay.
     return sessions
-      .map((session) => ({ ...session, current: session.sid === currentSid }))
+      .map((session) => ({
+        ...session,
+        location: this.geoIp.lookup(session.ip),
+        lastLocation: this.geoIp.lookup(session.lastIp),
+        current: session.sid === currentSid,
+      }))
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
   }
 

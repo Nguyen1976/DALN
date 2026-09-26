@@ -59,6 +59,7 @@ function setup(
     clearLoginFailures: jest.fn().mockResolvedValue(undefined),
   }
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() }
+  const geoIp = { lookup: jest.fn().mockReturnValue(null) }
 
   const service = new UserService(
     userRepo as never,
@@ -72,6 +73,8 @@ function setup(
     logger as never,
     {} as never, // prisma
     sessions as never,
+    geoIp as never,
+    redisService as never, // authStore: cùng stub, đã có đủ các phương thức đã dời
   )
 
   return {
@@ -82,6 +85,7 @@ function setup(
     logger,
     utilService,
     redisService,
+    geoIp,
   }
 }
 
@@ -223,6 +227,15 @@ describe('UserService.refreshSession', () => {
       status: 'terminated',
     })
     expect(sessions.revokeSession).toHaveBeenCalledWith('u1', 's1')
+  })
+
+  it('truyền IP của request xuống tầng phiên để ghi lastIp', async () => {
+    const consume = jest.fn().mockResolvedValue({ status: 'invalid' })
+    const { service } = setup({ consume })
+
+    await service.refreshSession('s1.cu', { ip: '89.160.20.112' })
+
+    expect(consume).toHaveBeenCalledWith('s1.cu', { ip: '89.160.20.112' })
   })
 })
 
@@ -435,5 +448,76 @@ describe('UserService — danh sách thiết bị', () => {
       service.revokeOwnSession('u1', 'cua-nguoi-khac'),
     ).resolves.toBe(false)
     expect(eventsPublisher.publishSessionRevoked).not.toHaveBeenCalled()
+  })
+
+  const london = {
+    city: 'London',
+    country: 'United Kingdom',
+    latitude: 51.5142,
+    longitude: -0.0931,
+    accuracyRadiusKm: 10,
+  }
+  const linkoping = {
+    city: 'Linköping',
+    country: 'Sweden',
+    latitude: 58.4167,
+    longitude: 15.6167,
+    accuracyRadiusKm: 76,
+  }
+
+  it('gắn vị trí cho IP lúc đăng nhập và cho IP gần nhất, mỗi cái một vị trí', async () => {
+    const { service, sessions, geoIp } = setup()
+    sessions.listSessions.mockResolvedValue([
+      {
+        sid: 'a',
+        createdAt: 1,
+        lastSeenAt: 2,
+        userAgent: 'Chrome',
+        ip: '81.2.69.142',
+        lastIp: '89.160.20.112',
+      },
+    ])
+    geoIp.lookup.mockImplementation((ip: string | null) =>
+      ip === '81.2.69.142' ? london : ip === '89.160.20.112' ? linkoping : null,
+    )
+
+    const [item] = await service.listOwnSessions('u1', 'a')
+
+    expect(item).toEqual({
+      sid: 'a',
+      createdAt: 1,
+      lastSeenAt: 2,
+      userAgent: 'Chrome',
+      ip: '81.2.69.142',
+      lastIp: '89.160.20.112',
+      location: london,
+      lastLocation: linkoping,
+      current: true,
+    })
+  })
+
+  it('không tra được vị trí -> location null, các field khác vẫn đủ', async () => {
+    const { service, sessions } = setup()
+    sessions.listSessions.mockResolvedValue([
+      {
+        sid: 'a',
+        createdAt: 1,
+        lastSeenAt: 2,
+        userAgent: null,
+        ip: '172.22.0.1',
+        lastIp: '172.22.0.1',
+      },
+    ])
+
+    const [item] = await service.listOwnSessions('u1', 'khac')
+
+    expect(item).toMatchObject({
+      sid: 'a',
+      ip: '172.22.0.1',
+      lastIp: '172.22.0.1',
+      location: null,
+      lastLocation: null,
+      current: false,
+    })
   })
 })

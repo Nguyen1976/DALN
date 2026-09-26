@@ -173,11 +173,18 @@ jobs:
 
       - name: Build & push
         uses: docker/build-push-action@v6
+        env:
+          # Build tái lập: mọi timestamp trong layer và config cố định ở 0, nên
+          # cùng input ra cùng image kể cả khi cache GHA bị miss (cache chỉ 10GB,
+          # 8 scope mode=max rất hay bị đẩy ra). deploy.sh dựa vào đó để giữ
+          # nguyên container của service không đổi.
+          SOURCE_DATE_EPOCH: 0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.context }}/Dockerfile
           target: ${{ matrix.target }}
-          push: true
+          # Đẩy qua `outputs` thay cho `push: true` để bật rewrite-timestamp.
+          outputs: type=image,push=true,rewrite-timestamp=true
           # Tag theo SHA là bản ghi "server đang chạy đúng commit nào", và là thứ
           # làm rollback thành một lần pull. `latest` chỉ để tiện xem bằng mắt.
           tags: |

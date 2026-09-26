@@ -33,9 +33,13 @@ export class MailerService {
   ) {}
 
   private resolveTemplate(filename: string): string {
+    // Hai bố cục chạy thật: mã nguồn (jest) có templates/ nằm cạnh file này;
+    // bundle webpack (dev watch và prod) nằm ở dist/apps/notification, template
+    // được nest-cli copy vào mailer/templates cạnh main.js. webpack của Nest
+    // giữ __dirname thật (node.__dirname: false).
     const candidates = [
-      join(process.cwd(), 'libs/mailer/src/templates', filename),
       join(__dirname, 'templates', filename),
+      join(__dirname, 'mailer', 'templates', filename),
     ]
     const path = candidates.find((candidate) => existsSync(candidate))
     if (!path) {
