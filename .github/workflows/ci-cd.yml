@@ -2,11 +2,14 @@ name: CI/CD
 
 # Một workflow cho cả frontend + backend.
 #   - PR vào main  : chỉ kiểm tra (typecheck/test BE, lint/build FE) -> chặn merge nếu đỏ.
-#   - push vào main: kiểm tra xong -> build 8 image SONG SONG rồi đẩy lên GHCR ->
-#                    SSH vào server, server chỉ `compose pull` + `up -d`.
+#   - push vào main: kiểm tra và build 8 image chạy CÙNG LÚC (image đẩy lên GHCR) ->
+#                    cả hai xanh mới SSH vào server, server chỉ `compose pull` + `up -d`.
+#                    Push chỉ đổi tài liệu (docs/**, *.md) thì không chạy gì cả.
 #   - Run workflow : deploy lại một commit trên main mà KHÔNG build lại — image đã
 #                    nằm sẵn trên GHCR theo tag là SHA. Dùng để redeploy sau khi sửa
 #                    env trên server, hoặc điền SHA cũ để rollback (tức thì).
+#                    Chỉ điền SHA có lượt CI xanh: image được build song song với test
+#                    nên commit test đỏ vẫn có image trên GHCR, chỉ là không được deploy.
 #
 # Vì sao build ở đây chứ không trên server: server là VPS 4 nhân, và nó vừa build
 # vừa phục vụ người dùng thật. Dockerfile backend `COPY libs libs` cho MỌI service,
@@ -18,6 +21,11 @@ on:
     branches: [main]
   push:
     branches: [main]
+    # Không ảnh hưởng image nào (không file .md nào nằm trong code service), nên
+    # không cần test, build hay deploy. Push có lẫn file khác thì vẫn chạy đủ.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
     inputs:
       sha:
@@ -101,7 +109,9 @@ jobs:
 
   images:
     name: Build & push ${{ matrix.service }}
-    needs: [backend, frontend]
+    # Không `needs` test: build chạy song song với test thay vì đợi ~1,5 phút.
+    # Test đỏ vẫn chặn deploy (xem `needs` của job deploy); image lỡ đẩy lên GHCR
+    # chỉ mang tag SHA của commit đó nên không ai dùng tới.
     # Chỉ build khi có code mới vào main. workflow_dispatch (redeploy / rollback)
     # cố ý BỎ QUA job này: image của commit đó đã nằm trên GHCR theo tag SHA, nên
     # rollback chỉ còn là kéo image cũ về — không phải build lại.
@@ -186,10 +196,9 @@ jobs:
           # Đẩy qua `outputs` thay cho `push: true` để bật rewrite-timestamp.
           outputs: type=image,push=true,rewrite-timestamp=true
           # Tag theo SHA là bản ghi "server đang chạy đúng commit nào", và là thứ
-          # làm rollback thành một lần pull. `latest` chỉ để tiện xem bằng mắt.
-          tags: |
-            ${{ steps.img.outputs.name }}:${{ github.sha }}
-            ${{ steps.img.outputs.name }}:latest
+          # làm rollback thành một lần pull. Không đẩy `latest`: build chạy trước khi
+          # test xong nên `latest` có thể trỏ vào commit test đỏ.
+          tags: ${{ steps.img.outputs.name }}:${{ github.sha }}
           build-args: |
             ${{ matrix.build_args }}
             ${{ matrix.service == 'web' && format('VITE_API_ROOT={0}', vars.VITE_API_ROOT) || '' }}
