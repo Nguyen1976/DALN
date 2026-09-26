@@ -293,3 +293,17 @@ tham số `authStore`.
 | `backend/apps/notification/src/notification.{module,service}.ts` | import mới |
 | `backend/nest-cli.json`, `tsconfig.json`, `package.json` | bỏ lib `mailer`; asset template |
 | `backend/Dockerfile` | bỏ copy template vào mọi image |
+
+---
+
+## 8. Nghiệm thu trên prod (2026-09-26/27)
+
+| Lần deploy | Nguồn image | Image mới | Tạo lại |
+|---|---|---|---|
+| PR #48 (`a3a1216`) | pull hỏng (`db-push`, connection reset qua IPv6) → build tại chỗ | cả 8 | tất cả (dự kiến: quy tắc timestamp đổi) |
+| Chạy lại `a3a1216` | pull hỏng lần 2, vẫn `db-push` → build tại chỗ | cả 8 | tất cả |
+| PR #49 (`a1d51b1`, thử lại pull + chỉ build image hỏng) | pull thành công, 114s | cả 8 (chuyển từ image build tại server sang image CI) | tất cả |
+| PR này (chỉ tài liệu) | xem PR | kỳ vọng: không có | kỳ vọng: không có |
+
+Compose trên server là v5.5.1, thế được biến lồng nhau. Build cache của hai lần build
+tại chỗ để lại 63 GB trên đĩa; đã dọn bằng `docker builder prune -af`.
