@@ -81,7 +81,7 @@ COPY --from=deps /app/node_modules ./node_modules
 # scripts/, kong/, compose...) không làm mất cache của image này, nên deploy chỉ
 # build lại service thật sự đổi. An toàn vì không app nào import code của app
 # khác — chỉ import libs/.
-COPY package.json package-lock.json nest-cli.json tsconfig*.json ./
+COPY package.json package-lock.json nest-cli.json tsconfig*.json webpack.config.js ./
 COPY libs libs
 COPY apps/${SERVICE} apps/${SERVICE}
 # Prisma: chỉ sinh query engine cho OS/arch của image (không ship native/darwin).
