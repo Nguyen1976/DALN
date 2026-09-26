@@ -69,6 +69,7 @@ function setup(
     logger as never,
     {} as never,
     sessions as never,
+    {} as never, // geoIp
   )
 
   return {

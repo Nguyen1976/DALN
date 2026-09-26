@@ -41,6 +41,7 @@ import {
 } from './domain/user.domain'
 import { RedisService } from '@app/redis/redis.service'
 import { maskEmail } from './domain/mask-email'
+import { GeoIpService } from './geoip/geoip.service'
 import type { MemberProfile } from 'libs/constant/member-profile'
 import { internalFetch, serviceUrl } from '@app/common/http/internal-fetch'
 import {
@@ -176,6 +177,7 @@ export class UserService {
     private readonly logger: LoggerService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly sessions: SessionStore,
+    private readonly geoIp: GeoIpService,
   ) {}
 
   /**
@@ -792,8 +794,11 @@ export class UserService {
    * Làm mới phiên. Đây là chỗ DUY NHẤT cấp lại cookie — trước đây guard tự làm
    * việc này trên request bất kỳ, và chính vì thế refresh token không thể rotate.
    */
-  async refreshSession(refreshCookie?: string | null): Promise<RefreshResult> {
-    const outcome = await this.sessions.consume(refreshCookie)
+  async refreshSession(
+    refreshCookie?: string | null,
+    meta: Pick<SessionMeta, 'ip'> = {},
+  ): Promise<RefreshResult> {
+    const outcome = await this.sessions.consume(refreshCookie, meta)
 
     if (outcome.status === 'invalid') {
       return { status: 'terminated' }
@@ -881,8 +886,15 @@ export class UserService {
     currentSid: string,
   ): Promise<SessionListItem[]> {
     const sessions = await this.sessions.listSessions(userId)
+    // Tra lúc đọc chứ không lúc ghi: đường refresh không phải làm thêm gì, và
+    // phiên có từ trước tính năng này cũng có vị trí ngay.
     return sessions
-      .map((session) => ({ ...session, current: session.sid === currentSid }))
+      .map((session) => ({
+        ...session,
+        location: this.geoIp.lookup(session.ip),
+        lastLocation: this.geoIp.lookup(session.lastIp),
+        current: session.sid === currentSid,
+      }))
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
   }
 

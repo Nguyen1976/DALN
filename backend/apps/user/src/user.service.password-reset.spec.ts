@@ -54,6 +54,7 @@ function setup(user: typeof activeUser | null = activeUser) {
     logger as never,
     {} as never,
     sessions as never,
+    {} as never, // geoIp
   )
   return {
     service,
