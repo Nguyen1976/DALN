@@ -11,6 +11,8 @@
 #
 # Chỉ phần có thay đổi mới tốn thời gian:
 #   - pull chỉ tải layer khác; 7 image backend dùng chung layer base + npm ci;
+#   - mỗi image một tag: image mới giống hệt nội dung image đang chạy thì giữ
+#     tag cũ (deploy/lib/image-tags.sh), nên `up -d` không tạo lại container đó;
 #   - `up -d` chỉ tạo lại container có image/cấu hình đổi;
 #   - Kong chỉ restart khi một service phía sau nó vừa được tạo lại.
 #
@@ -107,6 +109,13 @@ DALN_IMAGE_PREFIX="${DALN_IMAGE_PREFIX:-ghcr.io/nguyen1976/daln}"
 DALN_IMAGE_TAG="${DALN_IMAGE_TAG:-$(git -C "${ROOT}" rev-parse HEAD)}"
 export DALN_IMAGE_PREFIX DALN_IMAGE_TAG
 
+# Tag thật sự dùng được chọn theo từng image SAU khi có image (xem
+# deploy/lib/image-tags.sh). Xoá mọi DALN_TAG_* sót trong môi trường để pull và
+# build luôn nhắm đúng SHA mới.
+for var in $(compgen -v DALN_TAG_ || true); do unset "${var}"; done
+# shellcheck source=lib/image-tags.sh
+source "${ROOT}/deploy/lib/image-tags.sh"
+
 # Service có image riêng. Dùng chung cho cả đường pull lẫn đường build dự phòng.
 SERVICES="db-push user chat notification realtime-gateway recommendation saga-orchestrator web"
 
@@ -121,9 +130,7 @@ DOMAIN="${DALN_DOMAIN:-nguyen1976.xyz}"
 # image store (server đang dùng), .Id là digest của index và đổi sau mỗi lần build,
 # kể cả khi build ăn cache hoàn toàn.
 image_id() {
-  { docker image inspect -f '{{json .RootFS.Layers}}{{json .Config}}' \
-    "${DALN_IMAGE_PREFIX}/$1:${DALN_IMAGE_TAG}" 2>/dev/null || true; } |
-    sha256sum | cut -c1-16
+  image_fingerprint "${DALN_IMAGE_PREFIX}/$1:${DALN_IMAGE_TAG}" || true
 }
 
 # "<service> <container id>" của mọi container trong project, kể cả đã dừng.
@@ -134,6 +141,7 @@ containers() {
 
 # Giá trị cho bảng tóm tắt. Khởi tạo từ đầu vì deploy có thể dừng giữa chừng.
 built=""
+kept=""
 recreated=""
 image_source="chưa tới bước này"
 kong="giữ nguyên"
@@ -158,6 +166,7 @@ summary() {
   echo "[deploy] ===== Tóm tắt ====="
   echo "[deploy] Nguồn image : ${image_source}"
   echo "[deploy] Image mới   :${built:- không có}"
+  echo "[deploy] Giữ nguyên  :${kept:- không có}"
   echo "[deploy] Tạo lại     : ${recreated:-không có}"
   echo "[deploy] Đĩa         : $(df -h / | awk 'NR==2 {print $4" trống ("$5" đã dùng)"}')"
   echo "[deploy] Kong        : ${kong}"
@@ -208,6 +217,11 @@ backup_mongo() {
 
 echo "[deploy] Commit $(git -C "${ROOT}" log -1 --format='%h %s')"
 
+# Compose phải thế được biến lồng nhau ${DALN_TAG_X:-${DALN_IMAGE_TAG}}. Bản quá
+# cũ sẽ báo lỗi ngay ở `compose pull` — trước khi đụng container — và dòng này
+# cho biết vì sao.
+echo "[deploy] $(docker compose version)"
+
 # ---- Lấy image ----
 # Đường chính: pull từ GHCR. Đường dự phòng: build tại chỗ — giữ lại để chạy tay
 # trên một commit chưa lên CI vẫn deploy được, và để một sự cố registry không làm
@@ -219,7 +233,6 @@ build_local() {
     before="$(image_id "${svc}")"
     compose build "${svc}"
     if [ "$(image_id "${svc}")" != "${before}" ]; then
-      built+=" ${svc}"
       echo "[deploy] Build ${svc}: image mới ($((SECONDS - started))s)"
     else
       echo "[deploy] Build ${svc}: không đổi ($((SECONDS - started))s)"
@@ -228,8 +241,6 @@ build_local() {
 }
 
 pull_started=${SECONDS}
-declare -A before_ids=()
-for svc in ${SERVICES}; do before_ids["${svc}"]="$(image_id "${svc}")"; done
 
 if [ -n "${DALN_BUILD_LOCAL:-}" ]; then
   image_source="build tại chỗ (DALN_BUILD_LOCAL)"
@@ -237,15 +248,27 @@ if [ -n "${DALN_BUILD_LOCAL:-}" ]; then
 elif compose pull --quiet ${SERVICES}; then
   image_source="pull ${DALN_IMAGE_PREFIX}:${DALN_IMAGE_TAG:0:7} ($((SECONDS - pull_started))s)"
   echo "[deploy] Pull xong sau $((SECONDS - pull_started))s"
-  for svc in ${SERVICES}; do
-    [ "$(image_id "${svc}")" != "${before_ids[${svc}]}" ] && built+=" ${svc}"
-  done
 else
   # Tag chưa có trên registry (commit chưa qua CI), mạng hỏng, hoặc GHCR sự cố.
   echo "[deploy] Pull thất bại -> quay về build tại chỗ" >&2
   image_source="pull THẤT BẠI -> build tại chỗ"
   build_local
 fi
+
+# ---- Chọn tag từng image: giữ tag đang chạy khi nội dung không đổi ----
+# Phải xong TRƯỚC bước đếm migration và `up -d`: cả hai đọc image qua compose,
+# và `up -d` chỉ tạo lại container có chuỗi `image:` (hay cấu hình khác) đổi.
+for svc in ${SERVICES}; do
+  tag="$(choose_image_tag "${svc}" "${svc}" "${DALN_IMAGE_TAG}")"
+  export "$(image_tag_var "${svc}")=${tag}"
+  if image_switching "${svc}" "${svc}" "${tag}"; then
+    built+=" ${svc}"
+  else
+    kept+=" ${svc}(${tag:0:7})"
+  fi
+done
+echo "[deploy] Image mới   :${built:- không có}"
+echo "[deploy] Giữ nguyên  :${kept:- không có}"
 
 before="$(containers)"
 
@@ -473,11 +496,17 @@ if [ "${failed}" -ne 0 ]; then
 fi
 
 # Image của các lần deploy TRƯỚC mang tag là SHA của chúng, nên chúng KHÔNG
-# dangling và `docker image prune` không đụng tới — đĩa sẽ đầy dần khoảng 6GB mỗi
-# lần phát hành. Xoá mọi tag daln khác tag đang chạy; cái nào còn container dùng
-# thì docker từ chối và bỏ qua. Rollback vẫn được: image nằm trên GHCR.
+# dangling và `docker image prune` không đụng tới — đĩa sẽ đầy dần. Xoá mọi tag
+# daln không còn service nào dùng. Tag đang dùng không chỉ là SHA mới: service
+# có image không đổi vẫn chạy bằng tag cũ của nó. Docker vốn từ chối xoá image
+# còn container dùng; lọc ở đây để ý định hiện rõ. Rollback vẫn được: image
+# nằm trên GHCR.
+in_use="$(for svc in ${SERVICES}; do
+  var="$(image_tag_var "${svc}")"
+  printf '%s\n' "${!var:-${DALN_IMAGE_TAG}}"
+done | sort -u | paste -sd '|' -)"
 docker image ls --filter "reference=${DALN_IMAGE_PREFIX}/*" --format '{{.Repository}}:{{.Tag}}' |
-  grep -v ":${DALN_IMAGE_TAG}\$" |
+  grep -vE ":(${in_use})\$" |
   xargs -r docker rmi >/dev/null 2>&1 || true
 
 # Image build tại chỗ từ thời trước khi chuyển sang registry (daln/<svc>:latest).

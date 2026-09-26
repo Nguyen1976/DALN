@@ -19,7 +19,9 @@ ARG NODE_IMAGE=node:20-alpine
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 # openssl: Prisma engine cần trên alpine. bash: chạy entrypoint script.
-RUN apk add --no-cache openssl bash
+# Xoá apk.log: nó ghi GIỜ cài gói, là thứ duy nhất làm layer này khác nhau giữa
+# hai lần build cùng input — mà CI cần build tái lập (deploy/lib/image-tags.sh).
+RUN apk add --no-cache openssl bash && rm -f /var/log/apk.log
 
 # ----------------------------------------------------------------------------
 # Deps: cài node_modules (cache theo package*.json) - dùng cho dev & build

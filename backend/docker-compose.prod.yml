@@ -38,7 +38,7 @@ x-schema-env: &schema-env
 # migrate + migrate-background: cùng image với db-push (target `schema`), chỉ đổi
 # entrypoint sang docker/migrate.sh.
 x-migrate: &migrate
-  image: ${DALN_IMAGE_PREFIX:-daln}/db-push:${DALN_IMAGE_TAG:-latest}
+  image: ${DALN_IMAGE_PREFIX:-daln}/db-push:${DALN_TAG_DB_PUSH:-${DALN_IMAGE_TAG:-latest}}
   # Cùng image với service db-push, đã có sẵn trên máy sau khi nó được pull (hoặc
   # build). `never` để thiếu image là lỗi ồn ào ngay, thay vì âm thầm kéo về một
   # thứ khác với thứ db-push đang dùng.
@@ -247,7 +247,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: schema
-    image: ${DALN_IMAGE_PREFIX:-daln}/db-push:${DALN_IMAGE_TAG:-latest}
+    image: ${DALN_IMAGE_PREFIX:-daln}/db-push:${DALN_TAG_DB_PUSH:-${DALN_IMAGE_TAG:-latest}}
     container_name: daln-prod-db-push
     restart: "no"
     environment: *schema-env
@@ -297,7 +297,7 @@ services:
       target: production
       args:
         SERVICE: user
-    image: ${DALN_IMAGE_PREFIX:-daln}/user:${DALN_IMAGE_TAG:-latest}
+    image: ${DALN_IMAGE_PREFIX:-daln}/user:${DALN_TAG_USER:-${DALN_IMAGE_TAG:-latest}}
     environment:
       <<: *app-env
       SERVICE: user
@@ -322,7 +322,7 @@ services:
       target: production
       args:
         SERVICE: chat
-    image: ${DALN_IMAGE_PREFIX:-daln}/chat:${DALN_IMAGE_TAG:-latest}
+    image: ${DALN_IMAGE_PREFIX:-daln}/chat:${DALN_TAG_CHAT:-${DALN_IMAGE_TAG:-latest}}
     environment:
       <<: *app-env
       SERVICE: chat
@@ -338,7 +338,7 @@ services:
       target: production
       args:
         SERVICE: notification
-    image: ${DALN_IMAGE_PREFIX:-daln}/notification:${DALN_IMAGE_TAG:-latest}
+    image: ${DALN_IMAGE_PREFIX:-daln}/notification:${DALN_TAG_NOTIFICATION:-${DALN_IMAGE_TAG:-latest}}
     environment:
       <<: *app-env
       SERVICE: notification
@@ -354,7 +354,7 @@ services:
       target: production
       args:
         SERVICE: realtime-gateway
-    image: ${DALN_IMAGE_PREFIX:-daln}/realtime-gateway:${DALN_IMAGE_TAG:-latest}
+    image: ${DALN_IMAGE_PREFIX:-daln}/realtime-gateway:${DALN_TAG_REALTIME_GATEWAY:-${DALN_IMAGE_TAG:-latest}}
     environment:
       <<: *app-env
       SERVICE: realtime-gateway
@@ -371,7 +371,7 @@ services:
       target: production
       args:
         SERVICE: recommendation
-    image: ${DALN_IMAGE_PREFIX:-daln}/recommendation:${DALN_IMAGE_TAG:-latest}
+    image: ${DALN_IMAGE_PREFIX:-daln}/recommendation:${DALN_TAG_RECOMMENDATION:-${DALN_IMAGE_TAG:-latest}}
     environment:
       <<: *app-env
       SERVICE: recommendation
@@ -387,7 +387,7 @@ services:
   recommendation-worker:
     <<: *app
     container_name: daln-prod-recommendation-worker
-    image: ${DALN_IMAGE_PREFIX:-daln}/recommendation:${DALN_IMAGE_TAG:-latest}
+    image: ${DALN_IMAGE_PREFIX:-daln}/recommendation:${DALN_TAG_RECOMMENDATION:-${DALN_IMAGE_TAG:-latest}}
     pull_policy: never
     environment:
       <<: *app-env
@@ -411,7 +411,7 @@ services:
       target: production
       args:
         SERVICE: saga-orchestrator
-    image: ${DALN_IMAGE_PREFIX:-daln}/saga-orchestrator:${DALN_IMAGE_TAG:-latest}
+    image: ${DALN_IMAGE_PREFIX:-daln}/saga-orchestrator:${DALN_TAG_SAGA_ORCHESTRATOR:-${DALN_IMAGE_TAG:-latest}}
     environment:
       <<: *app-env
       SERVICE: saga-orchestrator
@@ -467,7 +467,7 @@ services:
       args:
         VITE_API_ROOT: ${VITE_API_ROOT:?thiếu trong .env.production}
         VITE_SOCKET_URL: ${VITE_SOCKET_URL:?thiếu trong .env.production}
-    image: ${DALN_IMAGE_PREFIX:-daln}/web:${DALN_IMAGE_TAG:-latest}
+    image: ${DALN_IMAGE_PREFIX:-daln}/web:${DALN_TAG_WEB:-${DALN_IMAGE_TAG:-latest}}
     container_name: daln-prod-web
     restart: unless-stopped
     # Chỉ nghe localhost: nginx trên host giữ cổng 80/443 và chuyển vào đây
