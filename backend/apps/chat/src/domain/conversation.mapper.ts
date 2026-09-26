@@ -1,4 +1,4 @@
-import { displayNameOf } from '@app/util'
+import { displayNameOf } from './display-name'
 import type { conversation, conversationMember } from '../generated'
 
 type Person = Pick<conversationMember, 'userId'> &

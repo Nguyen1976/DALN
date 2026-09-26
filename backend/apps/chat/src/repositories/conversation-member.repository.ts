@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import type { Prisma } from 'apps/chat/src/generated'
 import { RedisService } from '@app/redis'
-import { isObjectId } from '@app/util'
+import { isObjectId } from '../domain/object-id'
 import { buildMemberRow } from '../domain/member-row'
 import type { MemberProfile } from 'libs/constant/member-profile'
 

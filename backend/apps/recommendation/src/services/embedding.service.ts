@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { QdrantService } from '@app/qdrant/qdrant.service'
+import { QdrantService } from '../qdrant/qdrant.service'
 import { UtilService } from '@app/util/util.service'
 
 export type EmbedUserInput = {

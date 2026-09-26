@@ -16,8 +16,8 @@ import {
   ValidateNested,
   IsNumberString,
 } from 'class-validator'
-import { MaxBytes } from '@app/common/http/max-bytes.validator'
-import { ExactlyOneOf } from '@app/common/http/exactly-one-of.validator'
+import { MaxBytes } from './max-bytes.validator'
+import { ExactlyOneOf } from './exactly-one-of.validator'
 import { Transform, Type, type TransformFnParams } from 'class-transformer'
 import { PageQueryDto } from '@app/common/http/page-query.dto'
 

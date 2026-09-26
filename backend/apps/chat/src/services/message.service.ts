@@ -24,13 +24,9 @@ import type { AssetKind, UploadType } from '../http/chat-http.dto'
 import { resolveMentions } from '../domain/mention.resolver'
 import { MessageMapper, type MessageRow } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
-import {
-  buildKeysetCursor,
-  displayNameOf,
-  isObjectId,
-  parseKeysetCursor,
-  toPage,
-} from '@app/util'
+import { buildKeysetCursor, parseKeysetCursor, toPage } from '@app/util'
+import { displayNameOf } from '../domain/display-name'
+import { isObjectId } from '../domain/object-id'
 
 export interface RevokeMessageRequest {
   conversationId: string

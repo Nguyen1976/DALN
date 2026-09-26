@@ -46,12 +46,6 @@
       "@app/migrations/*": [
         "libs/migrations/src/*"
       ],
-      "@app/qdrant": [
-        "libs/qdrant/src"
-      ],
-      "@app/qdrant/*": [
-        "libs/qdrant/src/*"
-      ],
       "@app/redis": [
         "libs/redis/src"
       ],
