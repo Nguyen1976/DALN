@@ -63,6 +63,7 @@
     "ioredis": "^5.8.2",
     "livekit-server-sdk": "^2.19.0",
     "lodash": "^4.17.21",
+    "maxmind": "^5.0.7",
     "mime-types": "^3.0.2",
     "ml-cart": "^2.1.1",
     "mongodb": "^6.21.0",

@@ -307,6 +307,11 @@ services:
       # .env.production) rồi export. Đường dẫn này thuộc về TRÌNH DUYỆT: nó phải
       # khớp URL công khai, thứ mà service không tự biết vì nginx cắt tiền tố.
       REFRESH_COOKIE_PATH: ${REFRESH_COOKIE_PATH:-/user}
+    # File GeoLite2-City cho trang "Thiết bị đang đăng nhập". Đặt tay trên
+    # server (deploy/README.md, mục GeoIP). Thiếu file thì service vẫn chạy,
+    # chỉ không có vị trí.
+    volumes:
+      - ./geoip:/app/geoip:ro
 
   chat:
     <<: *app

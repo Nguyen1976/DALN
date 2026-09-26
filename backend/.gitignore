@@ -60,3 +60,6 @@ secret.yaml
 .env*
 !.env.docker
 !.env.production.example
+
+# GeoLite2 — tải từ MaxMind, không được phân phối lại (deploy/README.md, mục GeoIP)
+/geoip/

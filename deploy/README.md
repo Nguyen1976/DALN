@@ -359,6 +359,33 @@ Từ trình duyệt: mở hội thoại NHÓM, bấm gọi; `chrome://webrtc-int
 `livekit-cli list-rooms --url wss://nguyen1976.xyz/livekit --api-key daln --api-secret <secret>`
 liệt kê phòng đang mở.
 
+## GeoIP — vị trí trên trang "Thiết bị đang đăng nhập"
+
+Service `user` tra vị trí ước tính của IP từ file MaxMind **GeoLite2-City** đặt
+ngay trên server, không gọi API ngoài. File không nằm trong git. Thiếu file thì
+mọi thứ vẫn chạy; trang chỉ không có vị trí và bản đồ.
+
+```bash
+# 1. Máy local: đăng ký tài khoản miễn phí ở maxmind.com → GeoLite → Download
+#    Databases → "GeoLite2 City" (GZIP). Giải nén lấy GeoLite2-City.mmdb.
+tar -xzf GeoLite2-City_*.tar.gz
+ssh root@<SERVER> mkdir -p /root/workspace/DALN/backend/geoip
+scp GeoLite2-City_*/GeoLite2-City.mmdb root@<SERVER>:/root/workspace/DALN/backend/geoip/
+
+# 2. Server (alias dc ở mục Vận hành): service chỉ đọc file lúc khởi động.
+#    Restart cả kong vì Kong giữ IP upstream cũ trong cache, restart riêng
+#    user sẽ nhận 502.
+dc restart user kong
+dc logs user | grep geoip     # mong thấy "[geoip] đã nạp dữ liệu vị trí"
+```
+
+- Đặt file **trước** lần deploy đầu tiên có tính năng này thì bỏ qua bước 2,
+  vì deploy đó tạo lại container `user`.
+- Cập nhật: MaxMind ra bản mới hằng tuần và điều khoản GeoLite2 yêu cầu dùng
+  bản mới. Hiện làm tay bằng cách lặp lại hai bước trên; cron `geoipupdate` là
+  việc để sau.
+- Dòng ghi công MaxMind và OpenStreetMap đã có sẵn trong panel chi tiết thiết bị.
+
 ## Env
 
 - File thật: `/root/workspace/DALN/backend/.env.production` — chỉ nằm trên server (quyền 600),
