@@ -26,6 +26,7 @@ import { APP_GUARD } from '@nestjs/core'
 import { PrismaModule } from '../prisma/prisma.module'
 import { PrometheusModule } from '@willsoto/nestjs-prometheus'
 import { GeoIpService } from './geoip/geoip.service'
+import { UserAuthStore } from './auth-store/user-auth.store'
 
 @Module({
   imports: [
@@ -90,6 +91,7 @@ import { GeoIpService } from './geoip/geoip.service'
     },
     UserService,
     GeoIpService,
+    UserAuthStore,
     UserRepository,
     FriendRequestRepository,
     UserEventsPublisher,

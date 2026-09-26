@@ -74,6 +74,7 @@ function setup(
     {} as never, // prisma
     sessions as never,
     geoIp as never,
+    redisService as never, // authStore: cùng stub, đã có đủ các phương thức đã dời
   )
 
   return {
