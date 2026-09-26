@@ -122,8 +122,6 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# Email HTML templates (notification service reads at runtime)
-COPY --from=build /app/libs/mailer/src/templates ./libs/mailer/src/templates
 COPY docker/link-prisma-generated.sh /tmp/link-prisma-generated.sh
 RUN chmod +x /tmp/link-prisma-generated.sh \
     && /tmp/link-prisma-generated.sh "${SERVICE}"

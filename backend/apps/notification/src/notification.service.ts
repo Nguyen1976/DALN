@@ -1,4 +1,4 @@
-import { MailerService } from '@app/mailer'
+import { MailerService } from './mailer/mailer.service'
 import { RedisService } from '@app/redis'
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
 import {

@@ -45,15 +45,6 @@
         "tsConfigPath": "libs/logger/tsconfig.lib.json"
       }
     },
-    "mailer": {
-      "type": "library",
-      "root": "libs/mailer",
-      "entryFile": "index",
-      "sourceRoot": "libs/mailer/src",
-      "compilerOptions": {
-        "tsConfigPath": "libs/mailer/tsconfig.lib.json"
-      }
-    },
     "notification": {
       "type": "application",
       "root": "apps/notification",
@@ -64,6 +55,10 @@
           {
             "include": "generated/**/*",
             "outDir": "dist/apps/notification/apps/notification/src"
+          },
+          {
+            "include": "mailer/templates/**/*",
+            "outDir": "dist/apps/notification"
           }
         ],
         "tsConfigPath": "apps/notification/tsconfig.app.json"
