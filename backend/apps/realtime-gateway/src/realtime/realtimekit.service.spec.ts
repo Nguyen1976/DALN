@@ -184,7 +184,7 @@ describe('RealtimeKitService', () => {
     jest.useRealTimers()
   })
 
-  it('revoke: kick theo custom id rồi xoá từng người; lỗi không ném ra', async () => {
+  it('revoke: kick theo participant id rồi xoá từng người; lỗi không ném ra', async () => {
     fetchMock
       .mockResolvedValueOnce(reply(null, 400))
       .mockResolvedValueOnce(reply({}))
@@ -199,8 +199,10 @@ describe('RealtimeKitService', () => {
 
     const calls = fetchMock.mock.calls as [string, RequestInit][]
     expect(calls[0][0]).toMatch(/\/meetings\/m1\/active-session\/kick$/)
+    // Kick theo id người tham gia (participant_ids): kick theo custom id trả về
+    // danh sách rỗng và không đá ai ra (probe trình duyệt 2026-09-27).
     expect(JSON.parse(calls[0][1].body as string)).toEqual({
-      custom_participant_ids: ['u1.aa', 'u2.bb'],
+      participant_ids: ['p1', 'p2'],
     })
     expect(calls[1][1].method).toBe('DELETE')
     expect(calls[1][0]).toMatch(/\/meetings\/m1\/participants\/p1$/)

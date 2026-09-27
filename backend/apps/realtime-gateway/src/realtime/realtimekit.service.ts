@@ -204,11 +204,13 @@ export class RealtimeKitService {
 
     for (const [meetingId, list] of byMeeting) {
       try {
+        // participant_ids (id người tham gia), KHÔNG custom id: kick theo custom
+        // id trả danh sách rỗng và không đá ai ra (probe 2026-09-27).
         await this.request(
           'POST',
           `/meetings/${meetingId}/active-session/kick`,
           {
-            custom_participant_ids: list.map((g) => g.customParticipantId),
+            participant_ids: list.map((g) => g.participantId),
           },
         )
       } catch (error) {

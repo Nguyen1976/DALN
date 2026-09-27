@@ -246,12 +246,12 @@ Chạy lại nhiều lần vẫn an toàn: preset đã có thì cập nhật cho
 
 | Preset | `view_type` | Video | Simulcast | `max_video_streams` | Quyền phát |
 |---|---|---|---|---|---|
-| `daln_direct_video` | GROUP_CALL | `hd`, 30 fps | tắt | 1 / 1 | audio + video |
-| `daln_direct_audio` | GROUP_CALL | — | tắt | 1 / 1 (xem ghi chú) | chỉ audio (video `NOT_ALLOWED`) |
+| `daln_direct_video` | GROUP_CALL | `hd`, 30 fps | tắt | 2 / 2 (xem ghi chú) | audio + video |
+| `daln_direct_audio` | GROUP_CALL | — | tắt | 2 / 2 (xem ghi chú) | chỉ audio (video `NOT_ALLOWED`) |
 | `daln_group_video` | GROUP_CALL | `vga`, 24 fps | **bật** | 9 máy tính / 6 điện thoại | audio + video |
 | `daln_group_audio` | GROUP_CALL | — | — | 9 / 6 (xem ghi chú) | chỉ audio |
 
-Ghi chú: preset thoại dùng cùng `max_video_streams` với preset video tương ứng, vì SDK chỉ đăng ký nghe `max_video_streams + 4` người (để 0 sẽ cắt tiếng từ người thứ 5). Preset thoại vẫn không phát được video vì video `NOT_ALLOWED`.
+Ghi chú: `max_video_streams` là số ô lưới **gồm cả ô của chính mình** — SDK chỉ nhận video của `max_video_streams − 1` người khác, nên 1-1 phải là 2 (QC phát hiện: để 1 thì không nhận được video của bên kia). Preset thoại dùng cùng `max_video_streams` với preset video tương ứng, vì SDK chỉ đăng ký nghe `max_video_streams + 4` người (để 0 sẽ cắt tiếng từ người thứ 5). Preset thoại vẫn không phát được video vì video `NOT_ALLOWED`.
 
 Quyền chung cho cả 4 preset:
 
@@ -404,9 +404,20 @@ Tài liệu không nói rõ các điểm dưới đây. Task đầu tiên của 
 | Trùng `custom_participant_id` | 201, trả **cùng** participant (cùng `participantId` trong JWT), cấp token mới | Không ảnh hưởng: id luôn kèm hậu tố ngẫu nhiên nên không bao giờ trùng |
 | Phòng lạ → 404 | Đúng: 404 `Meeting … not found` | `addParticipant` thử lại khi gặp 404 |
 | Phòng INACTIVE → mã gì | 201: vẫn thêm được người tham gia | Không đổi code: gateway không bao giờ vô hiệu hoá phòng. Chặn vào phòng ở phòng INACTIVE (nếu có) nằm ở bước join, không ảnh hưởng luồng |
-| Kick khi không có phiên | 200, `participants: []` | `revoke` chạy bình thường |
+| Kick khi không có phiên | 200, `participants: []` | `revoke` chạy bình thường. **Sửa ở §11.2:** phải kick theo `participant_ids`, không theo `custom_participant_ids` |
 | Xoá participant | 200 | `revoke` dùng như thiết kế |
 | `ui` bắt buộc khi tạo preset | **Có**: thiếu `ui` thì 400 (`ui` required). Các quyền `accept_waiting_requests`, `can_accept_production_requests`, `can_edit_display_name`… cũng bắt buộc | `rtk:setup` luôn gửi đủ `permissions` và `ui` |
 | Định dạng `publicKey` | PEM (`-----BEGIN PUBLIC KEY-----…`) | `toPem()` giữ nguyên PEM, vẫn xử lý base64 trần để phòng |
 | `GET /webhooks` khi chưa có webhook | **404** `Webhook not found` (không phải mảng rỗng) | `rtk:setup` coi 404 ở `GET /webhooks` là danh sách rỗng |
 | Preset có `config.media.video.simulcast` | Có (preset mặc định: `{quality:'hd', frame_rate:24, simulcast:true}`) | Giữ trường `simulcast` như thiết kế |
+
+### 11.2 Kết quả kiểm phía client (dev, 2026-09-27)
+
+| Giả định | Kết quả | Ghi chú |
+|---|---|---|
+| 3. Token đã thu hồi (xoá participant) vào lại phòng | **Bị từ chối**: `ERR0004 Invalid auth token … participant may no longer exist (404)` | Đạt yêu cầu bảo mật §7.30 |
+| 3b. Kick người đang trong phòng | Kick theo `custom_participant_ids` trả `participants: []` và **không đá ai ra**. Kick theo `participant_ids` thì đá ra ngay (`roomState: kicked`) | `revoke` đổi sang `participant_ids` (test `revoke: kick theo participant id…`) |
+| 5. Preset cấm video: `enableVideo()` | Không ném lỗi, `videoEnabled` vẫn `false`, bên kia không nhận được video | Quy tắc "cuộc gọi thoại không phát video" được Cloudflare chặn, không phụ thuộc giao diện |
+| 6. `defaults.video=false` rồi bật camera giữa cuộc gọi | Chạy được (QC §7.7 bật lại camera, §7.3 nhận bằng thoại) | |
+| `max_video_streams` là số ô gồm cả ô của mình | Để 1 cho 1-1 thì không nhận được video của bên kia (`videoSubscribed: []`) | Preset 1-1 đổi thành 2/2 (§6.1) |
+| Tên trường webhook | Chưa thấy lỗi ở `parseRtkEvent`: danh sách người trong phòng, banner và kết thúc cuộc gọi nhóm (QC §7.18, §7.22, §7.24) đều đúng qua webhook thật đi qua tunnel | |

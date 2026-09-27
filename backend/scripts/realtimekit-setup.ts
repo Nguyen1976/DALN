@@ -76,12 +76,14 @@ function presetBody(
     name,
     config: {
       view_type: 'GROUP_CALL',
-      // Cùng giá trị cho preset thoại và video: SDK chỉ đăng ký nghe
-      // max_video_streams + 4 người, nên để 0 ở preset thoại sẽ cắt tiếng người
-      // thứ 5 trở đi. Preset thoại vẫn không phát được video (can_produce).
+      // Số ô lưới GỒM cả ô của chính mình: SDK (ACTIVE_GRID) chỉ đăng ký nhận
+      // video của max_video_streams − 1 người khác — để 1 cho 1-1 thì không nhận
+      // được video của ai (QC 2026-09-27). Cùng giá trị cho preset thoại: SDK
+      // đăng ký nghe max_video_streams + 4 người, để 0 sẽ cắt tiếng người thứ 5.
+      // Preset thoại vẫn không phát được video (can_produce).
       max_video_streams: group
         ? { desktop: 9, mobile: 6 }
-        : { desktop: 1, mobile: 1 },
+        : { desktop: 2, mobile: 2 },
       max_screenshare_count: 0,
       media: {
         video: group

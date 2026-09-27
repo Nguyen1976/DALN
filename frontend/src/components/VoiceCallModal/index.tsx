@@ -351,7 +351,10 @@ export default function VoiceCallModal({
     if (remoteStream) {
       void audio.play().catch(() => undefined);
     }
-  }, [remoteStream]);
+    // Phụ thuộc cả `minimized`: thanh thu nhỏ và giao diện đầy đủ mỗi bên có một
+    // thẻ <audio> riêng, chuyển qua lại thì thẻ MỚI phải được gắn luồng lại —
+    // thiếu dep này thì thu nhỏ cuộc gọi là mất tiếng (QC 2026-09-27).
+  }, [remoteStream, minimized]);
 
   // Gắn luồng đối phương vào thẻ <video> (muted — tiếng đã phát ở thẻ <audio> nên
   // KHÔNG phát hai lần). Phụ thuộc showVideoLayout để chạy lại khi thẻ vừa mount.
