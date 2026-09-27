@@ -89,4 +89,17 @@ describe('rtk-webhook', () => {
     )
     expect(await verifier.verify(body, sign(body))).toBe(false)
   })
+
+  it('verifier: chữ ký rác liên tục không làm tải lại khoá mỗi request; request có timeout', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(keyReply(pem))
+    const verifier = new RtkWebhookVerifier(fetchMock)
+
+    expect(await verifier.verify(body, 'rác')).toBe(false)
+    const afterFirst = fetchMock.mock.calls.length
+    for (let i = 0; i < 5; i++) await verifier.verify(body, 'rác')
+
+    expect(fetchMock.mock.calls.length).toBe(afterFirst)
+    const [[, init]] = fetchMock.mock.calls as [string, RequestInit?][]
+    expect(init?.signal).toBeDefined()
+  })
 })

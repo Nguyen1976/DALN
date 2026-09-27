@@ -45,7 +45,7 @@ interface GroupCallStatic {
 }
 
 export interface GroupCallSession extends GroupCallStatic {
-  /** Ai đang thực sự trong phòng (theo webhook RealtimeKit), khoá theo userId. */
+  /** Ai đang thực sự trong phòng (theo webhook RealtimeKit), khoá theo custom participant id. */
   participants: Record<string, GroupCallMember>
   /** userId từng vào phòng ít nhất một lần — để đếm "N người" khi ghi log. */
   seen: string[]
@@ -222,9 +222,16 @@ export class GroupCallStore {
     return { ...stat, participants: {}, seen: [], rtkGrants: [] }
   }
 
+  /**
+   * Ghi một người tham gia RealtimeKit vào roster. Khoá theo `presenceKey` (custom
+   * participant id của từng lần vào) chứ không theo userId: một người có thể có
+   * hai bản ghi (tab mới vào trước khi tab cũ bị báo rời) — tab cũ rời không được
+   * xoá người vẫn còn trong cuộc.
+   */
   async addParticipant(
     conversationId: string,
     member: GroupCallMember,
+    presenceKey: string = member.id,
   ): Promise<GroupCallSession | null> {
     const stat = await this.getStatic(conversationId)
     if (!stat) return null
@@ -232,7 +239,7 @@ export class GroupCallStore {
     // HSET + SADD nguyên tử theo từng field: hai webhook đồng thời không mất nhau.
     await this.redisClient.hset(
       this.participantsKey(conversationId),
-      member.id,
+      presenceKey,
       JSON.stringify(member),
     )
     await this.redisClient.sadd(this.seenKey(conversationId), member.id)
@@ -248,14 +255,42 @@ export class GroupCallStore {
     return this.assemble(stat)
   }
 
+  /** Bỏ đúng một bản ghi có mặt (theo presenceKey). */
   async removeParticipant(
+    conversationId: string,
+    presenceKey: string,
+  ): Promise<GroupCallSession | null> {
+    const stat = await this.getStatic(conversationId)
+    if (!stat) return null
+
+    await this.redisClient.hdel(
+      this.participantsKey(conversationId),
+      presenceKey,
+    )
+
+    return this.assemble(stat)
+  }
+
+  /** Bỏ mọi bản ghi có mặt của một người (họ bấm rời trên client). */
+  async removeUser(
     conversationId: string,
     userId: string,
   ): Promise<GroupCallSession | null> {
     const stat = await this.getStatic(conversationId)
     if (!stat) return null
 
-    await this.redisClient.hdel(this.participantsKey(conversationId), userId)
+    const raw = await this.redisClient.hgetall(
+      this.participantsKey(conversationId),
+    )
+    for (const [key, value] of Object.entries(raw || {})) {
+      try {
+        if ((JSON.parse(value) as GroupCallMember).id === userId) {
+          await this.redisClient.hdel(this.participantsKey(conversationId), key)
+        }
+      } catch {
+        await this.redisClient.hdel(this.participantsKey(conversationId), key)
+      }
+    }
 
     return this.assemble(stat)
   }
@@ -305,7 +340,12 @@ export class GroupCallStore {
     return session.members.some((member) => member.id === userId)
   }
 
+  /** Người đang trong cuộc — mỗi người một lần dù có nhiều bản ghi (nhiều tab). */
   static participantList(session: GroupCallSession): GroupCallMember[] {
-    return Object.values(session.participants)
+    const byId = new Map<string, GroupCallMember>()
+    for (const member of Object.values(session.participants)) {
+      byId.set(member.id, member)
+    }
+    return [...byId.values()]
   }
 }

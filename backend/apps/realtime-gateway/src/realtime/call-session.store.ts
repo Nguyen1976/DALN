@@ -110,21 +110,24 @@ export class CallSessionStore {
   async markConnected(
     session: CallSession,
     nowMs: number = Date.now(),
-  ): Promise<CallSession> {
+  ): Promise<CallSession | null> {
     const connected: CallSession = {
       ...session,
       status: 'connected',
       connectedAt: session.connectedAt ?? nowMs,
     }
 
-    await this.redisClient.set(
+    // XX: chỉ ghi khi phiên còn. Bên kia cúp máy trong lúc người nhận đang bắt
+    // máy thì end() đã xoá phiên — không được dựng lại nó (sẽ ghi nhật ký lần hai).
+    const written = await this.redisClient.set(
       this.key(connected.callId),
       JSON.stringify(connected),
       'EX',
       this.connectedTtlSeconds,
+      'XX',
     )
 
-    return connected
+    return written ? connected : null
   }
 
   /**

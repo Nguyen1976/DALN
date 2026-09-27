@@ -27,6 +27,8 @@ const REQUEST_TIMEOUT_MS = 8000
 export const meetingKey = (conversationId: string) =>
   `rtk:meeting:${conversationId}`
 export const conversationKey = (meetingId: string) => `rtk:conv:${meetingId}`
+/** Grant xoá thất bại — thử xoá lại ở lần thu hồi sau (token sống 100 ngày). */
+export const PENDING_REVOKE_KEY = 'rtk:revoke:pending'
 
 /**
  * Cầu nối gateway ↔ REST API Cloudflare RealtimeKit.
@@ -195,6 +197,8 @@ export class RealtimeKitService {
    * từng người tham gia để token của họ hết hiệu lực. Không bao giờ ném lỗi.
    */
   async revoke(grants: RtkGrant[]): Promise<void> {
+    await this.retryPendingDeletes()
+
     const byMeeting = new Map<string, RtkGrant[]>()
     for (const grant of grants) {
       const list = byMeeting.get(grant.meetingId) ?? []
@@ -209,25 +213,55 @@ export class RealtimeKitService {
         await this.request(
           'POST',
           `/meetings/${meetingId}/active-session/kick`,
-          {
-            participant_ids: list.map((g) => g.participantId),
-          },
+          { participant_ids: list.map((g) => g.participantId) },
         )
       } catch (error) {
         this.logger.warn(`kick ${meetingId} failed`, error as Error)
       }
       for (const grant of list) {
-        try {
-          await this.request(
-            'DELETE',
-            `/meetings/${meetingId}/participants/${grant.participantId}`,
-          )
-        } catch (error) {
-          this.logger.warn(
-            `delete participant ${grant.participantId} failed`,
-            error as Error,
-          )
+        if (!(await this.deleteParticipant(grant))) {
+          await this.redis
+            .sadd(PENDING_REVOKE_KEY, JSON.stringify(grant))
+            .catch(() => 0)
         }
+      }
+    }
+  }
+
+  /** Xoá người tham gia để token hết hiệu lực; true khi xong (hoặc đã không còn). */
+  private async deleteParticipant(grant: RtkGrant): Promise<boolean> {
+    try {
+      const { status } = await this.request(
+        'DELETE',
+        `/meetings/${grant.meetingId}/participants/${grant.participantId}`,
+      )
+      return status < 300 || status === 404
+    } catch (error) {
+      this.logger.warn(
+        `delete participant ${grant.participantId} failed`,
+        error as Error,
+      )
+      return false
+    }
+  }
+
+  private async retryPendingDeletes(): Promise<void> {
+    let pending: string[]
+    try {
+      pending = await this.redis.smembers(PENDING_REVOKE_KEY)
+    } catch {
+      return
+    }
+    for (const raw of pending) {
+      let grant: RtkGrant
+      try {
+        grant = JSON.parse(raw) as RtkGrant
+      } catch {
+        await this.redis.srem(PENDING_REVOKE_KEY, raw).catch(() => 0)
+        continue
+      }
+      if (await this.deleteParticipant(grant)) {
+        await this.redis.srem(PENDING_REVOKE_KEY, raw).catch(() => 0)
       }
     }
   }

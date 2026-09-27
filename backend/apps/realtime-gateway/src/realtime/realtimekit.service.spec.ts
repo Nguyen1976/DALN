@@ -23,6 +23,19 @@ class MemRedis {
     for (const k of keys) if (this.m.delete(k)) n++
     return Promise.resolve(n)
   }
+  sets = new Map<string, Set<string>>()
+  sadd(k: string, v: string) {
+    const set = this.sets.get(k) ?? new Set<string>()
+    set.add(v)
+    this.sets.set(k, set)
+    return Promise.resolve(1)
+  }
+  smembers(k: string) {
+    return Promise.resolve([...(this.sets.get(k) ?? [])])
+  }
+  srem(k: string, v: string) {
+    return Promise.resolve(this.sets.get(k)?.delete(v) ? 1 : 0)
+  }
 }
 
 const reply = (data: unknown, status = 200) => ({
@@ -212,5 +225,30 @@ describe('RealtimeKitService', () => {
   it('revoke với danh sách rỗng không gọi mạng', async () => {
     await svc.revoke([])
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('xoá người tham gia thất bại -> ghi lại, lần thu hồi sau thử xoá lại', async () => {
+    const grant = {
+      meetingId: 'm1',
+      participantId: 'p1',
+      customParticipantId: 'u1.aa',
+    }
+    fetchMock
+      .mockResolvedValueOnce(reply({})) // kick
+      .mockResolvedValueOnce(reply(null, 503)) // DELETE p1 lỗi
+    await svc.revoke([grant])
+    expect(await redis.smembers('rtk:revoke:pending')).toHaveLength(1)
+
+    fetchMock.mockReset().mockResolvedValue(reply({}))
+    await svc.revoke([])
+    const calls = fetchMock.mock.calls as [string, RequestInit][]
+    expect(
+      calls.some(
+        ([url, init]) =>
+          init.method === 'DELETE' &&
+          url.endsWith('/meetings/m1/participants/p1'),
+      ),
+    ).toBe(true)
+    expect(await redis.smembers('rtk:revoke:pending')).toHaveLength(0)
   })
 })

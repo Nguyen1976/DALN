@@ -204,4 +204,22 @@ describe('group-call.store', () => {
     })
     expect((await store.getByConversationId('conv-g'))?.rtkGrants).toEqual([])
   })
+
+  it('có mặt theo từng người tham gia RealtimeKit: một tab rời không xoá người còn tab khác', async () => {
+    await store.getOrCreate({
+      conversationId: 'conv-p',
+      startedBy: 'alice',
+      members: [{ id: 'alice', username: 'Alice' }],
+    })
+    const alice = { id: 'alice', username: 'Alice' }
+    await store.addParticipant('conv-p', alice, 'alice.00000001')
+    await store.addParticipant('conv-p', alice, 'alice.00000002')
+
+    let session = await store.removeParticipant('conv-p', 'alice.00000001')
+    expect(GroupCallStore.participantList(session!)).toEqual([alice])
+
+    session = await store.removeUser('conv-p', 'alice')
+    expect(GroupCallStore.participantList(session!)).toEqual([])
+    expect(session?.seen).toEqual(['alice'])
+  })
 })

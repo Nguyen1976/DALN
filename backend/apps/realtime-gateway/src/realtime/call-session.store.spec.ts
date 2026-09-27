@@ -7,6 +7,7 @@ class MemRedis {
   }
   set(k: string, v: string, ...args: unknown[]) {
     if (args.includes('NX') && this.m.has(k)) return Promise.resolve(null)
+    if (args.includes('XX') && !this.m.has(k)) return Promise.resolve(null)
     this.m.set(k, v)
     return Promise.resolve('OK')
   }
@@ -46,5 +47,24 @@ describe('CallSessionStore', () => {
       rtkGrants: [grant],
     })
     expect((await store.get(CALL_ID))?.rtkGrants).toEqual([grant])
+  })
+
+  it('markConnected không dựng lại phiên đã kết thúc (bên kia cúp máy giữa chừng)', async () => {
+    const store = new CallSessionStore(new MemRedis() as never)
+    const session = {
+      callId: CALL_ID,
+      callerId: 'u1',
+      calleeId: 'u2',
+      conversationId: 'c1',
+      status: 'ringing' as const,
+      callType: 'audio' as const,
+      startedAt: 1,
+    }
+    await store.create(session)
+    expect(await store.markConnected(session)).not.toBeNull()
+
+    await store.end(CALL_ID)
+    expect(await store.markConnected(session)).toBeNull()
+    expect(await store.get(CALL_ID)).toBeNull()
   })
 })

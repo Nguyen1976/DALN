@@ -790,10 +790,17 @@ export class RealtimeGateway
     await this.callBusyStore.refresh(userId, session.callId)
     await this.callBusyStore.refresh(session.callerId, session.callId)
 
-    await this.callSessionStore.markConnected({
+    const connected = await this.callSessionStore.markConnected({
       ...session,
       rtkGrants: [...(session.rtkGrants ?? []), grantOf(grant)],
     })
+    if (!connected) {
+      // Người gọi cúp máy trong lúc đang cấp media: phiên đã đóng, không dựng lại.
+      void this.rtk.revoke([grantOf(grant)])
+      await this.callBusyStore.release(userId, session.callId)
+      await this.callSessionStore.releaseAccept(session.callId)
+      return callError('CALL_NOT_FOUND', 'Call session no longer exists')
+    }
 
     // Báo các tab KHÁC của người nhận đóng màn hình chuông. Dùng broadcast để
     // LOẠI TRỪ chính socket vừa bắt máy — nếu không, tab đang nghe cũng nhận
@@ -1100,7 +1107,9 @@ export class RealtimeGateway
       await this.callBusyStore.release(callerId, session.callId)
       return callError('MEDIA_UNAVAILABLE', 'Could not start the call')
     }
-    await this.groupCallStore.addGrant(conversationId, grantOf(grant))
+    if (!(await this.keepGroupGrant(session, callerId, grant))) {
+      return callError('CALL_NOT_FOUND', 'Group call no longer exists')
+    }
 
     this.emitToUserSockets(
       lookup.members
@@ -1193,7 +1202,9 @@ export class RealtimeGateway
       await this.callBusyStore.release(userId, session.callId)
       return callError('MEDIA_UNAVAILABLE', 'Could not join the call')
     }
-    await this.groupCallStore.addGrant(session.conversationId, grantOf(grant))
+    if (!(await this.keepGroupGrant(session, userId, grant))) {
+      return callError('CALL_NOT_FOUND', 'Group call no longer exists')
+    }
 
     return {
       ok: true,
@@ -1249,10 +1260,13 @@ export class RealtimeGateway
 
     const session = await this.groupCallStore.getByCallId(data.callId)
     if (!session || !GroupCallStore.isMember(session, userId)) {
+      // Phiên đã đóng (hoặc chưa từng thuộc về người này): vẫn nhả khoá bận —
+      // release so khớp callId nên không đụng khoá của cuộc gọi khác.
+      await this.callBusyStore.release(userId, data.callId)
       return { ok: true }
     }
 
-    const updated = await this.groupCallStore.removeParticipant(
+    const updated = await this.groupCallStore.removeUser(
       session.conversationId,
       userId,
     )
@@ -1285,10 +1299,11 @@ export class RealtimeGateway
     switch (event.event) {
       case 'meeting.participantJoined': {
         const member = this.memberOf(session, event.customParticipantId)
-        if (!member) return
+        if (!member || !event.customParticipantId) return
         const updated = await this.groupCallStore.addParticipant(
           conversationId,
           member,
+          event.customParticipantId,
         )
         if (!updated) return
         this.clearGroupPending(session.callId)
@@ -1298,10 +1313,10 @@ export class RealtimeGateway
       }
       case 'meeting.participantLeft': {
         const member = this.memberOf(session, event.customParticipantId)
-        if (!member) return
+        if (!member || !event.customParticipantId) return
         const updated = await this.groupCallStore.removeParticipant(
           conversationId,
-          member.id,
+          event.customParticipantId,
         )
         if (!updated) return
         this.emitGroupCallState(updated)
@@ -1311,7 +1326,16 @@ export class RealtimeGateway
         return
       }
       case 'meeting.ended': {
-        await this.finishGroupCall(conversationId)
+        // Phòng RealtimeKit dùng lại cho mọi cuộc gọi của hội thoại, và phiên chỉ
+        // đóng ≥60s sau khi trống: meeting.ended có thể là của cuộc gọi TRƯỚC, tới
+        // khi cuộc gọi mới đang đổ chuông. Chỉ kết thúc khi phiên hiện tại đã có
+        // người vào và giờ trống; còn lại để bộ đếm 35s/15s lo.
+        if (
+          session.seen.length > 0 &&
+          GroupCallStore.participantList(session).length === 0
+        ) {
+          await this.finishGroupCall(conversationId)
+        }
         return
       }
       default:
@@ -1319,13 +1343,55 @@ export class RealtimeGateway
     }
   }
 
+  /**
+   * Người tham gia của webhook — CHỈ khi custom id là grant của chính cuộc gọi này.
+   * Phòng RealtimeKit dùng lại qua các cuộc gọi, nên sự kiện trễ của cuộc gọi trước
+   * hay token cũ chưa kịp thu hồi không được tính vào roster hiện tại.
+   */
   private memberOf(
     session: GroupCallSession,
     customParticipantId?: string,
   ): GroupCallMember | null {
+    if (!customParticipantId) return null
+    const granted = session.rtkGrants.some(
+      (grant) => grant.customParticipantId === customParticipantId,
+    )
+    if (!granted) return null
     const userId = userIdFromCustomId(customParticipantId)
-    if (!userId) return null
     return session.members.find((member) => member.id === userId) ?? null
+  }
+
+  /**
+   * Lưu grant vừa cấp — nếu phiên vẫn còn. Cấp media mất tới vài giây; phiên có thể
+   * đã kết thúc trong lúc đó (bộ đếm, người cuối rời). Khi đó thu hồi grant và nhả
+   * khoá bận, không để người dùng kẹt "bận" 4 giờ hay vào một phòng đã đóng.
+   */
+  private async keepGroupGrant(
+    session: GroupCallSession,
+    userId: string,
+    grant: RtkGrant,
+  ): Promise<boolean> {
+    const current = await this.groupCallStore.getByCallId(session.callId)
+    if (!current) {
+      void this.rtk.revoke([grantOf(grant)])
+      await this.callBusyStore.release(userId, session.callId)
+      return false
+    }
+    await this.groupCallStore.addGrant(session.conversationId, grantOf(grant))
+    return true
+  }
+
+  /** Mọi người có thể đang giữ khoá bận của phiên: đã vào, đã được cấp, người mở. */
+  private busyHolders(session: GroupCallSession): string[] {
+    return [
+      ...new Set([
+        session.startedBy,
+        ...session.seen,
+        ...session.rtkGrants.map((grant) =>
+          userIdFromCustomId(grant.customParticipantId),
+        ),
+      ]),
+    ].filter(Boolean)
   }
 
   /**
@@ -1354,7 +1420,7 @@ export class RealtimeGateway
       startedBy: session.startedBy,
     })
 
-    for (const uid of session.seen) {
+    for (const uid of this.busyHolders(session)) {
       await this.callBusyStore.release(uid, session.callId)
     }
 
@@ -1414,7 +1480,8 @@ export class RealtimeGateway
   /**
    * Sau deadline: nếu vẫn chưa ai thực sự vào phòng (không có participant từ
    * webhook), huỷ phiên và báo `ended` để tắt chuông. Không ghi log (0 người =
-   * không phải một cuộc gọi đã diễn ra).
+   * không phải một cuộc gọi đã diễn ra). Đã có người từng vào thì kết thúc bình
+   * thường (có log).
    */
   private async cancelGroupIfEmpty(
     conversationId: string,
@@ -1425,10 +1492,17 @@ export class RealtimeGateway
     if (!session) return
     if (GroupCallStore.participantList(session).length > 0) return
 
+    // Đã có người vào (rồi rời): đây là một cuộc gọi thật — kết thúc có nhật ký,
+    // không xoá lặng lẽ (hẹn 35s có thể được đặt lại bởi người bấm "Gọi nhóm"
+    // khi phòng đang chạy).
+    if (session.seen.length > 0) {
+      await this.finishGroupCall(conversationId)
+      return
+    }
+
     await this.groupCallStore.delete(conversationId)
     void this.rtk.revoke(session.rtkGrants)
-    await this.callBusyStore.release(session.startedBy, session.callId)
-    for (const uid of session.seen) {
+    for (const uid of this.busyHolders(session)) {
       await this.callBusyStore.release(uid, session.callId)
     }
 
