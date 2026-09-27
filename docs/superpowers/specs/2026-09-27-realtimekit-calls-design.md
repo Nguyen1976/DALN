@@ -393,3 +393,18 @@ Tài liệu không nói rõ các điểm dưới đây. Task đầu tiên của 
 4. Tên trường thật trong payload webhook (`participant.customParticipantId`, `meeting.id`), và độ trễ của `participantLeft` khi đóng tab đột ngột.
 5. Preset với video `NOT_ALLOWED`: `enableVideo()` ở client bị từ chối rõ ràng, hay chỉ im lặng không có tác dụng.
 6. Khi `defaults.video: false`, sau đó gọi `enableVideo()` giữa cuộc gọi, video có được phát ra không mà không cần join lại.
+
+### 11.1 Kết quả probe (2026-09-27, app daln-dev)
+
+| Giả định | Kết quả thật | Hệ quả cho code |
+|---|---|---|
+| Thêm participant trả `data.id`, `data.token` | Đúng: 201, có `data.id` và `data.token` (JWT, `exp` sau 100 ngày) | Dùng như thiết kế |
+| Trùng `custom_participant_id` | 201, trả **cùng** participant (cùng `participantId` trong JWT), cấp token mới | Không ảnh hưởng: id luôn kèm hậu tố ngẫu nhiên nên không bao giờ trùng |
+| Phòng lạ → 404 | Đúng: 404 `Meeting … not found` | `addParticipant` thử lại khi gặp 404 |
+| Phòng INACTIVE → mã gì | 201: vẫn thêm được người tham gia | Không đổi code: gateway không bao giờ vô hiệu hoá phòng. Chặn vào phòng ở phòng INACTIVE (nếu có) nằm ở bước join, không ảnh hưởng luồng |
+| Kick khi không có phiên | 200, `participants: []` | `revoke` chạy bình thường |
+| Xoá participant | 200 | `revoke` dùng như thiết kế |
+| `ui` bắt buộc khi tạo preset | **Có**: thiếu `ui` thì 400 (`ui` required). Các quyền `accept_waiting_requests`, `can_accept_production_requests`, `can_edit_display_name`… cũng bắt buộc | `rtk:setup` luôn gửi đủ `permissions` và `ui` |
+| Định dạng `publicKey` | PEM (`-----BEGIN PUBLIC KEY-----…`) | `toPem()` giữ nguyên PEM, vẫn xử lý base64 trần để phòng |
+| `GET /webhooks` khi chưa có webhook | **404** `Webhook not found` (không phải mảng rỗng) | `rtk:setup` coi 404 ở `GET /webhooks` là danh sách rỗng |
+| Preset có `config.media.video.simulcast` | Có (preset mặc định: `{quality:'hd', frame_rate:24, simulcast:true}`) | Giữ trường `simulcast` như thiết kế |
