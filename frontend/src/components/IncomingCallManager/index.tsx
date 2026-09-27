@@ -45,26 +45,22 @@ type IncomingGroupCallState = {
   callType: CallType;
 };
 
-/** Cuộc gọi nhóm đã chấp nhận và đã có url/token để join. */
+/** Cuộc gọi nhóm đã chấp nhận và đã có authToken RealtimeKit để vào phòng. */
 type ActiveGroupCallState = {
   callId: string;
   conversationId: string;
   roomName: string;
-  url: string;
-  token: string;
+  authToken: string;
   callType: CallType;
   startWithCamera: boolean;
-  iceServers?: RTCIceServer[];
 };
 
 /** Hình dạng ack của `group_call.accept`. */
 type GroupCallAcceptAck =
   | {
       ok: true;
-      url: string;
-      token: string;
+      authToken: string;
       callType?: CallType;
-      iceServers?: RTCIceServer[];
     }
   | { ok: false; code?: string };
 
@@ -215,7 +211,7 @@ export default function IncomingCallManager() {
 
     socket.emit(
       SOCKET_EVENTS.GROUP_CALL.ACCEPT,
-      { callId: call.callId },
+      { v: 2, callId: call.callId },
       (ack?: GroupCallAcceptAck) => {
         if (ack?.ok) {
           const callType = ack.callType ?? call.callType;
@@ -223,12 +219,10 @@ export default function IncomingCallManager() {
             callId: call.callId,
             conversationId: call.conversationId,
             roomName: call.roomName,
-            url: ack.url,
-            token: ack.token,
+            authToken: ack.authToken,
             callType,
             // Chỉ bật camera khi là cuộc gọi video VÀ người nhận chọn "kèm camera".
             startWithCamera: callType === "video" && withCamera,
-            iceServers: ack.iceServers,
           });
         } else {
           toast.error(describeGroupCallError(ack?.code));
@@ -358,12 +352,10 @@ export default function IncomingCallManager() {
         <GroupCallModal
           callId={activeGroupCall.callId}
           roomName={activeGroupCall.roomName}
-          url={activeGroupCall.url}
-          token={activeGroupCall.token}
+          authToken={activeGroupCall.authToken}
           conversationId={activeGroupCall.conversationId}
           callType={activeGroupCall.callType}
           startWithCamera={activeGroupCall.startWithCamera}
-          iceServers={activeGroupCall.iceServers}
           minimized={groupMinimized}
           onToggleMinimize={() => setGroupMinimized((v) => !v)}
           onClose={() => {

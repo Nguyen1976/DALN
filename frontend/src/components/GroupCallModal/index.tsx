@@ -31,10 +31,8 @@ interface GroupCallModalProps {
   callId: string;
   /** `conv_<conversationId>` — chỉ để hiển thị/đối chiếu, room đã join bằng token. */
   roomName: string;
-  /** LiveKit URL (ack.url). */
-  url: string;
-  /** Access token (ack.token). */
-  token: string;
+  /** authToken RealtimeKit (ack.authToken). */
+  authToken: string;
   conversationId: string;
   /**
    * Loại cuộc gọi: `'audio'` (mặc định) giữ nguyên UI danh sách như cũ; `'video'`
@@ -43,8 +41,6 @@ interface GroupCallModalProps {
   callType?: "audio" | "video";
   /** Video nhóm: có tự bật camera khi vào không (người nhận có thể chọn thoại). */
   startWithCamera?: boolean;
-  /** STUN/TURN (coturn) từ ack để LiveKit vượt NAT chặt; additive. */
-  iceServers?: RTCIceServer[];
   /** Thu nhỏ: thanh gọn thay vì overlay, GIỮ phòng sống. */
   minimized?: boolean;
   /** Bật/tắt thu nhỏ; không truyền thì ẩn nút thu nhỏ. */
@@ -56,9 +52,8 @@ interface GroupCallModalProps {
 type ServerParticipant = { id: string; username: string };
 
 /**
- * Một ô video trong lưới. Modal (chứ không phải hook) tự `attach`/`detach` track
- * để adaptiveStream của LiveKit nhìn thấy thẻ `<video>` thật mà tạm dừng video
- * ngoài màn hình. Cleanup khi đổi track / unmount để không rò element.
+ * Một ô video trong lưới: gắn MediaStreamTrack của RealtimeKit vào thẻ `<video>`
+ * của chính ô. Cleanup khi đổi track / unmount để không giữ luồng.
  */
 function GroupCallVideoTile({
   participant,
@@ -78,18 +73,16 @@ function GroupCallVideoTile({
   const track = participant.videoTrack ?? null;
   const showVideo = participant.isCameraEnabled && Boolean(track);
 
-  // Gắn track vào thẻ <video>. PHẢI phụ thuộc cả `showVideo`: khi tắt camera thẻ
-  // <video> bị gỡ (hiện avatar) rồi bật lại thì thẻ MỚI được tạo, nhưng LiveKit
-  // tái dùng CÙNG track object khi mute/unmute (setCameraEnabled). Nếu chỉ phụ
-  // thuộc [track] thì effect không chạy lại → thẻ mới không được attach → hình
-  // không hiện (chỉ hiện lại khi ghim vì ghim remount tile). Thêm showVideo để
-  // attach lại đúng thẻ mỗi lần tile hiện video trở lại.
+  // Gắn track vào thẻ <video>. PHẢI phụ thuộc cả `showVideo`: tắt camera thì thẻ
+  // <video> bị gỡ (hiện avatar), bật lại thì thẻ MỚI được tạo — cùng một track vẫn
+  // phải được gắn lại vào đúng thẻ mới (lỗi đã sửa ở PR #30, giữ nguyên nguyên tắc).
   useEffect(() => {
     const element = videoRef.current;
     if (!element || !track || !showVideo) return;
-    track.attach(element);
+    element.srcObject = new MediaStream([track]);
+    void element.play().catch(() => undefined);
     return () => {
-      track.detach(element);
+      element.srcObject = null;
     };
   }, [track, showVideo]);
 
@@ -168,12 +161,10 @@ function GroupCallVideoTile({
 export default function GroupCallModal({
   callId,
   roomName,
-  url,
-  token,
+  authToken,
   conversationId,
   callType = "audio",
   startWithCamera = true,
-  iceServers,
   minimized = false,
   onToggleMinimize,
   onClose,
@@ -194,12 +185,12 @@ export default function GroupCallModal({
     toggleCamera,
     switchCamera,
     leave,
+    needsAudioUnlock,
+    unlockAudio,
   } = useGroupCall({
-    url,
-    token,
+    authToken,
     callType,
     startWithCamera,
-    iceServers,
     onDisconnected: onClose,
   });
 
@@ -284,6 +275,7 @@ export default function GroupCallModal({
         isMuted: false,
         isCameraEnabled: false,
         videoTrack: null,
+        audioTrack: null,
       });
     }
     for (const person of participants) {
@@ -424,6 +416,16 @@ export default function GroupCallModal({
             )}
             {statusLabel}
           </p>
+          {needsAudioUnlock && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={unlockAudio}
+              aria-label="Bật âm thanh"
+            >
+              Bật âm thanh
+            </Button>
+          )}
         </div>
 
         {isVideo ? (

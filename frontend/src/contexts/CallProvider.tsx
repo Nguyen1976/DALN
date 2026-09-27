@@ -34,11 +34,10 @@ type ActiveGroupCall = {
   callId: string;
   conversationId: string;
   roomName: string;
-  url: string;
-  token: string;
+  /** authToken RealtimeKit từ ack start/accept. */
+  authToken: string;
   callType: CallType;
   startWithCamera: boolean;
-  iceServers?: RTCIceServer[];
 };
 
 type GroupCallStartAck =
@@ -46,15 +45,13 @@ type GroupCallStartAck =
       ok: true;
       callId: string;
       roomName: string;
-      url: string;
-      token: string;
+      authToken: string;
       callType?: CallType;
-      iceServers?: RTCIceServer[];
     }
   | { ok: false; code?: string };
 
 type GroupCallAcceptAck =
-  | { ok: true; url: string; token: string; callType?: CallType; iceServers?: RTCIceServer[] }
+  | { ok: true; authToken: string; callType?: CallType }
   | { ok: false; code?: string };
 
 /**
@@ -122,7 +119,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (!conversationId) return;
       socket.emit(
         SOCKET_EVENTS.GROUP_CALL.START,
-        { conversationId, callType },
+        { v: 2, conversationId, callType },
         (ack?: GroupCallStartAck) => {
           if (ack?.ok) {
             setGroupMinimized(false);
@@ -130,12 +127,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
               callId: ack.callId,
               conversationId,
               roomName: ack.roomName,
-              url: ack.url,
-              token: ack.token,
+              authToken: ack.authToken,
               // Phòng đã mở giữ nguyên callType — tin theo ack của server.
               callType: ack.callType ?? callType,
               startWithCamera: (ack.callType ?? callType) === "video",
-              iceServers: ack.iceServers,
             });
           } else {
             toast.error(describeGroupCallError(ack?.code));
@@ -182,7 +177,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const joinGroupRoom = useCallback((room: ActiveGroupRoom) => {
     socket.emit(
       SOCKET_EVENTS.GROUP_CALL.ACCEPT,
-      { callId: room.callId },
+      { v: 2, callId: room.callId },
       (ack?: GroupCallAcceptAck) => {
         if (ack?.ok) {
           setGroupMinimized(false);
@@ -190,11 +185,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
             callId: room.callId,
             conversationId: room.conversationId,
             roomName: room.roomName,
-            url: ack.url,
-            token: ack.token,
+            authToken: ack.authToken,
             callType: ack.callType ?? room.callType,
             startWithCamera: false,
-            iceServers: ack.iceServers,
           });
         } else {
           toast.error(describeGroupCallError(ack?.code));
@@ -257,12 +250,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
         <GroupCallModal
           callId={groupCall.callId}
           roomName={groupCall.roomName}
-          url={groupCall.url}
-          token={groupCall.token}
+          authToken={groupCall.authToken}
           conversationId={groupCall.conversationId}
           callType={groupCall.callType}
           startWithCamera={groupCall.startWithCamera}
-          iceServers={groupCall.iceServers}
           minimized={groupMinimized}
           onToggleMinimize={() => setGroupMinimized((v) => !v)}
           onClose={() => {
