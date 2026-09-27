@@ -9,12 +9,12 @@ import type { RtkGrant } from './realtimekit.types'
  * `conversationId`: một hội thoại nhóm chỉ có đúng một phòng đang mở, nên ai bấm
  * gọi khi phòng đã mở thì rơi vào chính phòng đó (vào muộn/vào lại đều đúng chỗ).
  *
- * Nguồn sự thật cuối về "ai đang trong cuộc" là webhook LiveKit (participant_*),
+ * Nguồn sự thật cuối về "ai đang trong cuộc" là webhook RealtimeKit (participant*),
  * không phải client — nên `participants` chỉ được cập nhật từ webhook, còn handler
  * socket chỉ đọc để phát `group_call.state`.
  *
  * Lưu trữ tách làm ba để các webhook đồng thời không ghi đè lẫn nhau (trước đây
- * cả phiên là một blob JSON đọc-sửa-ghi, hai participant_joined sát nhau làm mất
+ * cả phiên là một blob JSON đọc-sửa-ghi, hai participantJoined sát nhau làm mất
  * roster):
  *   - `groupcall:<conv>`               JSON các trường tĩnh (callId, room, members…)
  *   - `groupcall:<conv>:participants`  HASH userId -> member đang trong phòng
@@ -36,7 +36,7 @@ interface GroupCallStatic {
   conversationId: string
   /** userId của người bấm gọi đầu tiên (mở phòng). */
   startedBy: string
-  /** Unix ms — lúc mở phòng; dùng để tính thời lượng khi room_finished. */
+  /** Unix ms — lúc mở phòng; dùng để tính thời lượng khi kết thúc. */
   startedAt: number
   /** Loại cuộc gọi được khởi tạo; mặc định audio để tương thích payload cũ. */
   callType: GroupCallType
@@ -45,7 +45,7 @@ interface GroupCallStatic {
 }
 
 export interface GroupCallSession extends GroupCallStatic {
-  /** Ai đang thực sự trong phòng (theo webhook LiveKit), khoá theo userId. */
+  /** Ai đang thực sự trong phòng (theo webhook RealtimeKit), khoá theo userId. */
   participants: Record<string, GroupCallMember>
   /** userId từng vào phòng ít nhất một lần — để đếm "N người" khi ghi log. */
   seen: string[]
@@ -56,13 +56,6 @@ export interface GroupCallSession extends GroupCallStatic {
 /** roomName ổn định theo hội thoại: vào lại/vào muộn đều rơi đúng phòng. */
 export function roomNameFor(conversationId: string): string {
   return `conv_${conversationId}`
-}
-
-/** Ngược lại `roomNameFor`: webhook chỉ có roomName, cần lần ra conversationId. */
-export function conversationIdFromRoom(roomName: string): string | null {
-  if (typeof roomName !== 'string' || !roomName.startsWith('conv_')) return null
-  const conversationId = roomName.slice('conv_'.length)
-  return conversationId || null
 }
 
 /** callId do gateway sinh bằng randomUUID; chặn key rác từ client. */
@@ -277,8 +270,8 @@ export class GroupCallStore {
   }
 
   /**
-   * Đóng phiên đúng MỘT lần. room_finished của LiveKit có thể tới trùng hoặc đảo
-   * thứ tự; chỉ lời gọi xoá được key chính mới trả về phiên (để ghi log tổng kết),
+   * Đóng phiên đúng MỘT lần. Bộ đếm phòng trống và webhook meeting.ended có thể
+   * cùng tới, webhook có thể tới trùng; chỉ lời gọi xoá được key chính mới trả về phiên (để ghi log tổng kết),
    * các lời gọi sau nhận `null`. Trả phiên đã ghép sẵn `seen` để đếm "N người".
    */
   async finish(conversationId: string): Promise<GroupCallSession | null> {

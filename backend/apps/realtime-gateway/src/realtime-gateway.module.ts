@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { RealtimeGatewayController } from './realtime-gateway.controller'
 import { RealtimeGateway } from './realtime/realtime.gateway'
 import { RealtimeKitService } from './realtime/realtimekit.service'
+import { RtkWebhookVerifier } from './realtime/rtk-webhook'
 import { RedisModule } from '@app/redis'
 import { CommonModule } from '@app/common'
 import {
@@ -31,6 +32,6 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
     CommonModule,
   ],
   controllers: [RealtimeGatewayController],
-  providers: [RealtimeGateway, RealtimeKitService],
+  providers: [RealtimeGateway, RealtimeKitService, RtkWebhookVerifier],
 })
 export class RealtimeGatewayModule {}

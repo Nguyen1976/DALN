@@ -1,9 +1,4 @@
-import {
-  conversationIdFromRoom,
-  GroupCallStore,
-  isGroupCallId,
-  roomNameFor,
-} from './group-call.store'
+import { GroupCallStore, isGroupCallId, roomNameFor } from './group-call.store'
 
 /**
  * Redis giả trong bộ nhớ: đủ cho string (get/set với NX), hash (hset/hdel/hgetall)
@@ -82,10 +77,8 @@ describe('group-call.store', () => {
     store = new GroupCallStore(new FakeRedis() as never)
   })
 
-  it('roomName ổn định theo hội thoại, và giải ngược được', () => {
+  it('roomName ổn định theo hội thoại', () => {
     expect(roomNameFor('c1')).toBe('conv_c1')
-    expect(conversationIdFromRoom('conv_c1')).toBe('c1')
-    expect(conversationIdFromRoom('lobby')).toBeNull()
   })
 
   it('một hội thoại chỉ một phòng: getOrCreate lần hai trả đúng phiên cũ', async () => {
