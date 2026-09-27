@@ -28,7 +28,6 @@ type IncomingCallState = {
   /** ID phiên do gateway cấp; dùng để accept/reject/ice/ended. */
   callId: string;
   callerId: string;
-  incomingOffer: RTCSessionDescriptionInit;
   conversationId?: string;
   callerDisplayName: string;
   callerDisplayAvatar: string;
@@ -105,13 +104,11 @@ export default function IncomingCallManager() {
     const handleIncomingCall = ({
       callId,
       callerId,
-      offer,
       conversationId,
       callType,
     }: {
       callId: string;
       callerId: string;
-      offer: RTCSessionDescriptionInit;
       conversationId?: string;
       callType?: CallType;
     }) => {
@@ -129,7 +126,6 @@ export default function IncomingCallManager() {
         mode: "incoming",
         callId,
         callerId,
-        incomingOffer: offer,
         conversationId: conversation?.id ?? conversationId,
         callerDisplayName:
           conversation?.displayName ||
@@ -262,7 +258,6 @@ export default function IncomingCallManager() {
           callType={incomingCall.callType}
           callerId={incomingCall.callerId}
           callId={incomingCall.callId}
-          incomingOffer={incomingCall.incomingOffer}
           minimized={voiceMinimized}
           onToggleMinimize={() => setVoiceMinimized((v) => !v)}
           onClose={() => {

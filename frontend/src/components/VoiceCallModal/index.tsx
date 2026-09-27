@@ -19,7 +19,8 @@ import {
   SwitchCamera,
 } from "@/components/icons";
 import { useSelector } from "react-redux";
-import { describeCallError, useWebRTC } from "@/hooks/useWebRTC";
+import { useDirectCall } from "@/hooks/useDirectCall";
+import { describeCallError } from "@/utils/callErrors";
 import { toast } from "sonner";
 import { useCallRingTimeout } from "@/hooks/useCallRingTimeout";
 import { useIncomingCallRingtone } from "@/hooks/useIncomingCallRingtone";
@@ -42,7 +43,6 @@ interface VoiceCallModalProps {
   callerId?: string;
   /** ID phiên cuộc gọi (chế độ incoming lấy từ sự kiện incoming_call). */
   callId?: string;
-  incomingOffer?: RTCSessionDescriptionInit;
   /**
    * Loại cuộc gọi. Mặc định 'audio' để giữ nguyên hành vi cũ (mọi caller hiện
    * tại không truyền prop này vẫn là cuộc gọi thoại).
@@ -75,7 +75,6 @@ export default function VoiceCallModal({
   mode = "outgoing",
   callerId,
   callId,
-  incomingOffer,
   callType = "audio",
   isCameraOn,
   onToggleCamera,
@@ -101,16 +100,6 @@ export default function VoiceCallModal({
   const dismissTimerRef = useRef<number | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [showBusyResult, setShowBusyResult] = useState(false);
-  // Suy ra từ RTP track (chỉ đáng tin lúc bật; replaceTrack(null) KHÔNG phát `mute`).
-  const [remoteCameraByTrack, setRemoteCameraByTrack] = useState(false);
-  // Trạng thái camera/micro đối phương BÁO qua signaling (call.media_state) — nguồn
-  // sự thật; null = chưa nhận tín hiệu nào (client cũ) → tạm dùng suy luận từ track.
-  const [remoteCameraSignaled, setRemoteCameraSignaled] = useState<
-    boolean | null
-  >(null);
-  const [remoteMicOn, setRemoteMicOn] = useState(true);
-  // Camera của đối phương đang bật hay không → chuyển giữa khung video và avatar.
-  const remoteCameraOn = remoteCameraSignaled ?? remoteCameraByTrack;
 
   const peerUserId = useMemo(() => {
     if (mode === "incoming" && callerId) return callerId;
@@ -125,16 +114,21 @@ export default function VoiceCallModal({
     acceptCall,
     rejectCall,
     endCall,
-    handleReceiveAnswer,
-    handleReceiveIceCandidate,
+    handlePeerAccepted,
     toggleMute,
     toggleCamera,
     switchCamera,
     isCameraOn: cameraOnFromHook,
+    remoteMedia,
     cleanup,
     connectedAt,
     callIdRef,
-  } = useWebRTC(socket);
+  } = useDirectCall(socket);
+
+  // Trạng thái camera/micro của đối phương đến thẳng từ RealtimeKit (videoUpdate/
+  // audioUpdate) — không còn tín hiệu call.media_state hay suy luận từ RTP mute.
+  const remoteCameraOn = remoteMedia.cameraOn;
+  const remoteMicOn = remoteMedia.micOn;
 
   const isVideoCall = callType === "video";
   // Prop ghi đè nếu truyền; mặc định dùng trạng thái camera nội bộ của hook.
@@ -275,26 +269,11 @@ export default function VoiceCallModal({
     const isSameCall = (eventCallId?: string) =>
       !eventCallId || !callIdRef.current || eventCallId === callIdRef.current;
 
-    const handleCallAccepted = async ({
+    const handleCallAccepted = ({
       callId: eventCallId,
-      answer,
-    }: {
-      callId?: string;
-      answer: RTCSessionDescriptionInit;
-    }) => {
+    }: { callId?: string } = {}) => {
       if (!isSameCall(eventCallId)) return;
-      await handleReceiveAnswer(answer);
-    };
-
-    const handleIceCandidate = async ({
-      callId: eventCallId,
-      candidate,
-    }: {
-      callId?: string;
-      candidate: RTCIceCandidateInit;
-    }) => {
-      if (!isSameCall(eventCallId)) return;
-      await handleReceiveIceCandidate(candidate);
+      handlePeerAccepted();
     };
 
     const handleCallRejected = ({
@@ -337,59 +316,24 @@ export default function VoiceCallModal({
       onClose();
     };
 
-    // Đối phương báo bật/tắt camera/micro — nguồn sự thật để đổi khung video ↔
-    // avatar (không dựa vào RTP `mute` vốn không đáng tin với replaceTrack(null)).
-    const handleMediaState = ({
-      callId: eventCallId,
-      cameraEnabled,
-      micEnabled,
-    }: {
-      callId?: string;
-      cameraEnabled?: boolean;
-      micEnabled?: boolean;
-    } = {}) => {
-      if (!isSameCall(eventCallId)) return;
-      setRemoteCameraSignaled(cameraEnabled === true);
-      setRemoteMicOn(micEnabled !== false);
-    };
-
     socket.on(SOCKET_EVENTS.CALL.CALL_ACCEPTED, handleCallAccepted);
-    socket.on(SOCKET_EVENTS.CALL.ICE_CANDIDATE, handleIceCandidate);
     socket.on(SOCKET_EVENTS.CALL.CALL_REJECTED, handleCallRejected);
     socket.on(SOCKET_EVENTS.CALL.CALL_ENDED, handleCallEnded);
-    socket.on(SOCKET_EVENTS.CALL.MEDIA_STATE, handleMediaState);
 
     return () => {
       socket.off(SOCKET_EVENTS.CALL.CALL_ACCEPTED, handleCallAccepted);
-      socket.off(SOCKET_EVENTS.CALL.ICE_CANDIDATE, handleIceCandidate);
       socket.off(SOCKET_EVENTS.CALL.CALL_REJECTED, handleCallRejected);
       socket.off(SOCKET_EVENTS.CALL.CALL_ENDED, handleCallEnded);
-      socket.off(SOCKET_EVENTS.CALL.MEDIA_STATE, handleMediaState);
     };
   }, [
     callIdRef,
     cleanup,
     endCall,
-    handleReceiveAnswer,
-    handleReceiveIceCandidate,
+    handlePeerAccepted,
     mode,
     onClose,
     scheduleClose,
   ]);
-
-  // Báo trạng thái camera/micro của mình cho đối phương mỗi khi đổi (và ngay khi
-  // vừa connected). Bên kia dùng tín hiệu này làm nguồn sự thật để hiển thị khung
-  // video hay avatar, không chờ sự kiện `mute` của RTP (không đáng tin khi tắt cam).
-  useEffect(() => {
-    if (callStatus !== "connected") return;
-    const callId = callIdRef.current;
-    if (!callId) return;
-    socket.emit(SOCKET_EVENTS.CALL.MEDIA_STATE, {
-      callId,
-      cameraEnabled: cameraOn,
-      micEnabled: !isMuted,
-    });
-  }, [callStatus, cameraOn, isMuted, callIdRef]);
 
   // Không kết nối được: giữ màn hình một nhịp để người dùng đọc được thông báo
   // rồi tự đóng, thay vì biến mất không rõ lý do.
@@ -438,35 +382,6 @@ export default function VoiceCallModal({
     };
   }, [localStream, showVideoLayout]);
 
-  // Theo dõi track video của đối phương: replaceTrack(null) phía họ làm track
-  // chuyển 'muted' → hiện avatar thay cho khung video.
-  useEffect(() => {
-    if (!remoteStream) {
-      setRemoteCameraByTrack(false);
-      return;
-    }
-    const videoTrack = remoteStream.getVideoTracks()[0];
-    if (!videoTrack) {
-      setRemoteCameraByTrack(false);
-      return;
-    }
-    const update = () =>
-      setRemoteCameraByTrack(
-        videoTrack.readyState === "live" &&
-          !videoTrack.muted &&
-          videoTrack.enabled,
-      );
-    update();
-    videoTrack.addEventListener("mute", update);
-    videoTrack.addEventListener("unmute", update);
-    videoTrack.addEventListener("ended", update);
-    return () => {
-      videoTrack.removeEventListener("mute", update);
-      videoTrack.removeEventListener("unmute", update);
-      videoTrack.removeEventListener("ended", update);
-    };
-  }, [remoteStream]);
-
   useEffect(() => {
     return () => {
       clearDismissTimer();
@@ -475,13 +390,13 @@ export default function VoiceCallModal({
   }, [cleanup, clearDismissTimer]);
 
   const handleAccept = async (withCamera = isVideoCall) => {
-    if (!callId || !incomingOffer) return;
+    if (!callId) return;
 
     try {
       // Người nhận tự chọn: "Nhận video" (kèm camera) hay "Nhận thoại" (chỉ micro).
       // Dù chọn thoại vẫn NHẬN được video của người gọi (m-line video recvonly),
       // và có thể bật camera sau bằng nút trong cuộc gọi — không phải gọi lại.
-      await acceptCall(callId, incomingOffer, { withCamera });
+      await acceptCall(callId, { withCamera });
     } catch (error) {
       toast.error(describeCallError(error));
       onClose();
@@ -504,7 +419,7 @@ export default function VoiceCallModal({
   };
 
   const handleToggleMute = () => {
-    setIsMuted(toggleMute());
+    void toggleMute().then(setIsMuted);
   };
 
   if (mode === "outgoing" && !peerUserId) return null;
