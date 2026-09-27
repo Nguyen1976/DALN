@@ -30,7 +30,11 @@ describe('CallSessionStore', () => {
 
   it('rtkGrants được lưu và đọc lại cùng phiên', async () => {
     const store = new CallSessionStore(new MemRedis() as never)
-    const grant = { meetingId: 'm1', participantId: 'p1', customParticipantId: 'u1.aa' }
+    const grant = {
+      meetingId: 'm1',
+      participantId: 'p1',
+      customParticipantId: 'u1.aa',
+    }
     await store.create({
       callId: CALL_ID,
       callerId: 'u1',
