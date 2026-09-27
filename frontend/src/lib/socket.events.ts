@@ -45,17 +45,14 @@ export const SOCKET_EVENTS = {
   },
 
   CALL: {
-    ICE_CONFIG: "call.ice_config",
     INCOMING_CALL: "call.incoming_call",
     CALL_ACCEPTED: "call.accepted",
     CALL_REJECTED: "call.rejected",
     CALL_ENDED: "call.ended",
     CLAIMED: "call.claimed",
-    ICE_CANDIDATE: "call.ice_candidate",
-    MEDIA_STATE: "call.media_state",
   },
 
-  // Gọi nhóm (hội thoại GROUP) qua SFU LiveKit. 1-1 (DIRECT) vẫn dùng CALL.
+  // Gọi nhóm (hội thoại GROUP) qua Cloudflare RealtimeKit. 1-1 (DIRECT) dùng CALL.
   GROUP_CALL: {
     START: "group_call.start",
     INCOMING: "group_call.incoming",
