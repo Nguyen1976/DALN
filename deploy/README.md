@@ -4,7 +4,8 @@ Toàn bộ ứng dụng (FE + BE + hạ tầng) chạy trên **một server** b�
 `backend/docker-compose.prod.yml` (project `daln-prod`). Source nằm ở `/root/workspace/DALN`.
 
 Ra ngoài chỉ có **nginx trên host**: cổng 80 (chuyển sang HTTPS) và 443, domain
-`https://nguyen1976.xyz` — xem mục [HTTPS](#https-nginx--certbot).
+`https://nguyen1976.xyz` — xem mục [HTTPS](#https-nginx--certbot). DNS nằm ở Cloudflare và
+domain đi qua proxy Cloudflare — xem mục [Cloudflare](#cloudflare).
 
 | Đường dẫn | Chuyển tới (các cổng này chỉ nghe 127.0.0.1) |
 |---|---|
@@ -215,13 +216,9 @@ docker exec daln-prod-rabbitmq rabbitmqctl purge_queue daln.dead-letters
 - Chứng chỉ Let's Encrypt, đăng ký không kèm email. certbot tự gia hạn (systemd
   `certbot.timer`) qua webroot `/var/www/certbot`; hook
   `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx` reload nginx sau khi gia hạn.
-- Chứng chỉ hiện mới có `nguyen1976.xyz`: Let's Encrypt chưa tra được CAA của `www` vì
-  registry `.xyz` còn trỏ domain tới 4 nameserver AWS cũ và `ns3`/`ns4.matbao.com` (cần đúng
-  `ns1`/`ns2.matbao.com`), nên lúc được lúc SERVFAIL. Cũng vì vậy `certbot renew --dry-run`
-  đang lỗi, và lần gia hạn thật (từ khoảng 12/11, chứng chỉ hết hạn 12/12/2026) sẽ lỗi nếu
-  chưa sửa nameserver. `http://www…` vẫn chuyển về domain gốc; riêng `https://www…` báo sai
-  chứng chỉ. DNS ổn thì thêm `www` (không phải dừng gì):
-  `certbot certonly --webroot -w /var/www/certbot --cert-name nguyen1976.xyz -d nguyen1976.xyz -d www.nguyen1976.xyz --expand --deploy-hook 'systemctl reload nginx'`
+- Chứng chỉ gồm `nguyen1976.xyz` và `www.nguyen1976.xyz` (thêm `www` ngày 2026-09-27, sau khi
+  chuyển DNS sang Cloudflare). Challenge `/.well-known/acme-challenge/` được phục vụ ở cả cổng
+  80 lẫn các khối 443, vì Cloudflare có thể đẩy challenge sang https trước khi tới server.
 - `http://` và truy cập bằng IP đều chuyển sang `https://nguyen1976.xyz`.
 
 ```bash
@@ -230,6 +227,23 @@ certbot renew --dry-run              # thử gia hạn, không đổi gì
 nginx -t && systemctl reload nginx   # nạp lại tay
 tail -f /var/log/nginx/error.log
 ```
+
+## Cloudflare
+
+- Nameserver của domain (đặt ở Mắt Bão) là `adaline.ns.cloudflare.com` + `jaziel.ns.cloudflare.com`;
+  mọi bản ghi DNS sửa trên Cloudflare, bản ghi còn lại ở Mắt Bão không còn tác dụng.
+- `@` và `www` là bản ghi A tới IP server, bật **proxy (đám mây cam)**; SSL/TLS mode
+  **Full (strict)** — Cloudflare nói chuyện với server bằng https và kiểm tra chứng chỉ Let's
+  Encrypt ở trên. Đừng để Flexible: nginx sẽ chuyển http sang https mãi (redirect loop).
+- Qua proxy, server thấy IP của Cloudflare. `daln.conf` khôi phục IP thật từ header
+  `CF-Connecting-IP` (`set_real_ip_from` + `real_ip_header`), chỉ khi kết nối tới từ dải IP
+  Cloudflare, và ghi đè `X-Forwarded-For` bằng IP đó. Kong và service không phải đổi gì
+  (`trust proxy 2`). Dải IP Cloudflare hiếm khi đổi; khi đổi, cập nhật theo
+  <https://www.cloudflare.com/ips-v4> và `/ips-v6`, nếu không phiên đăng nhập sẽ ghi IP Cloudflare.
+- Proxy chỉ chuyển HTTP/HTTPS/WebSocket. Media gọi thoại/video (TURN, LiveKit UDP/TCP) đi thẳng
+  tới IP server nên không bị ảnh hưởng. Gói Free giới hạn **100 MB** mỗi request (khớp
+  `client_max_body_size`) và server phải trả lời trong 100 giây.
+- Tắt proxy (đám mây xám) vẫn chạy bình thường, chỉ mất cache ở gần người dùng.
 
 ## TURN (coturn) — gọi thoại
 
