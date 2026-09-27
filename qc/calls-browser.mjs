@@ -12,7 +12,7 @@
 import puppeteer from 'puppeteer-core'
 import { execSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
-import { fixtures } from './calls-fixtures.mjs'
+import { fixtures, login } from './calls-fixtures.mjs'
 
 const APP = process.env.APP ?? 'http://localhost:5174'
 const API = process.env.API ?? 'http://localhost:8080'
@@ -361,19 +361,27 @@ async function extra({ A, B, C, fx }) {
   const { createRequire } = await import('node:module')
   const { io } = createRequire(new URL('../frontend/package.json', import.meta.url))('socket.io-client')
   const socketBase = API.replace(/\/api$/, '')
+  // Cookie mới: bộ QC đầy đủ chạy lâu hơn hạn access token (15 phút).
+  const freshA = await login(fx.a.email, fx.a.password)
   const code = await new Promise((resolve) => {
     const s = io(`${socketBase}/realtime`, {
       path: '/socket.io',
       transports: ['websocket'],
-      extraHeaders: { cookie: fx.a.cookie },
+      extraHeaders: { cookie: freshA.cookie },
     })
     const timer = setTimeout(() => { s.close(); resolve('timeout') }, 8000)
+    // Chờ một nhịp sau connect: server xác thực socket bất đồng bộ (kiểm phiên
+    // trong Redis) — gửi ngay có thể tới trước và nhận UNAUTHORIZED.
     s.on('connect', () =>
-      s.emit('call.incoming_call', { conversationId: fx.directId, offer: { sdp: 'x' } }, (ack) => {
-        clearTimeout(timer)
-        s.close()
-        resolve(ack?.code)
-      }),
+      setTimeout(
+        () =>
+          s.emit('call.incoming_call', { conversationId: fx.directId, offer: { sdp: 'x' } }, (ack) => {
+            clearTimeout(timer)
+            s.close()
+            resolve(ack?.code)
+          }),
+        800,
+      ),
     )
   })
   check(code === 'CLIENT_OUTDATED', '[§7.28] payload kiểu cũ -> CLIENT_OUTDATED', `nhận ${code}`)
