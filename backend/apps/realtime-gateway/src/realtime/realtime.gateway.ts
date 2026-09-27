@@ -30,7 +30,6 @@ import {
   SessionStore,
 } from '@app/common'
 import { randomUUID } from 'crypto'
-import { buildIceConfig } from './turn-credentials'
 import { CallSession, CallSessionStore, isCallId } from './call-session.store'
 import { CallBusyStore } from './call-busy.store'
 import {
@@ -50,6 +49,8 @@ import {
   getLivekitUrl,
   isLivekitConfigured,
 } from './livekit-token'
+import { RealtimeKitService } from './realtimekit.service'
+import { presetFor, RtkGrant } from './realtimekit.types'
 import type {
   CallBody,
   ClientSocket,
@@ -74,6 +75,25 @@ function sidOf(socket: { data?: unknown }): string | undefined {
 
 function callError(code: string, message: string): CallAck {
   return { ok: false, code, message }
+}
+
+/**
+ * Client chạy JS trước khi chuyển sang RealtimeKit: vẫn gửi SDP, hoặc chưa gửi
+ * `v: 2`. Trả CLIENT_OUTDATED để nó nhắc người dùng tải lại trang, thay vì kẹt ở
+ * một luồng media mà server không còn phục vụ.
+ */
+export function isLegacyCallPayload(data: CallBody | undefined): boolean {
+  if (!data) return true
+  return data.v !== 2 || data.offer !== undefined || data.answer !== undefined
+}
+
+/** Grant để lưu vào Redis: bỏ authToken (token chỉ đi trong ack). */
+function grantOf(grant: RtkGrant & { authToken?: string }): RtkGrant {
+  return {
+    meetingId: grant.meetingId,
+    participantId: grant.participantId,
+    customParticipantId: grant.customParticipantId,
+  }
 }
 
 //nếu k đặt tên cổng thì nó sẽ trùng với cổng của http
@@ -200,6 +220,7 @@ export class RealtimeGateway
     private readonly redisClient: Redis,
     private readonly amqpConnection: AmqpConnection,
     private readonly sessions: SessionStore,
+    private readonly rtk: RealtimeKitService,
   ) {
     this.userStatusStore = new UserStatusStore(this.redisClient)
     this.callSessionStore = new CallSessionStore(this.redisClient)
@@ -578,22 +599,6 @@ export class RealtimeGateway
   }
 
   /**
-   * Cấp STUN/TURN cho trình duyệt ngay trước khi gọi.
-   *
-   * Trả qua ack chứ không broadcast: mật khẩu TURN gắn với một người dùng và
-   * chỉ sống một giờ, không có lý do gì để nó đi tới socket khác.
-   */
-  @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CONFIG)
-  handleIceConfig(@ConnectedSocket() client: ClientSocket): CallAck {
-    const userId = client.data.userId
-    if (!userId) {
-      return callError('UNAUTHORIZED', 'Unauthorized socket client')
-    }
-
-    return { ok: true, ...buildIceConfig(userId) }
-  }
-
-  /**
    * Nạp phiên cuộc gọi và kiểm người gửi có thuộc phiên không.
    *
    * Mọi sự kiện `call.*` sau lúc đổ chuông đều đi qua đây: không có chốt này
@@ -647,15 +652,18 @@ export class RealtimeGateway
       return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
-    const offer = data?.offer
+    if (isLegacyCallPayload(data)) {
+      return callError('CLIENT_OUTDATED', 'Client is outdated, reload the page')
+    }
+
     const conversationId =
       typeof data?.conversationId === 'string' ? data.conversationId.trim() : ''
+    if (!conversationId) {
+      return callError('INVALID_PAYLOAD', 'conversationId is required')
+    }
 
-    if (!offer || !conversationId) {
-      return callError(
-        'INVALID_PAYLOAD',
-        'offer and conversationId are required',
-      )
+    if (!this.rtk.isConfigured()) {
+      return callError('MEDIA_UNCONFIGURED', 'Calling is not configured')
     }
 
     const peer = await fetchCallPeer(conversationId, callerId)
@@ -668,49 +676,60 @@ export class RealtimeGateway
       )
     }
 
-    // Mặc định audio để tương thích client cũ chưa gửi callType. cameraEnabled là
-    // trạng thái từng người, không đổi callType (một người tắt camera ≠ audio call).
+    // Mặc định audio. cameraEnabled là trạng thái từng người, không đổi callType
+    // (một người tắt camera ≠ audio call).
     const callType = data?.callType === 'video' ? 'video' : 'audio'
+    const callId = randomUUID()
+
+    // Busy: người gọi phải đang rảnh, và người nhận không kẹt cuộc gọi khác.
+    // Chốt ở server để nhiều tab / cuộc gọi chồng chéo không tranh phiên.
+    if (!(await this.callBusyStore.acquire(callerId, callId))) {
+      return callError('BUSY', 'You are already in a call')
+    }
+    if (await this.callBusyStore.isBusy(peer.peerId, callId)) {
+      await this.callBusyStore.release(callerId, callId)
+      return callError('CALLEE_BUSY', 'The other person is in another call')
+    }
+
+    // Người gọi vào phòng RealtimeKit ngay (đứng chờ trong lúc đổ chuông), nên
+    // cấp media TRƯỚC khi đổ chuông; lỗi thì nhả khoá, không để ai kẹt "bận".
+    let grant: RtkGrant & { authToken: string }
+    try {
+      grant = await this.rtk.addParticipant(conversationId, {
+        userId: callerId,
+        name: callerId,
+        preset: presetFor('direct', callType),
+      })
+    } catch (error) {
+      this.logger.warn(`cấp media cho cuộc gọi ${callId} thất bại`, error)
+      await this.callBusyStore.release(callerId, callId)
+      return callError('MEDIA_UNAVAILABLE', 'Could not start the call')
+    }
 
     const session: CallSession = {
-      callId: randomUUID(),
+      callId,
       callerId,
       calleeId: peer.peerId,
       conversationId,
       status: 'ringing',
       callType,
       startedAt: Date.now(),
+      rtkGrants: [grantOf(grant)],
     }
-
-    // Busy: người gọi phải đang rảnh, và người nhận không kẹt cuộc gọi khác.
-    // Chốt ở server để nhiều tab / cuộc gọi chồng chéo không tranh phiên.
-    if (!(await this.callBusyStore.acquire(callerId, session.callId))) {
-      return callError('BUSY', 'You are already in a call')
-    }
-    if (await this.callBusyStore.isBusy(session.calleeId, session.callId)) {
-      await this.callBusyStore.release(callerId, session.callId)
-      return callError('CALLEE_BUSY', 'The other person is in another call')
-    }
-
     await this.callSessionStore.create(session)
 
     this.emitToUserSockets(
       [session.calleeId],
       SOCKET_EVENTS.CALL.INCOMING_CALL,
-      {
-        callId: session.callId,
-        callerId,
-        conversationId,
-        callType,
-        offer,
-      },
+      { callId, callerId, conversationId, callType },
     )
 
     return {
       ok: true,
-      callId: session.callId,
+      callId,
       calleeId: session.calleeId,
       callType,
+      authToken: grant.authToken,
     }
   }
 
@@ -724,8 +743,8 @@ export class RealtimeGateway
       return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
-    if (!data?.answer) {
-      return callError('INVALID_PAYLOAD', 'answer is required')
+    if (isLegacyCallPayload(data)) {
+      return callError('CLIENT_OUTDATED', 'Client is outdated, reload the page')
     }
 
     const loaded = await this.loadCallSession(data?.callId, userId)
@@ -751,11 +770,32 @@ export class RealtimeGateway
     if (!(await this.callBusyStore.acquire(userId, session.callId))) {
       return callError('BUSY', 'You are already in a call')
     }
+
+    let grant: RtkGrant & { authToken: string }
+    try {
+      grant = await this.rtk.addParticipant(session.conversationId, {
+        userId,
+        name: userId,
+        preset: presetFor('direct', session.callType),
+      })
+    } catch (error) {
+      this.logger.warn(
+        `cấp media khi nghe máy ${session.callId} thất bại`,
+        error,
+      )
+      await this.callBusyStore.release(userId, session.callId)
+      await this.callSessionStore.releaseAccept(session.callId)
+      return callError('MEDIA_UNAVAILABLE', 'Could not start the call')
+    }
+
     // Đã kết nối: gia hạn khoá bận của cả hai lên TTL dài.
     await this.callBusyStore.refresh(userId, session.callId)
     await this.callBusyStore.refresh(session.callerId, session.callId)
 
-    await this.callSessionStore.markConnected(session)
+    await this.callSessionStore.markConnected({
+      ...session,
+      rtkGrants: [...(session.rtkGrants ?? []), grantOf(grant)],
+    })
 
     // Báo các tab KHÁC của người nhận đóng màn hình chuông. Dùng broadcast để
     // LOẠI TRỪ chính socket vừa bắt máy — nếu không, tab đang nghe cũng nhận
@@ -767,14 +807,10 @@ export class RealtimeGateway
     this.emitToUserSockets(
       [session.callerId],
       SOCKET_EVENTS.CALL.CALL_ACCEPTED,
-      {
-        callId: session.callId,
-        answer: data.answer,
-        answererId: userId,
-      },
+      { callId: session.callId, answererId: userId },
     )
 
-    return { ok: true, callId: session.callId }
+    return { ok: true, callId: session.callId, authToken: grant.authToken }
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_REJECTED)
@@ -813,6 +849,7 @@ export class RealtimeGateway
         outcome: 'REJECTED',
         callType: session.callType,
       })
+      void this.rtk.revoke(session.rtkGrants ?? [])
     }
 
     await this.releaseDirectBusy(session)
@@ -855,6 +892,8 @@ export class RealtimeGateway
     if (!(await this.callSessionStore.end(session.callId))) {
       return { ok: true, callId: session.callId }
     }
+
+    void this.rtk.revoke(session.rtkGrants ?? [])
 
     this.recordCallOutcome({
       conversationId: session.conversationId,
@@ -912,74 +951,6 @@ export class RealtimeGateway
   private async releaseDirectBusy(session: CallSession): Promise<void> {
     await this.callBusyStore.release(session.callerId, session.callId)
     await this.callBusyStore.release(session.calleeId, session.callId)
-  }
-
-  @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CANDIDATE)
-  async handleIceCandidate(
-    @MessageBody() data: CallBody | undefined,
-    @ConnectedSocket() client: ClientSocket,
-  ): Promise<CallAck> {
-    const senderId = client.data.userId
-    if (!senderId) {
-      return callError('UNAUTHORIZED', 'Unauthorized socket client')
-    }
-
-    if (!data?.candidate) {
-      return callError('INVALID_PAYLOAD', 'candidate is required')
-    }
-
-    const loaded = await this.loadCallSession(data?.callId, senderId)
-    if (!loaded.ok) return loaded.ack
-
-    const { session } = loaded
-
-    // Chuyển tiếp ICE candidate cho đối phương của đúng phiên này.
-    this.emitToUserSockets(
-      [CallSessionStore.peerOf(session, senderId)],
-      SOCKET_EVENTS.CALL.ICE_CANDIDATE,
-      {
-        callId: session.callId,
-        senderId,
-        candidate: data.candidate,
-      },
-    )
-
-    return { ok: true, callId: session.callId }
-  }
-
-  /**
-   * Chuyển tiếp trạng thái camera/micro của một bên cho bên kia (1-1). Đây là
-   * NGUỒN SỰ THẬT để hiển thị avatar/khung video, thay vì dựa vào sự kiện `mute`
-   * của RTP track (replaceTrack(null) không phát `mute` đáng tin) — khiến bên kia
-   * thấy khung hình đứng hình khi tắt camera.
-   */
-  @SubscribeMessage(SOCKET_EVENTS.CALL.MEDIA_STATE)
-  async handleCallMediaState(
-    @MessageBody() data: CallBody | undefined,
-    @ConnectedSocket() client: ClientSocket,
-  ): Promise<CallAck> {
-    const senderId = client.data.userId
-    if (!senderId) {
-      return callError('UNAUTHORIZED', 'Unauthorized socket client')
-    }
-
-    const loaded = await this.loadCallSession(data?.callId, senderId)
-    if (!loaded.ok) return loaded.ack
-
-    const { session } = loaded
-
-    this.emitToUserSockets(
-      [CallSessionStore.peerOf(session, senderId)],
-      SOCKET_EVENTS.CALL.MEDIA_STATE,
-      {
-        callId: session.callId,
-        senderId,
-        cameraEnabled: data?.cameraEnabled === true,
-        micEnabled: data?.micEnabled !== false,
-      },
-    )
-
-    return { ok: true, callId: session.callId }
   }
 
   // ── Gọi nhóm (GROUP) qua SFU LiveKit ────────────────────────────────────
@@ -1157,8 +1128,6 @@ export class RealtimeGateway
       callType: session.callType,
       url: getLivekitUrl(),
       token,
-      // coturn làm TURN cho LiveKit (thiết kế mục 04 ①) — xem group_call.accept.
-      iceServers: buildIceConfig(callerId).iceServers,
     }
   }
 
@@ -1229,10 +1198,6 @@ export class RealtimeGateway
       url: getLivekitUrl(),
       token,
       callType: session.callType,
-      // coturn làm TURN cho LiveKit (thiết kế mục 04 ①): client sau NAT chặt/UDP
-      // bị chặn vẫn tới được SFU qua relay. Additive — không ép relay, đường trực
-      // tiếp vẫn ưu tiên.
-      iceServers: buildIceConfig(userId).iceServers,
     }
   }
 

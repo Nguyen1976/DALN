@@ -40,13 +40,12 @@ export interface MessageReadBody {
 
 /** Any `call.*` or `group_call.*` event; each reads the fields it needs. */
 export interface CallBody {
+  /** Phiên bản giao thức gọi: client RealtimeKit gửi 2; thiếu = client cũ. */
+  v?: unknown
   callId?: unknown
   conversationId?: unknown
   callType?: unknown
   offer?: unknown
   answer?: unknown
-  candidate?: unknown
   reason?: unknown
-  cameraEnabled?: unknown
-  micEnabled?: unknown
 }
