@@ -110,9 +110,10 @@ describe('RealtimeKitService', () => {
     expect(grant).toEqual({
       meetingId: 'm1',
       participantId: 'p1',
-      customParticipantId: expect.stringMatching(/^u1\.[0-9a-f]{8}$/),
+      customParticipantId: grant.customParticipantId,
       authToken: 'jwt',
     })
+    expect(grant.customParticipantId).toMatch(/^u1\.[0-9a-f]{8}$/)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/meetings\/m1\/participants$/)
     expect(JSON.parse(init.body as string)).toEqual({
