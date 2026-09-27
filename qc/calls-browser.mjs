@@ -57,14 +57,8 @@ async function openBrowser(account) {
   await page.type('input[name="password"]', account.password)
   await page.click('button[type="submit"]')
   await until(async () => !page.url().includes('/auth'), 20000)
-  if (page.url().includes('/onboarding')) {
-    await page.evaluate(() =>
-      [...document.querySelectorAll('button')]
-        .find((b) => /Bỏ qua/.test(b.textContent ?? ''))
-        ?.click(),
-    )
-    await sleep(2000)
-  }
+  await sleep(1500)
+  await skipOnboarding(page)
   return { browser, page, account }
 }
 
@@ -105,9 +99,25 @@ async function pressPrefix(page, prefix) {
   await el.click()
 }
 
+/** Tài khoản mới bị đưa sang /onboarding (có khi sau một nhịp): bấm "Bỏ qua". */
+async function skipOnboarding(page) {
+  if (!page.url().includes('/onboarding')) return
+  await page.evaluate(() =>
+    [...document.querySelectorAll('button')]
+      .find((b) => /Bỏ qua/.test(b.textContent ?? ''))
+      ?.click(),
+  )
+  await until(async () => !page.url().includes('/onboarding'), 10000)
+}
+
 async function openConversation(page, id) {
   await page.goto(`${APP}/chat/${id}`, { waitUntil: 'networkidle2' })
   await sleep(800)
+  if (page.url().includes('/onboarding')) {
+    await skipOnboarding(page)
+    await page.goto(`${APP}/chat/${id}`, { waitUntil: 'networkidle2' })
+    await sleep(800)
+  }
 }
 
 /** Video có khung hình thật: kích thước > 0 và currentTime tăng. */
@@ -224,7 +234,12 @@ async function direct({ A, B, directId }) {
   await sleep(2500)
   await press(A.page, 'Kết thúc cuộc gọi')
   await openConversation(A.page, directId)
-  check(await until(() => hasText(A.page, 'Cuộc gọi video')), '[§7.14] nhật ký "Cuộc gọi video"')
+  const logShown = await until(() => hasText(A.page, 'Cuộc gọi video'))
+  check(logShown, '[§7.14] nhật ký "Cuộc gọi video"')
+  if (!logShown) {
+    await shot(A.page, 'direct-log-A')
+    console.log(`     ↳ url=${A.page.url()} text=${(await text(A.page)).replace(/\s+/g, ' ').slice(0, 300)}`)
+  }
   check(await until(() => A.page.evaluate(() => /\d+ giây/.test(document.body.innerText))), '[§7.14] nhật ký có thời lượng')
 
   // §7.9 từ chối
@@ -271,7 +286,12 @@ async function group({ A, B, C, groupId, fx }) {
   check(await until(() => audioFlowing(B.page)), '[§7.18] B nghe được A')
 
   // §7.22 C từ chối lời mời, rồi vẫn thấy banner + vào lại được từ banner
-  check(await until(() => hasText(C.page, 'đang mời bạn vào cuộc gọi')), '[§7.17] C cũng nhận lời mời')
+  const cInvited = await until(() => hasText(C.page, 'đang mời bạn vào cuộc gọi'))
+  check(cInvited, '[§7.17] C cũng nhận lời mời')
+  if (!cInvited) {
+    await shot(C.page, 'group-invite-C')
+    console.log(`     ↳ C url=${C.page.url()} text=${(await text(C.page)).replace(/\s+/g, ' ').slice(0, 300)}`)
+  }
   await press(C.page, 'Từ chối cuộc gọi nhóm')
   check(await until(() => hasText(C.page, 'Đang có cuộc gọi')), '[§7.22] C thấy banner "Đang có cuộc gọi…"')
   await press(C.page, 'Tham gia')
