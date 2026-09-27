@@ -48,3 +48,15 @@ Ghi đè được bằng biến môi trường: `API`, `DIRECT`, `APP`, `CHROME_
   chính phép đo sai: `curl -c` ghi ra jar *mọi* cookie nó đang biết chứ không
   riêng cookie mới, và `page.cookies(url)` lọc theo path nên bỏ sót cookie
   `Path=/user`. Cả hai làm code trông như có bug.
+
+## Cuộc gọi (RealtimeKit)
+
+```bash
+node qc/calls-browser.mjs            # dev: tự tạo 3 tài khoản, kết bạn, nhóm
+ONLY=direct node qc/calls-browser.mjs
+```
+
+Cần: stack dev chạy, Vite ở 5174, `npm run rtk:dev-tunnel` (backend) đã chạy để
+webhook tới được gateway, Chrome. Prod: `APP`, `API` trỏ domain thật và
+`QC_ACCOUNTS_FILE` là file JSON `{accounts:[{email,password}×3], directId, groupId, groupName}`
+(gitignore, không commit).

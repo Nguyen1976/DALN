@@ -437,6 +437,8 @@ services:
     command: tunnel --no-autoupdate --url http://realtime-gateway:3001
     depends_on:
       - realtime-gateway
+    networks:
+      - backend
 
   realtime-gateway:
     <<: *app-common
