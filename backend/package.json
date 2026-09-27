@@ -14,6 +14,8 @@
     "db:seed": "npm run db:seed:recommendation",
     "db:seed:recommendation": "npx prisma db seed --schema=apps/recommendation/prisma/schema.prisma",
     "rcm:train-bootstrap": "ts-node --compiler-options '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' scripts/train-rcm-from-dataset.ts",
+    "rtk:setup": "ts-node --transpile-only --compiler-options '{\"module\":\"commonjs\",\"moduleResolution\":\"node\",\"resolvePackageJsonExports\":false,\"resolvePackageJsonImports\":false}' scripts/realtimekit-setup.ts",
+    "rtk:dev-tunnel": "bash scripts/realtimekit-dev-tunnel.sh",
     "docker:dev": "docker compose up -d",
     "docker:dev:down": "docker compose down",
     "docker:dev:neo4j": "docker compose --profile training up -d neo4j",

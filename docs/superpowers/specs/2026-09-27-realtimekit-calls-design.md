@@ -247,9 +247,11 @@ Chạy lại nhiều lần vẫn an toàn: preset đã có thì cập nhật cho
 | Preset | `view_type` | Video | Simulcast | `max_video_streams` | Quyền phát |
 |---|---|---|---|---|---|
 | `daln_direct_video` | GROUP_CALL | `hd`, 30 fps | tắt | 1 / 1 | audio + video |
-| `daln_direct_audio` | GROUP_CALL | — | tắt | 0 / 0 | chỉ audio (video `NOT_ALLOWED`) |
+| `daln_direct_audio` | GROUP_CALL | — | tắt | 1 / 1 (xem ghi chú) | chỉ audio (video `NOT_ALLOWED`) |
 | `daln_group_video` | GROUP_CALL | `vga`, 24 fps | **bật** | 9 máy tính / 6 điện thoại | audio + video |
-| `daln_group_audio` | GROUP_CALL | — | — | 0 / 0 | chỉ audio |
+| `daln_group_audio` | GROUP_CALL | — | — | 9 / 6 (xem ghi chú) | chỉ audio |
+
+Ghi chú: preset thoại dùng cùng `max_video_streams` với preset video tương ứng, vì SDK chỉ đăng ký nghe `max_video_streams + 4` người (để 0 sẽ cắt tiếng từ người thứ 5). Preset thoại vẫn không phát được video vì video `NOT_ALLOWED`.
 
 Quyền chung cho cả 4 preset:
 
