@@ -13,3 +13,5 @@ training/.venv/
 SEQUENCE_DIAGRAMS.md
 
 .claude/
+# Tài khoản QA cho QC trên prod (mật khẩu) — không commit.
+qc/.env*
