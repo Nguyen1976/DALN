@@ -1,4 +1,5 @@
 import type Redis from 'ioredis'
+import type { RtkGrant } from './realtimekit.types'
 
 /**
  * Phiên cuộc gọi trong Redis.
@@ -28,6 +29,8 @@ export interface CallSession {
   startedAt: number
   /** Unix ms — lúc người nhận bấm nghe; chưa nghe thì không có. */
   connectedAt?: number
+  /** Người tham gia RealtimeKit đã cấp (người gọi, rồi người nhận) — để thu hồi khi kết thúc. */
+  rtkGrants?: RtkGrant[]
 }
 
 /** callId do gateway sinh bằng randomUUID; chặn luôn key rác từ client. */
@@ -74,6 +77,12 @@ export class CallSessionStore {
     return current === socketId
   }
 
+  /** Bỏ claim khi bắt máy thất bại giữa chừng (vd. API media lỗi) để thử lại được. */
+  async releaseAccept(callId: string): Promise<void> {
+    if (!isCallId(callId)) return
+    await this.redisClient.del(this.acceptKey(callId))
+  }
+
   async create(session: CallSession): Promise<void> {
     await this.redisClient.set(
       this.key(session.callId),
@@ -101,21 +110,24 @@ export class CallSessionStore {
   async markConnected(
     session: CallSession,
     nowMs: number = Date.now(),
-  ): Promise<CallSession> {
+  ): Promise<CallSession | null> {
     const connected: CallSession = {
       ...session,
       status: 'connected',
       connectedAt: session.connectedAt ?? nowMs,
     }
 
-    await this.redisClient.set(
+    // XX: chỉ ghi khi phiên còn. Bên kia cúp máy trong lúc người nhận đang bắt
+    // máy thì end() đã xoá phiên — không được dựng lại nó (sẽ ghi nhật ký lần hai).
+    const written = await this.redisClient.set(
       this.key(connected.callId),
       JSON.stringify(connected),
       'EX',
       this.connectedTtlSeconds,
+      'XX',
     )
 
-    return connected
+    return written ? connected : null
   }
 
   /**

@@ -245,7 +245,33 @@ tail -f /var/log/nginx/error.log
   `client_max_body_size`) và server phải trả lời trong 100 giây.
 - Tắt proxy (đám mây xám) vẫn chạy bình thường, chỉ mất cache ở gần người dùng.
 
+## RealtimeKit — cuộc gọi thoại/video
+
+Mọi cuộc gọi (1-1 và nhóm) chạy trên Cloudflare RealtimeKit; server chỉ cấp
+quyền vào phòng qua REST API và nhận webhook. Coturn và LiveKit bên dưới **không
+còn được code dùng** (giữ tới PR dọn hạ tầng).
+
+- Env trên server (`.env.production`): `REALTIMEKIT_ACCOUNT_ID`, `REALTIMEKIT_APP_ID`
+  (app `daln-prod`), `REALTIMEKIT_API_TOKEN` (quyền Realtime Admin).
+- Preset (`daln_direct_audio|video`, `daln_group_audio|video`) và webhook tạo/cập nhật
+  bằng script, chạy từ máy dev, token prod stream qua SSH (không ghi ra máy):
+
+  ```bash
+  ssh root@<server> "grep '^REALTIMEKIT_' /root/workspace/DALN/backend/.env.production" \
+    | (cd backend && npm run rtk:setup -- --env-stdin --webhook-url https://nguyen1976.xyz/api/realtime/rtk-webhook)
+  ```
+
+- Webhook đi vào `https://nguyen1976.xyz/api/realtime/rtk-webhook` (nginx → Kong
+  `/realtime` → gateway), xác thực chữ ký RSA. Nếu sau này bật Bot Fight Mode / WAF
+  trên Cloudflare, **bỏ qua đường dẫn này**, nếu không danh sách người trong cuộc
+  gọi nhóm sẽ không cập nhật.
+- Dev: `npm run rtk:dev-tunnel` (backend) mở tunnel tạm và trỏ webhook của app
+  `daln-dev` vào gateway dev. URL đổi mỗi lần tunnel khởi động lại.
+- QC: `qc/calls-browser.mjs` (xem qc/README.md).
+
 ## TURN (coturn) — gọi thoại
+
+> **Không còn được code dùng** từ khi cuộc gọi chuyển sang RealtimeKit (mục trên). Giữ lại tới PR dọn hạ tầng.
 
 Gọi thoại 1-1 (WebRTC) cần một máy chủ TURN để nối được khi hai máy ở sau CGNAT/tường
 lửa (bản thiết kế: `docs/diagrams/voice-call-turn.html`). coturn cài **thẳng trên host**
@@ -316,6 +342,8 @@ thấy candidate loại `relay`. Trong app: hai điện thoại 4G khác nhà m�
 > giây (mặc định 1 giờ).
 
 ## LiveKit (gọi nhóm)
+
+> **Không còn được code dùng** từ khi cuộc gọi chuyển sang RealtimeKit (mục trên). Giữ lại tới PR dọn hạ tầng.
 
 Gọi **nhóm** audio (n-n) đi qua một máy chủ **SFU LiveKit** (bản thiết kế:
 `docs/diagrams/group-call-sfu-flow.html`) — mỗi người gửi 1 luồng audio lên server, server

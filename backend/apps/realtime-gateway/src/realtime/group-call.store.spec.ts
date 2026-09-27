@@ -1,9 +1,4 @@
-import {
-  conversationIdFromRoom,
-  GroupCallStore,
-  isGroupCallId,
-  roomNameFor,
-} from './group-call.store'
+import { GroupCallStore, isGroupCallId, roomNameFor } from './group-call.store'
 
 /**
  * Redis giả trong bộ nhớ: đủ cho string (get/set với NX), hash (hset/hdel/hgetall)
@@ -82,10 +77,8 @@ describe('group-call.store', () => {
     store = new GroupCallStore(new FakeRedis() as never)
   })
 
-  it('roomName ổn định theo hội thoại, và giải ngược được', () => {
+  it('roomName ổn định theo hội thoại', () => {
     expect(roomNameFor('c1')).toBe('conv_c1')
-    expect(conversationIdFromRoom('conv_c1')).toBe('c1')
-    expect(conversationIdFromRoom('lobby')).toBeNull()
   })
 
   it('một hội thoại chỉ một phòng: getOrCreate lần hai trả đúng phiên cũ', async () => {
@@ -183,5 +176,50 @@ describe('group-call.store', () => {
 
     expect(GroupCallStore.isMember(session, 'bob')).toBe(true)
     expect(GroupCallStore.isMember(session, 'stranger')).toBe(false)
+  })
+
+  it('addGrant lưu người tham gia RealtimeKit; finish trả về rồi xoá', async () => {
+    await store.getOrCreate({
+      conversationId: 'conv-g',
+      startedBy: 'alice',
+      members: [{ id: 'alice', username: 'Alice' }],
+    })
+    const grant = {
+      meetingId: 'm1',
+      participantId: 'p1',
+      customParticipantId: 'alice.0a0b0c0d',
+    }
+    await store.addGrant('conv-g', grant)
+
+    const session = await store.getByConversationId('conv-g')
+    expect(session?.rtkGrants).toEqual([grant])
+
+    const finished = await store.finish('conv-g')
+    expect(finished?.rtkGrants).toEqual([grant])
+    expect(await store.getByConversationId('conv-g')).toBeNull()
+    await store.getOrCreate({
+      conversationId: 'conv-g',
+      startedBy: 'bob',
+      members: [{ id: 'bob', username: 'Bob' }],
+    })
+    expect((await store.getByConversationId('conv-g'))?.rtkGrants).toEqual([])
+  })
+
+  it('có mặt theo từng người tham gia RealtimeKit: một tab rời không xoá người còn tab khác', async () => {
+    await store.getOrCreate({
+      conversationId: 'conv-p',
+      startedBy: 'alice',
+      members: [{ id: 'alice', username: 'Alice' }],
+    })
+    const alice = { id: 'alice', username: 'Alice' }
+    await store.addParticipant('conv-p', alice, 'alice.00000001')
+    await store.addParticipant('conv-p', alice, 'alice.00000002')
+
+    let session = await store.removeParticipant('conv-p', 'alice.00000001')
+    expect(GroupCallStore.participantList(session!)).toEqual([alice])
+
+    session = await store.removeUser('conv-p', 'alice')
+    expect(GroupCallStore.participantList(session!)).toEqual([])
+    expect(session?.seen).toEqual(['alice'])
   })
 })

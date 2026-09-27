@@ -77,14 +77,14 @@ export async function fetchCallMembers(
 /**
  * Ghi 1 tin hệ thống tổng kết cuộc gọi nhóm vào dòng trò chuyện.
  *
- * Gọi thẳng HTTP (không qua RMQ) vì webhook LiveKit vốn đã là một request HTTP
+ * Gọi thẳng HTTP (không qua RMQ) vì webhook RealtimeKit vốn đã là một request HTTP
  * ngoài luồng — giữ nó đồng bộ, đơn giản, và trả về được true/false để log.
  */
 export async function postGroupCallLog(input: {
   conversationId: string
   participantCount: number
   durationSeconds: number
-  /** callId để chat khử trùng khi webhook room_finished tới lặp/đảo thứ tự. */
+  /** callId để chat khử trùng khi việc kết thúc cuộc gọi bị kích hoạt lặp. */
   callId?: string
   /** Loại cuộc gọi để chat chọn văn bản "nhóm" vs "video nhóm". */
   callType?: 'audio' | 'video'

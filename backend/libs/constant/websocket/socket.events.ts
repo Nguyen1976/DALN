@@ -41,19 +41,16 @@ export const SOCKET_EVENTS = {
   },
 
   CALL: {
-    ICE_CONFIG: 'call.ice_config', //emit + ack: xin danh sách STUN/TURN kèm mật khẩu ngắn hạn
     INCOMING_CALL: 'call.incoming_call', //listen
     CALL_ACCEPTED: 'call.accepted', //listen
     CALL_REJECTED: 'call.rejected', //listen
     CALL_ENDED: 'call.ended', //listen
     CLAIMED: 'call.claimed', //listen: một tab khác của mình đã bắt máy -> đóng chuông
-    ICE_CANDIDATE: 'call.ice_candidate', //listen
-    MEDIA_STATE: 'call.media_state', //emit + listen: báo bật/tắt camera+micro cho đối phương (nguồn sự thật, không dựa vào RTP mute)
   },
 
-  // Gọi nhóm (hội thoại GROUP) qua SFU LiveKit. 1-1 (DIRECT) vẫn dùng CALL ở trên.
+  // Gọi nhóm (hội thoại GROUP) qua Cloudflare RealtimeKit. 1-1 (DIRECT) dùng CALL ở trên.
   GROUP_CALL: {
-    START: 'group_call.start', //emit + ack: mở phòng, trả {callId, roomName, url, token}
+    START: 'group_call.start', //emit + ack: mở phòng, trả {callId, roomName, callType, authToken}
     INCOMING: 'group_call.incoming', //listen: có cuộc gọi nhóm, đổ chuông
     ACCEPT: 'group_call.accept', //emit + ack: xin token vào phòng
     DECLINE: 'group_call.decline', //emit: từ chối

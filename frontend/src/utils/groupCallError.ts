@@ -8,8 +8,14 @@ export function describeGroupCallError(code?: string): string {
       return "Bạn không còn trong nhóm này nên không thể gọi.";
     case "NOT_GROUP":
       return "Cuộc trò chuyện này không phải nhóm.";
-    case "LIVEKIT_UNCONFIGURED":
-      return "Tính năng gọi nhóm chưa sẵn sàng. Vui lòng thử lại sau.";
+    case "MEDIA_UNCONFIGURED":
+      return "Tính năng gọi chưa sẵn sàng. Vui lòng thử lại sau.";
+    case "MEDIA_UNAVAILABLE":
+      return "Không thể bắt đầu cuộc gọi, thử lại sau.";
+    case "CLIENT_OUTDATED":
+      return "Ứng dụng vừa được cập nhật, vui lòng tải lại trang.";
+    case "BUSY":
+      return "Bạn đang trong một cuộc gọi khác.";
     case "CALL_NOT_FOUND":
       return "Cuộc gọi nhóm không còn tồn tại.";
     default:

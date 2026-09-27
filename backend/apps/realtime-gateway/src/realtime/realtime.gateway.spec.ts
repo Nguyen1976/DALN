@@ -9,6 +9,7 @@ import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
 import { CallAck, RealtimeGateway } from './realtime.gateway'
 import { GroupCallStore, isGroupCallId } from './group-call.store'
 import type { ClientSocket } from './socket.types'
+import { RealtimeKitService } from './realtimekit.service'
 
 /**
  * Redis giả trong bộ nhớ, đủ cho GroupCallStore trong test gọi nhóm: string
@@ -108,6 +109,25 @@ describe('RealtimeGateway', () => {
     isAlive: jest.fn<Promise<boolean>, [string]>().mockResolvedValue(true),
   }
 
+  /** RealtimeKit giả: cấp grant kèm token, thu hồi ghi lại để kiểm. */
+  let grantSeq = 0
+  const rtkStub = {
+    isConfigured: jest.fn(() => true),
+    addParticipant: jest.fn(
+      (conversationId: string, input: { userId: string }) => {
+        grantSeq++
+        return Promise.resolve({
+          meetingId: `meeting-${conversationId}`,
+          participantId: `p${grantSeq}`,
+          customParticipantId: `${input.userId}.0000000${grantSeq}`,
+          authToken: `token-${input.userId}`,
+        })
+      },
+    ),
+    revoke: jest.fn().mockResolvedValue(undefined),
+    conversationOfMeeting: jest.fn(),
+  }
+
   /** What the chat service answers, as `internalFetch` reads it. */
   const fetchMock = jest.fn<
     Promise<Pick<Response, 'ok' | 'status' | 'text'>>,
@@ -130,6 +150,14 @@ describe('RealtimeGateway', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks()
+    rtkStub.isConfigured.mockReturnValue(true)
+    // mockReset (không chỉ clear): xoá cả hàng đợi mockResolvedValueOnce mà một
+    // test thoát sớm để lại, không thì nó rò sang test sau.
+    redisStub.get.mockReset().mockResolvedValue(null)
+    redisStub.set.mockReset().mockResolvedValue('OK')
+    redisStub.del.mockReset().mockResolvedValue(1)
+    redisStub.eval.mockReset().mockResolvedValue(1)
+    rtkStub.addParticipant.mockClear()
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RealtimeGateway,
@@ -137,6 +165,7 @@ describe('RealtimeGateway', () => {
         { provide: 'REDIS_CLIENT', useValue: redisStub },
         { provide: AmqpConnection, useValue: amqpStub },
         { provide: SessionStore, useValue: sessionStub },
+        { provide: RealtimeKitService, useValue: rtkStub },
       ],
     }).compile()
 
@@ -365,6 +394,11 @@ describe('RealtimeGateway', () => {
    */
   describe('gọi thoại 1-1', () => {
     const CALL_ID = '11111111-2222-4333-8444-555555555555'
+    const GRANT = {
+      meetingId: 'meeting-conv-1',
+      participantId: 'p0',
+      customParticipantId: 'caller.00000000',
+    }
 
     const session = (overrides: Record<string, unknown> = {}) =>
       JSON.stringify({
@@ -375,21 +409,50 @@ describe('RealtimeGateway', () => {
         status: 'ringing',
         callType: 'audio',
         startedAt: Date.now(),
+        rtkGrants: [GRANT],
         ...overrides,
       })
 
-    // The client still sends who it wants to ring; the gateway must not care.
-    const ringVictim = {
-      conversationId: 'conv-1',
-      offer: { sdp: 'x' },
-      targetUserId: 'victim',
-    }
+    const start = { v: 2, conversationId: 'conv-1', callType: 'video' }
+    // Client vẫn khai người nhận; gateway không được tin (biến riêng để tránh
+    // excess-property check của object literal).
+    const startWithVictim = { ...start, targetUserId: 'victim' }
+
+    /** Socket bắt máy: cần `broadcast` để báo các tab khác đóng chuông. */
+    const acceptingSocket = (userId: string) =>
+      ({
+        id: 'sock-1',
+        data: { userId },
+        emit: jest.fn(),
+        broadcast: { to: jest.fn().mockReturnValue({ emit: jest.fn() }) },
+      }) as unknown as ClientSocket
+
+    it('client cũ (có offer hoặc thiếu v) -> CLIENT_OUTDATED, không gọi chat', async () => {
+      for (const body of [
+        { conversationId: 'conv-1', offer: { sdp: 'x' } },
+        { v: 2, conversationId: 'conv-1', offer: { sdp: 'x' } },
+        { conversationId: 'conv-1' },
+      ]) {
+        const ack = await gateway.handleIncomingCall(body, socketOf('caller'))
+        expect(ack).toEqual(
+          expect.objectContaining({ ok: false, code: 'CLIENT_OUTDATED' }),
+        )
+      }
+      expect(fetchMock).not.toHaveBeenCalled()
+      const accepted = await gateway.handleCallAccepted(
+        { callId: CALL_ID, answer: { sdp: 'y' } },
+        socketOf('callee'),
+      )
+      expect(accepted).toEqual(
+        expect.objectContaining({ ok: false, code: 'CLIENT_OUTDATED' }),
+      )
+    })
 
     it('chat service từ chối (403) -> ack CALL_FORBIDDEN, không ai đổ chuông', async () => {
       respond(403)
 
       const ack = await gateway.handleIncomingCall(
-        ringVictim,
+        startWithVictim,
         socketOf('stranger'),
       )
 
@@ -397,50 +460,77 @@ describe('RealtimeGateway', () => {
         expect.objectContaining({ ok: false, code: 'CALL_FORBIDDEN' }),
       )
       expect(emitted).not.toHaveBeenCalled()
-      expect(redisStub.set).not.toHaveBeenCalled()
+      expect(rtkStub.addParticipant).not.toHaveBeenCalled()
     })
 
-    it('đổ chuông người nhận do chat service trả, bỏ qua targetUserId của client', async () => {
+    it('đổ chuông đúng người nhận, không kèm SDP; ack trả authToken của người gọi', async () => {
       respond(200, { peerId: 'callee' })
 
       const ack = expectOk(
-        await gateway.handleIncomingCall(ringVictim, socketOf('caller')),
+        await gateway.handleIncomingCall(startWithVictim, socketOf('caller')),
       )
 
+      expect(ack.authToken).toBe('token-caller')
+      expect(rtkStub.addParticipant).toHaveBeenCalledWith('conv-1', {
+        userId: 'caller',
+        name: 'caller',
+        preset: 'daln_direct_video',
+      })
       expect(to).toHaveBeenCalledWith('user:callee')
       expect(to).not.toHaveBeenCalledWith('user:victim')
-      expect(emitted).toHaveBeenCalledWith(
-        'call.incoming_call',
-        expect.objectContaining({ callId: ack.callId, callerId: 'caller' }),
+      expect(emitted).toHaveBeenCalledWith('call.incoming_call', {
+        callId: ack.callId,
+        callerId: 'caller',
+        conversationId: 'conv-1',
+        callType: 'video',
+      })
+      // Phiên lưu grant để thu hồi sau, KHÔNG lưu token.
+      const setCalls = redisStub.set.mock.calls as unknown as [string, string][]
+      const stored = setCalls.find(([key]) => key.startsWith('call:'))
+      expect(stored?.[1]).toContain('"customParticipantId"')
+      expect(stored?.[1]).not.toContain('token-caller')
+    })
+
+    it('chưa cấu hình RealtimeKit -> MEDIA_UNCONFIGURED', async () => {
+      rtkStub.isConfigured.mockReturnValue(false)
+      const ack = await gateway.handleIncomingCall(start, socketOf('caller'))
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'MEDIA_UNCONFIGURED' }),
       )
     })
 
-    it('người nhận đang bận -> CALLEE_BUSY, không đổ chuông', async () => {
+    it('API media lỗi khi gọi -> MEDIA_UNAVAILABLE, nhả khoá bận, không đổ chuông', async () => {
       respond(200, { peerId: 'callee' })
-      // acquire(caller) thắng SET NX; isBusy(callee) đọc thấy cuộc gọi khác.
+      rtkStub.addParticipant.mockRejectedValueOnce(new Error('down'))
+
+      const ack = await gateway.handleIncomingCall(start, socketOf('caller'))
+
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'MEDIA_UNAVAILABLE' }),
+      )
+      expect(emitted).not.toHaveBeenCalled()
+      // release() của CallBusyStore là Lua compare-and-DEL.
+      expect(redisStub.eval).toHaveBeenCalled()
+    })
+
+    it('người nhận đang bận -> CALLEE_BUSY, không cấp media', async () => {
+      respond(200, { peerId: 'callee' })
       redisStub.get.mockResolvedValueOnce('another-call-id')
 
-      const ack = await gateway.handleIncomingCall(
-        { conversationId: 'conv-1', offer: { sdp: 'x' } },
-        socketOf('caller'),
-      )
+      const ack = await gateway.handleIncomingCall(start, socketOf('caller'))
 
       expect(ack).toEqual(
         expect.objectContaining({ ok: false, code: 'CALLEE_BUSY' }),
       )
-      expect(emitted).not.toHaveBeenCalled()
+      expect(rtkStub.addParticipant).not.toHaveBeenCalled()
     })
 
     it('người gọi đang bận -> BUSY, không tạo phiên', async () => {
       respond(200, { peerId: 'callee' })
-      // acquire(caller): SET NX thất bại rồi GET thấy callId khác -> đang bận.
       redisStub.set.mockResolvedValueOnce(null)
       redisStub.get.mockResolvedValueOnce('another-call-id')
 
-      const ack = await gateway.handleIncomingCall(
-        { conversationId: 'conv-1', offer: { sdp: 'x' } },
-        socketOf('caller'),
-      )
+      const ack = await gateway.handleIncomingCall(start, socketOf('caller'))
 
       expect(ack).toEqual(expect.objectContaining({ ok: false, code: 'BUSY' }))
       expect(emitted).not.toHaveBeenCalled()
@@ -449,9 +539,9 @@ describe('RealtimeGateway', () => {
     it('sự kiện mang callId không có phiên thì bị bỏ', async () => {
       redisStub.get.mockResolvedValueOnce(null)
 
-      const ack = await gateway.handleIceCandidate(
-        { callId: CALL_ID, candidate: { candidate: 'a' } },
-        socketOf('caller'),
+      const ack = await gateway.handleCallRejected(
+        { callId: CALL_ID },
+        socketOf('callee'),
       )
 
       expect(ack).toEqual(
@@ -463,8 +553,8 @@ describe('RealtimeGateway', () => {
     it('người ngoài phiên không chen được vào cuộc gọi', async () => {
       redisStub.get.mockResolvedValueOnce(session())
 
-      const ack = await gateway.handleIceCandidate(
-        { callId: CALL_ID, candidate: { candidate: 'a' } },
+      const ack = await gateway.handleCallEnded(
+        { callId: CALL_ID },
         socketOf('stranger'),
       )
 
@@ -478,7 +568,7 @@ describe('RealtimeGateway', () => {
       redisStub.get.mockResolvedValueOnce(session())
 
       const ack = await gateway.handleCallAccepted(
-        { callId: CALL_ID, answer: { sdp: 'y' } },
+        { v: 2, callId: CALL_ID },
         socketOf('caller'),
       )
 
@@ -487,13 +577,87 @@ describe('RealtimeGateway', () => {
       )
     })
 
-    it('kết thúc: ghi kết quả bằng conversationId của phiên, đúng một lần', async () => {
+    it('nghe máy: cấp media cho người nhận, lưu cả hai grant, báo người gọi không kèm SDP', async () => {
+      redisStub.get.mockResolvedValue(session())
+
+      const ack = expectOk(
+        await gateway.handleCallAccepted(
+          { v: 2, callId: CALL_ID },
+          acceptingSocket('callee'),
+        ),
+      )
+
+      expect(ack.authToken).toBe('token-callee')
+      expect(rtkStub.addParticipant).toHaveBeenCalledWith('conv-1', {
+        userId: 'callee',
+        name: 'callee',
+        preset: 'daln_direct_audio',
+      })
+      expect(emitted).toHaveBeenCalledWith('call.accepted', {
+        callId: CALL_ID,
+        answererId: 'callee',
+      })
+      const setCalls = redisStub.set.mock.calls as unknown as [string, string][]
+      const connected = setCalls
+        .filter(([key]) => key === `call:${CALL_ID}`)
+        .pop()
+      const saved = JSON.parse(String(connected?.[1])) as {
+        rtkGrants: unknown[]
+      }
+      expect(saved.rtkGrants).toHaveLength(2)
+    })
+
+    it('bên kia cúp máy trong lúc đang cấp media khi nghe -> CALL_NOT_FOUND, không dựng lại phiên', async () => {
+      redisStub.get.mockResolvedValue(session())
+      // markConnected ghi có điều kiện (XX): phiên đã bị end() xoá thì không ghi.
+      redisStub.set.mockImplementation((...args: unknown[]) =>
+        Promise.resolve(args.includes('XX') ? null : 'OK'),
+      )
+
+      const ack = await gateway.handleCallAccepted(
+        { v: 2, callId: CALL_ID },
+        acceptingSocket('callee'),
+      )
+
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'CALL_NOT_FOUND' }),
+      )
+      expect(rtkStub.revoke).toHaveBeenCalledWith([
+        expect.objectContaining({
+          customParticipantId: expect.stringMatching(/^callee\./) as string,
+        }),
+      ])
+      expect(redisStub.del).toHaveBeenCalledWith(`callaccept:${CALL_ID}`)
+      expect(emitted).not.toHaveBeenCalledWith(
+        'call.accepted',
+        expect.anything(),
+      )
+    })
+
+    it('API media lỗi khi nghe máy -> MEDIA_UNAVAILABLE, nhả khoá bận và claim', async () => {
+      redisStub.get.mockResolvedValue(session())
+      rtkStub.addParticipant.mockRejectedValueOnce(new Error('down'))
+
+      const ack = await gateway.handleCallAccepted(
+        { v: 2, callId: CALL_ID },
+        socketOf('callee'),
+      )
+
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'MEDIA_UNAVAILABLE' }),
+      )
+      expect(redisStub.del).toHaveBeenCalledWith(`callaccept:${CALL_ID}`)
+      expect(emitted).not.toHaveBeenCalledWith(
+        'call.accepted',
+        expect.anything(),
+      )
+    })
+
+    it('kết thúc: ghi kết quả đúng một lần và thu hồi media đúng một lần', async () => {
       const connectedAt = Date.now() - 42_000
       redisStub.get.mockResolvedValue(
         session({ status: 'connected', connectedAt }),
       )
-      // end() nay xoá HAI key mỗi lần (call: + callaccept:). Lần kết thúc đầu: cả
-      // hai trả 1 (session còn) -> ghi kết quả; lần thứ hai: 0 -> không ghi lại.
       redisStub.del
         .mockResolvedValueOnce(1)
         .mockResolvedValueOnce(1)
@@ -507,7 +671,6 @@ describe('RealtimeGateway', () => {
         durationSeconds: 9999,
       }
       await gateway.handleCallEnded(forged, socketOf('caller'))
-      // Bên kia cũng phát `call.ended` — lần này DEL trả 0 nên không ghi nữa.
       await gateway.handleCallEnded({ callId: CALL_ID }, socketOf('callee'))
 
       const calls = publishedTo(ROUTING_RMQ.CALL_ENDED)
@@ -515,12 +678,23 @@ describe('RealtimeGateway', () => {
       expect(calls[0][2]).toEqual(
         expect.objectContaining({
           conversationId: 'conv-1',
-          callerId: 'caller',
-          calleeId: 'callee',
           outcome: 'COMPLETED',
           durationSeconds: 42,
         }),
       )
+      expect(rtkStub.revoke).toHaveBeenCalledTimes(1)
+      expect(rtkStub.revoke).toHaveBeenCalledWith([GRANT])
+    })
+
+    it('từ chối: báo người gọi, ghi REJECTED, thu hồi media', async () => {
+      redisStub.get.mockResolvedValue(session())
+      redisStub.del.mockResolvedValueOnce(1)
+
+      await gateway.handleCallRejected({ callId: CALL_ID }, socketOf('callee'))
+
+      const [[, , payload]] = publishedTo(ROUTING_RMQ.CALL_ENDED)
+      expect(payload).toEqual(expect.objectContaining({ outcome: 'REJECTED' }))
+      expect(rtkStub.revoke).toHaveBeenCalledWith([GRANT])
     })
 
     it('huỷ lúc đang đổ chuông là cuộc gọi nhỡ, không phải hoàn tất 0 giây', async () => {
@@ -560,15 +734,16 @@ describe('RealtimeGateway', () => {
 
     beforeEach(() => {
       process.env = { ...OLD_ENV }
-      process.env.LIVEKIT_URL = 'ws://localhost:7880'
-      process.env.LIVEKIT_API_KEY = 'devkey'
-      process.env.LIVEKIT_API_SECRET = 'a'.repeat(32)
       process.env.INTERNAL_API_TOKEN = 'test-token'
       process.env.CHAT_SERVICE_URL = 'http://chat:3003'
 
       // Store thật trên Redis giả: kiểm cả logic phiên chứ không chỉ handler.
       store = new GroupCallStore(new FakeRedis() as never)
       Object.assign(gateway, { groupCallStore: store })
+    })
+
+    afterEach(() => {
+      jest.useRealTimers()
     })
 
     afterAll(() => {
@@ -584,7 +759,7 @@ describe('RealtimeGateway', () => {
       respond(403)
 
       const ack = await gateway.handleGroupCallStart(
-        { conversationId: 'conv-1' },
+        { v: 2, conversationId: 'conv-1' },
         socketOf('stranger'),
       )
 
@@ -600,7 +775,7 @@ describe('RealtimeGateway', () => {
       respond(200, { members, type: 'DIRECT' })
 
       const ack = await gateway.handleGroupCallStart(
-        { conversationId: 'conv-1' },
+        { v: 2, conversationId: 'conv-1' },
         socketOf('alice'),
       )
 
@@ -615,7 +790,7 @@ describe('RealtimeGateway', () => {
 
       const ack = expectOk(
         await gateway.handleGroupCallStart(
-          { conversationId: 'conv-1', callType: 'video' },
+          { v: 2, conversationId: 'conv-1', callType: 'video' },
           socketOf('alice'),
         ),
       )
@@ -628,77 +803,147 @@ describe('RealtimeGateway', () => {
       // Phòng đã mở giữ callType: bấm audio sau đó vẫn vào phòng video.
       const audioAck = expectOk(
         await gateway.handleGroupCallStart(
-          { conversationId: 'conv-1', callType: 'audio' },
+          { v: 2, conversationId: 'conv-1', callType: 'audio' },
           socketOf('bob'),
         ),
       )
       expect(audioAck.callType).toBe('video')
     })
 
-    it('được phép -> tạo phiên, đổ chuông thành viên khác, ack có token/room/url', async () => {
+    const rtkEvent = (
+      event: string,
+      userId?: string,
+    ): { event: string; meetingId: string; customParticipantId?: string } => ({
+      event,
+      meetingId: 'meeting-conv-1',
+      ...(userId ? { customParticipantId: `${userId}.0a0b0c0d` } : {}),
+    })
+
+    /** Grant RealtimeKit của một người trong cuộc gọi này (webhook chỉ tin grant). */
+    const grantFor = async (userId: string, suffix = '0a0b0c0d') => {
+      const grant = {
+        meetingId: 'meeting-conv-1',
+        participantId: `p-${userId}-${suffix}`,
+        customParticipantId: `${userId}.${suffix}`,
+      }
+      await store.addGrant('conv-1', grant)
+      return grant
+    }
+    const ev = (event: string, customParticipantId?: string) => ({
+      event,
+      meetingId: 'meeting-conv-1',
+      ...(customParticipantId ? { customParticipantId } : {}),
+    })
+    /** Mở phòng conv-1 và cấp grant cho alice + bob như khi họ bấm tham gia. */
+    const openRoom = async () => {
+      const created = await store.getOrCreate({
+        conversationId: 'conv-1',
+        startedBy: 'alice',
+        members,
+      })
+      await grantFor('alice')
+      await grantFor('bob')
+      return created
+    }
+
+    beforeEach(() => {
+      rtkStub.conversationOfMeeting.mockImplementation((meetingId: string) =>
+        Promise.resolve(meetingId === 'meeting-conv-1' ? 'conv-1' : null),
+      )
+    })
+
+    it('client cũ -> CLIENT_OUTDATED', async () => {
+      const ack = await gateway.handleGroupCallStart(
+        { conversationId: 'conv-1' },
+        socketOf('alice'),
+      )
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'CLIENT_OUTDATED' }),
+      )
+    })
+
+    it('được phép -> tạo phiên, đổ chuông, ack có authToken, lưu grant', async () => {
       respond(200, { members, type: 'GROUP' })
 
       const ack = expectOk(
         await gateway.handleGroupCallStart(
-          { conversationId: 'conv-1' },
+          { v: 2, conversationId: 'conv-1' },
           socketOf('alice'),
         ),
       )
 
       expect(isGroupCallId(ack.callId)).toBe(true)
       expect(ack.roomName).toBe('conv_conv-1')
-      expect(ack.url).toBe('ws://localhost:7880')
-      expect(typeof ack.token).toBe('string')
-
-      // Đổ chuông Bob, không tự đổ chuông người gọi (Alice).
+      expect(ack.authToken).toBe('token-alice')
+      expect(ack).not.toHaveProperty('url')
+      expect(rtkStub.addParticipant).toHaveBeenCalledWith('conv-1', {
+        userId: 'alice',
+        name: 'Alice',
+        preset: 'daln_group_audio',
+      })
+      expect(
+        (await store.getByConversationId('conv-1'))?.rtkGrants,
+      ).toHaveLength(1)
       expect(to).toHaveBeenCalledWith('user:bob')
       expect(to).not.toHaveBeenCalledWith('user:alice')
-      expect(emitted).toHaveBeenCalledWith(
-        'group_call.incoming',
-        expect.objectContaining({
-          callId: ack.callId,
-          conversationId: 'conv-1',
-          roomName: 'conv_conv-1',
-          from: { id: 'alice', username: 'Alice' },
-        }),
-      )
     })
 
-    it('LiveKit chưa cấu hình -> ack LIVEKIT_UNCONFIGURED', async () => {
-      delete process.env.LIVEKIT_API_SECRET
+    it('RealtimeKit chưa cấu hình -> MEDIA_UNCONFIGURED', async () => {
+      rtkStub.isConfigured.mockReturnValue(false)
       respond(200, { members, type: 'GROUP' })
 
       const ack = await gateway.handleGroupCallStart(
-        { conversationId: 'conv-1' },
+        { v: 2, conversationId: 'conv-1' },
         socketOf('alice'),
       )
 
       expect(ack).toEqual(
-        expect.objectContaining({ ok: false, code: 'LIVEKIT_UNCONFIGURED' }),
+        expect.objectContaining({ ok: false, code: 'MEDIA_UNCONFIGURED' }),
       )
     })
 
-    it('accept: thành viên -> cấp token; người ngoài -> NOT_MEMBER', async () => {
+    it('API media lỗi khi mở phòng -> MEDIA_UNAVAILABLE, không đổ chuông', async () => {
+      respond(200, { members, type: 'GROUP' })
+      rtkStub.addParticipant.mockRejectedValueOnce(new Error('down'))
+
+      const ack = await gateway.handleGroupCallStart(
+        { v: 2, conversationId: 'conv-1' },
+        socketOf('alice'),
+      )
+
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'MEDIA_UNAVAILABLE' }),
+      )
+      expect(emitted).not.toHaveBeenCalledWith(
+        'group_call.incoming',
+        expect.anything(),
+      )
+    })
+
+    it('accept: thành viên -> authToken theo preset của phòng; người ngoài -> NOT_MEMBER', async () => {
       const created = await store.getOrCreate({
         conversationId: 'conv-1',
         startedBy: 'alice',
         members,
+        callType: 'video',
       })
-
-      // accept giờ revalidate quyền hiện tại qua chat -> mock trả members.
       respond(200, { members, type: 'GROUP' })
 
       const ok = expectOk(
         await gateway.handleGroupCallAccept(
-          { callId: created.callId },
+          { v: 2, callId: created.callId },
           socketOf('bob'),
         ),
       )
-      expect(typeof ok.token).toBe('string')
-      expect(ok.url).toBe('ws://localhost:7880')
+      expect(ok.authToken).toBe('token-bob')
+      expect(rtkStub.addParticipant).toHaveBeenCalledWith('conv-1', {
+        userId: 'bob',
+        name: 'Bob',
+        preset: 'daln_group_video',
+      })
 
       const denied = await gateway.handleGroupCallAccept(
-        { callId: created.callId },
+        { v: 2, callId: created.callId },
         socketOf('stranger'),
       )
       expect(denied).toEqual(
@@ -706,26 +951,89 @@ describe('RealtimeGateway', () => {
       )
     })
 
-    it('webhook room_finished: ghi group-call-log, phát ended, xoá phiên', async () => {
+    it('API media lỗi khi accept -> MEDIA_UNAVAILABLE và nhả khoá bận', async () => {
       const created = await store.getOrCreate({
         conversationId: 'conv-1',
         startedBy: 'alice',
         members,
       })
-      await store.addParticipant('conv-1', { id: 'alice', username: 'Alice' })
-      await store.addParticipant('conv-1', { id: 'bob', username: 'Bob' })
+      respond(200, { members, type: 'GROUP' })
+      rtkStub.addParticipant.mockRejectedValueOnce(new Error('down'))
+
+      const ack = await gateway.handleGroupCallAccept(
+        { v: 2, callId: created.callId },
+        socketOf('bob'),
+      )
+
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'MEDIA_UNAVAILABLE' }),
+      )
+      expect(redisStub.eval).toHaveBeenCalled()
+    })
+
+    it('webhook participantJoined: vào roster, phát state; người ngoài danh sách bị bỏ qua', async () => {
+      await openRoom()
+
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantJoined', 'bob'),
+      )
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantJoined', 'mallory'),
+      )
+
+      const session = await store.getByConversationId('conv-1')
+      expect(Object.keys(session?.participants ?? {})).toEqual(['bob.0a0b0c0d'])
+      expect(emitted).toHaveBeenCalledWith(
+        'group_call.state',
+        expect.objectContaining({
+          participants: [{ id: 'bob', username: 'Bob' }],
+        }),
+      )
+    })
+
+    it('webhook của phòng lạ hoặc phòng 1-1 thì bỏ qua', async () => {
+      await gateway.applyRtkWebhook({
+        event: 'meeting.participantJoined',
+        meetingId: 'meeting-khac',
+        customParticipantId: 'bob.00000001',
+      })
+      expect(emitted).not.toHaveBeenCalled()
+    })
+
+    it('người cuối rời -> 15 giây sau: ghi log, phát ended, thu hồi media, đúng một lần', async () => {
+      jest.useFakeTimers()
+      const created = await openRoom()
+      const grant = {
+        meetingId: 'meeting-conv-1',
+        participantId: 'p9',
+        customParticipantId: 'alice.0a0b0c0d',
+      }
+      await store.addGrant('conv-1', grant)
       respond(200)
 
-      await gateway.applyLivekitWebhook({
-        event: 'room_finished',
-        room: { name: 'conv_conv-1' },
-      })
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantJoined', 'alice'),
+      )
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantJoined', 'bob'),
+      )
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantLeft', 'alice'),
+      )
+      await gateway.applyRtkWebhook(rtkEvent('meeting.participantLeft', 'bob'))
 
-      const logCall = fetchMock.mock.calls.find(([url]) =>
+      // Chưa hết 15 giây: phòng còn.
+      await jest.advanceTimersByTimeAsync(14_000)
+      expect(await store.getByConversationId('conv-1')).not.toBeNull()
+
+      await jest.advanceTimersByTimeAsync(1_000)
+      expect(await store.getByConversationId('conv-1')).toBeNull()
+
+      const logCalls = fetchMock.mock.calls.filter(([url]) =>
         url.includes('/chat/internal/group-call-log'),
       )
-      expect(logCall?.[1]?.method).toBe('POST')
-      const body = JSON.parse(logCall?.[1]?.body as string) as Record<
+      expect(logCalls).toHaveLength(1)
+      const body = JSON.parse(logCalls[0][1]?.body as string) as Record<
         string,
         unknown
       >
@@ -735,8 +1043,6 @@ describe('RealtimeGateway', () => {
           participantCount: 2,
         }),
       )
-      expect(typeof body.durationSeconds).toBe('number')
-
       expect(emitted).toHaveBeenCalledWith(
         'group_call.ended',
         expect.objectContaining({
@@ -744,7 +1050,214 @@ describe('RealtimeGateway', () => {
           conversationId: 'conv-1',
         }),
       )
+      expect(rtkStub.revoke).toHaveBeenCalledWith(
+        expect.arrayContaining([grant]),
+      )
+
+      // meeting.ended tới muộn: finish đã chạy -> không ghi log lần hai.
+      await gateway.applyRtkWebhook(rtkEvent('meeting.ended'))
+      expect(
+        fetchMock.mock.calls.filter(([url]) =>
+          url.includes('/chat/internal/group-call-log'),
+        ),
+      ).toHaveLength(1)
+    })
+
+    it('rời rồi vào lại trong 15 giây -> không kết thúc', async () => {
+      jest.useFakeTimers()
+      await openRoom()
+
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantJoined', 'alice'),
+      )
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantLeft', 'alice'),
+      )
+      await jest.advanceTimersByTimeAsync(5_000)
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantJoined', 'alice'),
+      )
+      await jest.advanceTimersByTimeAsync(20_000)
+
+      expect(await store.getByConversationId('conv-1')).not.toBeNull()
+    })
+
+    it('meeting.ended kết thúc ngay', async () => {
+      await openRoom()
+      respond(200)
+      // Đã có người vào rồi rời (phòng trống) — meeting.ended kết thúc ngay,
+      // không chờ bộ đếm 15 giây.
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantJoined', 'alice'),
+      )
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantLeft', 'alice'),
+      )
+
+      await gateway.applyRtkWebhook(rtkEvent('meeting.ended'))
+
       expect(await store.getByConversationId('conv-1')).toBeNull()
+      expect(emitted).toHaveBeenCalledWith(
+        'group_call.ended',
+        expect.anything(),
+      )
+    })
+
+    it('group_call.leave của người cuối cũng khởi động bộ đếm 15 giây', async () => {
+      jest.useFakeTimers()
+      const created = await store.getOrCreate({
+        conversationId: 'conv-1',
+        startedBy: 'alice',
+        members,
+      })
+      respond(200)
+      await gateway.applyRtkWebhook(
+        rtkEvent('meeting.participantJoined', 'alice'),
+      )
+
+      await gateway.handleGroupCallLeave(
+        { callId: created.callId },
+        socketOf('alice'),
+      )
+      await jest.advanceTimersByTimeAsync(15_000)
+
+      expect(await store.getByConversationId('conv-1')).toBeNull()
+    })
+
+    it('webhook của người tham gia KHÔNG được cấp trong cuộc gọi này thì bỏ qua', async () => {
+      await openRoom()
+      // bob là thành viên nhưng custom id này không phải grant của cuộc gọi hiện
+      // tại (token cũ từ cuộc gọi trước trên cùng phòng RealtimeKit).
+      await gateway.applyRtkWebhook(
+        ev('meeting.participantJoined', 'bob.deadbeef'),
+      )
+      const session = await store.getByConversationId('conv-1')
+      expect(GroupCallStore.participantList(session!)).toEqual([])
+    })
+
+    it('tab cũ rời SAU khi tab mới đã vào -> người đó vẫn trong cuộc, không kết thúc', async () => {
+      jest.useFakeTimers()
+      await openRoom()
+      const fresh = await grantFor('alice', '11111111')
+      respond(200)
+
+      await gateway.applyRtkWebhook(
+        ev('meeting.participantJoined', 'alice.0a0b0c0d'),
+      )
+      await gateway.applyRtkWebhook(
+        ev('meeting.participantJoined', fresh.customParticipantId),
+      )
+      await gateway.applyRtkWebhook(
+        ev('meeting.participantLeft', 'alice.0a0b0c0d'),
+      )
+      await jest.advanceTimersByTimeAsync(20_000)
+
+      const session = await store.getByConversationId('conv-1')
+      expect(session).not.toBeNull()
+      expect(GroupCallStore.participantList(session!)).toEqual([
+        { id: 'alice', username: 'Alice' },
+      ])
+    })
+
+    it('meeting.ended tới muộn (của phiên trước) không kết thúc cuộc gọi đang đổ chuông', async () => {
+      await openRoom()
+      respond(200)
+
+      await gateway.applyRtkWebhook(ev('meeting.ended'))
+
+      expect(await store.getByConversationId('conv-1')).not.toBeNull()
+      expect(emitted).not.toHaveBeenCalledWith(
+        'group_call.ended',
+        expect.anything(),
+      )
+    })
+
+    it('rời khi phiên đã mất vẫn nhả khoá bận', async () => {
+      await gateway.handleGroupCallLeave(
+        { callId: '99999999-2222-4333-8444-555555555555' },
+        socketOf('bob'),
+      )
+      expect(redisStub.eval).toHaveBeenCalled()
+    })
+
+    it('phiên kết thúc trong lúc đang cấp media khi accept -> CALL_NOT_FOUND, thu hồi grant, nhả khoá', async () => {
+      const created = await store.getOrCreate({
+        conversationId: 'conv-1',
+        startedBy: 'alice',
+        members,
+      })
+      respond(200, { members, type: 'GROUP' })
+      rtkStub.addParticipant.mockImplementationOnce(async () => {
+        await store.finish('conv-1')
+        return {
+          meetingId: 'meeting-conv-1',
+          participantId: 'p-late',
+          customParticipantId: 'bob.late0000',
+          authToken: 'token-bob',
+        }
+      })
+
+      const ack = await gateway.handleGroupCallAccept(
+        { v: 2, callId: created.callId },
+        socketOf('bob'),
+      )
+
+      expect(ack).toEqual(
+        expect.objectContaining({ ok: false, code: 'CALL_NOT_FOUND' }),
+      )
+      expect(rtkStub.revoke).toHaveBeenCalledWith([
+        {
+          meetingId: 'meeting-conv-1',
+          participantId: 'p-late',
+          customParticipantId: 'bob.late0000',
+        },
+      ])
+      expect(redisStub.eval).toHaveBeenCalled()
+    })
+
+    it('kết thúc nhả khoá bận cả cho người đã nhận nhưng chưa kịp vào phòng', async () => {
+      await openRoom()
+      respond(200)
+      await gateway.applyRtkWebhook(
+        ev('meeting.participantJoined', 'alice.0a0b0c0d'),
+      )
+      await gateway.applyRtkWebhook(
+        ev('meeting.participantLeft', 'alice.0a0b0c0d'),
+      )
+      redisStub.eval.mockClear()
+
+      await gateway.applyRtkWebhook(ev('meeting.ended'))
+
+      const releasedKeys = (
+        redisStub.eval.mock.calls as unknown as unknown[][]
+      ).map((args) => args.map(String).join(' '))
+      expect(releasedKeys.some((a) => a.includes('callbusy:bob'))).toBe(true)
+    })
+
+    it('hết 35 giây mà cuộc gọi đã có người tham gia -> ghi nhật ký, không xoá lặng lẽ', async () => {
+      jest.useFakeTimers()
+      await openRoom()
+      respond(200, { members, type: 'GROUP' })
+      await gateway.applyRtkWebhook(
+        ev('meeting.participantJoined', 'alice.0a0b0c0d'),
+      )
+      // bob bấm "Gọi nhóm" khi phòng đang có người: hẹn 35 giây được đặt lại.
+      await gateway.handleGroupCallStart(
+        { v: 2, conversationId: 'conv-1' },
+        socketOf('bob'),
+      )
+      await jest.advanceTimersByTimeAsync(25_000)
+      respond(200)
+      await gateway.applyRtkWebhook(
+        ev('meeting.participantLeft', 'alice.0a0b0c0d'),
+      )
+      await jest.advanceTimersByTimeAsync(10_000)
+
+      expect(await store.getByConversationId('conv-1')).toBeNull()
+      const logCalls = fetchMock.mock.calls.filter(([url]) =>
+        url.includes('/chat/internal/group-call-log'),
+      )
+      expect(logCalls).toHaveLength(1)
     })
   })
 

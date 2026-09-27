@@ -428,6 +428,18 @@ services:
     ports:
       - "3004:3004"
 
+  # Tunnel tạm để webhook RealtimeKit (Cloudflare) gọi được gateway đang chạy ở
+  # máy dev. Chỉ chạy khi cần: `npm run rtk:dev-tunnel` (profile rtk).
+  rtk-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: daln-rtk-tunnel
+    profiles: ['rtk']
+    command: tunnel --no-autoupdate --url http://realtime-gateway:3001
+    depends_on:
+      - realtime-gateway
+    networks:
+      - backend
+
   realtime-gateway:
     <<: *app-common
     container_name: daln-realtime

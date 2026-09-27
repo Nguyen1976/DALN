@@ -5,7 +5,8 @@
   "description": "Bộ QC chạy tay cho luồng xác thực: API matrix + trình duyệt thật",
   "scripts": {
     "api": "bash ./auth-api.sh",
-    "browser": "node ./auth-browser.mjs"
+    "browser": "node ./auth-browser.mjs",
+    "calls": "node ./calls-browser.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "^23.11.1"

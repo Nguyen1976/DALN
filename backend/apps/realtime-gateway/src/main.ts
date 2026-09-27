@@ -8,13 +8,9 @@ async function bootstrap() {
   // Deploy gửi SIGTERM: đóng kết nối gọn rồi thoát, thay vì chờ Docker SIGKILL.
   app.enableShutdownHooks()
 
-  // Webhook LiveKit cần body THÔ để verify chữ ký (LiveKit gửi
-  // `application/webhook+json`, mà JSON parser mặc định của Nest bỏ qua
-  // content-type này). Gắn raw parser CHỈ cho đúng path webhook — mọi route
-  // khác và socket.io (transport riêng, không qua body parser) không ảnh hưởng.
-  // `limit` là thứ trước đây thiếu: parser này nhận MỌI content-type nên không
-  // có trần thì một request vài trăm MB cũng được đọc hết vào bộ nhớ.
-  app.use('/livekit/webhook', raw({ type: () => true, limit: '256kb' }))
+  // Webhook RealtimeKit cần body THÔ để xác thực chữ ký RSA trên đúng byte gốc.
+  // Chỉ gắn raw parser cho đúng path này; `limit` chặn request khổng lồ.
+  app.use('/realtime/rtk-webhook', raw({ type: () => true, limit: '256kb' }))
   app.use(securityHeaders())
   app.enableCors(corsOptions())
   const redisIoAdapter = new RedisIoAdapter(app)

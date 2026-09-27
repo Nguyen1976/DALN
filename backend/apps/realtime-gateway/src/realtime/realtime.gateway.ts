@@ -30,11 +30,9 @@ import {
   SessionStore,
 } from '@app/common'
 import { randomUUID } from 'crypto'
-import { buildIceConfig } from './turn-credentials'
 import { CallSession, CallSessionStore, isCallId } from './call-session.store'
 import { CallBusyStore } from './call-busy.store'
 import {
-  conversationIdFromRoom,
   GroupCallMember,
   GroupCallSession,
   GroupCallStore,
@@ -45,11 +43,9 @@ import {
   fetchCallPeer,
   postGroupCallLog,
 } from './chat.client'
-import {
-  buildGroupCallToken,
-  getLivekitUrl,
-  isLivekitConfigured,
-} from './livekit-token'
+import { RealtimeKitService } from './realtimekit.service'
+import { presetFor, RtkGrant, userIdFromCustomId } from './realtimekit.types'
+import type { RtkWebhookEvent } from './rtk-webhook'
 import type {
   CallBody,
   ClientSocket,
@@ -74,6 +70,25 @@ function sidOf(socket: { data?: unknown }): string | undefined {
 
 function callError(code: string, message: string): CallAck {
   return { ok: false, code, message }
+}
+
+/**
+ * Client chạy JS trước khi chuyển sang RealtimeKit: vẫn gửi SDP, hoặc chưa gửi
+ * `v: 2`. Trả CLIENT_OUTDATED để nó nhắc người dùng tải lại trang, thay vì kẹt ở
+ * một luồng media mà server không còn phục vụ.
+ */
+export function isLegacyCallPayload(data: CallBody | undefined): boolean {
+  if (!data) return true
+  return data.v !== 2 || data.offer !== undefined || data.answer !== undefined
+}
+
+/** Grant để lưu vào Redis: bỏ authToken (token chỉ đi trong ack). */
+function grantOf(grant: RtkGrant & { authToken?: string }): RtkGrant {
+  return {
+    meetingId: grant.meetingId,
+    participantId: grant.participantId,
+    customParticipantId: grant.customParticipantId,
+  }
 }
 
 //nếu k đặt tên cổng thì nó sẽ trùng với cổng của http
@@ -105,6 +120,9 @@ export class RealtimeGateway
   /** Hẹn huỷ phòng nhóm chưa ai vào (theo callId). Chỉ sống trong process này. */
   private readonly groupPendingTimers = new Map<string, NodeJS.Timeout>()
   private readonly groupPendingMs = 35000
+  /** Phòng nhóm trống (người cuối vừa rời): chờ ai đó rớt mạng vào lại. */
+  private readonly groupEmptyTimers = new Map<string, NodeJS.Timeout>()
+  private readonly groupEmptyMs = 15000
   // Không còn timer 25s cho mỗi socket: `pong` của Socket.IO (pingInterval
   // 40s, pingTimeout 10s -> tối đa 50s giữa hai lần) đã gia hạn TTL 90s của
   // key socket, dư 1,8 lần biên an toàn. Timer server-side còn có hại: nó gia
@@ -200,6 +218,7 @@ export class RealtimeGateway
     private readonly redisClient: Redis,
     private readonly amqpConnection: AmqpConnection,
     private readonly sessions: SessionStore,
+    private readonly rtk: RealtimeKitService,
   ) {
     this.userStatusStore = new UserStatusStore(this.redisClient)
     this.callSessionStore = new CallSessionStore(this.redisClient)
@@ -578,22 +597,6 @@ export class RealtimeGateway
   }
 
   /**
-   * Cấp STUN/TURN cho trình duyệt ngay trước khi gọi.
-   *
-   * Trả qua ack chứ không broadcast: mật khẩu TURN gắn với một người dùng và
-   * chỉ sống một giờ, không có lý do gì để nó đi tới socket khác.
-   */
-  @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CONFIG)
-  handleIceConfig(@ConnectedSocket() client: ClientSocket): CallAck {
-    const userId = client.data.userId
-    if (!userId) {
-      return callError('UNAUTHORIZED', 'Unauthorized socket client')
-    }
-
-    return { ok: true, ...buildIceConfig(userId) }
-  }
-
-  /**
    * Nạp phiên cuộc gọi và kiểm người gửi có thuộc phiên không.
    *
    * Mọi sự kiện `call.*` sau lúc đổ chuông đều đi qua đây: không có chốt này
@@ -647,15 +650,18 @@ export class RealtimeGateway
       return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
-    const offer = data?.offer
+    if (isLegacyCallPayload(data)) {
+      return callError('CLIENT_OUTDATED', 'Client is outdated, reload the page')
+    }
+
     const conversationId =
       typeof data?.conversationId === 'string' ? data.conversationId.trim() : ''
+    if (!conversationId) {
+      return callError('INVALID_PAYLOAD', 'conversationId is required')
+    }
 
-    if (!offer || !conversationId) {
-      return callError(
-        'INVALID_PAYLOAD',
-        'offer and conversationId are required',
-      )
+    if (!this.rtk.isConfigured()) {
+      return callError('MEDIA_UNCONFIGURED', 'Calling is not configured')
     }
 
     const peer = await fetchCallPeer(conversationId, callerId)
@@ -668,49 +674,60 @@ export class RealtimeGateway
       )
     }
 
-    // Mặc định audio để tương thích client cũ chưa gửi callType. cameraEnabled là
-    // trạng thái từng người, không đổi callType (một người tắt camera ≠ audio call).
+    // Mặc định audio. cameraEnabled là trạng thái từng người, không đổi callType
+    // (một người tắt camera ≠ audio call).
     const callType = data?.callType === 'video' ? 'video' : 'audio'
+    const callId = randomUUID()
+
+    // Busy: người gọi phải đang rảnh, và người nhận không kẹt cuộc gọi khác.
+    // Chốt ở server để nhiều tab / cuộc gọi chồng chéo không tranh phiên.
+    if (!(await this.callBusyStore.acquire(callerId, callId))) {
+      return callError('BUSY', 'You are already in a call')
+    }
+    if (await this.callBusyStore.isBusy(peer.peerId, callId)) {
+      await this.callBusyStore.release(callerId, callId)
+      return callError('CALLEE_BUSY', 'The other person is in another call')
+    }
+
+    // Người gọi vào phòng RealtimeKit ngay (đứng chờ trong lúc đổ chuông), nên
+    // cấp media TRƯỚC khi đổ chuông; lỗi thì nhả khoá, không để ai kẹt "bận".
+    let grant: RtkGrant & { authToken: string }
+    try {
+      grant = await this.rtk.addParticipant(conversationId, {
+        userId: callerId,
+        name: callerId,
+        preset: presetFor('direct', callType),
+      })
+    } catch (error) {
+      this.logger.warn(`cấp media cho cuộc gọi ${callId} thất bại`, error)
+      await this.callBusyStore.release(callerId, callId)
+      return callError('MEDIA_UNAVAILABLE', 'Could not start the call')
+    }
 
     const session: CallSession = {
-      callId: randomUUID(),
+      callId,
       callerId,
       calleeId: peer.peerId,
       conversationId,
       status: 'ringing',
       callType,
       startedAt: Date.now(),
+      rtkGrants: [grantOf(grant)],
     }
-
-    // Busy: người gọi phải đang rảnh, và người nhận không kẹt cuộc gọi khác.
-    // Chốt ở server để nhiều tab / cuộc gọi chồng chéo không tranh phiên.
-    if (!(await this.callBusyStore.acquire(callerId, session.callId))) {
-      return callError('BUSY', 'You are already in a call')
-    }
-    if (await this.callBusyStore.isBusy(session.calleeId, session.callId)) {
-      await this.callBusyStore.release(callerId, session.callId)
-      return callError('CALLEE_BUSY', 'The other person is in another call')
-    }
-
     await this.callSessionStore.create(session)
 
     this.emitToUserSockets(
       [session.calleeId],
       SOCKET_EVENTS.CALL.INCOMING_CALL,
-      {
-        callId: session.callId,
-        callerId,
-        conversationId,
-        callType,
-        offer,
-      },
+      { callId, callerId, conversationId, callType },
     )
 
     return {
       ok: true,
-      callId: session.callId,
+      callId,
       calleeId: session.calleeId,
       callType,
+      authToken: grant.authToken,
     }
   }
 
@@ -724,8 +741,8 @@ export class RealtimeGateway
       return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
-    if (!data?.answer) {
-      return callError('INVALID_PAYLOAD', 'answer is required')
+    if (isLegacyCallPayload(data)) {
+      return callError('CLIENT_OUTDATED', 'Client is outdated, reload the page')
     }
 
     const loaded = await this.loadCallSession(data?.callId, userId)
@@ -751,11 +768,39 @@ export class RealtimeGateway
     if (!(await this.callBusyStore.acquire(userId, session.callId))) {
       return callError('BUSY', 'You are already in a call')
     }
+
+    let grant: RtkGrant & { authToken: string }
+    try {
+      grant = await this.rtk.addParticipant(session.conversationId, {
+        userId,
+        name: userId,
+        preset: presetFor('direct', session.callType),
+      })
+    } catch (error) {
+      this.logger.warn(
+        `cấp media khi nghe máy ${session.callId} thất bại`,
+        error,
+      )
+      await this.callBusyStore.release(userId, session.callId)
+      await this.callSessionStore.releaseAccept(session.callId)
+      return callError('MEDIA_UNAVAILABLE', 'Could not start the call')
+    }
+
     // Đã kết nối: gia hạn khoá bận của cả hai lên TTL dài.
     await this.callBusyStore.refresh(userId, session.callId)
     await this.callBusyStore.refresh(session.callerId, session.callId)
 
-    await this.callSessionStore.markConnected(session)
+    const connected = await this.callSessionStore.markConnected({
+      ...session,
+      rtkGrants: [...(session.rtkGrants ?? []), grantOf(grant)],
+    })
+    if (!connected) {
+      // Người gọi cúp máy trong lúc đang cấp media: phiên đã đóng, không dựng lại.
+      void this.rtk.revoke([grantOf(grant)])
+      await this.callBusyStore.release(userId, session.callId)
+      await this.callSessionStore.releaseAccept(session.callId)
+      return callError('CALL_NOT_FOUND', 'Call session no longer exists')
+    }
 
     // Báo các tab KHÁC của người nhận đóng màn hình chuông. Dùng broadcast để
     // LOẠI TRỪ chính socket vừa bắt máy — nếu không, tab đang nghe cũng nhận
@@ -767,14 +812,10 @@ export class RealtimeGateway
     this.emitToUserSockets(
       [session.callerId],
       SOCKET_EVENTS.CALL.CALL_ACCEPTED,
-      {
-        callId: session.callId,
-        answer: data.answer,
-        answererId: userId,
-      },
+      { callId: session.callId, answererId: userId },
     )
 
-    return { ok: true, callId: session.callId }
+    return { ok: true, callId: session.callId, authToken: grant.authToken }
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CALL.CALL_REJECTED)
@@ -813,6 +854,7 @@ export class RealtimeGateway
         outcome: 'REJECTED',
         callType: session.callType,
       })
+      void this.rtk.revoke(session.rtkGrants ?? [])
     }
 
     await this.releaseDirectBusy(session)
@@ -855,6 +897,8 @@ export class RealtimeGateway
     if (!(await this.callSessionStore.end(session.callId))) {
       return { ok: true, callId: session.callId }
     }
+
+    void this.rtk.revoke(session.rtkGrants ?? [])
 
     this.recordCallOutcome({
       conversationId: session.conversationId,
@@ -914,79 +958,10 @@ export class RealtimeGateway
     await this.callBusyStore.release(session.calleeId, session.callId)
   }
 
-  @SubscribeMessage(SOCKET_EVENTS.CALL.ICE_CANDIDATE)
-  async handleIceCandidate(
-    @MessageBody() data: CallBody | undefined,
-    @ConnectedSocket() client: ClientSocket,
-  ): Promise<CallAck> {
-    const senderId = client.data.userId
-    if (!senderId) {
-      return callError('UNAUTHORIZED', 'Unauthorized socket client')
-    }
-
-    if (!data?.candidate) {
-      return callError('INVALID_PAYLOAD', 'candidate is required')
-    }
-
-    const loaded = await this.loadCallSession(data?.callId, senderId)
-    if (!loaded.ok) return loaded.ack
-
-    const { session } = loaded
-
-    // Chuyển tiếp ICE candidate cho đối phương của đúng phiên này.
-    this.emitToUserSockets(
-      [CallSessionStore.peerOf(session, senderId)],
-      SOCKET_EVENTS.CALL.ICE_CANDIDATE,
-      {
-        callId: session.callId,
-        senderId,
-        candidate: data.candidate,
-      },
-    )
-
-    return { ok: true, callId: session.callId }
-  }
-
-  /**
-   * Chuyển tiếp trạng thái camera/micro của một bên cho bên kia (1-1). Đây là
-   * NGUỒN SỰ THẬT để hiển thị avatar/khung video, thay vì dựa vào sự kiện `mute`
-   * của RTP track (replaceTrack(null) không phát `mute` đáng tin) — khiến bên kia
-   * thấy khung hình đứng hình khi tắt camera.
-   */
-  @SubscribeMessage(SOCKET_EVENTS.CALL.MEDIA_STATE)
-  async handleCallMediaState(
-    @MessageBody() data: CallBody | undefined,
-    @ConnectedSocket() client: ClientSocket,
-  ): Promise<CallAck> {
-    const senderId = client.data.userId
-    if (!senderId) {
-      return callError('UNAUTHORIZED', 'Unauthorized socket client')
-    }
-
-    const loaded = await this.loadCallSession(data?.callId, senderId)
-    if (!loaded.ok) return loaded.ack
-
-    const { session } = loaded
-
-    this.emitToUserSockets(
-      [CallSessionStore.peerOf(session, senderId)],
-      SOCKET_EVENTS.CALL.MEDIA_STATE,
-      {
-        callId: session.callId,
-        senderId,
-        cameraEnabled: data?.cameraEnabled === true,
-        micEnabled: data?.micEnabled !== false,
-      },
-    )
-
-    return { ok: true, callId: session.callId }
-  }
-
-  // ── Gọi nhóm (GROUP) qua SFU LiveKit ────────────────────────────────────
+  // ── Gọi nhóm (GROUP) qua Cloudflare RealtimeKit ─────────────────────────
   //
-  // Song song với cụm CALL.* 1-1 ở trên nhưng khác bản chất: LiveKit làm SFU nên
-  // gateway không chuyển tiếp SDP/ICE — nó chỉ phân quyền, ký token vào phòng, và
-  // giữ trạng thái "ai đang trong cuộc" (nguồn sự thật cuối là webhook LiveKit).
+  // Gateway không chuyển tiếp media: nó phân quyền, cấp người tham gia
+  // RealtimeKit, và giữ "ai đang trong cuộc" (nguồn sự thật cuối là webhook).
 
   /**
    * Hỏi một hội thoại nhóm có phòng gọi đang mở không (banner "Tham gia" khi mở
@@ -1061,6 +1036,10 @@ export class RealtimeGateway
       return callError('UNAUTHORIZED', 'Unauthorized socket client')
     }
 
+    if (isLegacyCallPayload(data)) {
+      return callError('CLIENT_OUTDATED', 'Client is outdated, reload the page')
+    }
+
     const conversationId =
       typeof data?.conversationId === 'string' ? data.conversationId.trim() : ''
     if (!conversationId) {
@@ -1084,13 +1063,8 @@ export class RealtimeGateway
       )
     }
 
-    // Kiểm cấu hình LiveKit trước khi tạo phiên, để không để lại phòng mồ côi khi
-    // chưa dựng LiveKit (buildGroupCallToken sẽ không null nếu đã cấu hình).
-    if (!isLivekitConfigured()) {
-      return callError(
-        'LIVEKIT_UNCONFIGURED',
-        'Group calling is not configured',
-      )
+    if (!this.rtk.isConfigured()) {
+      return callError('MEDIA_UNCONFIGURED', 'Calling is not configured')
     }
 
     const callType: 'audio' | 'video' =
@@ -1100,7 +1074,7 @@ export class RealtimeGateway
       callerId
 
     // Phòng đã mở giữ nguyên callType của nó: bấm "video" khi đang có phòng audio
-    // sẽ vào phòng audio (không tự nâng cấp) — token cấp theo session.callType.
+    // sẽ vào phòng audio (không tự nâng cấp) — preset cấp theo session.callType.
     const session = await this.groupCallStore.getOrCreate({
       conversationId,
       startedBy: callerId,
@@ -1108,34 +1082,35 @@ export class RealtimeGateway
       callType,
     })
 
-    const token = await buildGroupCallToken({
-      userId: callerId,
-      username: callerName,
-      roomName: session.roomName,
-      callType: session.callType,
-    })
-    if (!token) {
-      return callError(
-        'LIVEKIT_UNCONFIGURED',
-        'Group calling is not configured',
-      )
-    }
-
-    // Hẹn huỷ nếu không ai vào phòng: phòng nhóm tạo TRƯỚC khi có ai connect
-    // LiveKit, nên nếu tất cả bỏ chuông sẽ không có room_finished — timer này dọn
-    // phiên treo (và chuông) sau ~35s. participant_joined sẽ huỷ timer.
+    // Hẹn huỷ nếu không ai vào phòng (35s): chạy cả khi các bước dưới thất bại,
+    // để phòng vừa mở không treo lại. participantJoined sẽ huỷ timer.
     this.scheduleGroupPendingCancel(session)
 
-    // Người gọi phải rảnh; đang kẹt cuộc khác thì không đổ chuông (phòng vừa mở
-    // sẽ tự huỷ theo timer trên). Idempotent khi mở lại chính phòng này.
     if (
       !(await this.callBusyStore.acquire(callerId, session.callId, 4 * 60 * 60))
     ) {
       return callError('BUSY', 'You are already in a call')
     }
 
-    // Đổ chuông các thành viên khác. Ai offline thì room `user:<id>` rỗng nên
-    // emit là no-op — không cần lọc trước.
+    let grant: RtkGrant & { authToken: string }
+    try {
+      grant = await this.rtk.addParticipant(conversationId, {
+        userId: callerId,
+        name: callerName,
+        preset: presetFor('group', session.callType),
+      })
+    } catch (error) {
+      this.logger.warn(
+        `cấp media cho cuộc gọi nhóm ${session.callId} thất bại`,
+        error,
+      )
+      await this.callBusyStore.release(callerId, session.callId)
+      return callError('MEDIA_UNAVAILABLE', 'Could not start the call')
+    }
+    if (!(await this.keepGroupGrant(session, callerId, grant))) {
+      return callError('CALL_NOT_FOUND', 'Group call no longer exists')
+    }
+
     this.emitToUserSockets(
       lookup.members
         .filter((member) => member.id !== callerId)
@@ -1155,10 +1130,7 @@ export class RealtimeGateway
       callId: session.callId,
       roomName: session.roomName,
       callType: session.callType,
-      url: getLivekitUrl(),
-      token,
-      // coturn làm TURN cho LiveKit (thiết kế mục 04 ①) — xem group_call.accept.
-      iceServers: buildIceConfig(callerId).iceServers,
+      authToken: grant.authToken,
     }
   }
 
@@ -1176,6 +1148,10 @@ export class RealtimeGateway
     const userId = client.data.userId
     if (!userId) {
       return callError('UNAUTHORIZED', 'Unauthorized socket client')
+    }
+
+    if (isLegacyCallPayload(data)) {
+      return callError('CLIENT_OUTDATED', 'Client is outdated, reload the page')
     }
 
     if (!isGroupCallId(data?.callId)) {
@@ -1211,28 +1187,29 @@ export class RealtimeGateway
     const username =
       session.members.find((member) => member.id === userId)?.username || userId
 
-    const token = await buildGroupCallToken({
-      userId,
-      username,
-      roomName: session.roomName,
-      callType: session.callType,
-    })
-    if (!token) {
-      return callError(
-        'LIVEKIT_UNCONFIGURED',
-        'Group calling is not configured',
+    let grant: RtkGrant & { authToken: string }
+    try {
+      grant = await this.rtk.addParticipant(session.conversationId, {
+        userId,
+        name: username,
+        preset: presetFor('group', session.callType),
+      })
+    } catch (error) {
+      this.logger.warn(
+        `cấp media khi vào nhóm ${session.callId} thất bại`,
+        error,
       )
+      await this.callBusyStore.release(userId, session.callId)
+      return callError('MEDIA_UNAVAILABLE', 'Could not join the call')
+    }
+    if (!(await this.keepGroupGrant(session, userId, grant))) {
+      return callError('CALL_NOT_FOUND', 'Group call no longer exists')
     }
 
     return {
       ok: true,
-      url: getLivekitUrl(),
-      token,
       callType: session.callType,
-      // coturn làm TURN cho LiveKit (thiết kế mục 04 ①): client sau NAT chặt/UDP
-      // bị chặn vẫn tới được SFU qua relay. Additive — không ép relay, đường trực
-      // tiếp vẫn ưu tiên.
-      iceServers: buildIceConfig(userId).iceServers,
+      authToken: grant.authToken,
     }
   }
 
@@ -1264,8 +1241,8 @@ export class RealtimeGateway
   }
 
   /**
-   * Rời phòng gọi nhóm. Client tự ngắt khỏi LiveKit; đây chỉ là cập nhật lạc
-   * quan — webhook `participant_left` mới là nguồn sự thật cuối và cũng idempotent.
+   * Rời phòng gọi nhóm. Client tự rời phòng RealtimeKit; đây chỉ là cập nhật lạc
+   * quan — webhook `participantLeft` mới là nguồn sự thật cuối và cũng idempotent.
    */
   @SubscribeMessage(SOCKET_EVENTS.GROUP_CALL.LEAVE)
   async handleGroupCallLeave(
@@ -1283,53 +1260,82 @@ export class RealtimeGateway
 
     const session = await this.groupCallStore.getByCallId(data.callId)
     if (!session || !GroupCallStore.isMember(session, userId)) {
+      // Phiên đã đóng (hoặc chưa từng thuộc về người này): vẫn nhả khoá bận —
+      // release so khớp callId nên không đụng khoá của cuộc gọi khác.
+      await this.callBusyStore.release(userId, data.callId)
       return { ok: true }
     }
 
-    const updated = await this.groupCallStore.removeParticipant(
+    const updated = await this.groupCallStore.removeUser(
       session.conversationId,
       userId,
     )
-    if (updated) this.emitGroupCallState(updated)
+    if (updated) {
+      this.emitGroupCallState(updated)
+      if (GroupCallStore.participantList(updated).length === 0) {
+        this.scheduleGroupEmptyFinish(updated)
+      }
+    }
 
     await this.callBusyStore.release(userId, session.callId)
 
     return { ok: true }
   }
 
-  // ── Webhook LiveKit (gọi từ controller sau khi verify chữ ký) ────────────
+  // ── Webhook RealtimeKit (controller đã xác thực chữ ký) ─────────────────
 
   /**
-   * Áp một sự kiện webhook LiveKit vào phiên. Controller đã verify chữ ký; ở đây
-   * chỉ còn xử lý nghiệp vụ. Nhận dạng cấu trúc (không phụ thuộc kiểu của SDK) để
-   * gateway không phải import livekit-server-sdk.
+   * Áp một sự kiện webhook RealtimeKit vào phiên gọi nhóm. Chỉ phòng của cuộc gọi
+   * NHÓM đang mở mới được xử lý: phòng 1-1 có vòng đời riêng qua socket, phòng lạ
+   * thì bỏ qua. `customParticipantId` phải thuộc danh sách thành viên của phiên.
    */
-  async applyLivekitWebhook(event: {
-    event?: string
-    room?: { name?: string; numParticipants?: number }
-    participant?: { identity?: string; name?: string }
-  }): Promise<void> {
-    const roomName = event?.room?.name
-    if (!roomName) return
+  async applyRtkWebhook(event: RtkWebhookEvent): Promise<void> {
+    const conversationId = await this.rtk.conversationOfMeeting(event.meetingId)
+    if (!conversationId) return
+    const session =
+      await this.groupCallStore.getByConversationId(conversationId)
+    if (!session) return
 
     switch (event.event) {
-      case 'participant_joined': {
-        const identity = event.participant?.identity
-        if (!identity) return
-        await this.handleGroupParticipantJoined(roomName, {
-          id: identity,
-          username: event.participant?.name || identity,
-        })
+      case 'meeting.participantJoined': {
+        const member = this.memberOf(session, event.customParticipantId)
+        if (!member || !event.customParticipantId) return
+        const updated = await this.groupCallStore.addParticipant(
+          conversationId,
+          member,
+          event.customParticipantId,
+        )
+        if (!updated) return
+        this.clearGroupPending(session.callId)
+        this.clearGroupEmpty(session.callId)
+        this.emitGroupCallState(updated)
         return
       }
-      case 'participant_left': {
-        const identity = event.participant?.identity
-        if (!identity) return
-        await this.handleGroupParticipantLeft(roomName, identity)
+      case 'meeting.participantLeft': {
+        const member = this.memberOf(session, event.customParticipantId)
+        if (!member || !event.customParticipantId) return
+        const updated = await this.groupCallStore.removeParticipant(
+          conversationId,
+          event.customParticipantId,
+        )
+        if (!updated) return
+        this.emitGroupCallState(updated)
+        if (GroupCallStore.participantList(updated).length === 0) {
+          this.scheduleGroupEmptyFinish(updated)
+        }
         return
       }
-      case 'room_finished': {
-        await this.handleGroupRoomFinished(roomName)
+      case 'meeting.ended': {
+        // Phòng RealtimeKit dùng lại cho mọi cuộc gọi của hội thoại, và phiên chỉ
+        // đóng ≥60s sau khi trống: meeting.ended có thể là của cuộc gọi TRƯỚC, tới
+        // khi cuộc gọi mới đang đổ chuông. Chỉ kết thúc khi phiên hiện tại đã có
+        // người vào và giờ trống; còn lại để bộ đếm 35s/15s lo.
+        if (
+          session.seen.length > 0 &&
+          GroupCallStore.participantList(session).length === 0
+        ) {
+          await this.finishGroupCall(conversationId)
+        }
         return
       }
       default:
@@ -1337,52 +1343,68 @@ export class RealtimeGateway
     }
   }
 
-  private async handleGroupParticipantJoined(
-    roomName: string,
-    member: GroupCallMember,
-  ): Promise<void> {
-    const conversationId = conversationIdFromRoom(roomName)
-    if (!conversationId) return
-
-    const session = await this.groupCallStore.addParticipant(
-      conversationId,
-      member,
+  /**
+   * Người tham gia của webhook — CHỈ khi custom id là grant của chính cuộc gọi này.
+   * Phòng RealtimeKit dùng lại qua các cuộc gọi, nên sự kiện trễ của cuộc gọi trước
+   * hay token cũ chưa kịp thu hồi không được tính vào roster hiện tại.
+   */
+  private memberOf(
+    session: GroupCallSession,
+    customParticipantId?: string,
+  ): GroupCallMember | null {
+    if (!customParticipantId) return null
+    const granted = session.rtkGrants.some(
+      (grant) => grant.customParticipantId === customParticipantId,
     )
-    if (session) {
-      // Có người vào thật -> phòng không còn "treo chưa ai vào", huỷ timer huỷ-phiên.
-      this.clearGroupPending(session.callId)
-      this.emitGroupCallState(session)
-    }
-  }
-
-  private async handleGroupParticipantLeft(
-    roomName: string,
-    userId: string,
-  ): Promise<void> {
-    const conversationId = conversationIdFromRoom(roomName)
-    if (!conversationId) return
-
-    const session = await this.groupCallStore.removeParticipant(
-      conversationId,
-      userId,
-    )
-    if (session) this.emitGroupCallState(session)
+    if (!granted) return null
+    const userId = userIdFromCustomId(customParticipantId)
+    return session.members.find((member) => member.id === userId) ?? null
   }
 
   /**
-   * Phòng đóng: ghi tin hệ thống tổng kết, báo `group_call.ended`, dọn phiên.
-   * `participantCount` = số người từng vào (không phải số còn lại lúc đóng, vốn 0).
+   * Lưu grant vừa cấp — nếu phiên vẫn còn. Cấp media mất tới vài giây; phiên có thể
+   * đã kết thúc trong lúc đó (bộ đếm, người cuối rời). Khi đó thu hồi grant và nhả
+   * khoá bận, không để người dùng kẹt "bận" 4 giờ hay vào một phòng đã đóng.
    */
-  private async handleGroupRoomFinished(roomName: string): Promise<void> {
-    const conversationId = conversationIdFromRoom(roomName)
-    if (!conversationId) return
+  private async keepGroupGrant(
+    session: GroupCallSession,
+    userId: string,
+    grant: RtkGrant,
+  ): Promise<boolean> {
+    const current = await this.groupCallStore.getByCallId(session.callId)
+    if (!current) {
+      void this.rtk.revoke([grantOf(grant)])
+      await this.callBusyStore.release(userId, session.callId)
+      return false
+    }
+    await this.groupCallStore.addGrant(session.conversationId, grantOf(grant))
+    return true
+  }
 
-    // finish() đóng phiên đúng MỘT lần và dọn sạch key: webhook room_finished tới
-    // trùng/đảo thứ tự thì lần sau trả null -> không ghi log nhóm hai lần.
+  /** Mọi người có thể đang giữ khoá bận của phiên: đã vào, đã được cấp, người mở. */
+  private busyHolders(session: GroupCallSession): string[] {
+    return [
+      ...new Set([
+        session.startedBy,
+        ...session.seen,
+        ...session.rtkGrants.map((grant) =>
+          userIdFromCustomId(grant.customParticipantId),
+        ),
+      ]),
+    ].filter(Boolean)
+  }
+
+  /**
+   * Kết thúc cuộc gọi nhóm: ghi tin tổng kết, mở khoá bận, báo `group_call.ended`,
+   * thu hồi media. `finish()` là latch — bộ đếm phòng trống và `meeting.ended` có
+   * thể cùng tới, chỉ lần đầu làm việc.
+   */
+  private async finishGroupCall(conversationId: string): Promise<void> {
     const session = await this.groupCallStore.finish(conversationId)
     if (!session) return
 
     this.clearGroupPending(session.callId)
+    this.clearGroupEmpty(session.callId)
 
     const durationSeconds = Math.max(
       0,
@@ -1398,8 +1420,7 @@ export class RealtimeGateway
       startedBy: session.startedBy,
     })
 
-    // Mở khoá bận cho mọi người từng vào phòng.
-    for (const uid of session.seen) {
+    for (const uid of this.busyHolders(session)) {
       await this.callBusyStore.release(uid, session.callId)
     }
 
@@ -1408,6 +1429,31 @@ export class RealtimeGateway
       SOCKET_EVENTS.GROUP_CALL.ENDED,
       { callId: session.callId, conversationId },
     )
+
+    void this.rtk.revoke(session.rtkGrants)
+  }
+
+  private scheduleGroupEmptyFinish(session: GroupCallSession): void {
+    this.clearGroupEmpty(session.callId)
+    const timer = setTimeout(() => {
+      this.groupEmptyTimers.delete(session.callId)
+      void (async () => {
+        const current = await this.groupCallStore.getByCallId(session.callId)
+        if (!current) return
+        if (GroupCallStore.participantList(current).length > 0) return
+        await this.finishGroupCall(session.conversationId)
+      })().catch((error: unknown) =>
+        this.logger.error(`kết thúc phòng trống ${session.callId} lỗi`, error),
+      )
+    }, this.groupEmptyMs)
+    if (typeof timer.unref === 'function') timer.unref()
+    this.groupEmptyTimers.set(session.callId, timer)
+  }
+
+  private clearGroupEmpty(callId: string): void {
+    const timer = this.groupEmptyTimers.get(callId)
+    if (timer) clearTimeout(timer)
+    this.groupEmptyTimers.delete(callId)
   }
 
   // ── Hẹn huỷ phòng nhóm chưa ai vào ───────────────────────────────────────
@@ -1434,7 +1480,8 @@ export class RealtimeGateway
   /**
    * Sau deadline: nếu vẫn chưa ai thực sự vào phòng (không có participant từ
    * webhook), huỷ phiên và báo `ended` để tắt chuông. Không ghi log (0 người =
-   * không phải một cuộc gọi đã diễn ra).
+   * không phải một cuộc gọi đã diễn ra). Đã có người từng vào thì kết thúc bình
+   * thường (có log).
    */
   private async cancelGroupIfEmpty(
     conversationId: string,
@@ -1445,9 +1492,17 @@ export class RealtimeGateway
     if (!session) return
     if (GroupCallStore.participantList(session).length > 0) return
 
+    // Đã có người vào (rồi rời): đây là một cuộc gọi thật — kết thúc có nhật ký,
+    // không xoá lặng lẽ (hẹn 35s có thể được đặt lại bởi người bấm "Gọi nhóm"
+    // khi phòng đang chạy).
+    if (session.seen.length > 0) {
+      await this.finishGroupCall(conversationId)
+      return
+    }
+
     await this.groupCallStore.delete(conversationId)
-    await this.callBusyStore.release(session.startedBy, session.callId)
-    for (const uid of session.seen) {
+    void this.rtk.revoke(session.rtkGrants)
+    for (const uid of this.busyHolders(session)) {
       await this.callBusyStore.release(uid, session.callId)
     }
 
