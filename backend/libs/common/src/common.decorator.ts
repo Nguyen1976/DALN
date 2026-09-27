@@ -15,7 +15,8 @@ export const WithoutLogin = () => SetMetadata('without-login', true)
  * vận hành), xác thực bằng header `x-internal-token` khớp `INTERNAL_API_TOKEN`.
  * Dùng cho các endpoint không thuộc về người dùng cuối nên không có phiên JWT:
  * huấn luyện mô hình, sinh embedding, tác vụ quản trị.
- * Fail-closed: chưa cấu hình INTERNAL_API_TOKEN thì từ chối tất cả.
+ * Fail-closed ở production: chưa cấu hình INTERNAL_API_TOKEN thì từ chối tất cả
+ * (dev để trống thì dùng token dev mặc định — xem resolveInternalApiToken).
  */
 export const InternalOnly = () => SetMetadata('internal-only', true)
 

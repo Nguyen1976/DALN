@@ -1,3 +1,5 @@
+import { resolveInternalApiToken } from './internal-token'
+
 /**
  * Service-to-service HTTP. The callee's endpoint is `@InternalOnly()`, so the
  * shared `x-internal-token` goes along; the caller gets the endpoint's result
@@ -28,7 +30,7 @@ export async function internalFetch<T>(
     res = await fetch(url, {
       method,
       headers: {
-        'x-internal-token': process.env.INTERNAL_API_TOKEN ?? '',
+        'x-internal-token': resolveInternalApiToken() ?? '',
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),

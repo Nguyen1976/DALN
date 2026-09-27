@@ -1,3 +1,4 @@
+import { resolveInternalApiToken } from '../http/internal-token'
 import {
   CanActivate,
   ExecutionContext,
@@ -130,11 +131,12 @@ export class AuthGuard implements CanActivate {
   }
 
   /**
-   * Xác thực lời gọi nội bộ bằng shared secret. Fail-closed: thiếu biến môi
-   * trường thì chặn hết, tránh trường hợp cấu hình sót lại mở toang endpoint.
+   * Xác thực lời gọi nội bộ bằng shared secret. Fail-closed ở production: thiếu
+   * biến môi trường thì chặn hết, tránh cấu hình sót lại mở toang endpoint. Dev
+   * để trống thì dùng token dev mặc định (xem resolveInternalApiToken).
    */
   private assertInternalCaller(request: Request): boolean {
-    const expected = process.env.INTERNAL_API_TOKEN?.trim()
+    const expected = resolveInternalApiToken()
 
     if (!expected) {
       this.logger.error(

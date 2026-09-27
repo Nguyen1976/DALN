@@ -1,3 +1,4 @@
+import { DEV_INTERNAL_API_TOKEN } from '../http/internal-token'
 import { ExecutionContext } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { JwtService } from '@nestjs/jwt'
@@ -249,13 +250,43 @@ describe('AuthGuard — @InternalOnly()', () => {
     await expect(guard.canActivate(context)).resolves.toBe(true)
   })
 
-  it('thiếu cấu hình -> 403, fail-closed', async () => {
+  it('production thiếu cấu hình -> 403, fail-closed', async () => {
+    const env = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
     delete process.env.INTERNAL_API_TOKEN
     const { guard, context } = makeGuard({ internalOnly: true })
 
-    await expect(codeOf(() => guard.canActivate(context))).resolves.toBe(
-      'INTERNAL_API_NOT_CONFIGURED',
-    )
+    try {
+      await expect(codeOf(() => guard.canActivate(context))).resolves.toBe(
+        'INTERNAL_API_NOT_CONFIGURED',
+      )
+    } finally {
+      process.env.NODE_ENV = env
+    }
+  })
+
+  it('dev để trống -> nhận token dev mặc định, từ chối token khác', async () => {
+    const env = process.env.NODE_ENV
+    process.env.NODE_ENV = 'development'
+    process.env.INTERNAL_API_TOKEN = ''
+
+    try {
+      const ok = makeGuard({
+        internalOnly: true,
+        headers: { 'x-internal-token': DEV_INTERNAL_API_TOKEN },
+      })
+      await expect(ok.guard.canActivate(ok.context)).resolves.toBe(true)
+
+      const bad = makeGuard({
+        internalOnly: true,
+        headers: { 'x-internal-token': 'sai' },
+      })
+      await expect(
+        codeOf(() => bad.guard.canActivate(bad.context)),
+      ).resolves.toBe('INTERNAL_TOKEN_INVALID')
+    } finally {
+      process.env.NODE_ENV = env
+    }
   })
 
   it('token nội bộ sai -> 403', async () => {
