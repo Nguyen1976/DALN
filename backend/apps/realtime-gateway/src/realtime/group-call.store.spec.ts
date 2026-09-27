@@ -184,4 +184,31 @@ describe('group-call.store', () => {
     expect(GroupCallStore.isMember(session, 'bob')).toBe(true)
     expect(GroupCallStore.isMember(session, 'stranger')).toBe(false)
   })
+
+  it('addGrant lưu người tham gia RealtimeKit; finish trả về rồi xoá', async () => {
+    await store.getOrCreate({
+      conversationId: 'conv-g',
+      startedBy: 'alice',
+      members: [{ id: 'alice', username: 'Alice' }],
+    })
+    const grant = {
+      meetingId: 'm1',
+      participantId: 'p1',
+      customParticipantId: 'alice.0a0b0c0d',
+    }
+    await store.addGrant('conv-g', grant)
+
+    const session = await store.getByConversationId('conv-g')
+    expect(session?.rtkGrants).toEqual([grant])
+
+    const finished = await store.finish('conv-g')
+    expect(finished?.rtkGrants).toEqual([grant])
+    expect(await store.getByConversationId('conv-g')).toBeNull()
+    await store.getOrCreate({
+      conversationId: 'conv-g',
+      startedBy: 'bob',
+      members: [{ id: 'bob', username: 'Bob' }],
+    })
+    expect((await store.getByConversationId('conv-g'))?.rtkGrants).toEqual([])
+  })
 })

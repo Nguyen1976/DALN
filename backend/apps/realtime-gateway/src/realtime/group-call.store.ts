@@ -1,5 +1,6 @@
 import type Redis from 'ioredis'
 import { randomUUID } from 'crypto'
+import type { RtkGrant } from './realtimekit.types'
 
 /**
  * Phiên gọi nhóm trong Redis.
@@ -48,6 +49,8 @@ export interface GroupCallSession extends GroupCallStatic {
   participants: Record<string, GroupCallMember>
   /** userId từng vào phòng ít nhất một lần — để đếm "N người" khi ghi log. */
   seen: string[]
+  /** Người tham gia RealtimeKit đã cấp trong phiên này — thu hồi khi kết thúc. */
+  rtkGrants: RtkGrant[]
 }
 
 /** roomName ổn định theo hội thoại: vào lại/vào muộn đều rơi đúng phòng. */
@@ -93,6 +96,10 @@ export class GroupCallStore {
     return `groupcall:${conversationId}:seen`
   }
 
+  private rtkKey(conversationId: string) {
+    return `groupcall:${conversationId}:rtk`
+  }
+
   private async getStatic(
     conversationId: string,
   ): Promise<GroupCallStatic | null> {
@@ -109,9 +116,10 @@ export class GroupCallStore {
 
   /** Ghép phần tĩnh với participants (hash) + seen (set) thành phiên đầy đủ. */
   private async assemble(stat: GroupCallStatic): Promise<GroupCallSession> {
-    const [rawParticipants, seen] = await Promise.all([
+    const [rawParticipants, seen, rawGrants] = await Promise.all([
       this.redisClient.hgetall(this.participantsKey(stat.conversationId)),
       this.redisClient.smembers(this.seenKey(stat.conversationId)),
+      this.redisClient.hgetall(this.rtkKey(stat.conversationId)),
     ])
 
     const participants: Record<string, GroupCallMember> = {}
@@ -123,10 +131,20 @@ export class GroupCallStore {
       }
     }
 
+    const rtkGrants: RtkGrant[] = []
+    for (const value of Object.values(rawGrants || {})) {
+      try {
+        rtkGrants.push(JSON.parse(value) as RtkGrant)
+      } catch {
+        // Bản ghi hỏng: bỏ qua, các grant khác vẫn được thu hồi.
+      }
+    }
+
     return {
       ...stat,
       participants,
       seen: Array.isArray(seen) ? seen : [],
+      rtkGrants,
     }
   }
 
@@ -189,7 +207,7 @@ export class GroupCallStore {
         'EX',
         this.ttlSeconds,
       )
-      return { ...stat, participants: {}, seen: [] }
+      return { ...stat, participants: {}, seen: [], rtkGrants: [] }
     }
 
     const existing = await this.getByConversationId(input.conversationId)
@@ -208,7 +226,7 @@ export class GroupCallStore {
       'EX',
       this.ttlSeconds,
     )
-    return { ...stat, participants: {}, seen: [] }
+    return { ...stat, participants: {}, seen: [], rtkGrants: [] }
   }
 
   async addParticipant(
@@ -249,6 +267,15 @@ export class GroupCallStore {
     return this.assemble(stat)
   }
 
+  async addGrant(conversationId: string, grant: RtkGrant): Promise<void> {
+    await this.redisClient.hset(
+      this.rtkKey(conversationId),
+      grant.customParticipantId,
+      JSON.stringify(grant),
+    )
+    await this.redisClient.expire(this.rtkKey(conversationId), this.ttlSeconds)
+  }
+
   /**
    * Đóng phiên đúng MỘT lần. room_finished của LiveKit có thể tới trùng hoặc đảo
    * thứ tự; chỉ lời gọi xoá được key chính mới trả về phiên (để ghi log tổng kết),
@@ -265,6 +292,7 @@ export class GroupCallStore {
       this.callKey(session.callId),
       this.participantsKey(conversationId),
       this.seenKey(conversationId),
+      this.rtkKey(conversationId),
     )
 
     return session
@@ -276,6 +304,7 @@ export class GroupCallStore {
     await this.redisClient.del(this.key(conversationId))
     await this.redisClient.del(this.participantsKey(conversationId))
     await this.redisClient.del(this.seenKey(conversationId))
+    await this.redisClient.del(this.rtkKey(conversationId))
     if (stat) await this.redisClient.del(this.callKey(stat.callId))
   }
 
