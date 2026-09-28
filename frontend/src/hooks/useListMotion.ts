@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
+import { cssTimeMs } from "@/lib/motion";
 
 const MOVE = "list-move";
 
@@ -71,7 +72,7 @@ export function useListMotion(
       "(prefers-reduced-motion: reduce)",
     ).matches;
     const tokens = getComputedStyle(document.documentElement);
-    const step = parseFloat(tokens.getPropertyValue("--stagger-step")) || 60;
+    const step = cssTimeMs("--stagger-step", 60);
     const easeOut = tokens.getPropertyValue("--ease-out").trim() || "ease-out";
     const easeInOut =
       tokens.getPropertyValue("--ease-in-out").trim() || "ease-in-out";

@@ -1,4 +1,5 @@
 import { flushSync } from "react-dom";
+import { cssTimeMs } from "@/lib/motion";
 
 export type RevealOrigin = { x: number; y: number };
 
@@ -49,7 +50,7 @@ export function revealTheme(origin: RevealOrigin, apply: () => void) {
   const to = `circle(${reach}% ${at})`;
 
   const styles = getComputedStyle(root);
-  const duration = parseFloat(styles.getPropertyValue("--motion-reveal")) || 450;
+  const duration = cssTimeMs("--motion-reveal", 450);
   const easing = styles.getPropertyValue("--ease-in-out").trim() || "ease-in-out";
 
   root.dataset.themeReveal = "active";
