@@ -462,7 +462,7 @@ export default function ChatWindow({
           >
             <Phone className="size-5" />
           </Button>
-          {/* DIRECT → video 1-1 (WebRTC P2P). GROUP → video nhóm qua LiveKit SFU. */}
+          {/* DIRECT → video 1-1, GROUP → video nhóm — cả hai qua Cloudflare RealtimeKit. */}
           <Button
             variant="ghost"
             size="icon"

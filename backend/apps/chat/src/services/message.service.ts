@@ -55,7 +55,7 @@ export interface GroupCallLogRequest {
   startedBy?: string
 }
 
-/** Call timings arrive as floats (LiveKit) and are shown in whole units. */
+/** Call timings may arrive as floats and are shown in whole units. */
 const wholeNonNegative = (value: number | undefined) =>
   Number.isFinite(value) ? Math.max(0, Math.floor(value!)) : 0
 
@@ -551,11 +551,11 @@ export class MessageService {
   }
 
   /**
-   * Ghi một tin hệ thống tổng kết cuộc gọi nhóm khi phòng LiveKit đóng
-   * (webhook room_finished do gateway chuyển tiếp).
+   * Ghi một tin hệ thống tổng kết cuộc gọi nhóm khi gateway kết thúc nó (phòng
+   * trống quá 15 giây, hoặc webhook meeting.ended của RealtimeKit).
    *
    * Không tự ném 500: id hỏng -> 400; hội thoại đã biến mất / không còn thành
-   * viên -> `{ ok: false }` để webhook LiveKit không phải retry vô ích.
+   * viên -> `{ ok: false }` để gateway không phải thử lại vô ích.
    */
   async logGroupCall(data: GroupCallLogRequest): Promise<{ ok: boolean }> {
     const conversationId = data?.conversationId?.trim()
@@ -572,7 +572,7 @@ export class MessageService {
       return { ok: false }
     }
 
-    // Chốt idempotency: webhook LiveKit có thể gửi lại cùng một callId. Ai giành
+    // Chốt idempotency: việc kết thúc có thể bị kích hoạt lặp cho cùng callId. Ai giành
     // được key trước mới ghi tin; lần trùng thấy claimOnce trả false thì coi như
     // đã ghi rồi và trả ok:true mà không tạo tin thứ hai. Bỏ trống callId ->
     // giữ nguyên hành vi cũ (payload cũ vẫn chạy).
