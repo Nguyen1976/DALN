@@ -21,8 +21,8 @@ interface UseGroupCallOptions {
 }
 
 /**
- * Một phiên gọi nhóm trên Cloudflare RealtimeKit. Giữ nguyên hình dạng trả về
- * của bản LiveKit trước đây để GroupCallModal không phải đổi bố cục.
+ * Một phiên gọi nhóm trên Cloudflare RealtimeKit, trả về đúng hình dạng mà
+ * GroupCallModal dùng.
  */
 export function useGroupCall({
   authToken,

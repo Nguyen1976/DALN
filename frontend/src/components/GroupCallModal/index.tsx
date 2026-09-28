@@ -314,7 +314,7 @@ export default function GroupCallModal({
 
   const handleLeave = () => {
     leave();
-    // Client tự rời phòng LiveKit; báo gateway để phát lại STATE cho người khác.
+    // Client tự rời phòng RealtimeKit; báo gateway để phát lại STATE cho người khác.
     socket.emit(SOCKET_EVENTS.GROUP_CALL.LEAVE, { callId });
     onClose();
   };

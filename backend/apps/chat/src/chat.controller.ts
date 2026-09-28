@@ -288,7 +288,7 @@ export class ChatController {
   }
 
   // Gateway realtime duyệt quyền gọi NHÓM: trả danh sách thành viên ACTIVE để
-  // gateway phát chuông và ký token LiveKit.
+  // gateway phát chuông và cấp quyền vào phòng RealtimeKit.
   @Get('internal/call-members')
   @InternalOnly()
   getCallMembers(
@@ -298,7 +298,7 @@ export class ChatController {
     return this.conversations.getCallMembers({ conversationId, userId })
   }
 
-  // Webhook LiveKit (qua gateway) báo phòng đóng: ghi tin hệ thống tổng kết
+  // Gateway kết thúc cuộc gọi nhóm (phòng trống / webhook RealtimeKit): ghi tin tổng kết
   // cuộc gọi nhóm vào hội thoại.
   @Post('internal/group-call-log')
   @InternalOnly()

@@ -129,13 +129,11 @@ Accepting a friend request touches three services and there is no distributed tr
 - Every consumer runs inside `consumeIdempotent`: the message id goes into an inbox with a unique index, so a redelivered message hits `P2002` and is skipped.
 - Failures compensate in reverse: notify is retried three times, then the conversation is deleted and the friendship reverted.
 
-### 3. Audio and video calls: signaling on the socket, media peer to peer
+### 3. Audio and video calls: business logic on the socket, media on Cloudflare RealtimeKit
 
-![Calls: browsers signal through the realtime gateway over Socket.IO; 1-1 audio and video go peer to peer or through coturn, group calls through LiveKit](docs/diagrams/call-flow.png)
-
-- **1-1 calls are WebRTC peer to peer.** Offer, answer and ICE candidates ride the existing Socket.IO connection, so the gateway relays signaling but never carries audio or video. When NAT blocks the direct path, media goes through coturn with short-lived TURN credentials (`call.ice_config`).
-- **The gateway decides who may ring whom.** It asks the chat service whether both users share the 1-1 conversation, takes a per-user busy lock in Redis and stores the session under a `callId`. The first tab to answer wins; the others get `call.claimed` and stop ringing.
-- **Group calls go through a LiveKit SFU.** The gateway checks membership, signs a room token and rings the members; LiveKit webhooks report who joined and left.
+- **Media never touches the server.** Both 1-1 and group calls run on Cloudflare RealtimeKit (SFU + TURN near the user). The gateway only mints a participant per join through the RealtimeKit REST API and hands the browser an `authToken`; one RealtimeKit meeting is reused per conversation.
+- **The gateway decides who may ring whom.** It asks the chat service whether both users share the 1-1 conversation (or whether the caller is a member of the group), takes a per-user busy lock in Redis and stores the session under a `callId`. The first tab to answer wins; the others get `call.claimed` and stop ringing.
+- **Group presence comes from signed webhooks.** RealtimeKit posts `participantJoined`/`participantLeft`/`meeting.ended` (RSA-signed, deduplicated) and the gateway keeps the roster, ends an empty room after 15 seconds, and revokes every participant it granted when a call ends.
 - **Calls leave a trace.** Rejected and ended 1-1 calls publish `CALL_ENDED` to RabbitMQ, and the chat service writes a call-log message into the conversation.
 
 ### 4. Auth that survives expired tokens, on HTTP and WebSocket

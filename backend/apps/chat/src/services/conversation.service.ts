@@ -233,7 +233,7 @@ export class ConversationService {
    *
    * Trả `{ id, username }` cho mỗi thành viên; username lấy từ bản phi chuẩn hoá
    * trên membership (như findByConversationId phục vụ mọi API tên thành viên
-   * khác), lùi về fullName rồi userId để gateway luôn có tên đặt cho LiveKit.
+   * khác), lùi về fullName rồi userId để gateway luôn có tên đặt cho người tham gia.
    */
   async getCallMembers(dto: CallMembersRequest): Promise<{
     members: { id: string; username: string }[]

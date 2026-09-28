@@ -240,16 +240,17 @@ tail -f /var/log/nginx/error.log
   Cloudflare, và ghi đè `X-Forwarded-For` bằng IP đó. Kong và service không phải đổi gì
   (`trust proxy 2`). Dải IP Cloudflare hiếm khi đổi; khi đổi, cập nhật theo
   <https://www.cloudflare.com/ips-v4> và `/ips-v6`, nếu không phiên đăng nhập sẽ ghi IP Cloudflare.
-- Proxy chỉ chuyển HTTP/HTTPS/WebSocket. Media gọi thoại/video (TURN, LiveKit UDP/TCP) đi thẳng
-  tới IP server nên không bị ảnh hưởng. Gói Free giới hạn **100 MB** mỗi request (khớp
+- Proxy chỉ chuyển HTTP/HTTPS/WebSocket. Media gọi thoại/video không qua server: nó đi
+  giữa trình duyệt và hạ tầng RealtimeKit của Cloudflare (mục dưới). Gói Free giới hạn **100 MB** mỗi request (khớp
   `client_max_body_size`) và server phải trả lời trong 100 giây.
 - Tắt proxy (đám mây xám) vẫn chạy bình thường, chỉ mất cache ở gần người dùng.
 
 ## RealtimeKit — cuộc gọi thoại/video
 
 Mọi cuộc gọi (1-1 và nhóm) chạy trên Cloudflare RealtimeKit; server chỉ cấp
-quyền vào phòng qua REST API và nhận webhook. Coturn và LiveKit bên dưới **không
-còn được code dùng** (giữ tới PR dọn hạ tầng).
+quyền vào phòng qua REST API và nhận webhook — server không chuyển tiếp media và không
+mở cổng UDP nào cho cuộc gọi. (Coturn và LiveKit tự host đã gỡ khỏi repo và server từ
+2026-09-28.)
 
 - Env trên server (`.env.production`): `REALTIMEKIT_ACCOUNT_ID`, `REALTIMEKIT_APP_ID`
   (app `daln-prod`), `REALTIMEKIT_API_TOKEN` (quyền Realtime Admin).
@@ -268,152 +269,6 @@ còn được code dùng** (giữ tới PR dọn hạ tầng).
 - Dev: `npm run rtk:dev-tunnel` (backend) mở tunnel tạm và trỏ webhook của app
   `daln-dev` vào gateway dev. URL đổi mỗi lần tunnel khởi động lại.
 - QC: `qc/calls-browser.mjs` (xem qc/README.md).
-
-## TURN (coturn) — gọi thoại
-
-> **Không còn được code dùng** từ khi cuộc gọi chuyển sang RealtimeKit (mục trên). Giữ lại tới PR dọn hạ tầng.
-
-Gọi thoại 1-1 (WebRTC) cần một máy chủ TURN để nối được khi hai máy ở sau CGNAT/tường
-lửa (bản thiết kế: `docs/diagrams/voice-call-turn.html`). coturn cài **thẳng trên host**
-bằng apt, **cạnh nginx** (không trong Docker: relay cần hàng trăm cổng UDP, publish qua
-Docker đi vòng ufw và chậm với dải lớn). Chứng chỉ Let's Encrypt dùng chung với nginx.
-
-Gateway (`realtime-gateway`) ký mật khẩu TURN ngắn hạn bằng `TURN_SECRET`; coturn tự kiểm
-lại bằng **chính** `TURN_SECRET` đó (`use-auth-secret`) — nên **`TURN_SECRET` trong
-`backend/.env.production` phải TRÙNG với `static-auth-secret` trong `/etc/turnserver.conf`**.
-Không cần đồng bộ tay: `deploy.sh` render `/etc/turnserver.conf` từ
-`deploy/coturn/turnserver.conf` (template), thay `TURN_SECRET`/`TURN_REALM`/`TURN_HOST`
-bằng giá trị `.env.production` (envsubst) ở **mỗi** lần deploy — sửa cấu hình thì sửa file
-template trong repo, đừng sửa `/etc/turnserver.conf` (deploy sau ghi đè).
-
-| Cổng | Giao thức | Để làm gì |
-|---|---|---|
-| `3478` | UDP, TCP | STUN + TURN, đường chính. URL dùng thẳng IP `TURN_HOST` -> không phụ thuộc DNS |
-| `5349` | TCP + TLS | TURN qua TLS (`turns:`) cho mạng chỉ cho ra cổng web; cần domain khớp chứng chỉ |
-| `49152–49999` | UDP | Cổng relay: mỗi phiên giữ một cổng (khớp `min-port`/`max-port`) |
-
-### Cài lần đầu
-
-```bash
-# 1. Cài coturn
-apt-get install -y coturn
-# 2. Cho phép systemd chạy service (gói Debian mặc định để TURNSERVER_ENABLED=1;
-#    kiểm cho chắc, nếu không có/khác thì đặt lại).
-grep -q '^TURNSERVER_ENABLED=1' /etc/default/coturn || \
-  sed -i 's/^#\?TURNSERVER_ENABLED=.*/TURNSERVER_ENABLED=1/' /etc/default/coturn
-# 3. ufw mở cổng TURN + dải relay
-ufw allow 3478/udp && ufw allow 3478/tcp && ufw allow 5349/tcp
-ufw allow 49152:49999/udp
-# 4. certbot deploy-hook: gia hạn chứng chỉ xong thì RESTART coturn (coturn không
-#    nạp lại cert khi đang chạy). Hook nằm cùng chỗ hook reload-nginx.
-printf '#!/bin/sh\nsystemctl restart coturn\n' \
-  > /etc/letsencrypt/renewal-hooks/deploy/reload-coturn
-chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-coturn
-# 5. Deploy: deploy.sh render /etc/turnserver.conf từ template + restart coturn.
-#    (Cần TURN_SECRET/TURN_HOST/TURN_REALM/TURN_TLS_HOST trong .env.production trước.)
-bash /root/workspace/DALN/deploy/deploy.sh
-```
-
-`deploy.sh` bỏ qua bước coturn nếu host chưa cài `turnserver` (`coturn : không cài` trong
-tóm tắt), nên cứ deploy code như thường; cài coturn khi nào cần bật gọi thoại. Thiếu
-`TURN_SECRET` trong `.env.production` thì cũng bỏ qua và gateway trả **chỉ STUN** (gọi
-cùng mạng vẫn chạy). Dòng tóm tắt: `coturn : <restart | không cài | bỏ qua (...) | LỖI ...>`
-— coturn hỏng **không** làm dừng deploy (gọi thoại lùi về STUN, app vẫn lên).
-
-### Kiểm tra
-
-```bash
-systemctl status coturn                       # service đang chạy?
-journalctl -u coturn -n 50                    # log (turnserver.conf đặt `syslog`)
-grep static-auth-secret /etc/turnserver.conf  # secret đã render (khớp .env.production)?
-ss -lunp | grep 3478                          # đang nghe UDP 3478
-# Thử allocate qua TURN (secret là REST secret, coturn tự ký username/credential):
-turnutils_uclient -v -y -u anyuser -w "$(grep '^TURN_SECRET=' \
-  /root/workspace/DALN/backend/.env.production | cut -d= -f2-)" 109.199.115.126
-```
-
-Từ trình duyệt: trang **trickle-ice** (`https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/`)
-— nhập `turn:109.199.115.126:3478` + username/credential lấy từ `call.ice_config`, phải
-thấy candidate loại `relay`. Trong app: hai điện thoại 4G khác nhà mạng, mở
-`chrome://webrtc-internals` sẽ thấy cặp candidate `relay` khi đường thẳng hỏng.
-
-> **Đổi `TURN_SECRET`:** đổi ở `backend/.env.production` rồi deploy lại (config render
-> lại + coturn restart). Mật khẩu cũ trình duyệt đang giữ tự hết hạn trong `TURN_TTL`
-> giây (mặc định 1 giờ).
-
-## LiveKit (gọi nhóm)
-
-> **Không còn được code dùng** từ khi cuộc gọi chuyển sang RealtimeKit (mục trên). Giữ lại tới PR dọn hạ tầng.
-
-Gọi **nhóm** audio (n-n) đi qua một máy chủ **SFU LiveKit** (bản thiết kế:
-`docs/diagrams/group-call-sfu-flow.html`) — mỗi người gửi 1 luồng audio lên server, server
-phát lại cho những người còn lại (khác gọi 1-1 P2P dùng coturn). Khác coturn (cài apt trên
-host), **LiveKit chạy TRONG Docker Compose** (service `livekit`, `docker-compose.prod.yml`) vì
-prod đã dùng compose và dải cổng UDP vừa phải (200 cổng). `deploy.sh` không cần bước riêng cho
-LiveKit: `up -d` tự dựng.
-
-Gateway (`realtime-gateway`) ký token cho client bằng `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET`
-(`livekit-server-sdk`) và verify webhook bằng chính cặp đó. **Cách nạp key vào livekit-server:**
-file config `deploy/livekit/livekit.prod.yaml` **KHÔNG** chứa key (bind-mount read-only, không
-render); compose truyền env **`LIVEKIT_KEYS="${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"`** cho
-container (livekit-server nạp keys map từ env này). Ràng buộc: `LIVEKIT_API_KEY` trong
-`.env.production` **phải TRÙNG** `webhook.api_key` (`daln`) trong `livekit.prod.yaml` — LiveKit
-ký webhook bằng key đó rồi tra secret trong keys map.
-
-| Cổng | Giao thức | Publish | Để làm gì |
-|---|---|---|---|
-| `7880` | TCP (HTTP/WS) | `127.0.0.1:7880` | Tín hiệu WS + HTTP API. Ra ngoài qua **nginx** `/livekit/` (client: `wss://nguyen1976.xyz/livekit`) |
-| `7881` | TCP | `0.0.0.0:7881` | RTC qua TCP — dự phòng khi UDP bị chặn (client nối thẳng IP:7881) |
-| `50000–50199` | UDP | `0.0.0.0:50000-50199` | Media: mỗi participant giữ vài cổng (khớp `port_range_start/end` trong `livekit.prod.yaml`) |
-
-nginx: `location /livekit/ { proxy_pass http://127.0.0.1:7880/; }` — trailing slash BỎ tiền tố
-`/livekit`; header `Upgrade`/`Connection` + `proxy_http_version 1.1` kế thừa từ cấp server (đã có
-sẵn cho socket.io). Webhook `POST /livekit/webhook` là NỘI BỘ trong mạng docker
-(`http://realtime-gateway:3001/livekit/webhook`), không ra ngoài.
-
-### ufw
-
-Media UDP và RTC/TCP ra thẳng ngoài (WS đã đi qua nginx 443):
-
-```bash
-ufw allow 50000:50199/udp   # media
-ufw allow 7881/tcp          # RTC qua TCP (dự phòng UDP)
-```
-
-> **Lưu ý:** Docker publish cổng chèn iptables riêng, **đi vòng qua ufw** (xem cuối README) —
-> nên các cổng livekit publish (`7881`, `50000-50199/udp`) đã ra ngoài ngay khi container chạy.
-> Vẫn nên khai báo ufw ở trên cho nhất quán/tài liệu. Cổng `7880` chỉ nghe `127.0.0.1` (qua
-> nginx), không cần mở.
-
-### Đổi key/secret
-
-Sinh secret: `openssl rand -hex 32`. Đổi `LIVEKIT_API_SECRET` (và giữ `LIVEKIT_API_KEY=daln`)
-trong `backend/.env.production` rồi deploy lại — compose tạo lại cả `livekit` (env `LIVEKIT_KEYS`
-đổi) và `realtime-gateway` (đọc cùng biến), hai bên luôn khớp. Token client đang giữ tự hết hạn
-(~10 phút).
-
-### Dùng lại coturn làm TURN cho LiveKit (tùy chọn)
-
-Client sau NAT chặt có thể cần TURN để đẩy media lên SFU. Hiện chưa cấu hình (media qua UDP
-50000-50199 / TCP 7881 là đủ cho phần lớn mạng). Nếu cần, thêm khối `turn:` vào
-`livekit.prod.yaml` trỏ về coturn đang chạy trên host (dùng chung `TURN_SECRET`) — xem tài liệu
-LiveKit `rtc.turn_servers`.
-
-### Kiểm tra
-
-```bash
-cd /root/workspace/DALN/backend
-dc logs -f livekit                              # log server (mục logging: level info)
-curl -s http://127.0.0.1:7880/                  # health: trả "OK"
-curl -s --resolve nguyen1976.xyz:443:127.0.0.1 \
-  https://nguyen1976.xyz/livekit/               # qua nginx (strip /livekit) -> "OK"
-ss -lunp | grep -E '5000[0-9]|500[0-9][0-9]'    # đang nghe dải UDP media
-```
-
-Từ trình duyệt: mở hội thoại NHÓM, bấm gọi; `chrome://webrtc-internals` phải thấy kết nối tới
-`nguyen1976.xyz` (ICE) và candidate `srflx`/`host` của server. Có `livekit-cli` thì
-`livekit-cli list-rooms --url wss://nguyen1976.xyz/livekit --api-key daln --api-secret <secret>`
-liệt kê phòng đang mở.
 
 ## GeoIP — vị trí trên trang "Thiết bị đang đăng nhập"
 

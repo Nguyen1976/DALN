@@ -275,56 +275,6 @@ services:
     networks:
       - backend
 
-  # coturn cho DEV — máy chủ TURN để QC thử đường relay (ép iceTransportPolicy:
-  # 'relay' và thấy âm thanh đi qua coturn). Trình duyệt trên host gọi tới
-  # localhost:3478 (TURN_HOST=localhost trong .env.docker); static-auth-secret
-  # trong turnserver.dev.conf phải KHỚP TURN_SECRET ở .env.docker.
-  # Production KHÔNG chạy coturn trong Docker: cài apt trên host (deploy/deploy.sh).
-  coturn:
-    image: coturn/coturn:4.6
-    container_name: daln-coturn
-    restart: unless-stopped
-    # CMD mặc định của image thêm `--external-ip=$(detect-external-ip)`, trùng với
-    # external-ip=127.0.0.1 trong file config -> coturn báo lỗi "defined more than
-    # once". Ghi đè command để chỉ đọc config: relay quảng bá 127.0.0.1 nên trình
-    # duyệt trên host tới được cổng relay đã publish.
-    command: ["-c", "/etc/coturn/turnserver.conf", "--log-file=stdout"]
-    volumes:
-      # Config nằm ở deploy/ (dùng chung repo); compose ở backend/ nên đi ../.
-      - ../deploy/coturn/turnserver.dev.conf:/etc/coturn/turnserver.conf:ro
-    ports:
-      - "3478:3478/udp"
-      - "3478:3478/tcp"
-      # Dải relay nhỏ (khớp min-port/max-port trong turnserver.dev.conf).
-      - "49160-49200:49160-49200/udp"
-    networks:
-      - backend
-
-  # LiveKit (SFU) cho DEV — máy chủ gọi NHÓM audio (bản thiết kế:
-  # docs/diagrams/group-call-sfu-flow.html). Gateway ký token (livekit-server-sdk),
-  # trình duyệt trên host connect ws://localhost:7880 rồi publish/subscribe audio.
-  # Config + keys ở deploy/livekit/livekit.dev.yaml; secret trong đó phải KHỚP
-  # LIVEKIT_API_SECRET ở .env.docker. Production chạy livekit TRONG compose luôn:
-  # xem docker-compose.prod.yml.
-  livekit:
-    # v1.9 (protocol 16+): livekit-client 2.22.3 publish camera qua renegotiation
-    # cần LocalTrackSubscribed — server cũ v1.7 (protocol 14) không gửi nên video
-    # nhóm publish treo rồi reconnect vòng lặp. v1.9 vá triệt để (QC dev 20/20).
-    image: livekit/livekit-server:v1.9
-    container_name: daln-livekit
-    restart: unless-stopped
-    command: ["--config", "/etc/livekit.yaml"]
-    volumes:
-      # Config nằm ở deploy/ (dùng chung repo); compose ở backend/ nên đi ../.
-      - ../deploy/livekit/livekit.dev.yaml:/etc/livekit.yaml:ro
-    ports:
-      - "7880:7880"   # WebSocket + HTTP API (client connect)
-      - "7881:7881"   # RTC qua TCP (dự phòng khi UDP bị chặn)
-      # Dải cổng UDP cho media (khớp port_range trong livekit.dev.yaml).
-      - "50000:50000/udp"   # UDP mux (1 cổng)
-    networks:
-      - backend
-
   kong:
     image: kong:3.7
     container_name: daln-kong

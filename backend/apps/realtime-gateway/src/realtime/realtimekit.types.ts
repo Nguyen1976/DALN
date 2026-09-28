@@ -19,7 +19,7 @@ export type RtkPreset =
 
 /**
  * Preset theo loại CUỘC GỌI, không theo lựa chọn camera của từng người: cuộc gọi
- * thoại dùng preset cấm phát video (giữ quy tắc cũ của LiveKit), cuộc gọi video
+ * thoại dùng preset cấm phát video (cuộc gọi thoại không bao giờ có hình), cuộc gọi video
  * dùng preset cho phép dù người đó vào với camera tắt.
  */
 export function presetFor(
