@@ -7,8 +7,9 @@
    DALN Chat — design tokens
    Product category: Chat & Messaging App
    Style: Minimalism/Swiss + Micro-interactions
-   Brand: indigo (hue 272). Every text pair below is verified >= 4.5:1 and
-   every non-text UI boundary (field borders, presence dots) >= 3:1.
+   Brand: teal (hue 190) in light, indigo (hue 272) in dark. Every text pair
+   below is verified >= 4.5:1 and presence dots >= 3:1. Light field borders
+   are deliberately soft; fields rely on their fill and the focus ring.
    ========================================================================== */
 
 :root {
@@ -41,36 +42,36 @@
   --stagger-step: 60ms;
 
   /* ---- Elevation (light: soft, brand-tinted) ---- */
-  --shadow-xs: 0 1px 2px oklch(0.2 0.02 272 / 0.06);
-  --shadow-sm: 0 1px 2px oklch(0.2 0.02 272 / 0.06),
-    0 2px 6px oklch(0.2 0.02 272 / 0.06);
-  --shadow-md: 0 2px 4px oklch(0.2 0.02 272 / 0.05),
-    0 8px 20px oklch(0.2 0.02 272 / 0.09);
-  --shadow-lg: 0 4px 10px oklch(0.2 0.02 272 / 0.06),
-    0 20px 40px oklch(0.2 0.02 272 / 0.13);
-  --shadow-pop: 0 10px 30px oklch(0.2 0.02 272 / 0.14);
+  --shadow-xs: 0 1px 2px oklch(0.2 0.015 200 / 0.06);
+  --shadow-sm: 0 1px 2px oklch(0.2 0.015 200 / 0.06),
+    0 2px 6px oklch(0.2 0.015 200 / 0.06);
+  --shadow-md: 0 2px 4px oklch(0.2 0.015 200 / 0.05),
+    0 8px 20px oklch(0.2 0.015 200 / 0.09);
+  --shadow-lg: 0 4px 10px oklch(0.2 0.015 200 / 0.06),
+    0 20px 40px oklch(0.2 0.015 200 / 0.13);
+  --shadow-pop: 0 10px 30px oklch(0.2 0.015 200 / 0.14);
 
-  /* ---- Light surfaces ---- */
-  --background: oklch(0.985 0.002 272);
-  --foreground: oklch(0.2 0.02 272);
+  /* ---- Light surfaces: faintly teal-tinted, never pure white behind chat ---- */
+  --background: oklch(0.975 0.007 180);
+  --foreground: oklch(0.2 0.015 200);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.02 272);
+  --card-foreground: oklch(0.2 0.015 200);
   --elevated: oklch(1 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.02 272);
+  --popover-foreground: oklch(0.2 0.015 200);
 
   /* ---- Brand ---- */
-  --primary: oklch(0.52 0.19 272); /* fill — white text = 5.66:1 */
+  --primary: oklch(0.5 0.11 190); /* fill — white text = 5.47:1 */
   --primary-foreground: oklch(0.99 0 0);
-  --primary-hover: oklch(0.47 0.19 272);
-  --brand: oklch(0.48 0.19 272); /* text/icon-safe brand tone */
+  --primary-hover: oklch(0.45 0.11 190);
+  --brand: oklch(0.47 0.11 190); /* text/icon-safe brand tone, 5.76:1 */
 
-  --secondary: oklch(0.955 0.008 272);
-  --secondary-foreground: oklch(0.28 0.03 272);
-  --muted: oklch(0.965 0.006 272);
-  --muted-foreground: oklch(0.52 0.025 272); /* 5.29:1 on background */
-  --accent: oklch(0.955 0.025 272);
-  --accent-foreground: oklch(0.42 0.16 272);
+  --secondary: oklch(0.945 0.008 180);
+  --secondary-foreground: oklch(0.28 0.02 200);
+  --muted: oklch(0.94 0.01 180); /* one step below chat-bg so pills show */
+  --muted-foreground: oklch(0.5 0.02 200); /* 5.54:1 on background */
+  --accent: oklch(0.93 0.024 180);
+  --accent-foreground: oklch(0.42 0.094 190); /* 6.41:1 on accent */
 
   /* ---- Status ---- */
   --destructive: oklch(0.55 0.21 27);
@@ -84,51 +85,58 @@
   --warning-text: oklch(0.52 0.13 75);
 
   /* ---- Lines & fields ---- */
-  --border: oklch(0.885 0.01 272); /* decorative separator */
-  --input: oklch(0.65 0.022 272); /* field border — 3.06:1 vs card */
-  --placeholder: oklch(0.545 0.022 272); /* 4.9:1 on card */
+  --border: oklch(0.9 0.018 185); /* decorative separator */
+  /* Field border, kept soft on purpose (1.72:1 vs card): a field reads by its
+     white fill on the tinted page, and focus swaps in the brand ring. */
+  --input: oklch(0.82 0.035 188);
+  /* Outline-button border: the label identifies the control, so this only
+     groups it and can stay softer than a field border. */
+  --control-border: oklch(0.87 0.025 186);
+  --placeholder: oklch(0.545 0.018 200); /* 4.91:1 on card */
   --field: oklch(1 0 0); /* form field fill: the card itself on light */
   /* Backdrop behind dialogs and sheets: dims the page, never lightens it. */
-  --scrim: oklch(0.2 0.02 272 / 0.55);
-  --ring: oklch(0.52 0.19 272);
+  --scrim: oklch(0.2 0.015 200 / 0.55);
+  --ring: oklch(0.5 0.11 190);
 
   /* ---- Charts ---- */
-  --chart-1: oklch(0.52 0.19 272);
-  --chart-2: oklch(0.6 0.13 200);
+  --chart-1: oklch(0.5 0.11 190);
+  --chart-2: oklch(0.55 0.17 272);
   --chart-3: oklch(0.62 0.16 152);
   --chart-4: oklch(0.7 0.16 75);
   --chart-5: oklch(0.6 0.19 340);
 
   /* ---- Sidebar ---- */
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.2 0.02 272);
-  --sidebar-primary: oklch(0.52 0.19 272);
+  --sidebar: oklch(0.99 0.005 180);
+  --sidebar-foreground: oklch(0.2 0.015 200);
+  --sidebar-primary: oklch(0.5 0.11 190);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.955 0.025 272);
-  --sidebar-accent-foreground: oklch(0.42 0.16 272);
-  --sidebar-border: oklch(0.885 0.01 272);
-  --sidebar-ring: oklch(0.52 0.19 272);
+  --sidebar-accent: oklch(0.935 0.024 180);
+  --sidebar-accent-foreground: oklch(0.42 0.094 190); /* 6.51:1 */
+  --sidebar-border: oklch(0.9 0.018 185);
+  --sidebar-ring: oklch(0.5 0.11 190);
 
   /* ---- Chat surfaces ---- */
-  --chat-bg: oklch(1 0 0);
-  --chat-bg-pattern: oklch(0.955 0.008 272 / 0.55);
-  --bubble-in: oklch(0.945 0.008 272); /* 1.18:1 vs canvas, text 15.4:1 */
-  --bubble-in-foreground: oklch(0.2 0.02 272);
-  --bubble-out: oklch(0.52 0.19 272); /* 5.66:1 vs canvas */
+  /* Tinted canvas with white incoming bubbles: the bubbles lift off the page
+     instead of greying out on pure white. */
+  --chat-bg: oklch(0.96 0.012 180);
+  --chat-bg-pattern: oklch(0.89 0.018 180 / 0.55);
+  --bubble-in: oklch(1 0 0); /* text 16.1:1 */
+  --bubble-in-foreground: oklch(0.2 0.015 200);
+  --bubble-out: oklch(0.5 0.11 190); /* 4.89:1 vs canvas */
   --bubble-out-foreground: oklch(0.99 0 0);
-  --bubble-out-meta: oklch(0.99 0 0 / 0.78);
+  --bubble-out-meta: oklch(0.99 0 0 / 0.85);
   /* Inline mentions: restrained text accents, tuned against each bubble. */
-  --mention-in: oklch(0.43 0.2 272);
-  --mention-out: oklch(0.95 0.045 220);
-  --typing: oklch(0.52 0.025 272);
+  --mention-in: oklch(0.43 0.11 190); /* 7.27:1 on bubble-in */
+  --mention-out: oklch(0.96 0.07 100); /* 4.9:1 on bubble-out */
+  --typing: oklch(0.5 0.02 200);
 
   /* ---- Presence ---- */
   --presence-online: oklch(0.62 0.17 152); /* 3.36:1 vs card */
   --presence-away: oklch(0.72 0.15 75);
   --presence-busy: oklch(0.55 0.21 27);
-  --presence-offline: oklch(0.72 0.012 272);
+  --presence-offline: oklch(0.72 0.012 200);
 
-  --scroll-thumb: oklch(0.8 0.012 272);
+  --scroll-thumb: oklch(0.82 0.012 180);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -139,8 +147,8 @@
   --bg-box-message-out: var(--bubble-out);
   --text: var(--foreground);
   --black-bland: var(--sidebar);
-  --bg-voice-call: oklch(0.965 0.006 272);
-  --button: oklch(0.93 0.008 272);
+  --bg-voice-call: oklch(0.955 0.007 180);
+  --button: oklch(0.93 0.008 180);
   --bg-scroll-thumb: var(--scroll-thumb);
 }
 
@@ -186,6 +194,7 @@
   /* Softer than light mode's 3:1 border (a bright outline glares on a dark
      surface); dark fields are also told apart by their recessed fill. */
   --input: oklch(0.42 0.018 272);
+  --control-border: var(--input);
   --placeholder: oklch(0.66 0.02 272); /* 5.75:1 on card */
   --field: oklch(0.18 0.013 272); /* a step below the card */
   /* A light scrim (the old foreground/60) washed dark mode out to grey. */
@@ -260,6 +269,7 @@
   --color-warning-text: var(--warning-text);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-control-border: var(--control-border);
   --color-field: var(--field);
   --color-scrim: var(--scrim);
   --color-placeholder: var(--placeholder);
