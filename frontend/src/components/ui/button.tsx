@@ -31,7 +31,7 @@ const buttonVariants = cva(
         success:
           "bg-success text-success-foreground shadow-xs hover:brightness-110",
         outline:
-          "border border-input bg-card text-foreground shadow-xs hover:bg-accent hover:text-accent-foreground",
+          "border border-control-border bg-card text-foreground shadow-xs hover:bg-accent hover:text-accent-foreground",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/70",
         /** Tonal brand button — brand presence without full saturation. */
