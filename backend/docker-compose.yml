@@ -28,6 +28,9 @@ name: daln-backend
 x-app-common: &app-common
   image: daln-backend-dev:latest # 1 image dev dùng chung cho mọi service
   restart: unless-stopped
+  # docker stop chờ bấy lâu cho app tắt êm (drain partition, flush lô tin) rồi
+  # mới SIGKILL; entrypoint.dev.sh tự chờ tối đa 25s.
+  stop_grace_period: 30s
   env_file:
     - .env          # secrets có sẵn (SMTP, DATABASE_URL nếu bạn điền)
     - .env.docker   # cấu hình kết nối infra (ghi đè .env) - bắt buộc
