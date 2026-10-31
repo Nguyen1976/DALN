@@ -33,6 +33,7 @@ import { PrismaModule } from '../prisma/prisma.module'
 import { PrometheusModule } from '@willsoto/nestjs-prometheus/dist/module'
 import { RedisModule } from '@app/redis'
 import { BackgroundJobModule } from './background-jobs/background-jobs.module'
+import { partitionProviders } from './partitions/partitions.providers'
 
 @Module({
   imports: [
@@ -82,6 +83,7 @@ import { BackgroundJobModule } from './background-jobs/background-jobs.module'
     MessageSubscriber,
     ChatSagaSubscriber,
     ChatOutboxRelay,
+    ...partitionProviders,
   ],
 })
 export class ChatModule {}

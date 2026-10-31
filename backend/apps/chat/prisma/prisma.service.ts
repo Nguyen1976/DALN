@@ -1,16 +1,18 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common'
+import { Injectable, OnApplicationShutdown, OnModuleInit } from '@nestjs/common'
 import { PrismaClient } from '../src/generated/client'
 
 @Injectable()
 export class PrismaService
   extends PrismaClient
-  implements OnModuleInit, OnModuleDestroy
+  implements OnModuleInit, OnApplicationShutdown
 {
   async onModuleInit() {
     await this.$connect()
   }
 
-  async onModuleDestroy() {
+  // Phase cuối khi tắt máy: drain partition (onModuleDestroy) và lần flush
+  // cuối của BatchWriter (beforeApplicationShutdown) còn cần DB.
+  async onApplicationShutdown() {
     await this.$disconnect()
   }
 }
