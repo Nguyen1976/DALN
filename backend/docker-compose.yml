@@ -376,6 +376,9 @@ services:
       SERVICE: chat
       PORT: 3003
       DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
+      # Chỉ cho QC đối chứng (qc/README.md); để trống là chạy bình thường.
+      CHAT_QC_DISABLE_LANES: ${CHAT_QC_DISABLE_LANES:-}
+      CHAT_QC_DISABLE_DEDUP: ${CHAT_QC_DISABLE_DEDUP:-}
     ports:
       - "3003:3003"
 
@@ -425,6 +428,8 @@ services:
       SERVICE: chat
       PORT: 3003
       DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
+      CHAT_QC_DISABLE_LANES: ${CHAT_QC_DISABLE_LANES:-}
+      CHAT_QC_DISABLE_DEDUP: ${CHAT_QC_DISABLE_DEDUP:-}
     networks:
       backend:
         aliases: [chat]

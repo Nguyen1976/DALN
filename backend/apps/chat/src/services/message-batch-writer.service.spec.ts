@@ -123,4 +123,23 @@ describe('MessageBatchWriter', () => {
 
     await expect(settled).resolves.toBe('rejected')
   })
+
+  it('QC switch CHAT_QC_DISABLE_DEDUP writes without clientMessageId', async () => {
+    process.env.CHAT_QC_DISABLE_DEDUP = '1'
+    try {
+      const { writer, prisma } = makeWriter((cmd) => ({
+        ok: 1,
+        n: cmd.documents.length,
+      }))
+
+      const pending = writer.enqueue(input(1))
+      await jest.advanceTimersByTimeAsync(20)
+      await pending
+
+      const [cmd] = prisma.$runCommandRaw.mock.calls[0]
+      expect(cmd.documents[0]).not.toHaveProperty('clientMessageId')
+    } finally {
+      delete process.env.CHAT_QC_DISABLE_DEDUP
+    }
+  })
 })

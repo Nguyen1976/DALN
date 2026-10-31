@@ -82,7 +82,11 @@ function toDocument(doc: BatchedMessage): Prisma.InputJsonObject {
     ...(doc.mentions !== undefined
       ? { mentions: doc.mentions as Prisma.InputJsonValue }
       : {}),
-    ...(doc.clientMessageId ? { clientMessageId: doc.clientMessageId } : {}),
+    // CHAT_QC_DISABLE_DEDUP: CHỈ DÀNH CHO QC đối chứng — bỏ khoá chống trùng để
+    // chứng minh unique index là thứ chặn tin nhân bản khi giao lại.
+    ...(doc.clientMessageId && process.env.CHAT_QC_DISABLE_DEDUP !== '1'
+      ? { clientMessageId: doc.clientMessageId }
+      : {}),
     isRevoked: false,
     isDeleted: false,
     createdAt: date(doc.createdAt),

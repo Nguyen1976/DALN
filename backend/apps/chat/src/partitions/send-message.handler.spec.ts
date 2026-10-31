@@ -95,4 +95,27 @@ describe('SendMessageHandler', () => {
     await expect(both).resolves.toEqual(['ack', 'ack'])
     expect(saved).toEqual(['tmp-1', 'tmp-2'])
   })
+
+  it('QC switch CHAT_QC_DISABLE_LANES runs messages of one conversation concurrently', async () => {
+    process.env.CHAT_QC_DISABLE_LANES = '1'
+    try {
+      const order: string[] = []
+      const sendMessage = jest.fn(async (p: MessageSendPayload) => {
+        await new Promise((r) =>
+          setTimeout(r, p.clientMessageId === 'tmp-1' ? 30 : 1),
+        )
+        order.push(p.clientMessageId)
+      })
+      const { handler } = makeHandler(sendMessage)
+
+      await Promise.all([
+        handler.handle(payload(1)),
+        handler.handle(payload(2)),
+      ])
+
+      expect(order).toEqual(['tmp-2', 'tmp-1'])
+    } finally {
+      delete process.env.CHAT_QC_DISABLE_LANES
+    }
+  })
 })
