@@ -70,5 +70,13 @@ api POST "/bindings/${VHOST}/e/daln.dlx/q/daln.dead-letters" \
 api PUT "/policies/${VHOST}/daln-dlx" \
   '{"pattern":"^(?!daln\\.dead-letters$).*","definition":{"dead-letter-exchange":"daln.dlx"},"apply-to":"queues","priority":0}'
 
+# Queue partition của đường gửi tin (chat.send.p0..15). Priority 1 nên policy này
+# THAY hẳn daln-dlx trên các queue đó -> phải chép lại dead-letter-exchange.
+# max-length + reject-publish: queue đầy thì broker từ chối tin mới (gateway nhận
+# nack và báo SERVER_BUSY cho client) thay vì dồn vô hạn. Đặt ở policy chứ không
+# ở argument của queue để đổi được khi đang chạy (QC quá tải dùng điều này).
+api PUT "/policies/${VHOST}/chat-send-partitions" \
+  '{"pattern":"^chat\\.send\\.p\\d+$","definition":{"dead-letter-exchange":"daln.dlx","max-length":20000,"overflow":"reject-publish"},"apply-to":"queues","priority":1}'
+
 rm -f "${RESP}"
 log "Xong"
