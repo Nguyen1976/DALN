@@ -421,7 +421,11 @@ export class FakeCollection {
 
   createIndex(key: FakeDoc, options: FakeDoc = {}) {
     this.indexSpecs.push({ key: clone(key), options: clone(options) })
-    return Promise.resolve(String(options.name ?? Object.keys(key).join('_')))
+    const name =
+      typeof options.name === 'string'
+        ? options.name
+        : Object.keys(key).join('_')
+    return Promise.resolve(name)
   }
 
   countDocuments(filter: FakeDoc = {}) {
