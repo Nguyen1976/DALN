@@ -223,7 +223,9 @@ services:
   # Kho đối tượng cho DEV: tệp đính kèm không đi ra AWS.
   # Console: http://localhost:9001 (minioadmin/minioadmin) — API: :9000
   minio:
-    image: minio/minio:latest
+    # minio/minio và quay.io/minio không còn cho pull công khai (401 / repo bị gỡ).
+    # pgsty/minio là bản build lại từ mã nguồn MinIO: cùng CLI, cùng API S3.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: daln-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
@@ -245,7 +247,7 @@ services:
 
   # Tạo bucket và mở quyền đọc công khai (ảnh trong chat được tải thẳng).
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-10-26T00-00-00Z
     container_name: daln-minio-init
     restart: "no"
     depends_on:
