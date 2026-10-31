@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useDispatch, useSelector } from "react-redux";
+import { useDispatch, useSelector, useStore } from "react-redux";
 import { getConversationByIdAPI } from "@/apis";
 import { socket } from "@/lib/socket";
 import { SOCKET_EVENTS } from "@/lib/socket.events";
@@ -24,11 +24,20 @@ import {
   type PollData,
 } from "@/redux/slices/messageSlice";
 import { selectUser } from "@/redux/slices/userSlice";
-import type { AppDispatch } from "@/redux/store";
+import type { AppDispatch, RootState } from "@/redux/store";
+import {
+  findTextMessage,
+  nextBusyDelay,
+  pendingTextMessages,
+  sendTextMessage,
+} from "@/lib/resendPending";
 
 export function useProtectedRouteChatSockets(conversationId?: string) {
   const dispatch = useDispatch<AppDispatch>();
+  const store = useStore<RootState>();
   const user = useSelector(selectUser);
+  /** Số lần đã tự gửi lại vì server bận, theo clientMessageId. */
+  const busyAttemptsRef = useRef(new Map<string, number>());
   const conversations = useSelector(selectConversation);
 
   const selectedChatIdRef = useRef<string | null>(conversationId ?? null);
@@ -72,10 +81,12 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
 
       dispatch(addMessage(message));
       if (user?.id && message.mentionUserIds?.includes(user.id)) {
-        dispatch(markConversationMention({
-          conversationId: message.conversationId,
-          messageId: message.id,
-        }));
+        dispatch(
+          markConversationMention({
+            conversationId: message.conversationId,
+            messageId: message.id,
+          }),
+        );
       }
       dispatch(
         updateNewMessage({
@@ -113,8 +124,28 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
     const errorHandler = (payload: {
       clientMessageId?: string;
       conversationId?: string;
+      code?: string;
     }) => {
       if (!payload.conversationId) return;
+
+      // Queue phía server đầy: tự gửi lại sau 2s, 4s, 8s rồi mới báo lỗi.
+      const { conversationId: cid, clientMessageId } = payload;
+      if (payload.code === "SERVER_BUSY" && clientMessageId) {
+        const attempts = busyAttemptsRef.current.get(clientMessageId) ?? 0;
+        const delay = nextBusyDelay(attempts);
+        const message = findTextMessage(
+          store.getState().message,
+          cid,
+          clientMessageId,
+        );
+        if (delay !== null && message) {
+          busyAttemptsRef.current.set(clientMessageId, attempts + 1);
+          window.setTimeout(() => sendTextMessage(dispatch, message), delay);
+          return;
+        }
+        busyAttemptsRef.current.delete(clientMessageId);
+      }
+
       dispatch(
         failMessage({
           conversationId: payload.conversationId,
@@ -243,6 +274,21 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       dispatch(applyConversationUpdate(payload));
     };
 
+    // Nối lại sau khi rớt (gateway chết, mạng chập chờn): gửi lại mọi tin văn
+    // bản chưa có ACK, giữ nguyên clientMessageId nên server không lưu trùng.
+    // Lần kết nối đầu không có gì để gửi lại.
+    let connectedOnce = socket.connected;
+    const reconnectHandler = () => {
+      if (!connectedOnce) {
+        connectedOnce = true;
+        return;
+      }
+      for (const message of pendingTextMessages(store.getState().message)) {
+        sendTextMessage(dispatch, message);
+      }
+    };
+
+    socket.on("connect", reconnectHandler);
     socket.on(SOCKET_EVENTS.CHAT.MESSAGE_NEW, newMessageHandler);
     socket.on(SOCKET_EVENTS.CHAT.MESSAGE_ACK, ackHandler);
     socket.on(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, errorHandler);
@@ -262,6 +308,7 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
     );
 
     return () => {
+      socket.off("connect", reconnectHandler);
       socket.off(SOCKET_EVENTS.CHAT.MESSAGE_NEW, newMessageHandler);
       socket.off(SOCKET_EVENTS.CHAT.MESSAGE_ACK, ackHandler);
       socket.off(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, errorHandler);
@@ -286,5 +333,5 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
         conversationUpdateHandler,
       );
     };
-  }, [dispatch, user.id]);
+  }, [dispatch, store, user.id]);
 }
