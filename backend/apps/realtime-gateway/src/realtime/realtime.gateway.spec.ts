@@ -15,6 +15,7 @@ import {
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 import { CallAck, RealtimeGateway } from './realtime.gateway'
 import { GroupCallStore, isGroupCallId } from './group-call.store'
+import { GroupCallTimers } from './group-call-timers'
 import type { ClientSocket } from './socket.types'
 import { RealtimeKitService } from './realtimekit.service'
 
@@ -69,6 +70,24 @@ class FakeRedis {
   }
   smembers(key: string) {
     return Promise.resolve(Array.from(this.sets.get(key) ?? []))
+  }
+  private zsets = new Map<string, Map<string, number>>()
+  zadd(key: string, score: number, member: string) {
+    const zset = this.zsets.get(key) ?? new Map<string, number>()
+    zset.set(member, score)
+    this.zsets.set(key, zset)
+    return Promise.resolve(1)
+  }
+  zrem(key: string, member: string) {
+    return Promise.resolve(this.zsets.get(key)?.delete(member) ? 1 : 0)
+  }
+  zrangebyscore(key: string, min: number, max: number) {
+    return Promise.resolve(
+      [...(this.zsets.get(key) ?? new Map<string, number>())]
+        .filter(([, score]) => score >= min && score <= max)
+        .sort((a, b) => a[1] - b[1])
+        .map(([member]) => member),
+    )
   }
 }
 
@@ -777,6 +796,7 @@ describe('RealtimeGateway', () => {
   describe('gọi nhóm', () => {
     const OLD_ENV = process.env
     let store: GroupCallStore
+    let timers: GroupCallTimers
 
     beforeEach(() => {
       process.env = { ...OLD_ENV }
@@ -784,11 +804,20 @@ describe('RealtimeGateway', () => {
       process.env.CHAT_SERVICE_URL = 'http://chat:3003'
 
       // Store thật trên Redis giả: kiểm cả logic phiên chứ không chỉ handler.
-      store = new GroupCallStore(new FakeRedis() as never)
-      Object.assign(gateway, { groupCallStore: store })
+      const redis = new FakeRedis()
+      store = new GroupCallStore(redis as never)
+      timers = new GroupCallTimers(redis as never, (kind, id) =>
+        (
+          gateway as unknown as {
+            onGroupDeadline(k: typeof kind, i: string): Promise<void>
+          }
+        ).onGroupDeadline(kind, id),
+      )
+      Object.assign(gateway, { groupCallStore: store, groupCallTimers: timers })
     })
 
     afterEach(() => {
+      timers.stop()
       jest.useRealTimers()
     })
 

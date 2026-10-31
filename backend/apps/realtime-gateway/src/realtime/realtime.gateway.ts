@@ -47,6 +47,7 @@ import { randomUUID } from 'crypto'
 import { hostname } from 'node:os'
 import { CallSession, CallSessionStore, isCallId } from './call-session.store'
 import { CallBusyStore } from './call-busy.store'
+import { GroupCallTimers, type GroupDeadline } from './group-call-timers'
 import {
   GroupCallMember,
   GroupCallSession,
@@ -143,11 +144,14 @@ export class RealtimeGateway
   private callSessionStore: CallSessionStore
   private groupCallStore: GroupCallStore
   private callBusyStore: CallBusyStore
-  /** Hẹn huỷ phòng nhóm chưa ai vào (theo callId). Chỉ sống trong process này. */
-  private readonly groupPendingTimers = new Map<string, NodeJS.Timeout>()
+  /**
+   * Hạn chót của phòng gọi nhóm, lưu trong Redis để gateway nào còn sống cũng
+   * chạy được (gateway đặt hạn chót có thể đã restart).
+   *  - pending: phòng chưa ai vào sau 35s thì huỷ;
+   *  - empty: phòng trống 15s (chờ ai đó rớt mạng vào lại) thì kết thúc.
+   */
+  private groupCallTimers: GroupCallTimers
   private readonly groupPendingMs = 35000
-  /** Phòng nhóm trống (người cuối vừa rời): chờ ai đó rớt mạng vào lại. */
-  private readonly groupEmptyTimers = new Map<string, NodeJS.Timeout>()
   private readonly groupEmptyMs = 15000
   // Không còn timer 25s cho mỗi socket: `pong` của Socket.IO (pingInterval
   // 40s, pingTimeout 10s -> tối đa 50s giữa hai lần) đã gia hạn TTL 90s của
@@ -250,11 +254,16 @@ export class RealtimeGateway
     this.callSessionStore = new CallSessionStore(this.redisClient)
     this.groupCallStore = new GroupCallStore(this.redisClient)
     this.callBusyStore = new CallBusyStore(this.redisClient)
+    this.groupCallTimers = new GroupCallTimers(this.redisClient, (kind, id) =>
+      this.onGroupDeadline(kind, id),
+    )
   }
 
   /** Khai báo exchange + 16 queue partition để publish được ngay cả khi chưa có chat nào chạy. */
   async onApplicationBootstrap() {
     await assertSendTopology(this.amqpConnection.channel)
+    // Quét cả hạn chót do gateway khác đặt (nó có thể đã tắt).
+    this.groupCallTimers.start()
   }
 
   //default function
@@ -1495,47 +1504,45 @@ export class RealtimeGateway
   }
 
   private scheduleGroupEmptyFinish(session: GroupCallSession): void {
-    this.clearGroupEmpty(session.callId)
-    const timer = setTimeout(() => {
-      this.groupEmptyTimers.delete(session.callId)
-      void (async () => {
-        const current = await this.groupCallStore.getByCallId(session.callId)
-        if (!current) return
-        if (GroupCallStore.participantList(current).length > 0) return
-        await this.finishGroupCall(session.conversationId)
-      })().catch((error: unknown) =>
-        this.logger.error(`kết thúc phòng trống ${session.callId} lỗi`, error),
+    this.groupCallTimers
+      .schedule('empty', session.callId, this.groupEmptyMs)
+      .catch((error: unknown) =>
+        this.logger.error(`hẹn kết thúc phòng ${session.callId} lỗi`, error),
       )
-    }, this.groupEmptyMs)
-    if (typeof timer.unref === 'function') timer.unref()
-    this.groupEmptyTimers.set(session.callId, timer)
   }
 
   private clearGroupEmpty(callId: string): void {
-    const timer = this.groupEmptyTimers.get(callId)
-    if (timer) clearTimeout(timer)
-    this.groupEmptyTimers.delete(callId)
+    void this.groupCallTimers.cancel('empty', callId).catch(() => undefined)
   }
 
   // ── Hẹn huỷ phòng nhóm chưa ai vào ───────────────────────────────────────
 
   private scheduleGroupPendingCancel(session: GroupCallSession): void {
-    const existing = this.groupPendingTimers.get(session.callId)
-    if (existing) clearTimeout(existing)
-    const timer = setTimeout(() => {
-      this.cancelGroupIfEmpty(session.conversationId, session.callId).catch(
-        () => undefined,
+    this.groupCallTimers
+      .schedule('pending', session.callId, this.groupPendingMs)
+      .catch((error: unknown) =>
+        this.logger.error(`hẹn huỷ phòng ${session.callId} lỗi`, error),
       )
-    }, this.groupPendingMs)
-    // Không giữ process sống chỉ vì timer này.
-    if (typeof timer.unref === 'function') timer.unref()
-    this.groupPendingTimers.set(session.callId, timer)
   }
 
   private clearGroupPending(callId: string): void {
-    const timer = this.groupPendingTimers.get(callId)
-    if (timer) clearTimeout(timer)
-    this.groupPendingTimers.delete(callId)
+    void this.groupCallTimers.cancel('pending', callId).catch(() => undefined)
+  }
+
+  /** Một hạn chót tới hạn — gateway nào quét được nó thì chạy, đúng một lần. */
+  private async onGroupDeadline(
+    kind: GroupDeadline,
+    callId: string,
+  ): Promise<void> {
+    const session = await this.groupCallStore.getByCallId(callId)
+    if (!session) return
+    if (kind === 'pending') {
+      await this.cancelGroupIfEmpty(session.conversationId, callId)
+      return
+    }
+    // Ai đó đã vào lại trong 15 giây: giữ phòng.
+    if (GroupCallStore.participantList(session).length > 0) return
+    await this.finishGroupCall(session.conversationId)
   }
 
   /**
@@ -1548,7 +1555,6 @@ export class RealtimeGateway
     conversationId: string,
     callId: string,
   ): Promise<void> {
-    this.groupPendingTimers.delete(callId)
     const session = await this.groupCallStore.getByCallId(callId)
     if (!session) return
     if (GroupCallStore.participantList(session).length > 0) return
