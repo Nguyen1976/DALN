@@ -157,6 +157,8 @@ export class RealtimeGateway
   // 40s, pingTimeout 10s -> tối đa 50s giữa hai lần) đã gia hạn TTL 90s của
   // key socket, dư 1,8 lần biên an toàn. Timer server-side còn có hại: nó gia
   // hạn cho cả kết nối đã chết, kéo dài trạng thái online giả.
+  /** Handshake đang chạy theo socket id; xong thì tự xoá. */
+  private readonly handshakes = new Map<string, Promise<void>>()
   private readonly packetListeners = new Map<
     string,
     (packet: { type: string }) => void
@@ -268,6 +270,24 @@ export class RealtimeGateway
 
   //default function
   async handleConnection(client: ClientSocket) {
+    // Socket.IO báo 'connect' cho client TRƯỚC khi handshake này xong (nó còn
+    // phải hỏi Redis xem phiên còn sống). Tin client gửi ngay lúc đó — điển hình
+    // là gửi lại tin chưa ACK sau khi nối lại — chờ handshake qua promise này
+    // thay vì bị từ chối UNAUTHORIZED.
+    let handshakeDone!: () => void
+    this.handshakes.set(
+      client.id,
+      new Promise<void>((resolve) => (handshakeDone = resolve)),
+    )
+    try {
+      await this.authenticateConnection(client)
+    } finally {
+      handshakeDone()
+      this.handshakes.delete(client.id)
+    }
+  }
+
+  private async authenticateConnection(client: ClientSocket) {
     try {
       const rawCookie = client.handshake.headers.cookie
 
@@ -503,6 +523,7 @@ export class RealtimeGateway
     @MessageBody() data: CreateMessageBody | undefined,
     @ConnectedSocket() client: ClientSocket,
   ) {
+    if (!client.data.userId) await this.handshakes.get(client.id)
     if (!client.data.userId) {
       client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
         conversationId: data?.conversationId,

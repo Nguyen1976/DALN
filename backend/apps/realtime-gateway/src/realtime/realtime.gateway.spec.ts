@@ -291,6 +291,27 @@ describe('RealtimeGateway', () => {
       expect(publishedTo(ROUTING_RMQ.USER_OFFLINE)).toHaveLength(1)
     })
 
+    it('waits for the handshake before judging a message sent right after connect', async () => {
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      // Client gửi ngay khi 'connect' (vd. gửi lại tin chưa ACK sau khi nối
+      // lại) trong lúc gateway còn đang kiểm tra phiên.
+      const connecting = gateway.handleConnection(client)
+      const sending = gateway.handleCreateMessage(
+        { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'x' },
+        client,
+      )
+      await Promise.all([connecting, sending])
+
+      const errors = (client.emit.mock.calls as [string, unknown][]).filter(
+        ([event]) => event === SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+      )
+      expect(errors).toEqual([])
+      expect(publishedTo(partitionRoutingKey(partitionOf('c1')))).toHaveLength(
+        1,
+      )
+    })
+
     it('logs which node accepted the socket', async () => {
       const log = jest
         .spyOn(Logger.prototype, 'log')
