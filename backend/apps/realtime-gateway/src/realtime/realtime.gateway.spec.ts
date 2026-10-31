@@ -247,6 +247,31 @@ describe('RealtimeGateway', () => {
       expect(codeEmitted(client)).toBeUndefined()
     })
 
+    it('publishes USER_ONLINE only when the store says the user came online', async () => {
+      redisStub.eval.mockResolvedValueOnce(1)
+      await gateway.handleConnection(fakeClient(`accessToken=${signAccess()}`))
+      expect(publishedTo(ROUTING_RMQ.USER_ONLINE)).toHaveLength(1)
+
+      // Tab thứ hai (có thể ở gateway khác): store báo không phải lần đầu.
+      redisStub.eval.mockResolvedValueOnce(0)
+      await gateway.handleConnection(fakeClient(`accessToken=${signAccess()}`))
+      expect(publishedTo(ROUTING_RMQ.USER_ONLINE)).toHaveLength(1)
+    })
+
+    it('publishes USER_OFFLINE only when the last socket leaves', async () => {
+      const client = fakeClient(`accessToken=${signAccess()}`)
+      ;(client as unknown as { conn: { off: jest.Mock } }).conn.off = jest.fn()
+      client.data.userId = 'u1'
+
+      redisStub.eval.mockResolvedValueOnce(0)
+      await gateway.handleDisconnect(client)
+      expect(publishedTo(ROUTING_RMQ.USER_OFFLINE)).toHaveLength(0)
+
+      redisStub.eval.mockResolvedValueOnce(1)
+      await gateway.handleDisconnect(client)
+      expect(publishedTo(ROUTING_RMQ.USER_OFFLINE)).toHaveLength(1)
+    })
+
     it('logs which node accepted the socket', async () => {
       const log = jest
         .spyOn(Logger.prototype, 'log')

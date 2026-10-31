@@ -302,15 +302,17 @@ export class RealtimeGateway
       client.data.userId = userId
       client.data.sid = sid
 
-      const prevOnline = await this.userStatusStore.isOnline(userId)
-
       // 🔥 Join room theo user
       await client.join(`user:${userId}`)
       // QC nhiều gateway đọc dòng này để biết socket đang nằm ở node nào.
       this.logger.log(`socket connected user=${userId} node=${hostname()}`)
 
-      // 🔥 Lưu Redis + TTL
-      await this.userStatusStore.addConnection(userId, client.id)
+      // 🔥 Lưu Redis + TTL. Online hay chưa quyết định nguyên tử trong store,
+      // nên hai tab vào hai gateway cùng lúc chỉ phát online một lần.
+      const { cameOnline } = await this.userStatusStore.addConnection(
+        userId,
+        client.id,
+      )
 
       const packetListener = (packet: { type: string }) => {
         if (packet.type !== 'pong') return
@@ -324,7 +326,7 @@ export class RealtimeGateway
       client.conn.on('packet', packetListener)
       this.packetListeners.set(client.id, packetListener)
 
-      if (!prevOnline) {
+      if (cameOnline) {
         this.publish(ROUTING_RMQ.USER_ONLINE, { userId })
       }
     } catch {
@@ -389,11 +391,12 @@ export class RealtimeGateway
       this.packetListeners.delete(client.id)
     }
 
-    await this.userStatusStore.removeConnection(userId, client.id)
+    const { wentOffline } = await this.userStatusStore.removeConnection(
+      userId,
+      client.id,
+    )
 
-    const stillOnline = await this.userStatusStore.isOnline(userId)
-
-    if (!stillOnline) {
+    if (wentOffline) {
       //trường hợp này là trường hợp user offline thật sự, chứ k phải do lỗi kết nối mạng hay tắt máy đột ngột mà chưa kịp remove connection
       // The user service stores it on the account (USER_OFFLINE).
       const lastSeen = new Date().toISOString()
