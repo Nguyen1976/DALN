@@ -111,6 +111,10 @@ model message {
   /// {all:true,label}) để client tô sáng chính xác, không phải dò regex.
   mentions        Json?
   replyToMessageId String?           @db.ObjectId
+  /// Khoá chống trùng do client sinh; unique index partial (senderId,
+  /// clientMessageId) nằm ở migration chat/0007 vì Prisma không khai báo được
+  /// partial index.
+  clientMessageId  String?
   /// KHÔNG đặt @unique: MongoDB coi tin thiếu field là `null`, nên unique index
   /// chỉ cho đúng MỘT tin không kèm bình chọn tồn tại — mọi tin sau đó vỡ P2002.
   /// Một-bình-chọn-một-tin do PollService giữ (tạo tin ngay khi tạo poll).
