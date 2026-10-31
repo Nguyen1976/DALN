@@ -9,6 +9,7 @@
     "calls": "node ./calls-browser.mjs"
   },
   "devDependencies": {
-    "puppeteer-core": "^23.11.1"
+    "puppeteer-core": "^23.11.1",
+    "socket.io-client": "^4.8.1"
   }
 }
