@@ -4,8 +4,13 @@ import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
 import { SessionStore } from '@app/common'
 import type { Server } from 'socket.io'
 import { EVENT_TYPE_HEADER, EVENT_VERSION_HEADER } from '@app/common/rmq'
-import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
+import {
+  SEND_EXCHANGE,
+  partitionOf,
+  partitionRoutingKey,
+} from 'libs/constant/rmq/partition'
+import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 import { CallAck, RealtimeGateway } from './realtime.gateway'
 import { GroupCallStore, isGroupCallId } from './group-call.store'
 import type { ClientSocket } from './socket.types'
@@ -1265,10 +1270,10 @@ describe('RealtimeGateway', () => {
     expect(gateway).toBeDefined()
   })
 
-  it('không cho gửi tin nhắn khi socket chưa xác thực', () => {
+  it('không cho gửi tin nhắn khi socket chưa xác thực', async () => {
     const emit = jest.fn()
 
-    gateway.handleCreateMessage(
+    await gateway.handleCreateMessage(
       { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'xin chao' },
       socketOf(undefined, emit),
     )
@@ -1280,15 +1285,16 @@ describe('RealtimeGateway', () => {
     )
   })
 
-  it('socket đã xác thực -> publish SEND_MESSAGE kèm header version, body giữ nguyên', () => {
-    gateway.handleCreateMessage(
+  it("publishes to the conversation's partition with the version header, body unchanged", async () => {
+    await gateway.handleCreateMessage(
       { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'xin chao' },
       socketOf('u1'),
     )
 
+    const key = partitionRoutingKey(partitionOf('c1'))
     expect(amqpStub.publish).toHaveBeenCalledWith(
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.SEND_MESSAGE,
+      SEND_EXCHANGE,
+      key,
       expect.objectContaining({
         conversationId: 'c1',
         senderId: 'u1',
@@ -1299,9 +1305,53 @@ describe('RealtimeGateway', () => {
         persistent: true,
         headers: {
           [EVENT_VERSION_HEADER]: 1,
-          [EVENT_TYPE_HEADER]: ROUTING_RMQ.SEND_MESSAGE,
+          [EVENT_TYPE_HEADER]: key,
         },
       }),
     )
+  })
+
+  it('emits SERVER_BUSY when the broker rejects the publish', async () => {
+    amqpStub.publish.mockRejectedValueOnce(new Error('message nacked'))
+    const emit = jest.fn()
+
+    await gateway.handleCreateMessage(
+      { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'xin chao' },
+      socketOf('u1', emit),
+    )
+
+    expect(emit).toHaveBeenCalledWith(
+      SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+      expect.objectContaining({
+        code: 'SERVER_BUSY',
+        retryable: true,
+        clientMessageId: 'tmp-1',
+        conversationId: 'c1',
+      }),
+    )
+  })
+
+  it('emits SERVER_BUSY when the broker does not confirm within 5000ms', async () => {
+    jest.useFakeTimers()
+    try {
+      amqpStub.publish.mockReturnValueOnce(new Promise<boolean>(() => {}))
+      const emit = jest.fn()
+
+      const pending = gateway.handleCreateMessage(
+        { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'x' },
+        socketOf('u1', emit),
+      )
+      await jest.advanceTimersByTimeAsync(4999)
+      expect(emit).not.toHaveBeenCalled()
+      await jest.advanceTimersByTimeAsync(1)
+      await pending
+
+      expect(emit).toHaveBeenCalledWith(
+        SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+        expect.objectContaining({ code: 'SERVER_BUSY', retryable: true }),
+      )
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

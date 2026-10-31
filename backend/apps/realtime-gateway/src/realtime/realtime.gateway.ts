@@ -10,13 +10,27 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets'
 import { JwtService } from '@nestjs/jwt'
-import { Inject, Injectable, Logger } from '@nestjs/common'
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+} from '@nestjs/common'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
-import { publishEvent, RabbitSubscribeWithRetry } from '@app/common/rmq'
+import {
+  assertSendTopology,
+  publishEvent,
+  RabbitSubscribeWithRetry,
+} from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
+import {
+  SEND_EXCHANGE,
+  partitionOf,
+  partitionRoutingKey,
+} from 'libs/constant/rmq/partition'
 import { UserStatusStore } from './user-status.store'
 import type {
   EmitToUserPayload,
@@ -92,6 +106,17 @@ function grantOf(grant: RtkGrant & { authToken?: string }): RtkGrant {
 }
 
 //nếu k đặt tên cổng thì nó sẽ trùng với cổng của http
+/** Chờ broker xác nhận tin gửi tối đa bấy lâu (spec §6). */
+const PUBLISH_CONFIRM_TIMEOUT_MS = 5000
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout ${ms}ms`)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 @Injectable()
 @WebSocketGateway({
   // `origin: '*'` cộng với handshake xác thực bằng cookie là một cặp sai: mọi
@@ -106,7 +131,7 @@ function grantOf(grant: RtkGrant & { authToken?: string }): RtkGrant {
   pingTimeout: 10000,
 })
 export class RealtimeGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayConnection, OnGatewayDisconnect, OnApplicationBootstrap
 {
   @WebSocketServer()
   server!: Server
@@ -224,6 +249,11 @@ export class RealtimeGateway
     this.callSessionStore = new CallSessionStore(this.redisClient)
     this.groupCallStore = new GroupCallStore(this.redisClient)
     this.callBusyStore = new CallBusyStore(this.redisClient)
+  }
+
+  /** Khai báo exchange + 16 queue partition để publish được ngay cả khi chưa có chat nào chạy. */
+  async onApplicationBootstrap() {
+    await assertSendTopology(this.amqpConnection.channel)
   }
 
   //default function
@@ -454,7 +484,7 @@ export class RealtimeGateway
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_CREATE)
-  handleCreateMessage(
+  async handleCreateMessage(
     @MessageBody() data: CreateMessageBody | undefined,
     @ConnectedSocket() client: ClientSocket,
   ) {
@@ -489,7 +519,32 @@ export class RealtimeGateway
       type: data.type,
       medias: data.medias ?? [],
     }
-    this.publish(ROUTING_RMQ.SEND_MESSAGE, message)
+
+    // Tin của cùng một hội thoại luôn vào cùng một partition, ở mọi gateway.
+    // Chờ broker xác nhận: queue đầy (policy reject-publish) hay broker không
+    // trả lời thì báo client ngay để nó lùi lại, thay vì để tin treo im lặng.
+    try {
+      await withTimeout(
+        publishEvent(
+          this.amqpConnection,
+          SEND_EXCHANGE,
+          partitionRoutingKey(partitionOf(data.conversationId)),
+          message,
+        ),
+        PUBLISH_CONFIRM_TIMEOUT_MS,
+      )
+    } catch (error) {
+      this.logger.warn(
+        `SEND_MESSAGE không được broker nhận (${String(error)}) conversation=${data.conversationId}`,
+      )
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        conversationId: data.conversationId,
+        clientMessageId: data.clientMessageId,
+        code: 'SERVER_BUSY',
+        message: 'Server is busy, retrying shortly',
+        retryable: true,
+      })
+    }
   }
 
   /**
