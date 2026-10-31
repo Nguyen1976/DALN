@@ -6,8 +6,18 @@ set -e
 
 SCHEMA="apps/${SERVICE}/prisma/schema.prisma"
 if [ -f "${SCHEMA}" ]; then
-  echo "[entrypoint] Generating Prisma client cho ${SERVICE}..."
-  npx prisma generate --schema="${SCHEMA}"
+  # Client sinh vào source đang MOUNT CHUNG giữa các container. Sinh lại khi
+  # schema không đổi vẫn ghi file, làm mọi instance khác của service (chat-2,
+  # chat-3...) hot-reload theo. Chỉ sinh khi hash schema khác lần trước.
+  STAMP="apps/${SERVICE}/src/generated/.schema-sha256"
+  HASH=$(sha256sum "${SCHEMA}" | cut -d' ' -f1)
+  if [ "$(cat "${STAMP}" 2>/dev/null)" != "${HASH}" ]; then
+    echo "[entrypoint] Generating Prisma client cho ${SERVICE}..."
+    npx prisma generate --schema="${SCHEMA}"
+    echo "${HASH}" > "${STAMP}"
+  else
+    echo "[entrypoint] Prisma client của ${SERVICE} đã khớp schema, bỏ qua generate"
+  fi
 fi
 
 echo "[entrypoint] Khởi động ${SERVICE} ở chế độ watch (hot-reload)..."
