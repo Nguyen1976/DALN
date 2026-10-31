@@ -195,6 +195,7 @@ export class MessageService {
       medias,
       mentionUserIds,
       mentions,
+      clientMessageId: data.clientMessageId,
     })
 
     if (!message) {

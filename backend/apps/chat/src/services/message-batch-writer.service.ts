@@ -1,6 +1,12 @@
-import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
+import {
+  BeforeApplicationShutdown,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common'
 import { ObjectId } from 'mongodb'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
+import type { Prisma } from 'apps/chat/src/generated'
 
 export type BatchMessageInput = {
   conversationId: string
@@ -12,6 +18,8 @@ export type BatchMessageInput = {
   mentionUserIds?: string[]
   /** Nhãn từng lượt nhắc để client tô sáng chính xác. */
   mentions?: unknown
+  /** Khoá chống trùng do client sinh; tin hệ thống không có. */
+  clientMessageId?: string
 }
 
 /** Hình dạng trả về khớp với `messageRepo.create()` để bên gọi không phải đổi. */
@@ -32,6 +40,7 @@ export type BatchedMessage = {
   poll: null
   mentionUserIds: string[]
   mentions?: unknown
+  clientMessageId?: string
 }
 
 type Pending = {
@@ -44,6 +53,42 @@ type Pending = {
 const MAX_BATCH = Number(process.env.MESSAGE_BATCH_SIZE ?? 100)
 /** Tương đương `linger.ms` của Kafka producer — trần độ trễ thêm vào. */
 const MAX_DELAY_MS = Number(process.env.MESSAGE_BATCH_DELAY_MS ?? 20)
+
+const DUPLICATE_KEY = 11000
+
+type InsertResult = {
+  ok: number
+  n: number
+  writeErrors?: { index: number; code: number; errmsg?: string }[]
+}
+
+const oid = (hex: string) => ({ $oid: hex })
+const date = (value: Date) => ({ $date: value.toISOString() })
+
+/**
+ * Document cho lệnh `insert` thô: ObjectId và Date viết theo Extended JSON vì
+ * `$runCommandRaw` không đi qua lớp map kiểu của Prisma.
+ */
+function toDocument(doc: BatchedMessage): Prisma.InputJsonObject {
+  return {
+    _id: oid(doc.id),
+    conversationId: oid(doc.conversationId),
+    senderId: oid(doc.senderId),
+    type: doc.type,
+    content: doc.content,
+    replyToMessageId: doc.replyToMessageId ? oid(doc.replyToMessageId) : null,
+    isSystem: doc.isSystem,
+    mentionUserIds: doc.mentionUserIds.map(oid),
+    ...(doc.mentions !== undefined
+      ? { mentions: doc.mentions as Prisma.InputJsonValue }
+      : {}),
+    ...(doc.clientMessageId ? { clientMessageId: doc.clientMessageId } : {}),
+    isRevoked: false,
+    isDeleted: false,
+    createdAt: date(doc.createdAt),
+    updatedAt: date(doc.updatedAt),
+  }
+}
 
 /**
  * Gom nhiều lệnh ghi tin nhắn thành một `createMany`.
@@ -59,12 +104,16 @@ const MAX_DELAY_MS = Number(process.env.MESSAGE_BATCH_DELAY_MS ?? 20)
  * xong. `_id` sinh ở phía JS nên biết trước toàn bộ nội dung ack, không cần
  * chờ database trả về id.
  *
- * An toàn khi crash: golevelup chỉ `channel.ack()` SAU khi handler resolve, mà
- * handler đang chờ Promise này. Tiến trình chết lúc buffer còn hàng thì
- * RabbitMQ chưa ack và sẽ giao lại — không mất tin.
+ * An toàn khi crash: consumer chỉ ack SAU khi handler resolve, mà handler đang
+ * chờ Promise này. Tiến trình chết lúc buffer còn hàng thì RabbitMQ chưa ack và
+ * sẽ giao lại — không mất tin.
+ *
+ * Giao lại một tin ĐÃ ghi (chết sau insert, trước ack) không nhân bản nó: lô ghi
+ * bằng `insert ordered:false`, dòng nào chạm unique index (senderId,
+ * clientMessageId) thì đọc lại bản đã lưu và trả bản đó cho caller.
  */
 @Injectable()
-export class MessageBatchWriter implements OnModuleDestroy {
+export class MessageBatchWriter implements BeforeApplicationShutdown {
   private readonly logger = new Logger(MessageBatchWriter.name)
   private buffer: Pending[] = []
   private timer: NodeJS.Timeout | null = null
@@ -94,6 +143,7 @@ export class MessageBatchWriter implements OnModuleDestroy {
       poll: null,
       mentionUserIds: input.mentionUserIds || [],
       mentions: input.mentions ?? undefined,
+      clientMessageId: input.clientMessageId,
     }
 
     return new Promise<BatchedMessage>((resolve, reject) => {
@@ -122,25 +172,29 @@ export class MessageBatchWriter implements OnModuleDestroy {
     this.buffer = []
 
     try {
-      await this.prisma.message.createMany({
-        data: batch.map((item) => ({
-          id: item.doc.id,
-          conversationId: item.doc.conversationId,
-          senderId: item.doc.senderId,
-          type: item.doc.type as never,
-          content: item.doc.content,
-          replyToMessageId: item.doc.replyToMessageId,
-          isSystem: item.doc.isSystem,
-          mentionUserIds: item.doc.mentionUserIds,
-          mentions: (item.doc.mentions ?? undefined) as never,
-          isRevoked: false,
-          isDeleted: false,
-          createdAt: item.doc.createdAt,
-          updatedAt: item.doc.updatedAt,
-        })),
-      })
+      const result = (await this.prisma.$runCommandRaw({
+        insert: 'message',
+        ordered: false,
+        documents: batch.map((item) => toDocument(item.doc)),
+      })) as InsertResult
 
-      for (const item of batch) item.resolve(item.doc)
+      const errors = result.writeErrors ?? []
+      const other = errors.find((e) => e.code !== DUPLICATE_KEY)
+      if (other) {
+        throw new Error(
+          `insert message lỗi ${other.code}: ${other.errmsg ?? 'không rõ'}`,
+        )
+      }
+
+      const duplicates = new Set(errors.map((e) => e.index))
+      const stored = await this.loadStored(
+        batch.filter((_, i) => duplicates.has(i)).map((item) => item.doc),
+      )
+      batch.forEach((item, i) => {
+        item.resolve(
+          duplicates.has(i) ? (stored(item.doc) ?? item.doc) : item.doc,
+        )
+      })
 
       this.totalMessages += batch.length
       this.totalBatches += 1
@@ -156,14 +210,44 @@ export class MessageBatchWriter implements OnModuleDestroy {
           error instanceof Error ? error.message : String(error)
         }`,
       )
-      // Từ chối cả lô -> handler ném lỗi -> RabbitMQ giao lại. Vì `_id` sinh ở
-      // phía client, lần ghi lại dùng đúng id cũ nên nếu một phần đã vào được
-      // DB thì lần sau chạm duplicate key thay vì nhân bản tin nhắn.
+      // Từ chối cả lô -> handler ném lỗi -> được thử lại. Dòng nào đã kịp vào
+      // DB thì lần thử lại chạm unique index và lấy lại đúng bản đó.
       for (const item of batch) item.reject(error)
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
+  /** Bản đã lưu của những tin bị trùng, tra theo (senderId, clientMessageId). */
+  private async loadStored(docs: BatchedMessage[]) {
+    if (!docs.length) return () => undefined
+    const rows = await this.prisma.message.findMany({
+      where: {
+        OR: docs.map((doc) => ({
+          senderId: doc.senderId,
+          clientMessageId: doc.clientMessageId,
+        })),
+      },
+    })
+    const byKey = new Map(
+      rows.map((row) => [`${row.senderId}|${row.clientMessageId}`, row]),
+    )
+    return (doc: BatchedMessage): BatchedMessage | undefined => {
+      const row = byKey.get(`${doc.senderId}|${doc.clientMessageId}`)
+      return row
+        ? {
+            ...doc,
+            id: String(row.id),
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+          }
+        : undefined
+    }
+  }
+
+  /**
+   * Lần flush cuối chạy ở phase SAU onModuleDestroy: lúc đó coordinator đã nhả
+   * hết partition, nên không còn tin mới nào chui vào buffer sau lần flush này.
+   */
+  async beforeApplicationShutdown(): Promise<void> {
     this.stopped = true
     await this.flush()
   }

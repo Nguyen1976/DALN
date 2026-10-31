@@ -92,7 +92,7 @@ export type MessageRow = Pick<
     poll?: Parameters<typeof toPollDto>[0] | null
     pollState?: PollState
     /** Only on the sender's own copy, to match it with the optimistic one. */
-    clientMessageId?: string
+    clientMessageId?: string | null
   }
 
 /**
@@ -132,7 +132,7 @@ export class MessageMapper {
       // Tin type=CALL: dữ liệu để client render thẻ cuộc gọi + nút gọi lại.
       callInfo: message.callInfo ?? undefined,
       /** Only on the sender's own copy, to match it with the optimistic one. */
-      clientMessageId: message.clientMessageId,
+      clientMessageId: message.clientMessageId ?? undefined,
       replyToMessageId: message.replyToMessageId || undefined,
       // Quoted message, flattened to exactly what a reply bubble needs. Sending
       // only the id would force the client to have the original already loaded,

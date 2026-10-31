@@ -35,6 +35,8 @@ export class MessageRepository {
     isSystem?: boolean
     mentionUserIds?: string[]
     mentions?: unknown
+    /** Khoá chống trùng do client sinh; tin poll/hệ thống không có. */
+    clientMessageId?: string
   }) {
     // Đường nóng: tin nhắn thuần văn bản, không media, không poll — chiếm đại
     // đa số lưu lượng. Gom lô qua createMany thay vì mỗi tin một create().
@@ -50,9 +52,31 @@ export class MessageRepository {
         isSystem: data.isSystem,
         mentionUserIds: data.mentionUserIds,
         mentions: data.mentions,
+        clientMessageId: data.clientMessageId,
       })
     }
 
+    try {
+      return await this.createWithRelations(data)
+    } catch (error) {
+      // Tin gửi lại (broker giao lại, client gửi lại) chạm unique index
+      // (senderId, clientMessageId): trả bản đã lưu thay vì nhân bản.
+      if (!data.clientMessageId || !isUniqueConstraintError(error)) throw error
+      const existing = await this.prisma.message.findFirst({
+        where: {
+          senderId: data.senderId,
+          clientMessageId: data.clientMessageId,
+        },
+        include: { medias: { orderBy: { sortOrder: 'asc' } }, poll: true },
+      })
+      if (!existing) throw error
+      return existing
+    }
+  }
+
+  private async createWithRelations(
+    data: Parameters<MessageRepository['create']>[0],
+  ) {
     // Ghi dữ liệu & trả về trong 1 nhịp duy nhất (nested writes)
     const created = await this.prisma.message.create({
       data: {
@@ -64,6 +88,7 @@ export class MessageRepository {
         pollId: data.pollId || null,
         mentionUserIds: data.mentionUserIds || [],
         mentions: (data.mentions ?? undefined) as Prisma.InputJsonValue,
+        clientMessageId: data.clientMessageId,
 
         // Khởi tạo Medias luôn (Prisma tự động làm Transaction ngầm)
         medias: data.medias?.length
