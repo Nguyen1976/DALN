@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing'
+import { Logger } from '@nestjs/common'
+import { hostname } from 'node:os'
 import { JwtService } from '@nestjs/jwt'
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
 import { SessionStore } from '@app/common'
@@ -243,6 +245,20 @@ describe('RealtimeGateway', () => {
       expect(client.data.userId).toBe('u1')
       expect(client.data.sid).toBe('s1')
       expect(codeEmitted(client)).toBeUndefined()
+    })
+
+    it('logs which node accepted the socket', async () => {
+      const log = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined)
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      await gateway.handleConnection(client)
+
+      expect(log).toHaveBeenCalledWith(
+        `socket connected user=u1 node=${hostname()}`,
+      )
+      log.mockRestore()
     })
 
     // Hồi quy quan trọng nhất của thay đổi này: refresh token KHÔNG còn xác

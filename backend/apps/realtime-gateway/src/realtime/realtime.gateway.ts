@@ -44,6 +44,7 @@ import {
   SessionStore,
 } from '@app/common'
 import { randomUUID } from 'crypto'
+import { hostname } from 'node:os'
 import { CallSession, CallSessionStore, isCallId } from './call-session.store'
 import { CallBusyStore } from './call-busy.store'
 import {
@@ -305,6 +306,8 @@ export class RealtimeGateway
 
       // 🔥 Join room theo user
       await client.join(`user:${userId}`)
+      // QC nhiều gateway đọc dòng này để biết socket đang nằm ở node nào.
+      this.logger.log(`socket connected user=${userId} node=${hostname()}`)
 
       // 🔥 Lưu Redis + TTL
       await this.userStatusStore.addConnection(userId, client.id)
