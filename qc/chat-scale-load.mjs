@@ -139,6 +139,26 @@ const SCENARIOS = {
     },
     expectBusy: true,
   },
+  // Queue đầy thật: tạm dừng (pause) cả hai chat, đặt max-length = 1. Khi prefetch
+  // (20/partition) đã đầy, tin "ready" chạm giới hạn -> broker nack
+  // (reject-publish) -> gateway báo SERVER_BUSY. Tải rải trên ~14 partition
+  // (~3-4 tin/s mỗi cái) nên cần ~12s để vượt prefetch; client vẫn kịp gửi lại
+  // trong chuỗi 2/4/8s sau khi thả ra.
+  'queue-full': {
+    chats: ['daln-chat', 'daln-chat-2'],
+    event: async () => {
+      await setMaxLength(1)
+      sh('docker pause daln-chat daln-chat-2')
+      setTimeout(() => {
+        sh('docker unpause daln-chat daln-chat-2')
+        void setMaxLength(20000)
+      }, 12000)
+    },
+    expectBusy: true,
+    // Tin ảnh cần presign qua HTTP của chat — chat đang pause thì vòng gửi treo
+    // ở bước upload và không còn tin nào đổ vào queue.
+    mediaRatio: 0,
+  },
 }
 
 // ── Dữ liệu QC ───────────────────────────────────────────────────────────────
@@ -233,7 +253,7 @@ async function run(name, fx) {
         const key = `${g.id}|${user.id}`
         for (let i = rand(1, 4); i > 0 && sending; i--) {
           // Upload TRƯỚC khi lấy seq: seq phản ánh đúng thứ tự client emit.
-          const media = Math.random() < MEDIA_RATIO ? await upload(g.id).catch(() => null) : null
+          const media = Math.random() < (sc.mediaRatio ?? MEDIA_RATIO) ? await upload(g.id).catch(() => null) : null
           if (!socket.connected) break
           const seq = (seqOf.get(key) ?? 0) + 1
           seqOf.set(key, seq)

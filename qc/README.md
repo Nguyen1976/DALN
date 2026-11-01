@@ -68,7 +68,7 @@ Spec: `docs/superpowers/specs/2026-10-31-chat-scale-out-design.md`.
 ```bash
 cd backend && docker compose --profile scale up -d   # + chat-2, chat-3, realtime-gateway-2, -3
 cd qc && npm install
-node chat-scale-load.mjs                     # 6 kịch bản tải, mỗi kịch bản một dòng PASS/FAIL
+node chat-scale-load.mjs                     # 7 kịch bản tải, mỗi kịch bản một dòng PASS/FAIL
 SCENARIO=crash-chat node chat-scale-load.mjs # một kịch bản
 CHECK_ONLY=<runId> node chat-scale-load.mjs  # chạy lại checker trên một lần chạy đã lưu (.scale-runs/)
 node chat-scale-browser.mjs                  # trình duyệt thật, ảnh ở shots/scale-*.png
@@ -82,6 +82,7 @@ node chat-scale-browser.mjs                  # trình duyệt thật, ảnh ở 
 | `add-chat` | bật `chat-3` (`up -d --no-deps`) | như trên, chỉ partition `stickyAssign` chọn mới đổi chủ |
 | `kill-gateway` | `docker kill daln-realtime-2` | như trên, client nối lại và gửi lại tin chưa ACK |
 | `overload` | memory alarm của RabbitMQ chặn publisher 8s | có `SERVER_BUSY`, sau đó 0 mất · 0 trùng · 0 đảo |
+| `queue-full` | `docker pause` cả hai chat + policy `max-length` = 1 trong 12s | broker từ chối (reject-publish) → `SERVER_BUSY`, sau đó 0 mất · 0 trùng · 0 đảo |
 
 Checker đọc thẳng Mongo. **Mất** = đã nhận ACK mà không có trong DB. **Trùng** =
 một `clientMessageId` có hơn một bản ghi. **Đảo** = trong cùng (hội thoại, người
