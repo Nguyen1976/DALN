@@ -41,6 +41,11 @@ export type BatchedMessage = {
   mentionUserIds: string[]
   mentions?: unknown
   clientMessageId?: string
+  /**
+   * Bản đã có sẵn trong DB (tin gửi lại chạm unique index). Lần xử lý đầu đã
+   * cộng unread/nhắc tên, nên bên gọi không cộng lần nữa.
+   */
+  replayed?: true
 }
 
 type Pending = {
@@ -242,6 +247,7 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
             id: String(row.id),
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
+            replayed: true,
           }
         : undefined
     }

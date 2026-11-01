@@ -203,7 +203,12 @@ export class MessageService {
     }
 
     message.senderMember = senderMember
-    if (mentionUserIds.length) {
+    // Tin gửi lại (broker giao lại, client gửi lại) đã có trong DB: lần đầu đã
+    // cộng nhắc tên và unread. Chỉ phát lại ACK/NEW — client gộp theo id. Đánh
+    // đổi: crash đúng giữa ghi và cộng thì lần sau đếm thiếu một (badge), thay
+    // vì đếm dư một ở mọi lần giao lại.
+    const replayed = 'replayed' in message && message.replayed === true
+    if (mentionUserIds.length && !replayed) {
       await this.memberRepo.markMention(
         data.conversationId,
         mentionUserIds,
@@ -243,6 +248,7 @@ export class MessageService {
       senderMember,
       memberIds,
       clientMessageId: data.clientMessageId,
+      replayed,
     })
   }
 
@@ -716,16 +722,20 @@ export class MessageService {
     memberIds: string[]
     /** The sender's id for its optimistic copy, echoed on the ack. */
     clientMessageId?: string
+    /** Đã lưu từ trước (tin gửi lại): không cộng unread lần nữa. */
+    replayed?: boolean
   }) {
     const { conversationId, senderId, message, senderMember, memberIds } =
       params
 
-    this.enqueueConversationSyncJob({
-      conversationId,
-      senderId,
-      message,
-      senderMember,
-    })
+    if (!params.replayed) {
+      this.enqueueConversationSyncJob({
+        conversationId,
+        senderId,
+        message,
+        senderMember,
+      })
+    }
 
     const dto = MessageMapper.toResponse({
       ...message,

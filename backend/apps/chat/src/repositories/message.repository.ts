@@ -70,7 +70,7 @@ export class MessageRepository {
         include: { medias: { orderBy: { sortOrder: 'asc' } }, poll: true },
       })
       if (!existing) throw error
-      return existing
+      return { ...existing, replayed: true as const }
     }
   }
 

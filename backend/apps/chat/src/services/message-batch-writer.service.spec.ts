@@ -82,6 +82,7 @@ describe('MessageBatchWriter', () => {
 
     expect(saved.id).toBe('old')
     expect(saved.createdAt).toEqual(STORED_AT)
+    expect(saved.replayed).toBe(true)
   })
 
   it('resolves every caller when one row of the batch is a duplicate', async () => {
@@ -103,7 +104,9 @@ describe('MessageBatchWriter', () => {
     const [first, second, third] = await pending
 
     expect(second.id).toBe('old')
+    expect(second.replayed).toBe(true)
     expect(first.id).not.toBe('old')
+    expect(first.replayed).toBeUndefined()
     expect(third.id).not.toBe('old')
   })
 

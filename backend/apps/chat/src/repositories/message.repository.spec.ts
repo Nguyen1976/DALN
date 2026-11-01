@@ -44,6 +44,7 @@ describe('MessageRepository.create', () => {
     })
 
     expect(saved.id).toBe('old')
+    expect(saved).toHaveProperty('replayed', true)
     expect(prisma.message.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { senderId: SENDER, clientMessageId: 'c1' },
