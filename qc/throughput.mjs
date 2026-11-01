@@ -237,20 +237,31 @@ function summarize(samples, t0, k6) {
   return rows
 }
 
-function checkDb() {
+function checkDb(senders) {
+  // Đi qua index chống trùng {senderId, clientMessageId} theo khoảng tiền tố của
+  // lần chạy. Regex trên clientMessageId thì quét cả collection: với vài triệu tin
+  // nó kéo hết dữ liệu vào cache của Mongo và làm sai số đo bộ nhớ của lần sau.
+  // Phải nêu lại điều kiện lọc của partial index ($type: string): thiếu nó, kể cả
+  // có hint, Mongo quét hết index — đo được 4,7 triệu document, 43 s mỗi người gửi.
   const js = `
-    const last = {}
+    const prefix = 'lt-${RUN}-'
     let reorder = 0
     let stored = 0
-    db.message.find({ clientMessageId: { $regex: '^lt-${RUN}-' } }, { clientMessageId: 1, conversationId: 1 })
-      .sort({ conversationId: 1, createdAt: 1, _id: 1 })
-      .forEach((d) => {
+    for (const sender of ${JSON.stringify(senders)}) {
+      const byKey = {}
+      db.message.find(
+        { senderId: ObjectId(sender), clientMessageId: { $gte: prefix, $lt: prefix + '\\uffff', $type: 'string' } },
+        { clientMessageId: 1, conversationId: 1, createdAt: 1 },
+      ).hint('message_sender_client_id').forEach((d) => {
         stored++
         const [, , , , vu, seq] = d.clientMessageId.split('-')
-        const key = d.conversationId + ':' + vu
-        if (last[key] !== undefined && Number(seq) < last[key]) reorder++
-        last[key] = Number(seq)
+        ;(byKey[d.conversationId + ':' + vu] ??= []).push({ at: d.createdAt.getTime(), id: String(d._id), seq: Number(seq) })
       })
+      for (const list of Object.values(byKey)) {
+        list.sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1))
+        for (let i = 1; i < list.length; i++) if (list[i].seq < list[i - 1].seq) reorder++
+      }
+    }
     const s = db.message.stats()
     print(JSON.stringify({ stored, reorder, collectionDocs: s.count, indexMB: Math.round(s.totalIndexSize / 1e6) }))`
   return JSON.parse(execFileSync('docker', ['exec', 'daln-mongo', 'mongosh', 'chat-service', '--quiet', '--eval', js]).toString())
@@ -261,7 +272,8 @@ if (process.env.CHECK_ONLY) {
   const saved = JSON.parse(readFileSync(`${DIR}throughput-${RUN}.json`, 'utf8'))
   const k6Summary = JSON.parse(readFileSync(`${DIR}throughput-${RUN}.k6.json`, 'utf8'))
   const count = (name) => k6Summary.metrics[name]?.count ?? 0
-  const db = checkDb()
+  const fx = JSON.parse(readFileSync(FIXTURES, 'utf8'))
+  const db = checkDb(fx.vus.filter((v) => v.share > 0).map((v) => v.userId))
   console.log(JSON.stringify({ run: RUN, sent: count('sent'), failed: count('failed'), ...db, lost: count('sent') - count('failed') - db.stored }))
   process.exit(0)
 }
@@ -309,7 +321,7 @@ const k6Summary = JSON.parse(readFileSync(summaryFile, 'utf8'))
 const rows = summarize(samples, t0, k6Summary)
 writeFileSync(`${DIR}throughput-${RUN}.json`, JSON.stringify({ run: RUN, mode: MODE, t0, stages: STAGES, rows, samples }))
 console.table(rows)
-const db = checkDb()
+const db = checkDb(fixtures.vus.filter((v) => v.share > 0).map((v) => v.userId))
 const count = (name) => k6Summary.metrics[name]?.count ?? 0
 const totals = {
   sent: count('sent'),
