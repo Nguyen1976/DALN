@@ -312,6 +312,42 @@ describe('RealtimeGateway', () => {
       )
     })
 
+    it('keeps send order for messages that arrive while the handshake is still finishing', async () => {
+      let sessionAlive!: (v: boolean) => void
+      sessionStub.isAlive.mockReturnValueOnce(
+        new Promise<boolean>((r) => (sessionAlive = r)),
+      )
+      let presenceSaved!: (v: number) => void
+      redisStub.eval.mockReturnValueOnce(
+        new Promise<number>((r) => (presenceSaved = r)),
+      )
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      const connecting = gateway.handleConnection(client)
+      // Tin 1 tới khi chưa xác thực xong.
+      const first = gateway.handleCreateMessage(
+        { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'anh' },
+        client,
+      )
+      sessionAlive(true)
+      await new Promise((r) => setImmediate(r))
+      expect(client.data.userId).toBe('u1')
+      // Tin 2 tới khi userId đã có nhưng handshake chưa xong (đang lưu presence).
+      const second = gateway.handleCreateMessage(
+        { conversationId: 'c1', clientMessageId: 'tmp-2', content: 'chu' },
+        client,
+      )
+      presenceSaved(1)
+      await Promise.all([connecting, first, second])
+
+      const sent = amqpStub.publish.mock.calls
+        .map(
+          ([, , body]) => (body as { clientMessageId: string }).clientMessageId,
+        )
+        .filter((id) => id?.startsWith('tmp-'))
+      expect(sent).toEqual(['tmp-1', 'tmp-2'])
+    })
+
     it('logs which node accepted the socket', async () => {
       const log = jest
         .spyOn(Logger.prototype, 'log')

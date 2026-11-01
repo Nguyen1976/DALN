@@ -523,7 +523,11 @@ export class RealtimeGateway
     @MessageBody() data: CreateMessageBody | undefined,
     @ConnectedSocket() client: ClientSocket,
   ) {
-    if (!client.data.userId) await this.handshakes.get(client.id)
+    // Chờ khi handshake CÒN đang chạy — kể cả khi userId đã được gán giữa
+    // chừng. Chỉ chờ lúc userId chưa có thì tin tới giữa hai thời điểm đó vượt
+    // lên trước tin đang chờ, đảo thứ tự hai tin gửi liền nhau.
+    const handshake = this.handshakes.get(client.id)
+    if (handshake) await handshake
     if (!client.data.userId) {
       client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
         conversationId: data?.conversationId,
