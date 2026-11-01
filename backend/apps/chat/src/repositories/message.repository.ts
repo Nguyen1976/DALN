@@ -5,6 +5,7 @@ import { MessageBatchWriter } from '../services/message-batch-writer.service'
 import { olderThanCursor, type KeysetCursor } from '@app/util'
 import { isUniqueConstraintError } from '@app/saga'
 import type { MessageMediaInput } from 'libs/constant/rmq/payload'
+import { findStoredBySenderClientIds } from './message-raw.queries'
 
 const SENDER_SELECT = {
   select: { userId: true, username: true, fullName: true, avatar: true },
@@ -71,13 +72,17 @@ export class MessageRepository {
       // Tin gửi lại (broker giao lại, client gửi lại) chạm unique index
       // (senderId, clientMessageId): trả bản đã lưu thay vì nhân bản.
       if (!data.clientMessageId || !isUniqueConstraintError(error)) throw error
-      const existing = await this.prisma.message.findFirst({
-        where: {
-          senderId: data.senderId,
-          clientMessageId: data.clientMessageId,
-        },
-        include: { medias: { orderBy: { sortOrder: 'asc' } }, poll: true },
-      })
+      // Tra id qua partial index bằng find thô (qua Prisma nó quét cả
+      // collection), rồi đọc đủ quan hệ theo _id.
+      const [stored] = await findStoredBySenderClientIds(this.prisma, [
+        { senderId: data.senderId, clientMessageId: data.clientMessageId },
+      ])
+      const existing = stored
+        ? await this.prisma.message.findUnique({
+            where: { id: stored.id },
+            include: { medias: { orderBy: { sortOrder: 'asc' } }, poll: true },
+          })
+        : null
       if (!existing) throw error
       return { ...existing, replayed: true as const }
     }

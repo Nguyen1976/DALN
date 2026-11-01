@@ -21,16 +21,45 @@ type InsertCommand = {
   ordered: boolean
   documents: Record<string, unknown>[]
 }
+/** Writer gửi cả insert lẫn find qua $runCommandRaw; find mang filter. */
+type RawCommand = InsertCommand & {
+  find?: string
+  filter?: Record<string, unknown>
+}
+type StoredRow = {
+  id: string
+  senderId: string
+  clientMessageId: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+/** Kết quả `find` thô như MongoDB trả qua $runCommandRaw (extended JSON). */
+const findResult = (rows: StoredRow[]) => ({
+  cursor: {
+    firstBatch: rows.map((row) => ({
+      _id: { $oid: row.id },
+      senderId: { $oid: row.senderId },
+      clientMessageId: row.clientMessageId,
+      createdAt: { $date: row.createdAt.toISOString() },
+      updatedAt: { $date: row.updatedAt.toISOString() },
+    })),
+    id: 0,
+  },
+  ok: 1,
+})
 
 function makeWriter(
   insertResult: (cmd: InsertCommand) => unknown,
-  stored: Record<string, unknown>[] = [],
+  stored: StoredRow[] = [],
 ) {
   const prisma = {
-    $runCommandRaw: jest.fn((cmd: InsertCommand) =>
-      Promise.resolve(insertResult(cmd)),
+    $runCommandRaw: jest.fn((cmd: RawCommand) =>
+      cmd.find
+        ? Promise.resolve(findResult(stored))
+        : Promise.resolve(insertResult(cmd)),
     ),
-    message: { findMany: jest.fn(() => Promise.resolve(stored)) },
+    message: { findMany: jest.fn(() => Promise.resolve([])) },
   }
   return { writer: new MessageBatchWriter(prisma as never), prisma }
 }
@@ -142,24 +171,24 @@ describe('MessageBatchWriter', () => {
     ]
     const calls: InsertCommand[] = []
     const prisma = {
-      $runCommandRaw: jest.fn((cmd: InsertCommand) => {
+      $runCommandRaw: jest.fn((cmd: InsertCommand | { find: string }) => {
+        if ('find' in cmd) {
+          const doc = calls[0].documents[0] as { _id: { $oid: string } }
+          return Promise.resolve(
+            findResult([
+              {
+                id: doc._id.$oid,
+                senderId: SENDER,
+                clientMessageId: 'c1',
+                createdAt: STORED_AT,
+                updatedAt: STORED_AT,
+              },
+            ]),
+          )
+        }
         calls.push(cmd)
         return Promise.resolve(results.shift())
       }),
-      message: {
-        findMany: jest.fn(() => {
-          const doc = calls[0].documents[0] as { _id: { $oid: string } }
-          return Promise.resolve([
-            {
-              id: doc._id.$oid,
-              senderId: SENDER,
-              clientMessageId: 'c1',
-              createdAt: STORED_AT,
-              updatedAt: STORED_AT,
-            },
-          ])
-        }),
-      },
     }
     const writer = new MessageBatchWriter(prisma as never)
 
@@ -248,5 +277,30 @@ describe('MessageBatchWriter', () => {
 
     expect(b.createdAt.getTime()).toBeGreaterThanOrEqual(a.createdAt.getTime())
     expect(b.id > a.id).toBe(true)
+  })
+
+  it('looks duplicates up through the partial dedup index, not through Prisma', async () => {
+    const { writer, prisma } = makeWriter(
+      () => ({ ok: 1, n: 0, writeErrors: [{ index: 0, code: 11000 }] }),
+      [
+        {
+          id: 'old',
+          senderId: SENDER,
+          clientMessageId: 'c1',
+          createdAt: STORED_AT,
+          updatedAt: STORED_AT,
+        },
+      ],
+    )
+
+    const pending = writer.enqueue(input(1))
+    await jest.advanceTimersByTimeAsync(0)
+    await pending
+
+    expect(prisma.message.findMany).not.toHaveBeenCalled()
+    const find = prisma.$runCommandRaw.mock.calls
+      .map(([cmd]) => cmd)
+      .find((cmd) => cmd.find)
+    expect(find?.filter?.clientMessageId).toEqual({ $type: 'string' })
   })
 })

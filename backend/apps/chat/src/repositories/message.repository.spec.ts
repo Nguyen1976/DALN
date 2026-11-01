@@ -30,8 +30,24 @@ describe('MessageRepository.create', () => {
             }),
           ),
         ),
-        findFirst: jest.fn(() => Promise.resolve(existing)),
+        findUnique: jest.fn(() => Promise.resolve(existing)),
       },
+      // Tra id qua partial index bằng find thô, rồi Prisma đọc theo _id.
+      $runCommandRaw: jest.fn(() =>
+        Promise.resolve({
+          cursor: {
+            firstBatch: [
+              {
+                _id: { $oid: '6a35000000000000000b0001' },
+                senderId: { $oid: SENDER },
+                clientMessageId: 'c1',
+                createdAt: { $date: '2026-11-01T00:00:00.000Z' },
+                updatedAt: { $date: '2026-11-01T00:00:00.000Z' },
+              },
+            ],
+          },
+        }),
+      ),
     }
     const repo = new MessageRepository(prisma as never, {} as never)
 
@@ -45,10 +61,8 @@ describe('MessageRepository.create', () => {
 
     expect(saved.id).toBe('old')
     expect(saved).toHaveProperty('replayed', true)
-    expect(prisma.message.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { senderId: SENDER, clientMessageId: 'c1' },
-      }),
+    expect(prisma.message.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: '6a35000000000000000b0001' } }),
     )
   })
 
@@ -56,8 +70,9 @@ describe('MessageRepository.create', () => {
     const prisma = {
       message: {
         create: jest.fn(() => Promise.reject(new Error('connection lost'))),
-        findFirst: jest.fn(),
+        findUnique: jest.fn(),
       },
+      $runCommandRaw: jest.fn(),
     }
     const repo = new MessageRepository(prisma as never, {} as never)
 
@@ -70,7 +85,7 @@ describe('MessageRepository.create', () => {
         clientMessageId: 'c1',
       }),
     ).rejects.toThrow('connection lost')
-    expect(prisma.message.findFirst).not.toHaveBeenCalled()
+    expect(prisma.$runCommandRaw).not.toHaveBeenCalled()
   })
 })
 

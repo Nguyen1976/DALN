@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
+import { findStoredBySenderClientIds } from '../repositories/message-raw.queries'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import type { Prisma } from 'apps/chat/src/generated'
 
@@ -257,17 +258,19 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
     )
   }
 
-  /** Bản đã lưu của những tin bị trùng, tra theo (senderId, clientMessageId). */
+  /**
+   * Bản đã lưu của những tin bị trùng, tra theo (senderId, clientMessageId).
+   * Đi qua lệnh find thô: qua Prisma nó quét cả collection (xem message-raw.queries).
+   */
   private async loadStored(docs: BatchedMessage[]) {
     if (!docs.length) return () => undefined
-    const rows = await this.prisma.message.findMany({
-      where: {
-        OR: docs.map((doc) => ({
-          senderId: doc.senderId,
-          clientMessageId: doc.clientMessageId,
-        })),
-      },
-    })
+    const rows = await findStoredBySenderClientIds(
+      this.prisma,
+      docs.map((doc) => ({
+        senderId: doc.senderId,
+        clientMessageId: doc.clientMessageId as string,
+      })),
+    )
     const byKey = new Map(
       rows.map((row) => [`${row.senderId}|${row.clientMessageId}`, row]),
     )
