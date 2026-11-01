@@ -95,7 +95,8 @@ export class MessageService {
     await this.memberRepo.clearMentions(conversationId, userId)
   }
 
-  async sendMessage(data: MessageSendPayload) {
+  /** `onQueued`: báo cho làn của hội thoại rằng thứ tự tin đã chốt (xem repo). */
+  async sendMessage(data: MessageSendPayload, onQueued?: () => void) {
     const conversationMembers = await this.memberRepo.findByConversationId(
       data.conversationId,
     )
@@ -186,17 +187,20 @@ export class MessageService {
       type = (kinds.size === 1 ? [...kinds][0] : 'FILE') as typeof type
     }
 
-    const message: OutboundMessage = await this.messageRepo.create({
-      conversationId: data.conversationId,
-      senderId: data.senderId,
-      type,
-      content,
-      replyToMessageId: data.replyToMessageId,
-      medias,
-      mentionUserIds,
-      mentions,
-      clientMessageId: data.clientMessageId,
-    })
+    const message: OutboundMessage = await this.messageRepo.create(
+      {
+        conversationId: data.conversationId,
+        senderId: data.senderId,
+        type,
+        content,
+        replyToMessageId: data.replyToMessageId,
+        medias,
+        mentionUserIds,
+        mentions,
+        clientMessageId: data.clientMessageId,
+      },
+      onQueued,
+    )
 
     if (!message) {
       ChatErrors.invalidMessagePayload()

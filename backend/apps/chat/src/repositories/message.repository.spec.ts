@@ -73,3 +73,46 @@ describe('MessageRepository.create', () => {
     expect(prisma.message.findFirst).not.toHaveBeenCalled()
   })
 })
+
+describe('MessageRepository.create onQueued', () => {
+  it('signals as soon as a text message is in the write batch, before it is written', () => {
+    const batchWriter = { enqueue: jest.fn(() => new Promise(() => {})) }
+    const repo = new MessageRepository({} as never, batchWriter as never)
+    const onQueued = jest.fn()
+
+    void repo.create(
+      {
+        conversationId: CONV,
+        senderId: SENDER,
+        type: 'TEXT',
+        content: 'hi',
+        clientMessageId: 'c1',
+      },
+      onQueued,
+    )
+
+    expect(batchWriter.enqueue).toHaveBeenCalledTimes(1)
+    expect(onQueued).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not signal for a media message, whose createdAt is set when it is written', async () => {
+    const prisma = {
+      message: { create: jest.fn(() => Promise.resolve({ id: 'm1' })) },
+    }
+    const repo = new MessageRepository(prisma as never, {} as never)
+    const onQueued = jest.fn()
+
+    await repo.create(
+      {
+        conversationId: CONV,
+        senderId: SENDER,
+        type: 'IMAGE',
+        medias: [media],
+        clientMessageId: 'c1',
+      },
+      onQueued,
+    )
+
+    expect(onQueued).not.toHaveBeenCalled()
+  })
+})
