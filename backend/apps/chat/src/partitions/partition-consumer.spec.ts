@@ -128,4 +128,19 @@ describe('PartitionConsumer', () => {
     expect(handler).not.toHaveBeenCalled()
     expect(channel.log).toEqual(['nack not json requeue=false'])
   })
+
+  it('closes its channel when consuming fails so the channel does not leak', async () => {
+    const channel = new FakeChannel()
+    channel.consume = () => Promise.reject(new Error('NOT_FOUND - no queue'))
+
+    await expect(
+      PartitionConsumer.start(
+        { createChannel: () => Promise.resolve(channel as never) },
+        5,
+        jest.fn(),
+        100,
+      ),
+    ).rejects.toThrow('NOT_FOUND')
+    expect(channel.log).toEqual(['close'])
+  })
 })

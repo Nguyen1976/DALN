@@ -49,10 +49,17 @@ export class PartitionConsumer {
       if (!consumer.closing) consumer.lost?.()
     })
     channel.on('error', () => undefined)
-    await channel.prefetch(prefetch)
-    await channel.consume(partitionQueue(partition), (msg) => {
-      if (msg) consumer.onMessage(msg)
-    })
+    try {
+      await channel.prefetch(prefetch)
+      await channel.consume(partitionQueue(partition), (msg) => {
+        if (msg) consumer.onMessage(msg)
+      })
+    } catch (error) {
+      // Không trả consumer về thì không ai đóng channel này nữa: đóng tại đây.
+      consumer.closing = true
+      await channel.close().catch(() => undefined)
+      throw error
+    }
     return consumer
   }
 
