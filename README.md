@@ -6,9 +6,9 @@
 
 1:1 and group chat · voice and video calls · friend suggestions from a trained link-prediction model
 
-[![CI/CD](https://github.com/Nguyen1976/DALN/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/Nguyen1976/DALN/actions/workflows/ci-cd.yml) ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white) ![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?style=flat-square&logo=nestjs&logoColor=white) ![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black) ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.13-FF6600?style=flat-square&logo=rabbitmq&logoColor=white) ![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?style=flat-square&logo=mongodb&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white) ![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?style=flat-square&logo=nestjs&logoColor=white) ![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black) ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.13-FF6600?style=flat-square&logo=rabbitmq&logoColor=white) ![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?style=flat-square&logo=mongodb&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
-[**Live demo**](http://109.199.115.126) · [Architecture](#architecture) · [Engineering notes](#engineering-notes) · [Run it locally](#run-it-locally)
+[Architecture](#architecture) · [Engineering notes](#engineering-notes) · [Run it locally](#run-it-locally)
 
 </div>
 
@@ -26,8 +26,9 @@
 | **3,500 msg/s** | sustained by a **single** chat instance in a k6 ramp, at **p95 115 ms** |
 | **~139× less CPU** | per stored message, by batching writes into one `createMany` |
 | **6 services** | behind one Kong gateway, coordinated over one RabbitMQ bus |
+| **N × N** | chat instances and realtime gateways, added or killed under load with 0 lost, 0 duplicated, 0 reordered messages |
 | **0.93 AUC** | Gradient Boosting link-prediction model behind friend suggestions |
-| **45 automated checks** | 21 unit tests and 24 end-to-end cases driving two real browsers |
+| **678 unit tests** | plus QC suites that drive real Chrome sessions and a live multi-instance stack |
 | **75 user stories** | across 15 epics, in [`docs/DALN-User-Stories.xlsx`](docs/DALN-User-Stories.xlsx) |
 
 ## Features
@@ -85,18 +86,19 @@ All 32 screens, in light and dark, live in [`docs/ui-screenshots`](docs/ui-scree
 
 ## Architecture
 
-![DALN architecture: the web client reaches five services through Kong; all six services exchange events over RabbitMQ](docs/diagrams/architecture.png)
+![DALN architecture: the web client reaches five services through Kong; all six services exchange events over RabbitMQ; chat and the realtime gateway run as several instances](docs/diagrams/architecture.png)
 
 - **One way in.** The browser only ever talks to Kong on port 8000: REST for every service and the Socket.IO connection for realtime, with CORS and rate limiting in one place.
 - **One bus between services.** Each service owns its MongoDB database and publishes domain events to RabbitMQ topic exchanges; the realtime gateway turns those events into socket pushes.
+- **Scale out where the load is.** The chat service and the realtime gateway run as several instances each. Sending a message goes through 16 partitioned queues, and each partition is owned by exactly one chat instance at a time (details in [note 2](#2-scaling-out-many-chat-instances-and-many-gateways)).
 - **Consistency without distributed transactions.** State changes that other services depend on leave through a transactional outbox, consumers deduplicate through an inbox, and multi-step workflows run as an orchestrated saga.
 
 | Service | Owns | Notes |
 |---|---|---|
 | `user` | accounts, auth, friendships, profiles | issues JWT cookies; starts the friend-accept saga |
-| `chat` | conversations, messages, polls, call records, media | micro-batched writes; presigned uploads to MinIO |
+| `chat` | conversations, messages, polls, call records, media | runs as N instances over 16 partitions; micro-batched writes; presigned uploads to MinIO |
 | `notification` | in-app notifications, email | OTP and friend-request emails over SMTP |
-| `realtime-gateway` | Socket.IO connections, presence | turns bus events into pushes to rooms |
+| `realtime-gateway` | Socket.IO connections, presence | runs as N instances behind Kong; turns bus events into pushes to rooms |
 | `recommendation` | friend suggestions | an API process plus a worker for training and nightly batches |
 | `saga-orchestrator` | saga state | coordinates friend-accept, including compensation |
 
@@ -106,19 +108,46 @@ All 32 screens, in light and dark, live in [`docs/ui-screenshots`](docs/ui-scree
 
 ### 1. 3,500 messages a second on one instance
 
-![Message pipeline: sockets fan into the gateway, RabbitMQ buffers, a batch writer stores up to 100 messages per createMany](docs/diagrams/message-pipeline.png)
+![Message pipeline: sockets fan into the gateway, a RabbitMQ partition buffers, a batch writer stores up to 100 messages per createMany](docs/diagrams/message-pipeline.png)
 
 Before batching, the same chat instance saturated at about 690 msg/s. The fix was to stop paying a database round-trip per message:
 
-- The gateway turns each socket event into a RabbitMQ message; the chat consumer keeps up to **300 in flight** (prefetch).
+- The gateway turns each socket event into a RabbitMQ message. At the time of the measurement the chat consumer read one queue with **300 in flight** (prefetch). Today each of the 16 partitions has a prefetch of **20**, so the queue length limit pushes back on senders before too many messages are in flight.
 - Each message goes to a batch writer, and the handler awaits a promise that is **not resolved yet**. The writer flushes when **100 messages** are buffered or **20 ms** have passed, in a single `createMany`, then resolves every waiting handler.
 - The RabbitMQ message is acked only after its promise resolves, so a crash mid-batch means redelivery, not loss.
 - Ids are generated in the app (`ObjectId`), so the batch insert and the realtime fan-out agree on the id before the row exists.
 - Unread counters stay off MongoDB's hot path: a Redis `HINCRBY` plus a dirty set, flushed by a cron every 5 seconds.
 
-Measured with [`testing/test_sendmessage.js`](testing/test_sendmessage.js) (k6 over Socket.IO): a 500 → 2,000 → 3,500 msg/s ramp at p95 115 ms on a clean collection. The script documents its own traps too: the load generator's ceiling, and why test data must be cleared between runs.
+Measured with a k6 script over Socket.IO, before the send path was partitioned: a 500 → 2,000 → 3,500 msg/s ramp at p95 115 ms on a clean collection. The script was later removed from the repository (commit `76c8454`); the multi-instance load suite in [`qc/`](qc) replaced it for correctness under failure, not peak throughput.
 
-### 2. Consistency across services: the friend-accept saga
+### 2. Scaling out: many chat instances and many gateways
+
+![Chat scale-out: any gateway hashes the conversation onto one of 16 partitions; each partition has one active consumer; chat instances split partitions using heartbeats and leases in Redis](docs/diagrams/chat-scale-out.png)
+
+Several chat instances must not store one conversation's messages out of order, and must not drop or duplicate a message when one of them dies. The design:
+
+- **Partition by conversation.** Any gateway hashes the `conversationId` (FNV-1a, `% 16`) onto one of 16 queues `chat.send.p0…p15`. Every message of a conversation lands in the same queue, and each queue has a single active consumer, so a conversation is only ever processed by one instance.
+- **Agree on ownership without a leader.** Every 2 seconds each instance writes a heartbeat to Redis, reads the member list and runs the same pure function `stickyAssign`. All instances reach the same answer: partitions are spread evenly and as few as possible move. An instance takes a partition with `SET NX` on `chat:lease:pN` (6 s TTL) and renews it on every heartbeat. A crashed instance stops renewing, its leases expire, and the others take over. A graceful stop drains first: stop taking new messages, finish the ones in flight, then close the channel.
+- **Order inside an instance.** Messages of one conversation run through a lane, one after another. Failures retry in place (50/200/800 ms), never at the back of the queue.
+- **Exactly one stored copy.** Clients send a `clientMessageId`, and a partial unique index on `(senderId, clientMessageId)` turns a redelivered message into a replay. The sender gets its ack again, but unread and mention counters are not bumped twice.
+- **Back-pressure.** The gateway waits for the broker's publish confirm. When a partition is full (`max-length` with `reject-publish`) the sender receives `SERVER_BUSY`, and the client retries after 2, 4 and 8 seconds. After a reconnect the client resends its pending messages.
+- **Gateways share state through Redis.** They use the sharded Socket.IO Redis adapter, keep presence counters updated atomically in Lua (online and offline fire once per user, not once per socket), and store group-call timers in a Redis sorted set so any gateway can fire them.
+
+Measured on local Docker Compose with 3 gateways and 2 to 3 chat instances. Each scenario reports 0 lost, 0 duplicated and 0 reordered messages:
+
+| Scenario | What happens mid-run |
+|---|---|
+| `steady` | nothing |
+| `crash-chat` | `docker kill` one chat instance: its partitions have a new owner in 4.5–7.9 s |
+| `stop-chat` | `docker stop` one chat instance: each partition changes owner in under 1 s |
+| `add-chat` | a third chat instance joins and takes only the partitions `stickyAssign` gives it |
+| `kill-gateway` | `docker kill` one gateway: its clients reconnect and resend |
+| `overload` | the broker raises a memory alarm and senders get `SERVER_BUSY` |
+| `queue-full` | the partition length limit is set to 1 and the broker rejects publishes |
+
+The design is in [`docs/superpowers/specs/2026-10-31-chat-scale-out-design.md`](docs/superpowers/specs/2026-10-31-chat-scale-out-design.md), and the scenarios are in [`qc/chat-scale-load.mjs`](qc/chat-scale-load.mjs).
+
+### 3. Consistency across services: the friend-accept saga
 
 ![Friend-accept saga: user service, saga orchestrator, chat and notification, with an ALT fragment for completion versus compensation](docs/diagrams/friend-accept-saga.png)
 
@@ -129,21 +158,21 @@ Accepting a friend request touches three services and there is no distributed tr
 - Every consumer runs inside `consumeIdempotent`: the message id goes into an inbox with a unique index, so a redelivered message hits `P2002` and is skipped.
 - Failures compensate in reverse: notify is retried three times, then the conversation is deleted and the friendship reverted.
 
-### 3. Audio and video calls: business logic on the socket, media on Cloudflare RealtimeKit
+### 4. Audio and video calls: business logic on the socket, media on Cloudflare RealtimeKit
 
 - **Media never touches the server.** Both 1-1 and group calls run on Cloudflare RealtimeKit (SFU + TURN near the user). The gateway only mints a participant per join through the RealtimeKit REST API and hands the browser an `authToken`; one RealtimeKit meeting is reused per conversation.
 - **The gateway decides who may ring whom.** It asks the chat service whether both users share the 1-1 conversation (or whether the caller is a member of the group), takes a per-user busy lock in Redis and stores the session under a `callId`. The first tab to answer wins; the others get `call.claimed` and stop ringing.
 - **Group presence comes from signed webhooks.** RealtimeKit posts `participantJoined`/`participantLeft`/`meeting.ended` (RSA-signed, deduplicated) and the gateway keeps the roster, ends an empty room after 15 seconds, and revokes every participant it granted when a call ends.
 - **Calls leave a trace.** Rejected and ended 1-1 calls publish `CALL_ENDED` to RabbitMQ, and the chat service writes a call-log message into the conversation.
 
-### 4. Auth that survives expired tokens, on HTTP and WebSocket
+### 5. Auth that survives expired tokens, on HTTP and WebSocket
 
 - A 15-minute access token and a 7-day refresh token, both in httpOnly cookies.
 - One `resolveTokens()` decides for both the HTTP guard and the Socket.IO handshake. HTTP silently re-issues the access cookie; the socket accepts a still-valid refresh token.
 - A rejected socket first receives a machine-readable `auth:error` code. The client retries with bounded exponential backoff (at most 5 attempts) instead of going silent until the page is reloaded.
-- Covered by [`testing/e2e/socket-auth.spec.js`](testing/e2e/socket-auth.spec.js), which was checked to fail against the previous gateway.
+- Covered by the QC suites in [`qc/`](qc): about 92 API checks plus real-browser runs for silent refresh and for sockets being closed when a session is revoked.
 
-### 5. Friend suggestions from a trained model
+### 6. Friend suggestions from a trained model
 
 Offline, [`training/`](training) builds a link-prediction dataset from the Brightkite social graph in Neo4j and compares five models:
 
@@ -157,12 +186,10 @@ Offline, [`training/`](training) builds a link-prediction dataset from the Brigh
 
 Online, the recommendation service ranks candidates with the exported Gradient Boosting model. Candidates come from friends-of-friends and shared groups in MongoDB, plus bio similarity from multilingual MiniLM embeddings in Qdrant. A separate worker process runs the training queue (BullMQ) and the nightly recompute, so the API stays responsive.
 
-### 6. Shipping: one workflow, one server
+### 7. Shipping: one workflow, paused
 
-- [`ci-cd.yml`](.github/workflows/ci-cd.yml): pull requests to `main` run backend typecheck and unit tests plus frontend lint and build; merging deploys.
-- The deploy key can only deploy. An SSH forced command accepts a 40-character SHA that must already be on `main`, takes a lock, resets to it and runs [`deploy/deploy.sh`](deploy/deploy.sh).
-- Images are built on the server. A build-time check fails any image whose bundle `require()`s a module that per-service dependency pruning removed, so a broken image never replaces a running container.
-- A fresh MongoDB gets its unique indexes from a `db-push` step before any service starts. After every deploy, smoke checks hit each route through Kong.
+- [`ci-cd.yml`](.github/workflows/ci-cd.yml) ran backend typecheck and unit tests plus frontend lint and build on every pull request to `main`. Merging built the images on GitHub Actions, pushed them to GHCR and deployed one server over SSH with a restricted deploy key.
+- The server has been retired, so the workflow is currently **disabled** on GitHub. Merging into `main` only brings code in. Turn it back on with `gh workflow enable "CI/CD"`.
 
 Details are in [`deploy/README.md`](deploy/README.md).
 
@@ -175,7 +202,7 @@ Details are in [`deploy/README.md`](deploy/README.md).
 | Data | MongoDB 7 replica set, Redis 7, RabbitMQ 3.13, Qdrant 1.19, MinIO |
 | ML | Transformers.js (multilingual MiniLM embeddings), Gradient Boosting ranker; Python, scikit-learn, NetworkX and Neo4j for offline training |
 | Infra | Kong 3.7, Docker Compose, Nginx, GitHub Actions |
-| Testing | Jest, Playwright (two-browser e2e), k6 |
+| Testing | Jest, Puppeteer (real-browser QC), Socket.IO load scripts |
 
 ## Run it locally
 
@@ -204,6 +231,13 @@ npm run dev
 | http://localhost:9001 | MinIO console (`minioadmin` / `minioadmin`) |
 | http://localhost:15672 | RabbitMQ management (`user` / `user`) |
 
+To run several instances, start the `scale` profile. It adds `chat-2`, `chat-3`, `realtime-gateway-2` and `realtime-gateway-3`, and Kong spreads traffic across them through Docker DNS:
+
+```bash
+cd backend
+docker compose --profile scale up -d
+```
+
 ## Tests
 
 **Unit tests**
@@ -213,29 +247,16 @@ cd backend
 npm test
 ```
 
-**End-to-end.** Two real Chrome sessions act as two users: sign-in, friend request, accept, the new conversation appearing on both sides with the right name, and messages flowing both ways. The suite seeds its own accounts and removes them afterwards.
+**QC against the running stack.** These scripts in [`qc/`](qc) drive the real system: the API, Chrome through Puppeteer, and Docker containers that get killed mid-run. [`qc/README.md`](qc/README.md) lists what each one covers and what it needs.
 
 ```bash
-cd testing
-npm ci
-npm install --no-save playwright
-cd ..
-docker cp testing/e2e/seed.js daln-user:/tmp/seed.js
-export E2E_SEED="$(docker exec -e NODE_PATH=/app/node_modules daln-user node /tmp/seed.js)"
-node testing/e2e/realtime.spec.js
-node testing/e2e/socket-auth.spec.js
+cd qc
+npm install
+./auth-api.sh                 # sessions, revocation, rate limits: about 92 API checks
+node auth-browser.mjs         # silent refresh and revoked sockets in real Chrome
+node chat-scale-load.mjs      # the 7 scale-out scenarios (needs the scale profile)
+node chat-scale-browser.mjs   # two users on different gateways, in real Chrome
 ```
-
-Clean up afterwards:
-
-```bash
-docker cp testing/e2e/cleanup.js daln-user:/tmp/cleanup.js
-docker exec -e NODE_PATH=/app/node_modules \
-  -e CHAT_DATABASE_URL="mongodb://mongo:27017/chat-service?replicaSet=rs0" \
-  daln-user node /tmp/cleanup.js
-```
-
-**Load test.** `k6 run testing/test_sendmessage.js` runs the 3,500 msg/s ramp. Read the header of [`test_sendmessage.js`](testing/test_sendmessage.js) first: it covers the accounts it expects, other stage plans, and the cleanup step between runs.
 
 ## Project structure
 
@@ -245,11 +266,11 @@ DALN/
 │   ├── apps/                    user · chat · notification · realtime-gateway · recommendation · saga-orchestrator
 │   ├── libs/                    common (auth) · saga (outbox, inbox) · redis · qdrant · storage-s3 · mailer · logger · …
 │   ├── kong/kong.yml            gateway routes, CORS, rate limits
-│   ├── docker-compose.yml       dev stack: hot reload and local infrastructure
+│   ├── docker-compose.yml       dev stack: hot reload, local infrastructure, `scale` profile
 │   └── docker-compose.prod.yml  production stack
 ├── frontend/                    React SPA, plus the nginx image used in production
 ├── deploy/                      server-side deploy scripts
-├── testing/                     k6 load test, Playwright end-to-end suites
+├── qc/                          QC scripts against the running stack: API, real browser, multi-instance load
 ├── training/                    offline link-prediction pipeline (Neo4j, scikit-learn)
 └── docs/                        user stories, diagrams, UI screenshots
 ```
@@ -258,16 +279,17 @@ DALN/
 
 - [`docs/DALN-User-Stories.xlsx`](docs/DALN-User-Stories.xlsx): 75 user stories across 15 epics, with acceptance criteria
 - [`docs/diagrams/`](docs/diagrams): the diagrams above, as editable HTML sources and PNG exports
+- [`docs/superpowers/specs/2026-10-31-chat-scale-out-design.md`](docs/superpowers/specs/2026-10-31-chat-scale-out-design.md): the chat scale-out design
 - [`docs/socketio-presence-online-offline.md`](docs/socketio-presence-online-offline.md): how online presence is tracked
 - [`training/README.md`](training/README.md): the training pipeline
 - [`deploy/README.md`](deploy/README.md): deployment and operations
 
 ## Roadmap
 
-- HTTPS on a domain (the demo currently runs over plain HTTP on the server's IP)
-- A revocation channel that closes sockets when a session is revoked
+- Bring the multi-instance setup to a production deployment (today it runs on local Docker Compose)
+- Faster crash takeover by listening to RabbitMQ consumer events instead of waiting for leases to expire
+- Resend pending messages after a page reload, not only after a reconnect
 - Scheduled MongoDB backups
-- Running more than one chat consumer (today a deliberate single instance)
 
 ## Author
 

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DALN · Chat scale-out</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · Partitioned send path · DALN</p>
+    <h1>Any gateway in, exactly one chat instance per partition</h1>
+
+    <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="daln-chat-scale-out-title daln-chat-scale-out-desc">
+      <title id="daln-chat-scale-out-title">DALN chat scale-out</title>
+      <desc id="daln-chat-scale-out-desc">Architecture diagram showing clients connected to any of several realtime gateways, which hash each conversation id onto one of 16 RabbitMQ partitions; each partition has a single active consumer, and two chat instances split the partitions between them using heartbeats and leases in Redis.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        <marker id="arrow-bi" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- Editorial aside (top) -->
+      <text x="40" y="64" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">3 gateways × 2 chat instances, 7 failure scenarios on local compose: 0 lost, 0 duplicated, 0 reordered.</text>
+
+      <!-- ============ ARROWS (behind nodes) ============ -->
+      <!-- Clients -> gateways -->
+      <line x1="152" y1="248" x2="200" y2="248" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <!-- Gateways -> partitions -->
+      <line x1="336" y1="248" x2="392" y2="248" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- Partitions -> chat instances -->
+      <line x1="592" y1="176" x2="640" y2="176" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="592" y1="320" x2="640" y2="320" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- Chat B <-> Redis -->
+      <line x1="720" y1="368" x2="720" y2="432" stroke="#4f5d75" stroke-width="1.2" marker-start="url(#arrow-bi)" marker-end="url(#arrow-bi)"/>
+      <!-- Chat A <-> Redis, routed around chat B -->
+      <path d="M 800,176 H 816 Q 824,176 824,184 V 456 Q 824,464 816,464 H 800" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-start="url(#arrow-bi)" marker-end="url(#arrow-bi)"/>
+
+      <!-- Arrow labels (masked, 8px from the stroke) -->
+      <rect x="160" y="228" width="32" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="176" y="237" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WS</text>
+
+      <rect x="344" y="228" width="40" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="364" y="237" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SEND.PN</text>
+
+      <rect x="596" y="156" width="40" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="616" y="165" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">P0–P7</text>
+
+      <rect x="596" y="300" width="40" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="616" y="309" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">P8–P15</text>
+
+      <rect x="732" y="394" width="40" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="752" y="403" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">LEASE</text>
+
+      <rect x="832" y="314" width="64" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="864" y="323" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">EVERY 2 S</text>
+
+      <!-- ============ NODES ============ -->
+      <!-- Clients -->
+      <rect x="40" y="200" width="112" height="96" rx="6" fill="#f5f5f5"/>
+      <rect x="40" y="200" width="112" height="96" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+      <rect x="48" y="208" width="28" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.40)" stroke-width="0.8"/>
+      <text x="62" y="217" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SPA</text>
+      <text x="96" y="252" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Clients</text>
+      <text x="96" y="268" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">clientMessageId</text>
+
+      <!-- Realtime gateways: stacked to read as N replicas -->
+      <rect x="208" y="176" width="128" height="128" rx="6" fill="#f5f5f5" stroke="rgba(45,49,66,0.20)" stroke-width="1"/>
+      <rect x="204" y="180" width="128" height="128" rx="6" fill="#f5f5f5" stroke="rgba(45,49,66,0.35)" stroke-width="1"/>
+      <rect x="200" y="184" width="128" height="128" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="208" y="192" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="222" y="201" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">× N</text>
+      <text x="264" y="240" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Realtime gateways</text>
+      <text x="264" y="256" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">fnv1a(convId) % 16</text>
+      <text x="264" y="272" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">publisher confirm</text>
+      <text x="264" y="288" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">sharded Redis adapter</text>
+
+      <!-- RabbitMQ partitions (focal) -->
+      <rect x="392" y="128" width="200" height="240" rx="6" fill="#f5f5f5"/>
+      <rect x="392" y="128" width="200" height="240" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <rect x="400" y="136" width="36" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="418" y="145" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">QUEUE</text>
+      <text x="492" y="164" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">16 partitions</text>
+      <text x="492" y="180" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">chat.send.p0 … p15</text>
+      <!-- 4×4 partition chips: p0-p7 held by A (white), p8-p15 by B (tinted) -->
+      <g font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" fill="#4f5d75">
+        <rect x="400" y="192" width="40" height="20" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="420" y="205">p0</text>
+        <rect x="448" y="192" width="40" height="20" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="468" y="205">p1</text>
+        <rect x="496" y="192" width="40" height="20" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="516" y="205">p2</text>
+        <rect x="544" y="192" width="40" height="20" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="564" y="205">p3</text>
+        <rect x="400" y="220" width="40" height="20" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="420" y="233">p4</text>
+        <rect x="448" y="220" width="40" height="20" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="468" y="233">p5</text>
+        <rect x="496" y="220" width="40" height="20" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="516" y="233">p6</text>
+        <rect x="544" y="220" width="40" height="20" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="564" y="233">p7</text>
+        <rect x="400" y="248" width="40" height="20" rx="2" fill="rgba(79,93,117,0.16)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="420" y="261">p8</text>
+        <rect x="448" y="248" width="40" height="20" rx="2" fill="rgba(79,93,117,0.16)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="468" y="261">p9</text>
+        <rect x="496" y="248" width="40" height="20" rx="2" fill="rgba(79,93,117,0.16)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="516" y="261">p10</text>
+        <rect x="544" y="248" width="40" height="20" rx="2" fill="rgba(79,93,117,0.16)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="564" y="261">p11</text>
+        <rect x="400" y="276" width="40" height="20" rx="2" fill="rgba(79,93,117,0.16)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="420" y="289">p12</text>
+        <rect x="448" y="276" width="40" height="20" rx="2" fill="rgba(79,93,117,0.16)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="468" y="289">p13</text>
+        <rect x="496" y="276" width="40" height="20" rx="2" fill="rgba(79,93,117,0.16)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="516" y="289">p14</text>
+        <rect x="544" y="276" width="40" height="20" rx="2" fill="rgba(79,93,117,0.16)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/><text x="564" y="289">p15</text>
+      </g>
+      <text x="492" y="324" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">single active consumer</text>
+      <text x="492" y="340" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">max-length · reject-publish</text>
+
+      <!-- Chat instance A -->
+      <rect x="640" y="128" width="160" height="96" rx="6" fill="#f5f5f5"/>
+      <rect x="640" y="128" width="160" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="648" y="136" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="662" y="145" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+      <text x="720" y="176" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Chat instance A</text>
+      <text x="720" y="192" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">lane per conversation</text>
+      <text x="720" y="208" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">batch writer · MongoDB</text>
+
+      <!-- Chat instance B -->
+      <rect x="640" y="272" width="160" height="96" rx="6" fill="#f5f5f5"/>
+      <rect x="640" y="272" width="160" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="648" y="280" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="662" y="289" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+      <text x="720" y="320" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Chat instance B</text>
+      <text x="720" y="336" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">lane per conversation</text>
+      <text x="720" y="352" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">batch writer · MongoDB</text>
+
+      <!-- Redis coordination (focal) -->
+      <rect x="640" y="432" width="160" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="640" y="432" width="160" height="64" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <rect x="648" y="440" width="36" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="666" y="449" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">COORD</text>
+      <text x="728" y="460" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Redis</text>
+      <text x="728" y="476" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">members · lease:pN</text>
+
+      <!-- Editorial aside (bottom left) -->
+      <text x="40" y="452" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">Every instance runs the same stickyAssign over the same</text>
+      <text x="40" y="472" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">member list, so they agree on who owns which partition.</text>
+      <text x="40" y="492" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">A crashed instance stops renewing; its leases expire in 6 s.</text>
+
+      <!-- ============ LEGEND ============ -->
+      <line x1="40" y1="532" x2="920" y2="532" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="548" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <rect x="40" y="560" width="14" height="10" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="60" y="568" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Ordering and ownership</text>
+
+      <rect x="180" y="560" width="14" height="10" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="200" y="568" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Service</text>
+
+      <rect x="256" y="560" width="14" height="10" rx="2" fill="#ffffff" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/>
+      <text x="276" y="568" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Held by A</text>
+
+      <rect x="340" y="560" width="14" height="10" rx="2" fill="rgba(79,93,117,0.16)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/>
+      <text x="360" y="568" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Held by B</text>
+
+      <line x1="428" y1="565" x2="456" y2="565" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <text x="464" y="568" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Socket event</text>
+
+      <line x1="548" y1="565" x2="576" y2="565" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="584" y="568" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Message flow</text>
+
+      <line x1="668" y1="565" x2="696" y2="565" stroke="#4f5d75" stroke-width="1.2" marker-start="url(#arrow-bi)" marker-end="url(#arrow-bi)"/>
+      <text x="704" y="568" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Heartbeat and lease renewal</text>
+    </svg>
+  </div>
+</body>
+</html>
