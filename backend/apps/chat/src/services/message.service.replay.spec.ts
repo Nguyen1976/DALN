@@ -46,7 +46,7 @@ function setup(replayed: boolean) {
     redisService as never,
     {} as never,
   )
-  return { service, memberRepo, eventsPublisher, redisService }
+  return { service, memberRepo, messageRepo, eventsPublisher, redisService }
 }
 
 const payload = {
@@ -77,5 +77,14 @@ describe('MessageService.sendMessage — tin gửi lại', () => {
     expect(eventsPublisher.publishMentioned).not.toHaveBeenCalled()
     expect(redisService.pipeline).not.toHaveBeenCalled()
     expect(eventsPublisher.publishMessageSent).toHaveBeenCalledTimes(1)
+  })
+
+  it('hands the queued signal to the repository so the lane can move on', async () => {
+    const { service, messageRepo } = setup(false)
+    const onQueued = jest.fn()
+
+    await service.sendMessage(payload, onQueued)
+
+    expect(messageRepo.create).toHaveBeenCalledWith(expect.anything(), onQueued)
   })
 })

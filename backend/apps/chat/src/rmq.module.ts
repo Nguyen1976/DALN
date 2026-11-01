@@ -24,7 +24,8 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
       // Mặc định của golevelup là 10. golevelup chỉ ack SAU khi handler resolve,
       // nên prefetch chính là số tin tối đa đang xử lý cùng lúc — cũng là trần
       // của buffer trong MessageBatchWriter. Để 10 thì lô 100 không bao giờ đầy,
-      // luôn phải chờ hết linger 20ms rồi ghi vỏn vẹn 10 tin: batching vô nghĩa.
+      // luôn phải chờ hết hẹn giờ của lô rồi ghi vỏn vẹn 10 tin: batching vô nghĩa.
+      // (Hẹn giờ đó nay đã bỏ — BatchWriter ghi theo kiểu group commit.)
       //
       // Nâng lên 300 (~3x kích thước lô) chỉ an toàn KHI có batching: 300 tin
       // đang bay không tạo ra 300 lệnh Prisma song song (đo được là càng song
