@@ -11,7 +11,7 @@
  */
 import puppeteer from 'puppeteer-core'
 import { execSync, exec } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { api, fixtures } from './calls-fixtures.mjs'
 
@@ -121,7 +121,9 @@ async function send(page, content) {
 }
 
 const bodyText = (page) => page.evaluate(() => document.body.innerText)
-const count = (haystack, needle) => haystack.split(needle).length - 1
+/** Số bong bóng tin nhắn chứa chuỗi (không tính phần xem trước ở danh sách hội thoại). */
+const bubbles = (page, needle) =>
+  page.evaluate((n) => [...document.querySelectorAll('[id^="message-"]')].filter((el) => el.innerText.includes(n)).length, needle)
 
 /** Vị trí (theo thứ tự trên màn hình) của tin chứa từng chuỗi; -1 nếu chưa thấy. */
 const positions = (page, needles) =>
@@ -130,14 +132,20 @@ const positions = (page, needles) =>
     return ns.map((n) => items.findIndex((el) => el.innerText.includes(n) || el.innerHTML.includes(n)))
   }, needles)
 
+/** Chụp ở chế độ tối (app tự giữ theme trong localStorage, không theo hệ điều hành), 1280px và 375px. */
 async function shoot(page, name) {
-  await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }])
+  const setTheme = async (theme) => {
+    await page.evaluate((t) => localStorage.setItem('vite-ui-theme', t), theme)
+    await page.reload({ waitUntil: 'networkidle2' })
+    await sleep(800)
+  }
+  await setTheme('dark')
   await page.screenshot({ path: `${SHOTS}scale-${name}-1280.png` })
   await page.setViewport({ width: 375, height: 812 })
   await sleep(400)
   await page.screenshot({ path: `${SHOTS}scale-${name}-375.png` })
   await page.setViewport({ width: 1280, height: 860 })
-  await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
+  await setTheme('light')
 }
 
 // ── Kịch bản ─────────────────────────────────────────────────────────────────
@@ -179,8 +187,10 @@ const boxA = await A.page.$('textarea[aria-label="Nhập tin nhắn"]')
 await boxA.click()
 await boxA.type('đang gõ thử')
 check(await until(async () => (await bodyText(B.page)).includes('đang nhập'), 4000), 'B thấy "đang nhập…" của A')
-await A.page.evaluate(() => { const t = document.querySelector('textarea[aria-label="Nhập tin nhắn"]'); t.value = ''; t.dispatchEvent(new Event('input', { bubbles: true })) })
-await A.page.keyboard.down('Meta'); await A.page.keyboard.press('a'); await A.page.keyboard.up('Meta'); await A.page.keyboard.press('Backspace')
+// Xoá chữ thử khỏi ô soạn (React giữ state, nên xoá như người dùng: Backspace).
+await boxA.click()
+for (let i = 0; i < 'đang gõ thử'.length + 2; i++) await A.page.keyboard.press('Backspace')
+check((await A.page.$eval('textarea[aria-label="Nhập tin nhắn"]', (t) => t.value)) === '', 'ô soạn của A đã trống lại')
 
 console.log('\n== 7c. đã xem')
 check(await until(async () => /người đã xem/.test(await A.page.evaluate(() => document.body.innerHTML)), 6000), 'A thấy tin đã được xem')
@@ -198,7 +208,7 @@ console.log('\n== 8. gửi ảnh rồi gửi chữ ngay sau đó')
 {
   // Gửi ở tầng socket để đo đúng thứ tự phía server: qua UI, ảnh chỉ được emit
   // sau khi upload xong nên chữ gõ sau vẫn tới server trước.
-  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
+  const png = readFileSync(new URL('../docs/diagrams/message-pipeline.png', import.meta.url))
   const presign = await api(a, 'POST', '/chat/media/presign', { conversationId: groupId, type: 'IMAGE', mimeType: 'image/png', fileName: 'qc.png', size: String(png.length) })
   const put = await fetch(presign.uploadUrl, { method: 'PUT', body: png, headers: { 'Content-Type': 'image/png' } })
   check(put.ok, 'upload ảnh lên MinIO', `status=${put.status}`)
@@ -233,10 +243,10 @@ async function burstAcrossChatFailure(label, action, limitMs) {
   const arrived = await until(async () => (await positions(B.page, lines)).every((i) => i >= 0), limitMs, 200)
   const took = Date.now() - t0
   const pos = await positions(B.page, lines)
-  const text = await bodyText(B.page)
+  const counts = await Promise.all(lines.map((l) => bubbles(B.page, l)))
   check(arrived, `B nhận đủ 5 tin sau khi ${label} ${victim} (${took}ms, giới hạn ${limitMs}ms)`)
   check(pos.every((p, i) => i === 0 || p > pos[i - 1]), `${label}: 5 tin đúng thứ tự`, pos.join(','))
-  check(lines.every((l) => count(text, l) === 1), `${label}: không tin nào bị nhân bản`)
+  check(counts.every((n) => n === 1), `${label}: không tin nào bị nhân bản`, counts.join(','))
   return victim
 }
 
@@ -261,7 +271,7 @@ console.log('\n== 5 (UI). gateway của B chết ngay sau khi B gửi')
   const arrived = await until(async () => (await bodyText(A.page)).includes(line), 25000, 300)
   check(arrived, `A nhận tin của B sau khi ${gw} chết`)
   await sleep(2000)
-  check(count(await bodyText(A.page), line) === 1, 'tin của B tới A đúng một lần')
+  check((await bubbles(A.page, line)) === 1, 'tin của B tới A đúng một lần')
   const bText = await bodyText(B.page)
   check(!bText.includes('Gửi lại'), 'bong bóng của B không ở trạng thái lỗi')
   await shoot(B.page, '5-gateway-crash')
@@ -273,8 +283,15 @@ console.log('\n== 9. thu hồi phiên khi có nhiều gateway')
   const t = new Date(Date.now() - 600000).toISOString()
   const gw = gatewayOf(c.id, t)
   await api(c, 'POST', '/user/logout-all')
-  const kicked = await until(async () => C.page.url().includes('/auth') || (await bodyText(C.page)).match(/đăng nhập lại|phiên/i), 15000)
-  check(Boolean(kicked), `C bị đăng xuất dù socket nằm ở ${gw}`)
+  await sleep(2000)
+  // Frontend chỉ ngừng nối lại socket (mã SESSION_REVOKED), chưa đẩy về /auth
+  // cho tới lần gọi HTTP tiếp theo — nên kiểm điều người dùng thấy được.
+  const probe = `sau khi thu hoi ${Date.now().toString(36)}`
+  await send(A.page, probe)
+  await until(async () => (await bubbles(B.page, probe)) === 1, 5000)
+  check((await bubbles(C.page, probe)) === 0, `C không còn nhận tin sau khi bị thu hồi (socket ở ${gw})`)
+  await C.page.reload({ waitUntil: 'networkidle2' })
+  check(await until(async () => C.page.url().includes('/auth'), 10000), 'C tải lại trang thì bị đưa về đăng nhập')
   await shoot(C.page, '9-session-revoked')
 }
 
