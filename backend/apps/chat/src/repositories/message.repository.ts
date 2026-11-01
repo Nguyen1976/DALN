@@ -5,6 +5,7 @@ import { MessageBatchWriter } from '../services/message-batch-writer.service'
 import { olderThanCursor, type KeysetCursor } from '@app/util'
 import { isUniqueConstraintError } from '@app/saga'
 import type { MessageMediaInput } from 'libs/constant/rmq/payload'
+import { findStoredBySenderClientIds } from './message-raw.queries'
 
 const SENDER_SELECT = {
   select: { userId: true, username: true, fullName: true, avatar: true },
@@ -24,26 +25,33 @@ export class MessageRepository {
     private readonly batchWriter: MessageBatchWriter,
   ) {}
 
-  async create(data: {
-    conversationId: string
-    senderId: string
-    type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE' | 'POLL'
-    content?: string | null
-    replyToMessageId?: string | null
-    pollId?: string | null
-    medias?: MessageMediaInput[]
-    isSystem?: boolean
-    mentionUserIds?: string[]
-    mentions?: unknown
-    /** Khoá chống trùng do client sinh; tin poll/hệ thống không có. */
-    clientMessageId?: string
-  }) {
+  async create(
+    data: {
+      conversationId: string
+      senderId: string
+      type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE' | 'POLL'
+      content?: string | null
+      replyToMessageId?: string | null
+      pollId?: string | null
+      medias?: MessageMediaInput[]
+      isSystem?: boolean
+      mentionUserIds?: string[]
+      mentions?: unknown
+      /** Khoá chống trùng do client sinh; tin poll/hệ thống không có. */
+      clientMessageId?: string
+    },
+    /**
+     * Gọi khi thứ tự của tin đã chốt: tin văn bản vào lô là đã có id và
+     * createdAt. Tin media/poll lấy createdAt lúc ghi nên không gọi.
+     */
+    onQueued?: () => void,
+  ) {
     // Đường nóng: tin nhắn thuần văn bản, không media, không poll — chiếm đại
     // đa số lưu lượng. Gom lô qua createMany thay vì mỗi tin một create().
     // Tin có media/poll cần nested write + quan hệ nên giữ nguyên đường cũ;
     // chúng hiếm nên không ảnh hưởng thông lượng.
     if (!data.medias?.length && !data.pollId) {
-      return await this.batchWriter.enqueue({
+      const written = this.batchWriter.enqueue({
         conversationId: data.conversationId,
         senderId: data.senderId,
         type: data.type,
@@ -54,6 +62,8 @@ export class MessageRepository {
         mentions: data.mentions,
         clientMessageId: data.clientMessageId,
       })
+      onQueued?.()
+      return await written
     }
 
     try {
@@ -62,13 +72,17 @@ export class MessageRepository {
       // Tin gửi lại (broker giao lại, client gửi lại) chạm unique index
       // (senderId, clientMessageId): trả bản đã lưu thay vì nhân bản.
       if (!data.clientMessageId || !isUniqueConstraintError(error)) throw error
-      const existing = await this.prisma.message.findFirst({
-        where: {
-          senderId: data.senderId,
-          clientMessageId: data.clientMessageId,
-        },
-        include: { medias: { orderBy: { sortOrder: 'asc' } }, poll: true },
-      })
+      // Tra id qua partial index bằng find thô (qua Prisma nó quét cả
+      // collection), rồi đọc đủ quan hệ theo _id.
+      const [stored] = await findStoredBySenderClientIds(this.prisma, [
+        { senderId: data.senderId, clientMessageId: data.clientMessageId },
+      ])
+      const existing = stored
+        ? await this.prisma.message.findUnique({
+            where: { id: stored.id },
+            include: { medias: { orderBy: { sortOrder: 'asc' } }, poll: true },
+          })
+        : null
       if (!existing) throw error
       return { ...existing, replayed: true as const }
     }
