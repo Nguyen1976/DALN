@@ -24,6 +24,7 @@ import { validateUploadFile } from "@/utils/mediaLimits";
 import { toast } from "sonner";
 import { showErrorToast } from "@/utils/toastError";
 import { createClientMessageId } from "@/utils/clientId";
+import { sendTextMessage, type PendingText } from "@/lib/resendPending";
 
 interface UseChatComposerOptions {
   conversationId?: string;
@@ -35,7 +36,6 @@ interface UseChatComposerOptions {
 }
 
 /** Bao lâu không nhận được xác nhận thì coi là gửi hỏng. */
-const ACK_TIMEOUT_MS = 12000;
 
 /** Số tệp tối đa trong một tin nhắn. */
 const MAX_ATTACHMENTS = 10;
@@ -127,47 +127,9 @@ export function useChatComposer({
     [conversationId, user],
   );
 
-  /**
-   * Ship a text message and make sure it never sits in limbo.
-   *
-   * A bare `socket.emit` while the connection is down is buffered silently:
-   * the bubble stayed on "đang gửi" for ever with nothing telling the user it
-   * had not left the device. Offline is failed immediately, and an ack that
-   * never arrives fails the message after a bounded wait so the retry control
-   * can appear.
-   */
+  /** Gửi tin văn bản; xem `sendTextMessage` (báo lỗi ngay khi rớt mạng, hoặc khi không có ACK). */
   const emitMessage = useCallback(
-    ({
-      conversationId: cid,
-      content,
-      clientMessageId,
-      replyToMessageId,
-    }: {
-      conversationId: string;
-      content: string;
-      clientMessageId: string;
-      replyToMessageId?: string;
-    }) => {
-      if (!socket.connected) {
-        dispatch(failMessage({ conversationId: cid, clientMessageId }));
-        return;
-      }
-
-      socket.emit("message:create", {
-        conversationId: cid,
-        type: "TEXT",
-        content,
-        clientMessageId,
-        replyToMessageId,
-        medias: [],
-      });
-
-      window.setTimeout(() => {
-        // `failMessage` is a no-op once the ack has flipped the message to
-        // "sent", so this only bites when nothing came back.
-        dispatch(failMessage({ conversationId: cid, clientMessageId }));
-      }, ACK_TIMEOUT_MS);
-    },
+    (message: PendingText) => sendTextMessage(dispatch, message),
     [dispatch],
   );
 
@@ -249,8 +211,12 @@ export function useChatComposer({
             return prev;
           }
           if (accepted.length > room) {
-            toast.error(`Mỗi tin nhắn gửi tối đa ${MAX_ATTACHMENTS} tệp; đã bỏ bớt ${accepted.length - room} tệp.`);
-            accepted.slice(room).forEach((a) => URL.revokeObjectURL(a.previewUrl));
+            toast.error(
+              `Mỗi tin nhắn gửi tối đa ${MAX_ATTACHMENTS} tệp; đã bỏ bớt ${accepted.length - room} tệp.`,
+            );
+            accepted
+              .slice(room)
+              .forEach((a) => URL.revokeObjectURL(a.previewUrl));
           }
           return [...prev, ...accepted.slice(0, room)];
         });
@@ -287,7 +253,11 @@ export function useChatComposer({
 
   /** Uploads every queued file, then sends one message carrying all of them. */
   const sendWithAttachments = useCallback(
-    async (pending: PendingAttachment[], content: string, quoted: Message | null) => {
+    async (
+      pending: PendingAttachment[],
+      content: string,
+      quoted: Message | null,
+    ) => {
       if (!conversationId) return;
 
       const clientMessageId = createClientMessageId("temp-media");
@@ -329,9 +299,15 @@ export function useChatComposer({
               size: String(attachment.file.size),
             });
 
-            await uploadFileToSignedUrl(upload.uploadUrl, attachment.file, mimeType);
+            await uploadFileToSignedUrl(
+              upload.uploadUrl,
+              attachment.file,
+              mimeType,
+            );
             setAttachments((prev) =>
-              prev.map((a) => (a.id === attachment.id ? { ...a, progress: 100 } : a)),
+              prev.map((a) =>
+                a.id === attachment.id ? { ...a, progress: 100 } : a,
+              ),
             );
 
             return {

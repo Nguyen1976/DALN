@@ -31,7 +31,7 @@ export async function login(email, password = PASSWORD) {
   return { email, password, cookie, id: me.id ?? me.data?.id, username: me.username ?? me.data?.username }
 }
 
-async function api(account, method, path, body) {
+export async function api(account, method, path, body) {
   const res = await fetch(`${API}${path}`, {
     method,
     headers: { cookie: account.cookie, 'Content-Type': 'application/json' },
@@ -42,7 +42,7 @@ async function api(account, method, path, body) {
   return text ? JSON.parse(text) : null
 }
 
-async function register(tag) {
+export async function register(tag) {
   const stamp = Date.now().toString(36)
   const email = `qc.call.${tag}.${stamp}@example.test`
   const username = `qccall${tag}${stamp}`.slice(0, 30)
@@ -62,7 +62,7 @@ async function register(tag) {
   return login(email)
 }
 
-async function befriend(a, b) {
+export async function befriend(a, b) {
   await api(a, 'POST', '/user/make-friend-by-username', { username: b.username })
   const list = await api(b, 'GET', '/user/list-friend-requests?direction=received')
   const items = list?.items ?? list?.data ?? list ?? []

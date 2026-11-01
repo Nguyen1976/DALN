@@ -1,11 +1,13 @@
 // redis.adapter.ts
 import { IoAdapter } from '@nestjs/platform-socket.io'
 import type { Server, ServerOptions } from 'socket.io'
-import { createAdapter } from '@socket.io/redis-adapter'
+import { createShardedAdapter } from '@socket.io/redis-adapter'
 import { createClient } from 'redis'
 
 export class RedisIoAdapter extends IoAdapter {
-  private adapterConstructor: ReturnType<typeof createAdapter> | undefined
+  private adapterConstructor:
+    | ReturnType<typeof createShardedAdapter>
+    | undefined
 
   async connectToRedis(): Promise<void> {
     // Tạo 2 client kết nối đến Redis: 1 cái để hét (Pub), 1 cái để nghe (Sub)
@@ -17,8 +19,12 @@ export class RedisIoAdapter extends IoAdapter {
 
     await Promise.all([pubClient.connect(), subClient.connect()])
 
-    // Gắn chúng vào Adapter của Socket.IO
-    this.adapterConstructor = createAdapter(pubClient, subClient)
+    // Sharded (Redis 7 SPUBLISH/SSUBSCRIBE), chế độ dynamic: mỗi room một kênh,
+    // gateway chỉ subscribe kênh của room có socket của nó. Adapter thường phát
+    // MỌI emit tới MỌI gateway — chạy N gateway là mỗi emit tốn N lần.
+    this.adapterConstructor = createShardedAdapter(pubClient, subClient, {
+      subscriptionMode: 'dynamic',
+    })
   }
 
   createIOServer(port: number, options?: ServerOptions): Server {

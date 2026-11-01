@@ -3,6 +3,8 @@
 #
 #   docker compose up -d              -> dev full stack (hot-reload + mongo/redis/...)
 #   docker compose --profile training up -d neo4j   -> chỉ bật Neo4j khi train offline
+#   docker compose --profile scale up -d  -> thêm chat-2, chat-3, realtime-gateway-2,
+#                                            realtime-gateway-3 (QC nhiều instance)
 #
 # PRODUCTION (managed cloud — không chạy container stateful):
 #   cp .env.production.example .env.production
@@ -28,6 +30,9 @@ name: daln-backend
 x-app-common: &app-common
   image: daln-backend-dev:latest # 1 image dev dùng chung cho mọi service
   restart: unless-stopped
+  # docker stop chờ bấy lâu cho app tắt êm (drain partition, flush lô tin) rồi
+  # mới SIGKILL; entrypoint.dev.sh tự chờ tối đa 25s.
+  stop_grace_period: 30s
   env_file:
     - .env          # secrets có sẵn (SMTP, DATABASE_URL nếu bạn điền)
     - .env.docker   # cấu hình kết nối infra (ghi đè .env) - bắt buộc
@@ -223,7 +228,9 @@ services:
   # Kho đối tượng cho DEV: tệp đính kèm không đi ra AWS.
   # Console: http://localhost:9001 (minioadmin/minioadmin) — API: :9000
   minio:
-    image: minio/minio:latest
+    # minio/minio và quay.io/minio không còn cho pull công khai (401 / repo bị gỡ).
+    # pgsty/minio là bản build lại từ mã nguồn MinIO: cùng CLI, cùng API S3.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: daln-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
@@ -245,7 +252,7 @@ services:
 
   # Tạo bucket và mở quyền đọc công khai (ảnh trong chat được tải thẳng).
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-10-26T00-00-00Z
     container_name: daln-minio-init
     restart: "no"
     depends_on:
@@ -294,6 +301,10 @@ services:
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      # Profile `scale`: nhiều container cùng alias `chat` / `realtime-gateway`,
+      # DNS của Docker trả mọi địa chỉ và Kong chia tải giữa chúng. TTL ngắn để
+      # Kong nhận ra instance mới hoặc vừa chết trong vài giây.
+      KONG_DNS_VALID_TTL: 5
     ports:
       # 8080 trên host để không đụng dự án khác đang giữ 8000.
       # Bên trong container Kong vẫn nghe 8000 như cấu hình mặc định.
@@ -400,6 +411,43 @@ services:
       PORT: 3001
     ports:
       - "3001:3001"
+
+  # ==========================================================================
+  # INSTANCE PHỤ CHO QC NHIỀU INSTANCE (profile `scale`)
+  # Không mở cổng ra host; alias trùng tên service gốc để Kong chia tải mà không
+  # phải sửa kong.yml. Chat chia 16 partition qua Redis (apps/chat/src/partitions).
+  # ==========================================================================
+  chat-2: &chat-replica
+    <<: *app-common
+    container_name: daln-chat-2
+    profiles: ['scale']
+    environment:
+      SERVICE: chat
+      PORT: 3003
+      DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
+    networks:
+      backend:
+        aliases: [chat]
+
+  chat-3:
+    <<: *chat-replica
+    container_name: daln-chat-3
+
+  realtime-gateway-2: &realtime-replica
+    <<: *app-common
+    container_name: daln-realtime-2
+    profiles: ['scale']
+    environment:
+      SERVICE: realtime-gateway
+      port: 3001
+      PORT: 3001
+    networks:
+      backend:
+        aliases: [realtime-gateway]
+
+  realtime-gateway-3:
+    <<: *realtime-replica
+    container_name: daln-realtime-3
 
   recommendation:
     <<: *app-common

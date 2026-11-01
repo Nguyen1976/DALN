@@ -60,3 +60,47 @@ Cần: stack dev chạy, Vite ở 5174, `npm run rtk:dev-tunnel` (backend) đã 
 webhook tới được gateway, Chrome. Prod: `APP`, `API` trỏ domain thật và
 `QC_ACCOUNTS_FILE` là file JSON `{accounts:[{email,password}×3], directId, groupId, groupName}`
 (gitignore, không commit).
+
+## Scale-out: nhiều instance chat và nhiều gateway
+
+Spec: `docs/superpowers/specs/2026-10-31-chat-scale-out-design.md`.
+
+```bash
+cd backend && docker compose --profile scale up -d   # + chat-2, chat-3, realtime-gateway-2, -3
+cd qc && npm install
+node chat-scale-load.mjs                     # 7 kịch bản tải, mỗi kịch bản một dòng PASS/FAIL
+SCENARIO=crash-chat node chat-scale-load.mjs # một kịch bản
+CHECK_ONLY=<runId> node chat-scale-load.mjs  # chạy lại checker trên một lần chạy đã lưu (.scale-runs/)
+node chat-scale-browser.mjs                  # trình duyệt thật, ảnh ở shots/scale-*.png
+```
+
+| Kịch bản | Sự kiện ở giây 12 | Đạt khi |
+|---|---|---|
+| `steady` | không có | 0 mất · 0 trùng · 0 đảo |
+| `crash-chat` | `docker kill daln-chat-2` | như trên, partition của nó có chủ mới ≤ 10s |
+| `stop-chat` | `docker stop daln-chat-2` | như trên, mỗi partition dừng < 1s |
+| `add-chat` | bật `chat-3` (`up -d --no-deps`) | như trên, chỉ partition `stickyAssign` chọn mới đổi chủ |
+| `kill-gateway` | `docker kill daln-realtime-2` | như trên, client nối lại và gửi lại tin chưa ACK |
+| `overload` | memory alarm của RabbitMQ chặn publisher 8s | có `SERVER_BUSY`, sau đó 0 mất · 0 trùng · 0 đảo |
+| `queue-full` | `docker pause` cả hai chat + policy `max-length` = 1 trong 12s | broker từ chối (reject-publish) → `SERVER_BUSY`, sau đó 0 mất · 0 trùng · 0 đảo |
+
+Checker đọc thẳng Mongo. **Mất** = đã nhận ACK mà không có trong DB. **Trùng** =
+một `clientMessageId` có hơn một bản ghi. **Đảo** = trong cùng (hội thoại, người
+gửi), `seq` giảm khi xếp theo `(createdAt, _id)`. Tin từng bị `SERVER_BUSY` được
+client gửi lại nên được phép đứng sau, và không tính vào "đảo".
+
+Script tự dọn key `rl:*` trước khi tạo tài khoản (đăng ký bị giới hạn theo IP),
+và tự bật/tắt container cho đúng trạng thái đầu của từng kịch bản.
+
+Đối chứng (chứng minh từng cơ chế có tác dụng). Hai công tắc tắt làn / tắt chặn
+trùng KHÔNG nằm trong code production; chúng ở dạng patch, chỉ áp khi chạy đối chứng:
+
+```bash
+git apply qc/controls/qc-switches.patch          # thêm CHAT_QC_DISABLE_LANES / _DEDUP
+cd backend && CHAT_QC_DISABLE_LANES=1 docker compose --profile scale up -d --no-deps chat chat-2 chat-3
+cd ../qc && SCENARIO=steady node chat-scale-load.mjs   # kỳ vọng reorder > 0 (cần tin có ảnh, MEDIA_RATIO mặc định 0.15)
+git apply -R qc/controls/qc-switches.patch       # gỡ ra, dựng lại chat như bình thường
+```
+
+Kết quả đã đo (2026-11-01): tắt làn → `reorder=116`; bật lại → 0. Tắt chặn trùng
++ `crash-chat` ×5 → chưa lần nào tái hiện được tin nhân bản (khe ghi → ack chỉ vài ms).

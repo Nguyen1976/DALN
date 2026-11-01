@@ -9,6 +9,7 @@ import backfillConversationUpdatedAt from '../../../migrations/chat/0001-backfil
 import normalizeParticipantRole from '../../../migrations/chat/0002-normalize-participant-role'
 import initUnreadCount from '../../../migrations/chat/0003-init-unread-count'
 import repairUnreadCounts from '../../../migrations/chat/0004-repair-unread-counts'
+import messageClientIdUnique from '../../../migrations/chat/0007-message-client-id-unique'
 import { FakeDb, matches, type FakeDoc } from './testing/fake-db'
 import { makeContext } from './testing/helpers'
 
@@ -419,5 +420,32 @@ describe('user/0002-resync-user-copies', () => {
     expect(sleep.mock.calls).toEqual([[5000], [5000]])
     const saved = (await checkpoint.get()) as { User: ObjectId }
     expect(String(saved.User)).toBe(String(oid(249)))
+  })
+})
+
+describe('chat/0007-message-client-id-unique', () => {
+  it('creates a unique index scoped to documents that have a clientMessageId', async () => {
+    const db = new FakeDb('chat-service')
+
+    await messageClientIdUnique.up(makeContext(db).ctx)
+
+    expect(db.collection('message').indexSpecs).toEqual([
+      {
+        key: { senderId: 1, clientMessageId: 1 },
+        options: {
+          name: 'message_sender_client_id',
+          unique: true,
+          partialFilterExpression: { clientMessageId: { $type: 'string' } },
+        },
+      },
+    ])
+  })
+
+  it('dry-run creates nothing', async () => {
+    const db = new FakeDb('chat-service')
+
+    await messageClientIdUnique.up(makeContext(db, { dryRun: true }).ctx)
+
+    expect(db.collection('message').indexSpecs).toEqual([])
   })
 })

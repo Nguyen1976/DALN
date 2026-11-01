@@ -15,11 +15,12 @@ import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
   imports: [
     RedisModule.forRoot(() => ({}), 'REDIS_CLIENT'),
     RabbitMQModule.forRoot({
+      // Khai báo mọi exchange service này chạm tới, kể cả exchange chỉ
+      // subscribe (user.events). Với RabbitMQ trống, gateway thường lên trước
+      // service user: bind vào exchange chưa có -> 404 NOT_FOUND -> process chết.
       exchanges: [
-        {
-          name: EXCHANGE_RMQ.REALTIME_EVENTS,
-          type: 'topic',
-        },
+        { name: EXCHANGE_RMQ.REALTIME_EVENTS, type: 'topic' },
+        { name: EXCHANGE_RMQ.USER_EVENTS, type: 'topic' },
       ],
       uri: process.env.RABBITMQ_URL || 'amqp://user:user@localhost:5672',
       connectionInitOptions: { wait: true },

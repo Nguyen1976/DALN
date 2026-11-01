@@ -10,13 +10,27 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets'
 import { JwtService } from '@nestjs/jwt'
-import { Inject, Injectable, Logger } from '@nestjs/common'
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+} from '@nestjs/common'
 import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
-import { publishEvent, RabbitSubscribeWithRetry } from '@app/common/rmq'
+import {
+  assertSendTopology,
+  publishEvent,
+  RabbitSubscribeWithRetry,
+} from '@app/common/rmq'
 import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { QUEUE_RMQ } from 'libs/constant/rmq/queue'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
+import {
+  SEND_EXCHANGE,
+  partitionOf,
+  partitionRoutingKey,
+} from 'libs/constant/rmq/partition'
 import { UserStatusStore } from './user-status.store'
 import type {
   EmitToUserPayload,
@@ -30,8 +44,10 @@ import {
   SessionStore,
 } from '@app/common'
 import { randomUUID } from 'crypto'
+import { hostname } from 'node:os'
 import { CallSession, CallSessionStore, isCallId } from './call-session.store'
 import { CallBusyStore } from './call-busy.store'
+import { GroupCallTimers, type GroupDeadline } from './group-call-timers'
 import {
   GroupCallMember,
   GroupCallSession,
@@ -92,6 +108,19 @@ function grantOf(grant: RtkGrant & { authToken?: string }): RtkGrant {
 }
 
 //nếu k đặt tên cổng thì nó sẽ trùng với cổng của http
+/** Chờ broker xác nhận tin gửi tối đa bấy lâu (spec §6). */
+const PUBLISH_CONFIRM_TIMEOUT_MS = 5000
+/** Tin tới khi handshake chưa xong chờ tối đa bấy lâu. */
+const HANDSHAKE_WAIT_MS = 5000
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout ${ms}ms`)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 @Injectable()
 @WebSocketGateway({
   // `origin: '*'` cộng với handshake xác thực bằng cookie là một cặp sai: mọi
@@ -106,7 +135,7 @@ function grantOf(grant: RtkGrant & { authToken?: string }): RtkGrant {
   pingTimeout: 10000,
 })
 export class RealtimeGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayConnection, OnGatewayDisconnect, OnApplicationBootstrap
 {
   @WebSocketServer()
   server!: Server
@@ -117,16 +146,21 @@ export class RealtimeGateway
   private callSessionStore: CallSessionStore
   private groupCallStore: GroupCallStore
   private callBusyStore: CallBusyStore
-  /** Hẹn huỷ phòng nhóm chưa ai vào (theo callId). Chỉ sống trong process này. */
-  private readonly groupPendingTimers = new Map<string, NodeJS.Timeout>()
+  /**
+   * Hạn chót của phòng gọi nhóm, lưu trong Redis để gateway nào còn sống cũng
+   * chạy được (gateway đặt hạn chót có thể đã restart).
+   *  - pending: phòng chưa ai vào sau 35s thì huỷ;
+   *  - empty: phòng trống 15s (chờ ai đó rớt mạng vào lại) thì kết thúc.
+   */
+  private groupCallTimers: GroupCallTimers
   private readonly groupPendingMs = 35000
-  /** Phòng nhóm trống (người cuối vừa rời): chờ ai đó rớt mạng vào lại. */
-  private readonly groupEmptyTimers = new Map<string, NodeJS.Timeout>()
   private readonly groupEmptyMs = 15000
   // Không còn timer 25s cho mỗi socket: `pong` của Socket.IO (pingInterval
   // 40s, pingTimeout 10s -> tối đa 50s giữa hai lần) đã gia hạn TTL 90s của
   // key socket, dư 1,8 lần biên an toàn. Timer server-side còn có hại: nó gia
   // hạn cho cả kết nối đã chết, kéo dài trạng thái online giả.
+  /** Handshake đang chạy theo socket id; xong thì tự xoá. */
+  private readonly handshakes = new Map<string, Promise<void>>()
   private readonly packetListeners = new Map<
     string,
     (packet: { type: string }) => void
@@ -224,10 +258,38 @@ export class RealtimeGateway
     this.callSessionStore = new CallSessionStore(this.redisClient)
     this.groupCallStore = new GroupCallStore(this.redisClient)
     this.callBusyStore = new CallBusyStore(this.redisClient)
+    this.groupCallTimers = new GroupCallTimers(this.redisClient, (kind, id) =>
+      this.onGroupDeadline(kind, id),
+    )
+  }
+
+  /** Khai báo exchange + 16 queue partition để publish được ngay cả khi chưa có chat nào chạy. */
+  async onApplicationBootstrap() {
+    await assertSendTopology(this.amqpConnection.channel)
+    // Quét cả hạn chót do gateway khác đặt (nó có thể đã tắt).
+    this.groupCallTimers.start()
   }
 
   //default function
   async handleConnection(client: ClientSocket) {
+    // Socket.IO báo 'connect' cho client TRƯỚC khi handshake này xong (nó còn
+    // phải hỏi Redis xem phiên còn sống). Tin client gửi ngay lúc đó — điển hình
+    // là gửi lại tin chưa ACK sau khi nối lại — chờ handshake qua promise này
+    // thay vì bị từ chối UNAUTHORIZED.
+    let handshakeDone!: () => void
+    this.handshakes.set(
+      client.id,
+      new Promise<void>((resolve) => (handshakeDone = resolve)),
+    )
+    try {
+      await this.authenticateConnection(client)
+    } finally {
+      handshakeDone()
+      this.handshakes.delete(client.id)
+    }
+  }
+
+  private async authenticateConnection(client: ClientSocket) {
     try {
       const rawCookie = client.handshake.headers.cookie
 
@@ -271,13 +333,17 @@ export class RealtimeGateway
       client.data.userId = userId
       client.data.sid = sid
 
-      const prevOnline = await this.userStatusStore.isOnline(userId)
-
       // 🔥 Join room theo user
       await client.join(`user:${userId}`)
+      // QC nhiều gateway đọc dòng này để biết socket đang nằm ở node nào.
+      this.logger.log(`socket connected user=${userId} node=${hostname()}`)
 
-      // 🔥 Lưu Redis + TTL
-      await this.userStatusStore.addConnection(userId, client.id)
+      // 🔥 Lưu Redis + TTL. Online hay chưa quyết định nguyên tử trong store,
+      // nên hai tab vào hai gateway cùng lúc chỉ phát online một lần.
+      const { cameOnline } = await this.userStatusStore.addConnection(
+        userId,
+        client.id,
+      )
 
       const packetListener = (packet: { type: string }) => {
         if (packet.type !== 'pong') return
@@ -291,7 +357,7 @@ export class RealtimeGateway
       client.conn.on('packet', packetListener)
       this.packetListeners.set(client.id, packetListener)
 
-      if (!prevOnline) {
+      if (cameOnline) {
         this.publish(ROUTING_RMQ.USER_ONLINE, { userId })
       }
     } catch {
@@ -356,11 +422,12 @@ export class RealtimeGateway
       this.packetListeners.delete(client.id)
     }
 
-    await this.userStatusStore.removeConnection(userId, client.id)
+    const { wentOffline } = await this.userStatusStore.removeConnection(
+      userId,
+      client.id,
+    )
 
-    const stillOnline = await this.userStatusStore.isOnline(userId)
-
-    if (!stillOnline) {
+    if (wentOffline) {
       //trường hợp này là trường hợp user offline thật sự, chứ k phải do lỗi kết nối mạng hay tắt máy đột ngột mà chưa kịp remove connection
       // The user service stores it on the account (USER_OFFLINE).
       const lastSeen = new Date().toISOString()
@@ -454,10 +521,30 @@ export class RealtimeGateway
   }
 
   @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_CREATE)
-  handleCreateMessage(
+  async handleCreateMessage(
     @MessageBody() data: CreateMessageBody | undefined,
     @ConnectedSocket() client: ClientSocket,
   ) {
+    // Chờ khi handshake CÒN đang chạy — kể cả khi userId đã được gán giữa
+    // chừng. Chỉ chờ lúc userId chưa có thì tin tới giữa hai thời điểm đó vượt
+    // lên trước tin đang chờ, đảo thứ tự hai tin gửi liền nhau.
+    const handshake = this.handshakes.get(client.id)
+    if (handshake) {
+      try {
+        await withTimeout(handshake, HANDSHAKE_WAIT_MS)
+      } catch {
+        // Kiểm tra phiên (Redis) treo: đừng giữ tin vô hạn. Báo client lùi lại
+        // rồi gửi lại như khi server bận.
+        client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+          conversationId: data?.conversationId,
+          clientMessageId: data?.clientMessageId,
+          code: 'SERVER_BUSY',
+          message: 'Connection is still being verified, retrying shortly',
+          retryable: true,
+        })
+        return
+      }
+    }
     if (!client.data.userId) {
       client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
         conversationId: data?.conversationId,
@@ -489,7 +576,32 @@ export class RealtimeGateway
       type: data.type,
       medias: data.medias ?? [],
     }
-    this.publish(ROUTING_RMQ.SEND_MESSAGE, message)
+
+    // Tin của cùng một hội thoại luôn vào cùng một partition, ở mọi gateway.
+    // Chờ broker xác nhận: queue đầy (policy reject-publish) hay broker không
+    // trả lời thì báo client ngay để nó lùi lại, thay vì để tin treo im lặng.
+    try {
+      await withTimeout(
+        publishEvent(
+          this.amqpConnection,
+          SEND_EXCHANGE,
+          partitionRoutingKey(partitionOf(data.conversationId)),
+          message,
+        ),
+        PUBLISH_CONFIRM_TIMEOUT_MS,
+      )
+    } catch (error) {
+      this.logger.warn(
+        `SEND_MESSAGE không được broker nhận (${String(error)}) conversation=${data.conversationId}`,
+      )
+      client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+        conversationId: data.conversationId,
+        clientMessageId: data.clientMessageId,
+        code: 'SERVER_BUSY',
+        message: 'Server is busy, retrying shortly',
+        retryable: true,
+      })
+    }
   }
 
   /**
@@ -1434,47 +1546,45 @@ export class RealtimeGateway
   }
 
   private scheduleGroupEmptyFinish(session: GroupCallSession): void {
-    this.clearGroupEmpty(session.callId)
-    const timer = setTimeout(() => {
-      this.groupEmptyTimers.delete(session.callId)
-      void (async () => {
-        const current = await this.groupCallStore.getByCallId(session.callId)
-        if (!current) return
-        if (GroupCallStore.participantList(current).length > 0) return
-        await this.finishGroupCall(session.conversationId)
-      })().catch((error: unknown) =>
-        this.logger.error(`kết thúc phòng trống ${session.callId} lỗi`, error),
+    this.groupCallTimers
+      .schedule('empty', session.callId, this.groupEmptyMs)
+      .catch((error: unknown) =>
+        this.logger.error(`hẹn kết thúc phòng ${session.callId} lỗi`, error),
       )
-    }, this.groupEmptyMs)
-    if (typeof timer.unref === 'function') timer.unref()
-    this.groupEmptyTimers.set(session.callId, timer)
   }
 
   private clearGroupEmpty(callId: string): void {
-    const timer = this.groupEmptyTimers.get(callId)
-    if (timer) clearTimeout(timer)
-    this.groupEmptyTimers.delete(callId)
+    void this.groupCallTimers.cancel('empty', callId).catch(() => undefined)
   }
 
   // ── Hẹn huỷ phòng nhóm chưa ai vào ───────────────────────────────────────
 
   private scheduleGroupPendingCancel(session: GroupCallSession): void {
-    const existing = this.groupPendingTimers.get(session.callId)
-    if (existing) clearTimeout(existing)
-    const timer = setTimeout(() => {
-      this.cancelGroupIfEmpty(session.conversationId, session.callId).catch(
-        () => undefined,
+    this.groupCallTimers
+      .schedule('pending', session.callId, this.groupPendingMs)
+      .catch((error: unknown) =>
+        this.logger.error(`hẹn huỷ phòng ${session.callId} lỗi`, error),
       )
-    }, this.groupPendingMs)
-    // Không giữ process sống chỉ vì timer này.
-    if (typeof timer.unref === 'function') timer.unref()
-    this.groupPendingTimers.set(session.callId, timer)
   }
 
   private clearGroupPending(callId: string): void {
-    const timer = this.groupPendingTimers.get(callId)
-    if (timer) clearTimeout(timer)
-    this.groupPendingTimers.delete(callId)
+    void this.groupCallTimers.cancel('pending', callId).catch(() => undefined)
+  }
+
+  /** Một hạn chót tới hạn — gateway nào quét được nó thì chạy, đúng một lần. */
+  private async onGroupDeadline(
+    kind: GroupDeadline,
+    callId: string,
+  ): Promise<void> {
+    const session = await this.groupCallStore.getByCallId(callId)
+    if (!session) return
+    if (kind === 'pending') {
+      await this.cancelGroupIfEmpty(session.conversationId, callId)
+      return
+    }
+    // Ai đó đã vào lại trong 15 giây: giữ phòng.
+    if (GroupCallStore.participantList(session).length > 0) return
+    await this.finishGroupCall(session.conversationId)
   }
 
   /**
@@ -1487,7 +1597,6 @@ export class RealtimeGateway
     conversationId: string,
     callId: string,
   ): Promise<void> {
-    this.groupPendingTimers.delete(callId)
     const session = await this.groupCallStore.getByCallId(callId)
     if (!session) return
     if (GroupCallStore.participantList(session).length > 0) return

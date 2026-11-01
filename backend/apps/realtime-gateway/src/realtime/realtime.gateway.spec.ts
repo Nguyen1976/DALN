@@ -1,13 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing'
+import { Logger } from '@nestjs/common'
+import { hostname } from 'node:os'
 import { JwtService } from '@nestjs/jwt'
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
 import { SessionStore } from '@app/common'
 import type { Server } from 'socket.io'
 import { EVENT_TYPE_HEADER, EVENT_VERSION_HEADER } from '@app/common/rmq'
-import { EXCHANGE_RMQ } from 'libs/constant/rmq/exchange'
 import { ROUTING_RMQ } from 'libs/constant/rmq/routing'
+import {
+  SEND_EXCHANGE,
+  partitionOf,
+  partitionRoutingKey,
+} from 'libs/constant/rmq/partition'
+import { SOCKET_EVENTS } from 'libs/constant/websocket/socket.events'
 import { CallAck, RealtimeGateway } from './realtime.gateway'
 import { GroupCallStore, isGroupCallId } from './group-call.store'
+import { GroupCallTimers } from './group-call-timers'
 import type { ClientSocket } from './socket.types'
 import { RealtimeKitService } from './realtimekit.service'
 
@@ -62,6 +70,24 @@ class FakeRedis {
   }
   smembers(key: string) {
     return Promise.resolve(Array.from(this.sets.get(key) ?? []))
+  }
+  private zsets = new Map<string, Map<string, number>>()
+  zadd(key: string, score: number, member: string) {
+    const zset = this.zsets.get(key) ?? new Map<string, number>()
+    zset.set(member, score)
+    this.zsets.set(key, zset)
+    return Promise.resolve(1)
+  }
+  zrem(key: string, member: string) {
+    return Promise.resolve(this.zsets.get(key)?.delete(member) ? 1 : 0)
+  }
+  zrangebyscore(key: string, min: number, max: number) {
+    return Promise.resolve(
+      [...(this.zsets.get(key) ?? new Map<string, number>())]
+        .filter(([, score]) => score >= min && score <= max)
+        .sort((a, b) => a[1] - b[1])
+        .map(([member]) => member),
+    )
   }
 }
 
@@ -238,6 +264,130 @@ describe('RealtimeGateway', () => {
       expect(client.data.userId).toBe('u1')
       expect(client.data.sid).toBe('s1')
       expect(codeEmitted(client)).toBeUndefined()
+    })
+
+    it('publishes USER_ONLINE only when the store says the user came online', async () => {
+      redisStub.eval.mockResolvedValueOnce(1)
+      await gateway.handleConnection(fakeClient(`accessToken=${signAccess()}`))
+      expect(publishedTo(ROUTING_RMQ.USER_ONLINE)).toHaveLength(1)
+
+      // Tab thứ hai (có thể ở gateway khác): store báo không phải lần đầu.
+      redisStub.eval.mockResolvedValueOnce(0)
+      await gateway.handleConnection(fakeClient(`accessToken=${signAccess()}`))
+      expect(publishedTo(ROUTING_RMQ.USER_ONLINE)).toHaveLength(1)
+    })
+
+    it('publishes USER_OFFLINE only when the last socket leaves', async () => {
+      const client = fakeClient(`accessToken=${signAccess()}`)
+      ;(client as unknown as { conn: { off: jest.Mock } }).conn.off = jest.fn()
+      client.data.userId = 'u1'
+
+      redisStub.eval.mockResolvedValueOnce(0)
+      await gateway.handleDisconnect(client)
+      expect(publishedTo(ROUTING_RMQ.USER_OFFLINE)).toHaveLength(0)
+
+      redisStub.eval.mockResolvedValueOnce(1)
+      await gateway.handleDisconnect(client)
+      expect(publishedTo(ROUTING_RMQ.USER_OFFLINE)).toHaveLength(1)
+    })
+
+    it('waits for the handshake before judging a message sent right after connect', async () => {
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      // Client gửi ngay khi 'connect' (vd. gửi lại tin chưa ACK sau khi nối
+      // lại) trong lúc gateway còn đang kiểm tra phiên.
+      const connecting = gateway.handleConnection(client)
+      const sending = gateway.handleCreateMessage(
+        { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'x' },
+        client,
+      )
+      await Promise.all([connecting, sending])
+
+      const errors = (client.emit.mock.calls as [string, unknown][]).filter(
+        ([event]) => event === SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+      )
+      expect(errors).toEqual([])
+      expect(publishedTo(partitionRoutingKey(partitionOf('c1')))).toHaveLength(
+        1,
+      )
+    })
+
+    it('keeps send order for messages that arrive while the handshake is still finishing', async () => {
+      let sessionAlive!: (v: boolean) => void
+      sessionStub.isAlive.mockReturnValueOnce(
+        new Promise<boolean>((r) => (sessionAlive = r)),
+      )
+      let presenceSaved!: (v: number) => void
+      redisStub.eval.mockReturnValueOnce(
+        new Promise<number>((r) => (presenceSaved = r)),
+      )
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      const connecting = gateway.handleConnection(client)
+      // Tin 1 tới khi chưa xác thực xong.
+      const first = gateway.handleCreateMessage(
+        { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'anh' },
+        client,
+      )
+      sessionAlive(true)
+      await new Promise((r) => setImmediate(r))
+      expect(client.data.userId).toBe('u1')
+      // Tin 2 tới khi userId đã có nhưng handshake chưa xong (đang lưu presence).
+      const second = gateway.handleCreateMessage(
+        { conversationId: 'c1', clientMessageId: 'tmp-2', content: 'chu' },
+        client,
+      )
+      presenceSaved(1)
+      await Promise.all([connecting, first, second])
+
+      const sent = amqpStub.publish.mock.calls
+        .map(
+          ([, , body]) => (body as { clientMessageId: string }).clientMessageId,
+        )
+        .filter((id) => id?.startsWith('tmp-'))
+      expect(sent).toEqual(['tmp-1', 'tmp-2'])
+    })
+
+    it('gives up waiting for a stuck handshake after 5s and asks the client to retry', async () => {
+      jest.useFakeTimers()
+      try {
+        sessionStub.isAlive.mockReturnValueOnce(new Promise<boolean>(() => {}))
+        const client = fakeClient(`accessToken=${signAccess()}`)
+
+        void gateway.handleConnection(client)
+        const sending = gateway.handleCreateMessage(
+          { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'x' },
+          client,
+        )
+        await jest.advanceTimersByTimeAsync(4999)
+        expect(client.emit).not.toHaveBeenCalled()
+        await jest.advanceTimersByTimeAsync(1)
+        await sending
+
+        expect(client.emit).toHaveBeenCalledWith(
+          SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+          expect.objectContaining({ code: 'SERVER_BUSY', retryable: true }),
+        )
+        expect(
+          publishedTo(partitionRoutingKey(partitionOf('c1'))),
+        ).toHaveLength(0)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('logs which node accepted the socket', async () => {
+      const log = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined)
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      await gateway.handleConnection(client)
+
+      expect(log).toHaveBeenCalledWith(
+        `socket connected user=u1 node=${hostname()}`,
+      )
+      log.mockRestore()
     })
 
     // Hồi quy quan trọng nhất của thay đổi này: refresh token KHÔNG còn xác
@@ -731,6 +881,7 @@ describe('RealtimeGateway', () => {
   describe('gọi nhóm', () => {
     const OLD_ENV = process.env
     let store: GroupCallStore
+    let timers: GroupCallTimers
 
     beforeEach(() => {
       process.env = { ...OLD_ENV }
@@ -738,11 +889,20 @@ describe('RealtimeGateway', () => {
       process.env.CHAT_SERVICE_URL = 'http://chat:3003'
 
       // Store thật trên Redis giả: kiểm cả logic phiên chứ không chỉ handler.
-      store = new GroupCallStore(new FakeRedis() as never)
-      Object.assign(gateway, { groupCallStore: store })
+      const redis = new FakeRedis()
+      store = new GroupCallStore(redis as never)
+      timers = new GroupCallTimers(redis as never, (kind, id) =>
+        (
+          gateway as unknown as {
+            onGroupDeadline(k: typeof kind, i: string): Promise<void>
+          }
+        ).onGroupDeadline(kind, id),
+      )
+      Object.assign(gateway, { groupCallStore: store, groupCallTimers: timers })
     })
 
     afterEach(() => {
+      timers.stop()
       jest.useRealTimers()
     })
 
@@ -1265,10 +1425,10 @@ describe('RealtimeGateway', () => {
     expect(gateway).toBeDefined()
   })
 
-  it('không cho gửi tin nhắn khi socket chưa xác thực', () => {
+  it('không cho gửi tin nhắn khi socket chưa xác thực', async () => {
     const emit = jest.fn()
 
-    gateway.handleCreateMessage(
+    await gateway.handleCreateMessage(
       { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'xin chao' },
       socketOf(undefined, emit),
     )
@@ -1280,15 +1440,16 @@ describe('RealtimeGateway', () => {
     )
   })
 
-  it('socket đã xác thực -> publish SEND_MESSAGE kèm header version, body giữ nguyên', () => {
-    gateway.handleCreateMessage(
+  it("publishes to the conversation's partition with the version header, body unchanged", async () => {
+    await gateway.handleCreateMessage(
       { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'xin chao' },
       socketOf('u1'),
     )
 
+    const key = partitionRoutingKey(partitionOf('c1'))
     expect(amqpStub.publish).toHaveBeenCalledWith(
-      EXCHANGE_RMQ.REALTIME_EVENTS,
-      ROUTING_RMQ.SEND_MESSAGE,
+      SEND_EXCHANGE,
+      key,
       expect.objectContaining({
         conversationId: 'c1',
         senderId: 'u1',
@@ -1299,9 +1460,53 @@ describe('RealtimeGateway', () => {
         persistent: true,
         headers: {
           [EVENT_VERSION_HEADER]: 1,
-          [EVENT_TYPE_HEADER]: ROUTING_RMQ.SEND_MESSAGE,
+          [EVENT_TYPE_HEADER]: key,
         },
       }),
     )
+  })
+
+  it('emits SERVER_BUSY when the broker rejects the publish', async () => {
+    amqpStub.publish.mockRejectedValueOnce(new Error('message nacked'))
+    const emit = jest.fn()
+
+    await gateway.handleCreateMessage(
+      { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'xin chao' },
+      socketOf('u1', emit),
+    )
+
+    expect(emit).toHaveBeenCalledWith(
+      SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+      expect.objectContaining({
+        code: 'SERVER_BUSY',
+        retryable: true,
+        clientMessageId: 'tmp-1',
+        conversationId: 'c1',
+      }),
+    )
+  })
+
+  it('emits SERVER_BUSY when the broker does not confirm within 5000ms', async () => {
+    jest.useFakeTimers()
+    try {
+      amqpStub.publish.mockReturnValueOnce(new Promise<boolean>(() => {}))
+      const emit = jest.fn()
+
+      const pending = gateway.handleCreateMessage(
+        { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'x' },
+        socketOf('u1', emit),
+      )
+      await jest.advanceTimersByTimeAsync(4999)
+      expect(emit).not.toHaveBeenCalled()
+      await jest.advanceTimersByTimeAsync(1)
+      await pending
+
+      expect(emit).toHaveBeenCalledWith(
+        SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+        expect.objectContaining({ code: 'SERVER_BUSY', retryable: true }),
+      )
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

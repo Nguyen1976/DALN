@@ -338,6 +338,8 @@ type BulkOp = {
 
 export class FakeCollection {
   readonly docs: FakeDoc[] = []
+  /** Index đã được yêu cầu tạo — chỉ ghi lại, không áp ràng buộc. */
+  readonly indexSpecs: { key: FakeDoc; options: FakeDoc }[] = []
 
   constructor(readonly collectionName: string) {}
 
@@ -415,6 +417,15 @@ export class FakeCollection {
       const [row] = this.matching(filter)
       return row ? clone(project(row, options.projection)) : null
     })
+  }
+
+  createIndex(key: FakeDoc, options: FakeDoc = {}) {
+    this.indexSpecs.push({ key: clone(key), options: clone(options) })
+    const name =
+      typeof options.name === 'string'
+        ? options.name
+        : Object.keys(key).join('_')
+    return Promise.resolve(name)
   }
 
   countDocuments(filter: FakeDoc = {}) {
