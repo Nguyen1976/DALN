@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing'
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq'
+import { PartitionConsumer } from './partition-consumer'
 import { PartitionCoordinator } from './partition-coordinator'
 import { partitionProviders } from './partitions.providers'
 
@@ -49,5 +50,35 @@ describe('partition providers', () => {
 
     await moduleRef.close()
     expect(shutdown).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens partition consumers with a prefetch of 20 by default', async () => {
+    jest.spyOn(PartitionCoordinator.prototype, 'start').mockResolvedValue()
+    const start = jest
+      .spyOn(PartitionConsumer, 'start')
+      .mockResolvedValue({} as never)
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ...partitionProviders,
+        { provide: MessageService, useValue: {} },
+        { provide: ChatEventsPublisher, useValue: {} },
+        { provide: 'REDIS_CLIENT', useValue: { duplicate: () => ({}) } },
+        { provide: AmqpConnection, useValue: { channel: {}, connection: {} } },
+      ],
+    }).compile()
+
+    const coordinator = moduleRef.get(PartitionCoordinator)
+    await (
+      coordinator as unknown as { startConsumer(p: number): Promise<unknown> }
+    ).startConsumer(3)
+
+    // 20 × 16 partition = tối đa 320 tin đang xử lý trước khi max-length của
+    // queue (chỉ đếm tin "ready") có tác dụng.
+    expect(start).toHaveBeenCalledWith(
+      expect.anything(),
+      3,
+      expect.any(Function),
+      20,
+    )
   })
 })

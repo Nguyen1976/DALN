@@ -31,7 +31,7 @@ client ─▶ gateway (bất kỳ) ─▶ exchange chat.send ─▶ queue chat.s
 | Queue | `chat.send.p{n}`, classic, durable, argument `x-single-active-consumer: true` |
 | Routing key | `send.p{n}` |
 | Policy RabbitMQ | `chat-send-partitions`, pattern `^chat\.send\.p\d+$`, priority `1`, definition `{"dead-letter-exchange":"daln.dlx","max-length":20000,"overflow":"reject-publish"}` |
-| Prefetch mỗi partition | `CHAT_PARTITION_PREFETCH`, mặc định `100` |
+| Prefetch mỗi partition | `CHAT_PARTITION_PREFETCH`, mặc định `20`. Policy `max-length` chỉ đếm tin "ready", nên prefetch là phần nằm ngoài giới hạn: 20 × 16 = tối đa 320 tin đang xử lý trước khi backpressure có tác dụng |
 
 Giới hạn độ dài queue để trong **policy**, không phải argument của queue. Lý do:
 policy đổi được lúc đang chạy mà không phải khai báo lại queue (khai báo lại với

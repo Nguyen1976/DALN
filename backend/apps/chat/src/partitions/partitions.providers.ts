@@ -40,7 +40,10 @@ const coordinatorProvider: Provider = {
           amqp.connection as unknown as { createChannel(): Promise<Channel> },
           p,
           (payload) => handler.handle(payload),
-          env('CHAT_PARTITION_PREFETCH', 100),
+          // Policy max-length của queue chỉ đếm tin "ready"; tin đã giao cho
+          // consumer (tới prefetch) thì không. 20 × 16 = tối đa 320 tin đang xử
+          // lý trước khi backpressure có tác dụng — vẫn đủ để BatchWriter gom lô.
+          env('CHAT_PARTITION_PREFETCH', 20),
         ),
       `${hostname()}-${randomUUID().slice(0, 8)}`,
       {
