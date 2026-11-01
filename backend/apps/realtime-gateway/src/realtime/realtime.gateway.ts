@@ -110,6 +110,8 @@ function grantOf(grant: RtkGrant & { authToken?: string }): RtkGrant {
 //nếu k đặt tên cổng thì nó sẽ trùng với cổng của http
 /** Chờ broker xác nhận tin gửi tối đa bấy lâu (spec §6). */
 const PUBLISH_CONFIRM_TIMEOUT_MS = 5000
+/** Tin tới khi handshake chưa xong chờ tối đa bấy lâu. */
+const HANDSHAKE_WAIT_MS = 5000
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined
@@ -527,7 +529,22 @@ export class RealtimeGateway
     // chừng. Chỉ chờ lúc userId chưa có thì tin tới giữa hai thời điểm đó vượt
     // lên trước tin đang chờ, đảo thứ tự hai tin gửi liền nhau.
     const handshake = this.handshakes.get(client.id)
-    if (handshake) await handshake
+    if (handshake) {
+      try {
+        await withTimeout(handshake, HANDSHAKE_WAIT_MS)
+      } catch {
+        // Kiểm tra phiên (Redis) treo: đừng giữ tin vô hạn. Báo client lùi lại
+        // rồi gửi lại như khi server bận.
+        client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
+          conversationId: data?.conversationId,
+          clientMessageId: data?.clientMessageId,
+          code: 'SERVER_BUSY',
+          message: 'Connection is still being verified, retrying shortly',
+          retryable: true,
+        })
+        return
+      }
+    }
     if (!client.data.userId) {
       client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
         conversationId: data?.conversationId,

@@ -348,6 +348,34 @@ describe('RealtimeGateway', () => {
       expect(sent).toEqual(['tmp-1', 'tmp-2'])
     })
 
+    it('gives up waiting for a stuck handshake after 5s and asks the client to retry', async () => {
+      jest.useFakeTimers()
+      try {
+        sessionStub.isAlive.mockReturnValueOnce(new Promise<boolean>(() => {}))
+        const client = fakeClient(`accessToken=${signAccess()}`)
+
+        void gateway.handleConnection(client)
+        const sending = gateway.handleCreateMessage(
+          { conversationId: 'c1', clientMessageId: 'tmp-1', content: 'x' },
+          client,
+        )
+        await jest.advanceTimersByTimeAsync(4999)
+        expect(client.emit).not.toHaveBeenCalled()
+        await jest.advanceTimersByTimeAsync(1)
+        await sending
+
+        expect(client.emit).toHaveBeenCalledWith(
+          SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+          expect.objectContaining({ code: 'SERVER_BUSY', retryable: true }),
+        )
+        expect(
+          publishedTo(partitionRoutingKey(partitionOf('c1'))),
+        ).toHaveLength(0)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
     it('logs which node accepted the socket', async () => {
       const log = jest
         .spyOn(Logger.prototype, 'log')
