@@ -1,0 +1,54 @@
+diff --git a/backend/apps/chat/src/partitions/send-message.handler.ts b/backend/apps/chat/src/partitions/send-message.handler.ts
+index f066678..8f5cfb3 100644
+--- a/backend/apps/chat/src/partitions/send-message.handler.ts
++++ b/backend/apps/chat/src/partitions/send-message.handler.ts
+@@ -33,6 +33,9 @@ export class SendMessageHandler {
+   ) {}
+ 
+   handle(payload: MessageSendPayload): Promise<'ack' | 'dead-letter'> {
++    // CHỈ DÀNH CHO QC đối chứng (qc/README.md): tắt làn để chứng minh làn là thứ
++    // giữ thứ tự. Không bao giờ đặt ở môi trường thật.
++    if (process.env.CHAT_QC_DISABLE_LANES === '1') return this.attempt(payload)
+     return this.lanes.run(payload.conversationId, () => this.attempt(payload))
+   }
+ 
+diff --git a/backend/apps/chat/src/services/message-batch-writer.service.ts b/backend/apps/chat/src/services/message-batch-writer.service.ts
+index 34e7af0..afd5708 100644
+--- a/backend/apps/chat/src/services/message-batch-writer.service.ts
++++ b/backend/apps/chat/src/services/message-batch-writer.service.ts
+@@ -87,7 +87,11 @@ function toDocument(doc: BatchedMessage): Prisma.InputJsonObject {
+     ...(doc.mentions !== undefined
+       ? { mentions: doc.mentions as Prisma.InputJsonValue }
+       : {}),
+-    ...(doc.clientMessageId ? { clientMessageId: doc.clientMessageId } : {}),
++    // CHAT_QC_DISABLE_DEDUP: CHỈ DÀNH CHO QC đối chứng — bỏ khoá chống trùng để
++    // chứng minh unique index là thứ chặn tin nhân bản khi giao lại.
++    ...(doc.clientMessageId && process.env.CHAT_QC_DISABLE_DEDUP !== '1'
++      ? { clientMessageId: doc.clientMessageId }
++      : {}),
+     isRevoked: false,
+     isDeleted: false,
+     createdAt: date(doc.createdAt),
+diff --git a/backend/docker-compose.yml b/backend/docker-compose.yml
+index 6fb5151..9b5f093 100644
+--- a/backend/docker-compose.yml
++++ b/backend/docker-compose.yml
+@@ -376,6 +376,9 @@ services:
+       SERVICE: chat
+       PORT: 3003
+       DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
++      # Chỉ cho QC đối chứng (qc/README.md); để trống là chạy bình thường.
++      CHAT_QC_DISABLE_LANES: ${CHAT_QC_DISABLE_LANES:-}
++      CHAT_QC_DISABLE_DEDUP: ${CHAT_QC_DISABLE_DEDUP:-}
+     ports:
+       - "3003:3003"
+ 
+@@ -425,6 +428,8 @@ services:
+       SERVICE: chat
+       PORT: 3003
+       DATABASE_URL: mongodb://mongo:27017/chat-service?replicaSet=rs0
++      CHAT_QC_DISABLE_LANES: ${CHAT_QC_DISABLE_LANES:-}
++      CHAT_QC_DISABLE_DEDUP: ${CHAT_QC_DISABLE_DEDUP:-}
+     networks:
+       backend:
+         aliases: [chat]

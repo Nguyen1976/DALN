@@ -33,9 +33,6 @@ export class SendMessageHandler {
   ) {}
 
   handle(payload: MessageSendPayload): Promise<'ack' | 'dead-letter'> {
-    // CHỈ DÀNH CHO QC đối chứng (qc/README.md): tắt làn để chứng minh làn là thứ
-    // giữ thứ tự. Không bao giờ đặt ở môi trường thật.
-    if (process.env.CHAT_QC_DISABLE_LANES === '1') return this.attempt(payload)
     return this.lanes.run(payload.conversationId, () => this.attempt(payload))
   }
 

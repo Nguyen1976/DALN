@@ -91,6 +91,15 @@ client gửi lại nên được phép đứng sau, và không tính vào "đả
 Script tự dọn key `rl:*` trước khi tạo tài khoản (đăng ký bị giới hạn theo IP),
 và tự bật/tắt container cho đúng trạng thái đầu của từng kịch bản.
 
-Đối chứng (chứng minh từng cơ chế có tác dụng): đặt `CHAT_QC_DISABLE_LANES=1`
-hoặc `CHAT_QC_DISABLE_DEDUP=1` cho các container chat (chỉ dành cho QC), dựng lại
-chúng, rồi chạy `steady` hoặc `crash-chat`.
+Đối chứng (chứng minh từng cơ chế có tác dụng). Hai công tắc tắt làn / tắt chặn
+trùng KHÔNG nằm trong code production; chúng ở dạng patch, chỉ áp khi chạy đối chứng:
+
+```bash
+git apply qc/controls/qc-switches.patch          # thêm CHAT_QC_DISABLE_LANES / _DEDUP
+cd backend && CHAT_QC_DISABLE_LANES=1 docker compose --profile scale up -d --no-deps chat chat-2 chat-3
+cd ../qc && SCENARIO=steady node chat-scale-load.mjs   # kỳ vọng reorder > 0 (cần tin có ảnh, MEDIA_RATIO mặc định 0.15)
+git apply -R qc/controls/qc-switches.patch       # gỡ ra, dựng lại chat như bình thường
+```
+
+Kết quả đã đo (2026-11-01): tắt làn → `reorder=116`; bật lại → 0. Tắt chặn trùng
++ `crash-chat` ×5 → chưa lần nào tái hiện được tin nhân bản (khe ghi → ack chỉ vài ms).
