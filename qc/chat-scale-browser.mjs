@@ -69,9 +69,20 @@ function chatOwning(conversationId) {
   return CHATS.find((c) => owner.startsWith(sh(`docker inspect -f '{{.Config.Hostname}}' ${c}`)))
 }
 
-/** Gateway đang giữ socket mới nhất của user (dòng log của gateway). */
+/**
+ * Gateway đang giữ socket MỚI NHẤT của user: so dấu thời gian của dòng log
+ * "socket connected" cuối cùng ở từng gateway. (Lấy gateway đầu tiên có log là
+ * sai: user từng nối vào gateway đó một lần thì luôn bị báo là ở đó.)
+ */
 function gatewayOf(userId, sinceIso) {
-  return GATEWAYS.find((c) => running(c) && sh(`docker logs --since ${sinceIso} ${c} 2>&1 | grep -c "socket connected user=${userId}" || true`) !== '0')
+  let best = null
+  for (const c of GATEWAYS) {
+    if (!running(c)) continue
+    const line = sh(`docker logs --timestamps --since ${sinceIso} ${c} 2>&1 | grep "socket connected user=${userId}" | tail -1 || true`)
+    const at = line.split(' ')[0]
+    if (at && (!best || at > best.at)) best = { c, at }
+  }
+  return best?.c
 }
 
 const onlinePublished = async () => {
@@ -171,7 +182,7 @@ for (const [X, acc] of [[B, b], [C, c]]) {
     if (gatewayOf(acc.id, t) !== nodeA) break
   }
 }
-const nodes = { A: gatewayOf(a.id, since), B: gatewayOf(b.id, new Date(Date.now() - 600000).toISOString()), C: gatewayOf(c.id, new Date(Date.now() - 600000).toISOString()) }
+const nodes = { A: gatewayOf(a.id, since), B: gatewayOf(b.id, since), C: gatewayOf(c.id, since) }
 console.log(`   A@${nodes.A}  B@${nodes.B}  C@${nodes.C}`)
 check(new Set(Object.values(nodes)).size >= 2, 'người dùng nằm ở ít nhất 2 gateway khác nhau', JSON.stringify(nodes))
 
