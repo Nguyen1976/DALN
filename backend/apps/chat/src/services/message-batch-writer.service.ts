@@ -54,12 +54,17 @@ type Pending = {
   reject: (error: unknown) => void
 }
 
-/** Tương đương `batch.size` của Kafka producer. */
+/** Trần số tin mỗi lần insert. */
 const MAX_BATCH = Number(process.env.MESSAGE_BATCH_SIZE ?? 100)
-/** Tương đương `linger.ms` của Kafka producer — trần độ trễ thêm vào. */
-const MAX_DELAY_MS = Number(process.env.MESSAGE_BATCH_DELAY_MS ?? 20)
 
 const DUPLICATE_KEY = 11000
+/**
+ * Lô lỗi được ghi lại với ĐÚNG các document cũ (cùng _id, cùng createdAt). Làn
+ * của hội thoại đã nhả ngay khi tin vào lô, nên thử lại ở handler sẽ sinh tin
+ * mới đứng sau các tin đến sau; ghi lại bản cũ thì thứ tự vẫn giữ nguyên.
+ */
+const WRITE_RETRY_DELAYS_MS = [50, 200, 800]
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 type InsertResult = {
   ok: number
@@ -121,7 +126,10 @@ function toDocument(doc: BatchedMessage): Prisma.InputJsonObject {
 export class MessageBatchWriter implements BeforeApplicationShutdown {
   private readonly logger = new Logger(MessageBatchWriter.name)
   private buffer: Pending[] = []
-  private timer: NodeJS.Timeout | null = null
+  /** Lần ghi đang chạy. Tối đa một: tin đến trong lúc ghi gom vào lần sau. */
+  private writing: Promise<void> | null = null
+  private scheduled = false
+  private lastCreatedAt = 0
   private stopped = false
 
   private totalMessages = 0
@@ -130,9 +138,14 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   enqueue(input: BatchMessageInput): Promise<BatchedMessage> {
-    const now = new Date()
+    // Thứ tự trong hội thoại là (createdAt, _id), nên createdAt không được lùi.
+    // Đồng hồ hệ thống thì có thể lùi: đo được máy ảo Docker lùi ~2 ms lúc đang
+    // swap, đảo thứ tự 21 cặp tin. Lùi thì giữ mốc cũ; bộ đếm của _id vẫn tăng
+    // nên phân xử đúng thứ tự giữa các tin cùng mốc.
+    this.lastCreatedAt = Math.max(Date.now(), this.lastCreatedAt)
+    const now = new Date(this.lastCreatedAt)
     const doc: BatchedMessage = {
-      id: new ObjectId().toHexString(),
+      id: new ObjectId(Math.floor(this.lastCreatedAt / 1000)).toHexString(),
       conversationId: input.conversationId,
       senderId: input.senderId,
       type: input.type,
@@ -153,72 +166,95 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
 
     return new Promise<BatchedMessage>((resolve, reject) => {
       this.buffer.push({ doc, resolve, reject })
-
-      if (this.buffer.length >= MAX_BATCH) {
-        void this.flush()
-      } else if (!this.timer) {
-        this.timer = setTimeout(() => void this.flush(), MAX_DELAY_MS)
-      }
+      this.schedule()
     })
   }
 
-  private async flush(): Promise<void> {
-    if (this.timer) {
-      clearTimeout(this.timer)
-      this.timer = null
-    }
-    if (!this.buffer.length) return
+  /**
+   * Group commit: rảnh thì ghi ngay ở tick sau (gom các tin đến cùng tick), đang
+   * ghi thì chờ lần ghi đó xong. Không có hẹn giờ cố định: một hẹn giờ 20 ms
+   * cộng prefetch 20 mỗi partition từng chặn một hội thoại ở ~750 tin/s, vì lô
+   * không bao giờ đủ lớn để ghi sớm. Tải cao thì lô tự lớn lên trong lúc chờ.
+   */
+  private schedule() {
+    if (this.writing || this.scheduled) return
+    this.scheduled = true
+    setImmediate(() => {
+      this.scheduled = false
+      void this.flush()
+    })
+  }
 
-    // Đổi buffer TRƯỚC mọi `await`. Hai dòng này chạy đồng bộ nên nhờ Node đơn
-    // luồng, không callback nào chen vào giữa được — không cần khoá. Nếu đảo
-    // thứ tự (await trước, gán sau) thì tin nhắn đến trong lúc ghi sẽ bị ghi
-    // hai lần hoặc mất.
-    const batch = this.buffer
-    this.buffer = []
+  private flush(): Promise<void> {
+    if (this.writing) return this.writing
+    if (!this.buffer.length) return Promise.resolve()
 
-    try {
-      const result = (await this.prisma.$runCommandRaw({
-        insert: 'message',
-        ordered: false,
-        documents: batch.map((item) => toDocument(item.doc)),
-      })) as InsertResult
+    // Lấy lô ra khỏi buffer TRƯỚC mọi `await`. Đoạn này chạy đồng bộ nên nhờ
+    // Node đơn luồng, không callback nào chen vào giữa được — không cần khoá.
+    // Nếu đảo thứ tự (await trước, lấy sau) thì tin nhắn đến trong lúc ghi sẽ bị
+    // ghi hai lần hoặc mất.
+    const batch = this.buffer.splice(0, MAX_BATCH)
+    this.writing = this.writeWithRetry(batch).finally(() => {
+      this.writing = null
+      if (this.buffer.length) void this.flush()
+    })
+    return this.writing
+  }
 
-      const errors = result.writeErrors ?? []
-      const other = errors.find((e) => e.code !== DUPLICATE_KEY)
-      if (other) {
-        throw new Error(
-          `insert message lỗi ${other.code}: ${other.errmsg ?? 'không rõ'}`,
+  private async writeWithRetry(batch: Pending[]): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const saved = await this.write(batch)
+        batch.forEach((item, i) => item.resolve(saved[i]))
+        break
+      } catch (error) {
+        const delay = WRITE_RETRY_DELAYS_MS[attempt]
+        this.logger.error(
+          `ghi lô ${batch.length} tin thất bại (lần ${attempt + 1}): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         )
+        if (delay === undefined) {
+          for (const item of batch) item.reject(error)
+          return
+        }
+        await sleep(delay)
       }
-
-      const duplicates = new Set(errors.map((e) => e.index))
-      const stored = await this.loadStored(
-        batch.filter((_, i) => duplicates.has(i)).map((item) => item.doc),
-      )
-      batch.forEach((item, i) => {
-        item.resolve(
-          duplicates.has(i) ? (stored(item.doc) ?? item.doc) : item.doc,
-        )
-      })
-
-      this.totalMessages += batch.length
-      this.totalBatches += 1
-      if (this.totalBatches % 200 === 0) {
-        this.logger.debug(
-          `đã ghi ${this.totalMessages} tin qua ${this.totalBatches} lô ` +
-            `(trung bình ${(this.totalMessages / this.totalBatches).toFixed(1)} tin/lô)`,
-        )
-      }
-    } catch (error) {
-      this.logger.error(
-        `ghi lô ${batch.length} tin thất bại: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      )
-      // Từ chối cả lô -> handler ném lỗi -> được thử lại. Dòng nào đã kịp vào
-      // DB thì lần thử lại chạm unique index và lấy lại đúng bản đó.
-      for (const item of batch) item.reject(error)
     }
+
+    this.totalMessages += batch.length
+    this.totalBatches += 1
+    if (this.totalBatches % 200 === 0) {
+      this.logger.debug(
+        `đã ghi ${this.totalMessages} tin qua ${this.totalBatches} lô ` +
+          `(trung bình ${(this.totalMessages / this.totalBatches).toFixed(1)} tin/lô)`,
+      )
+    }
+  }
+
+  /** Một lần insert cả lô; dòng trùng khoá trả về bản đã lưu. */
+  private async write(batch: Pending[]): Promise<BatchedMessage[]> {
+    const result = (await this.prisma.$runCommandRaw({
+      insert: 'message',
+      ordered: false,
+      documents: batch.map((item) => toDocument(item.doc)),
+    })) as InsertResult
+
+    const errors = result.writeErrors ?? []
+    const other = errors.find((e) => e.code !== DUPLICATE_KEY)
+    if (other) {
+      throw new Error(
+        `insert message lỗi ${other.code}: ${other.errmsg ?? 'không rõ'}`,
+      )
+    }
+
+    const duplicates = new Set(errors.map((e) => e.index))
+    const stored = await this.loadStored(
+      batch.filter((_, i) => duplicates.has(i)).map((item) => item.doc),
+    )
+    return batch.map((item, i) =>
+      duplicates.has(i) ? (stored(item.doc) ?? item.doc) : item.doc,
+    )
   }
 
   /** Bản đã lưu của những tin bị trùng, tra theo (senderId, clientMessageId). */
@@ -237,6 +273,9 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
     )
     return (doc: BatchedMessage): BatchedMessage | undefined => {
       const row = byKey.get(`${doc.senderId}|${doc.clientMessageId}`)
+      // Cùng _id: chính lần ghi hỏng trước của lô này đã kịp đưa vào — chưa ai
+      // cộng unread/nhắc tên cho nó, nên không phải tin gửi lại.
+      if (row && String(row.id) === doc.id) return doc
       return row
         ? {
             ...doc,
@@ -255,7 +294,7 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
    */
   async beforeApplicationShutdown(): Promise<void> {
     this.stopped = true
-    await this.flush()
+    while (this.writing || this.buffer.length) await this.flush()
   }
 
   /** Cho test/quan sát. */

@@ -110,8 +110,71 @@ describe('MessageBatchWriter', () => {
     expect(third.id).not.toBe('old')
   })
 
-  it('rejects the whole batch on an error other than a duplicate key', async () => {
-    const { writer } = makeWriter(() => ({
+  it('retries a failed batch with the same ids and createdAt', async () => {
+    let calls = 0
+    const { writer, prisma } = makeWriter((cmd) => {
+      calls += 1
+      if (calls === 1) throw new Error('not primary')
+      return { ok: 1, n: cmd.documents.length }
+    })
+
+    const pending = writer.enqueue(input(1))
+    await jest.advanceTimersByTimeAsync(20 + 50)
+    const saved = await pending
+
+    expect(prisma.$runCommandRaw).toHaveBeenCalledTimes(2)
+    const [first, second] = prisma.$runCommandRaw.mock.calls.map(
+      ([cmd]) => cmd.documents[0],
+    )
+    expect(second._id).toEqual(first._id)
+    expect(second.createdAt).toEqual(first.createdAt)
+    expect(saved.replayed).toBeUndefined()
+  })
+
+  it('does not treat a row its own failed attempt already inserted as a replay', async () => {
+    const results = [
+      {
+        ok: 1,
+        n: 1,
+        writeErrors: [{ index: 1, code: 91, errmsg: 'shutdown' }],
+      },
+      { ok: 1, n: 1, writeErrors: [{ index: 0, code: 11000 }] },
+    ]
+    const calls: InsertCommand[] = []
+    const prisma = {
+      $runCommandRaw: jest.fn((cmd: InsertCommand) => {
+        calls.push(cmd)
+        return Promise.resolve(results.shift())
+      }),
+      message: {
+        findMany: jest.fn(() => {
+          const doc = calls[0].documents[0] as { _id: { $oid: string } }
+          return Promise.resolve([
+            {
+              id: doc._id.$oid,
+              senderId: SENDER,
+              clientMessageId: 'c1',
+              createdAt: STORED_AT,
+              updatedAt: STORED_AT,
+            },
+          ])
+        }),
+      },
+    }
+    const writer = new MessageBatchWriter(prisma as never)
+
+    const pending = Promise.all([
+      writer.enqueue(input(1)),
+      writer.enqueue(input(2)),
+    ])
+    await jest.advanceTimersByTimeAsync(20 + 50)
+    const [first] = await pending
+
+    expect(first.replayed).toBeUndefined()
+  })
+
+  it('rejects the batch after three retries on an error other than a duplicate key', async () => {
+    const { writer, prisma } = makeWriter(() => ({
       ok: 1,
       n: 0,
       writeErrors: [{ index: 0, code: 121, errmsg: 'validation' }],
@@ -122,8 +185,68 @@ describe('MessageBatchWriter', () => {
       () => 'resolved',
       () => 'rejected',
     )
-    await jest.advanceTimersByTimeAsync(20)
+    await jest.advanceTimersByTimeAsync(20 + 50 + 200 + 800)
 
     await expect(settled).resolves.toBe('rejected')
+    expect(prisma.$runCommandRaw).toHaveBeenCalledTimes(4)
+  })
+
+  it('writes a lone message right away instead of waiting for a timer', async () => {
+    const { writer, prisma } = makeWriter((cmd) => ({
+      ok: 1,
+      n: cmd.documents.length,
+    }))
+
+    const pending = writer.enqueue(input(1))
+    await jest.advanceTimersByTimeAsync(0)
+
+    expect(prisma.$runCommandRaw).toHaveBeenCalledTimes(1)
+    await expect(pending).resolves.toMatchObject({ clientMessageId: 'c1' })
+  })
+
+  it('gathers messages that arrive during a write into the next write', async () => {
+    let finishFirst!: () => void
+    const calls: InsertCommand[] = []
+    const prisma = {
+      $runCommandRaw: jest.fn((cmd: InsertCommand) => {
+        calls.push(cmd)
+        return calls.length === 1
+          ? new Promise((r) => (finishFirst = () => r({ ok: 1, n: 1 })))
+          : Promise.resolve({ ok: 1, n: cmd.documents.length })
+      }),
+      message: { findMany: jest.fn(() => Promise.resolve([])) },
+    }
+    const writer = new MessageBatchWriter(prisma as never)
+
+    const first = writer.enqueue(input(1))
+    await jest.advanceTimersByTimeAsync(0)
+    const rest = Promise.all([
+      writer.enqueue(input(2)),
+      writer.enqueue(input(3)),
+    ])
+    await jest.advanceTimersByTimeAsync(0)
+    expect(calls).toHaveLength(1)
+
+    finishFirst()
+    await first
+    await jest.advanceTimersByTimeAsync(0)
+    await rest
+
+    expect(calls).toHaveLength(2)
+    expect(calls[1].documents).toHaveLength(2)
+  })
+
+  it('never stamps a message earlier than the one before it when the clock steps back', async () => {
+    const { writer } = makeWriter((cmd) => ({ ok: 1, n: cmd.documents.length }))
+
+    jest.setSystemTime(new Date('2026-11-01T06:17:27.985Z'))
+    const first = writer.enqueue(input(1))
+    jest.setSystemTime(new Date('2026-11-01T06:17:27.983Z'))
+    const second = writer.enqueue(input(2))
+    await jest.advanceTimersByTimeAsync(0)
+    const [a, b] = await Promise.all([first, second])
+
+    expect(b.createdAt.getTime()).toBeGreaterThanOrEqual(a.createdAt.getTime())
+    expect(b.id > a.id).toBe(true)
   })
 })
