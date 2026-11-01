@@ -55,7 +55,7 @@
 
     <svg viewBox="0 0 960 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="daln-architecture-title daln-architecture-desc">
       <title id="daln-architecture-title">DALN system architecture</title>
-      <desc id="daln-architecture-desc">Architecture diagram showing the React client reaching five NestJS services through the Kong gateway, all six services exchanging events over RabbitMQ, and each service owning its own data stores.</desc>
+      <desc id="daln-architecture-desc">Architecture diagram showing the React client reaching five NestJS services through the Kong gateway, all six services exchanging events over RabbitMQ, and each service owning its own data stores; the chat service and the realtime gateway run as several instances.</desc>
       <defs>
         <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
         <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
@@ -84,10 +84,10 @@
 
       <!-- Services <-> RabbitMQ. Two-way where the service both publishes and consumes. -->
       <line x1="624" y1="108" x2="704" y2="108" stroke="#4f5d75" stroke-width="1.2" marker-start="url(#arrow-bi)" marker-end="url(#arrow-bi)"/>
-      <line x1="624" y1="180" x2="704" y2="180" stroke="#4f5d75" stroke-width="1.2" marker-start="url(#arrow-bi)" marker-end="url(#arrow-bi)"/>
+      <line x1="628" y1="180" x2="704" y2="180" stroke="#4f5d75" stroke-width="1.2" marker-start="url(#arrow-bi)" marker-end="url(#arrow-bi)"/>
       <line x1="704" y1="252" x2="624" y2="252" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
       <line x1="704" y1="324" x2="624" y2="324" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
-      <line x1="624" y1="396" x2="704" y2="396" stroke="#4f5d75" stroke-width="1.2" marker-start="url(#arrow-bi)" marker-end="url(#arrow-bi)"/>
+      <line x1="628" y1="396" x2="704" y2="396" stroke="#4f5d75" stroke-width="1.2" marker-start="url(#arrow-bi)" marker-end="url(#arrow-bi)"/>
       <line x1="624" y1="468" x2="704" y2="468" stroke="#4f5d75" stroke-width="1.2" marker-start="url(#arrow-bi)" marker-end="url(#arrow-bi)"/>
 
       <!-- Arrow labels (masked, 8px above the stroke) -->
@@ -124,13 +124,14 @@
       <text x="520" y="108" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">User service</text>
       <text x="520" y="124" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">MongoDB · MinIO</text>
 
-      <!-- Chat service (focal) -->
+      <!-- Chat service (focal), offset outline = runs as N instances -->
+      <rect x="420" y="148" width="208" height="56" rx="6" fill="#f5f5f5" stroke="rgba(235,108,54,0.45)" stroke-width="1"/>
       <rect x="416" y="152" width="208" height="56" rx="6" fill="#f5f5f5"/>
       <rect x="416" y="152" width="208" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
       <rect x="424" y="160" width="28" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
       <text x="438" y="169" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
       <text x="520" y="180" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Chat service</text>
-      <text x="520" y="196" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">MongoDB · Redis · MinIO</text>
+      <text x="520" y="196" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">× N · MongoDB · Redis · MinIO</text>
 
       <!-- Notification service -->
       <rect x="416" y="224" width="208" height="56" rx="6" fill="#f5f5f5"/>
@@ -148,13 +149,14 @@
       <text x="520" y="324" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Recommendation</text>
       <text x="520" y="340" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">MongoDB · Qdrant · BullMQ</text>
 
-      <!-- Realtime gateway -->
+      <!-- Realtime gateway, offset outline = runs as N instances -->
+      <rect x="420" y="364" width="208" height="56" rx="6" fill="#f5f5f5" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
       <rect x="416" y="368" width="208" height="56" rx="6" fill="#f5f5f5"/>
       <rect x="416" y="368" width="208" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
       <rect x="424" y="376" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
       <text x="438" y="385" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">WS</text>
       <text x="520" y="396" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Realtime gateway</text>
-      <text x="520" y="412" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Socket.IO · Redis presence</text>
+      <text x="520" y="412" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">× N · Socket.IO · Redis presence</text>
 
       <!-- Saga orchestrator -->
       <rect x="416" y="440" width="208" height="56" rx="6" fill="#f5f5f5"/>
@@ -172,6 +174,7 @@
       <text x="792" y="272" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">RabbitMQ</text>
       <text x="792" y="288" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">topic exchanges</text>
       <text x="792" y="304" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">outbox · inbox · saga</text>
+      <text x="792" y="320" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">16 chat.send partitions</text>
 
       <!-- Editorial aside -->
       <text x="880" y="540" fill="#4f5d75" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="end">Outbox on the way in, inbox on the way out:</text>
