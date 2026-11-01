@@ -4,6 +4,7 @@ import { RedisLeaseStore } from './lease-store'
 // Chạy trên Redis thật vì đúng/sai nằm ở các script Lua. Ví dụ:
 //   LEASE_STORE_REDIS_URL=redis://localhost:6380/15 npx jest lease-store
 const url = process.env.LEASE_STORE_REDIS_URL
+// Mỗi file một DB riêng: jest chạy các file song song, flushdb không được xoá dữ liệu của nhau.
 const describeRedis = url ? describe : describe.skip
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -14,8 +15,8 @@ describeRedis('RedisLeaseStore', () => {
   let store: RedisLeaseStore
 
   beforeEach(async () => {
-    redis = new Redis(url!)
-    sub = new Redis(url!)
+    redis = new Redis(url!, { db: 15 })
+    sub = new Redis(url!, { db: 15 })
     await redis.flushdb()
     store = new RedisLeaseStore(redis, sub)
   })

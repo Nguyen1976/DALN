@@ -4,6 +4,7 @@ import { UserStatusStore } from './user-status.store'
 // Chạy trên Redis thật vì quyết định online/offline nằm trong script Lua.
 //   LEASE_STORE_REDIS_URL=redis://localhost:6380/15 npx jest user-status
 const url = process.env.LEASE_STORE_REDIS_URL
+// Mỗi file một DB riêng: jest chạy các file song song, flushdb không được xoá dữ liệu của nhau.
 const describeRedis = url ? describe : describe.skip
 
 describeRedis('UserStatusStore', () => {
@@ -11,7 +12,7 @@ describeRedis('UserStatusStore', () => {
   let store: UserStatusStore
 
   beforeEach(async () => {
-    redis = new Redis(url!)
+    redis = new Redis(url!, { db: 14 })
     await redis.flushdb()
     store = new UserStatusStore(redis)
   })

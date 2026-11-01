@@ -5,6 +5,7 @@ import { GroupCallTimers } from './group-call-timers'
 // hạn chót, và hạn chót sống sót khi gateway đặt nó đã tắt.
 //   LEASE_STORE_REDIS_URL=redis://localhost:6380/15 npx jest group-call-timers
 const url = process.env.LEASE_STORE_REDIS_URL
+// Mỗi file một DB riêng: jest chạy các file song song, flushdb không được xoá dữ liệu của nhau.
 const describeRedis = url ? describe : describe.skip
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -20,7 +21,7 @@ describeRedis('GroupCallTimers', () => {
   }
 
   beforeEach(async () => {
-    redis = new Redis(url!)
+    redis = new Redis(url!, { db: 13 })
     await redis.flushdb()
   })
 
