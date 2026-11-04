@@ -230,7 +230,7 @@ async function main() {
   push(await measure('add-members', {
     dbs: ['chat'], colls: ['conversationMember', 'conversation', 'message'], n: 2, profiled: 1,
     op: async () => {
-      const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QCP thêm ${Date.now().toString(36)}`, memberIds: [fx.b.id] })
+      const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QCP thêm ${Date.now().toString(36)}`, memberIds: [fx.b.id, fx.c.id] })
       await api(fx.a, 'POST', '/chat/add-member', { conversationId: g.id, memberIds: fx.extraIds })
     },
   }))

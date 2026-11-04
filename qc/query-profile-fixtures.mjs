@@ -201,7 +201,7 @@ export async function ensureDeleteGroup(fx, log = console.log) {
     const alive = await chat.collection('conversation').findOne({ _id: new ObjectId(fx.deleteGroupId), deletedAt: { $exists: false } })
     if (alive) return fx.deleteGroupId
   }
-  const group = await api(fx.a, 'POST', '/chat/create', { groupName: `QCP xoá ${Date.now().toString(36)}`, memberIds: [fx.b.id] })
+  const group = await api(fx.a, 'POST', '/chat/create', { groupName: `QCP xoá ${Date.now().toString(36)}`, memberIds: [fx.b.id, fx.c.id] })
   log(`chèn ${SIZES.deleteGroup} tin vào nhóm D...`)
   await insertMessages(group.id, [fx.a.id, fx.b.id], SIZES.deleteGroup, { tag: 'qcpd' })
   await chat.collection('qc_fixture').updateOne({ _id: MARKER }, { $set: { deleteGroupId: group.id } })

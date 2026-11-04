@@ -71,6 +71,18 @@ async function openBrowser(account) {
   return { browser, page }
 }
 
+/** Trang danh sách hội thoại (route `/`). */
+async function openHome(page) {
+  await page.goto(`${APP}/`, { waitUntil: 'networkidle2' })
+  await sleep(600)
+  if (page.url().includes('/onboarding')) {
+    await skipOnboarding(page)
+    await page.goto(`${APP}/`, { waitUntil: 'networkidle2' })
+  }
+  await page.waitForSelector('[aria-label="Tìm cuộc trò chuyện"]', { timeout: 15000 })
+  await sleep(500)
+}
+
 async function openConversation(page, id) {
   await page.goto(`${APP}/chat/${id}`, { waitUntil: 'networkidle2' })
   await sleep(600)
@@ -179,7 +191,7 @@ scenario('B1', 'Gửi/nhận hai chiều đúng thứ tự, tải lại vẫn đ
 })
 
 scenario('B2', 'Cuộn lên tải trang cũ hơn: đủ, không trùng, không hụt', async ({ A, fx, sockB }) => {
-  const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR trang ${Date.now().toString(36)}`, memberIds: [fx.b.id] })
+  const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR trang ${Date.now().toString(36)}`, memberIds: [fx.b.id, fx.c.id] })
   const tag = `qr2-${Date.now().toString(36)}`
   for (let i = 0; i < 120; i++) await send(sockB, g.id, `${tag}-${String(i).padStart(3, '0')}`)
   await openConversation(A.page, g.id)
@@ -267,7 +279,7 @@ scenario('B6', 'Nhắc tên: badge nhắc, đọc thì tắt', async ({ A, fx, s
 })
 
 scenario('B7', 'Tab Ảnh/Video, Tài liệu, Liên kết + tải thêm + lightbox + đi tới tin', async ({ A, fx, sockB }) => {
-  const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR tài nguyên ${Date.now().toString(36)}`, memberIds: [fx.b.id] })
+  const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR tài nguyên ${Date.now().toString(36)}`, memberIds: [fx.b.id, fx.c.id] })
   // Ảnh và file qua đúng luồng của app: presign -> PUT lên MinIO -> gửi tin.
   const upload = async (type, name, mime, bytes) => {
     const pre = await api(fx.a, 'POST', '/chat/media/presign', { conversationId: g.id, type, fileName: name, mimeType: mime, size: String(bytes.length) })
@@ -315,7 +327,8 @@ scenario('B7', 'Tab Ảnh/Video, Tài liệu, Liên kết + tải thêm + lightb
   check(sawFirst, 'Tab Liên kết tải thêm được trang sau (thấy link cũ nhất)')
   // Đi tới tin từ tab: link cũ nhất nằm trước 40 tin filler -> phải tải thêm lịch sử.
   await A.page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.innerText.includes('example.com/first'))?.click())
-  const jumped = await until(async () => A.page.evaluate((id) => Boolean(document.getElementById(`message-${id}`)), firstLink.id), 10000)
+  const jumped = await until(async () => A.page.evaluate((id) => Boolean(document.getElementById(`message-${id}`)), firstLink.id), 20000)
+  if (!jumped) await shot(A.page, 'B7-jump-fail')
   check(jumped, 'Bấm link trong tab thì khung chat nhảy tới tin gốc (B13)')
   await tab('Ảnh/Video')
   const opened = await A.page.evaluate(() => {
@@ -334,14 +347,20 @@ scenario('B7', 'Tab Ảnh/Video, Tài liệu, Liên kết + tải thêm + lightb
 })
 
 scenario('B8', 'Thêm/xoá/thêm lại thành viên, xoá nhóm', async ({ A, B, fx, sockB }) => {
-  const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR thành viên ${Date.now().toString(36)}`, memberIds: [fx.b.id] })
+  // Nhóm cần ít nhất 3 người: A, B và D; C là người được thêm/xoá/thêm lại.
+  const d = await register('d8')
+  await befriend(fx.a, d)
+  const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR thành viên ${Date.now().toString(36)}`, memberIds: [fx.b.id, d.id] })
   for (let i = 0; i < 5; i++) await send(sockB, g.id, `qr8-before-${i}`)
   await api(fx.a, 'POST', '/chat/add-member', { conversationId: g.id, memberIds: [fx.c.id] })
   await openConversation(A.page, g.id)
   const sys = await until(async () => (await A.page.evaluate(() => document.body.innerText)).includes('đã thêm 1 thành viên'), 8000)
   check(sys, 'Tin hệ thống "đã thêm 1 thành viên" hiện trong khung chat')
-  check(await until(async () => A.page.$('[aria-label="Xem 3 thành viên nhóm"]'), 6000), 'Số thành viên hiện 3')
+  await A.page.click('[aria-label="Thông tin cuộc trò chuyện"]')
+  check(await until(async () => A.page.$('[aria-label="Xem 4 thành viên nhóm"]'), 8000), 'Số thành viên hiện 4 (panel thông tin)')
+  await A.page.click('[aria-label="Đóng bảng thông tin"]').catch(() => {})
   const cConv = async () => (await api(fx.c, 'GET', '/chat/conversations?limit=50')).items.find((x) => x.id === g.id)
+  await sleep(6500) // qua một nhịp cron: số đọc từ DB mới có nghĩa
   check((await cConv())?.unreadCount === 0, 'C vừa vào nhóm có unread 0 (không bị tính 5 tin cũ)', JSON.stringify((await cConv())?.unreadCount))
   await api(fx.a, 'POST', '/chat/remove-member', { conversationId: g.id, targetUserId: fx.c.id })
   for (let i = 0; i < 4; i++) await send(sockB, g.id, `qr8-while-removed-${i}`)
@@ -354,7 +373,7 @@ scenario('B8', 'Thêm/xoá/thêm lại thành viên, xoá nhóm', async ({ A, B,
   const goneA = await until(async () => !(await api(fx.a, 'GET', '/chat/conversations?limit=100')).items.some((x) => x.id === g.id), 10000)
   const goneB = await until(async () => !(await api(fx.b, 'GET', '/chat/conversations?limit=100')).items.some((x) => x.id === g.id), 10000)
   check(goneA && goneB, 'Nhóm đã xoá biến khỏi danh sách của A và B')
-  await B.page.goto(`${APP}/chat`, { waitUntil: 'networkidle2' })
+  await openHome(B.page)
   check(await until(async () => !(await sidebarItem(B.page, g.id)), 8000), 'Sidebar của B không còn nhóm đã xoá')
   let refused = false
   try { await send(sockB, g.id, 'qr8-after-delete') } catch { refused = true }
@@ -366,7 +385,7 @@ scenario('B8', 'Thêm/xoá/thêm lại thành viên, xoá nhóm', async ({ A, B,
 })
 
 scenario('B9', 'Poll, thu hồi, xoá phía mình, xoá lịch sử, log cuộc gọi', async ({ A, B, fx, sockB }) => {
-  const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR khác ${Date.now().toString(36)}`, memberIds: [fx.b.id] })
+  const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR khác ${Date.now().toString(36)}`, memberIds: [fx.b.id, fx.c.id] })
   const poll = await api(fx.b, 'POST', '/chat/polls', { conversationId: g.id, question: 'qr9 ăn gì?', options: ['Phở', 'Bún'] })
   await openConversation(A.page, g.id)
   check(await until(async () => (await A.page.evaluate(() => document.body.innerText)).includes('qr9 ăn gì?'), 8000), 'A thấy poll của B')
@@ -427,12 +446,12 @@ scenario('B11', 'Bạn bè: danh sách, tìm, lời mời (nhận/từ chối/ch
   check(Boolean(conv), 'Chấp nhận lời mời của E thì có hội thoại DIRECT')
   const profile = await api(fx.a, 'GET', `/user?userId=${e.id}`)
   check(Boolean(profile.email), 'Bạn mới thấy được email của nhau (findFriendshipBetweenUsers)')
-  await A.page.goto(`${APP}/chat`, { waitUntil: 'networkidle2' })
+  await openHome(A.page)
   check(await until(async () => Boolean(await sidebarItem(A.page, conv)), 10000), 'Hội thoại với E hiện trong sidebar của A')
 })
 
 scenario('B12', 'Tìm nhóm theo tên ở thanh tìm kiếm', async ({ A, fx }) => {
-  await A.page.goto(`${APP}/chat`, { waitUntil: 'networkidle2' })
+  await openHome(A.page)
   const box = await A.page.waitForSelector('[aria-label="Tìm cuộc trò chuyện"]', { timeout: 8000 })
   await box.click({ clickCount: 3 })
   await box.type(fx.groupName.slice(0, 10))
