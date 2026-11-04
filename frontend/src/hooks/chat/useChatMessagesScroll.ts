@@ -119,12 +119,11 @@ export function useChatMessagesScroll({
   }, [lastMessageId, isAtBottom, conversationId, scrollListToBottom]);
 
   useEffect(() => {
-    if (
-      !conversationId ||
-      !canLoadMessages ||
-      messages.length > 0 ||
-      pagination.loaded
-    ) {
+    // Chỉ dựa vào `pagination.loaded`, không dựa vào việc đã có tin: sau khi
+    // nối lại, cache của hội thoại bị bỏ nhưng giữ lại tin mình chưa gửi được
+    // — nếu "đã có tin" chặn việc tải, hội thoại đó chỉ còn bong bóng của
+    // mình mãi. Trang đầu gộp với tin đang chờ theo clientMessageId.
+    if (!conversationId || !canLoadMessages || pagination.loaded) {
       return;
     }
 
@@ -135,13 +134,7 @@ export function useChatMessagesScroll({
         cursor: null,
       }),
     );
-  }, [
-    canLoadMessages,
-    conversationId,
-    dispatch,
-    messages.length,
-    pagination.loaded,
-  ]);
+  }, [canLoadMessages, conversationId, dispatch, pagination.loaded]);
 
   // Chặn gọi chồng: IntersectionObserver và handleScroll (scrollTop <= 24) có
   // thể cùng gọi trong một nhịp, trước khi state isLoadingOlder kịp đổi — hai

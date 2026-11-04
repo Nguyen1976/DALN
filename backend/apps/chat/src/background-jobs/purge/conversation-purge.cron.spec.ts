@@ -42,18 +42,40 @@ function setup(
           }
         }
         if (cmd.delete === 'conversation') conversationAlive = false
+        order.push(cmd.delete)
         deleted[cmd.delete] = (deleted[cmd.delete] ?? 0) + 1
         return Promise.resolve({ ok: 1, n: ids.length })
       },
     ),
   }
   let conversationAlive = true
+  const order: string[] = []
+  let lockHolder: string | null = null
+  // SET NX với token, rồi chỉ xoá khi token còn khớp.
   const redis = {
-    claimOnce: jest.fn(() => Promise.resolve(true)),
-    del: jest.fn(() => Promise.resolve()),
+    eval: jest.fn(
+      (script: string, _keys: string[], args: (string | number)[]) => {
+        if (script.includes('NX')) {
+          if (lockHolder) return Promise.resolve(null)
+          lockHolder = String(args[0])
+          return Promise.resolve('OK')
+        }
+        if (lockHolder === args[0]) lockHolder = null
+        return Promise.resolve(1)
+      },
+    ),
   }
   const cron = new ConversationPurgeCron(prisma as never, redis as never)
-  return { cron, prisma, messages, deleted, redis }
+  return {
+    cron,
+    prisma,
+    messages,
+    deleted,
+    redis,
+    order,
+    setHolder: (holder: string | null) => (lockHolder = holder),
+    holder: () => lockHolder,
+  }
 }
 
 describe('ConversationPurgeCron', () => {
@@ -82,6 +104,27 @@ describe('ConversationPurgeCron', () => {
     ).toBe(true)
   })
 
+  it('reads batches in seq order so it never walks the whole _id index', async () => {
+    const { cron, prisma } = setup(3)
+
+    await cron.purge()
+
+    for (const [args] of prisma.message.findMany.mock.calls) {
+      expect((args as { orderBy?: unknown }).orderBy).toEqual({ seq: 'asc' })
+    }
+  })
+
+  it('removes the members before the conversation document, which goes last', async () => {
+    const { cron, order } = setup(3)
+
+    await cron.purge()
+
+    expect(order.indexOf('conversationMember')).toBeLessThan(
+      order.indexOf('conversation'),
+    )
+    expect(order.at(-1)).toBe('conversation')
+  })
+
   it('purge resumes after a crash midway', async () => {
     const { cron, messages, deleted } = setup(PURGE_BATCH * 2, {
       failOnDeleteCall: 7,
@@ -96,12 +139,13 @@ describe('ConversationPurgeCron', () => {
     expect(deleted.conversation).toBe(1)
   })
 
-  it('does nothing when another instance holds the lock', async () => {
-    const { cron, redis, prisma } = setup(10)
-    redis.claimOnce.mockResolvedValueOnce(false)
+  it('does nothing when another instance holds the lock, and never releases it', async () => {
+    const { cron, prisma, setHolder, holder } = setup(10)
+    setHolder('someone-else')
 
     await cron.purge()
 
     expect(prisma.conversation.findMany).not.toHaveBeenCalled()
+    expect(holder()).toBe('someone-else')
   })
 })

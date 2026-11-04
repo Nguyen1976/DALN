@@ -245,6 +245,27 @@ scenario('B4', 'Mất kết nối rồi nối lại: tự lấy bù tin, không 
   await shot(A.page, 'B4-resync')
 })
 
+scenario('B4b', 'Nối lại khi đang giữ tin chưa gửi ở hội thoại khác: mở lại vẫn thấy lịch sử', async ({ A, fx, sockB }) => {
+  const old = `qr4b-old-${Date.now().toString(36)}`
+  await send(sockB, fx.directId, old)
+  await openConversation(A.page, fx.directId)
+  await until(async () => (await countIn(A.page, old)) > 0, 8000)
+  await setSocket(A.page, false)
+  const unsent = `qr4b-unsent-${Date.now().toString(36)}`
+  await typeAndSend(A.page, unsent)
+  // Chuyển hội thoại bằng sidebar (không tải lại trang: giữ nguyên store).
+  await A.page.click(`[data-conversation-id="${fx.groupId}"]`)
+  await A.page.waitForSelector('textarea[aria-label="Nhập tin nhắn"]', { timeout: 8000 })
+  await sleep(800)
+  await setSocket(A.page, true)
+  await sleep(2500)
+  await A.page.click(`[data-conversation-id="${fx.directId}"]`)
+  const history = await until(async () => (await countIn(A.page, old)) > 0, 10000)
+  check(history, 'Quay lại hội thoại có tin chưa gửi: lịch sử cũ vẫn tải được')
+  const sentOnce = await until(async () => (await countIn(A.page, unsent)) === 1, 10000)
+  check(sentOnce, 'Tin soạn lúc mất kết nối được gửi lại đúng một lần')
+})
+
 scenario('B5', 'Trả lời rồi gửi thường liền nhau: tin cuối ở danh sách luôn là tin thường', async ({ A, fx, sockB }) => {
   await openConversation(A.page, fx.groupId)
   const anchor = await send(sockB, fx.directId, `qr5-anchor-${Date.now().toString(36)}`)

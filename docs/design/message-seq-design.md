@@ -1,6 +1,6 @@
 # Thiết kế: số thứ tự `seq` cho tin nhắn
 
-Trạng thái: bản nháp để thảo luận (2026-11-03). Chưa có dòng code nào được sửa.
+Trạng thái: **đã triển khai §1–§9** trên branch `perf/query-enhancements` (2026-11-04). Kế hoạch: `docs/superpowers/plans/2026-11-04-query-enhancements.md`. Xem mục 12 cho các chỗ lệch so với bản nháp.
 
 ## 1. Vấn đề
 
@@ -200,3 +200,16 @@ Mỗi giai đoạn chạy được độc lập, có test và một lượt QC t
   - (a) Thiếu tin khi offline: A offline 10 s (`page.setOfflineMode`), B gửi 5 tin, A online lại; trong 3 s phải thấy đủ 5 tin, không F5.
   - (b) Tin cuối: B gửi tin trả lời rồi tin thường, lặp 10 lần; danh sách bên A luôn hiện tin thường.
   - (c) Unread: B gửi 7 tin thì badge A = 7; A mở hội thoại thì về 0; A gửi tin thì badge của A không tăng.
+
+## 12. Triển khai thực tế: những chỗ lệch so với bản nháp
+
+| Bản nháp | Triển khai | Vì sao |
+|---|---|---|
+| Field phi chuẩn hoá trên thành viên tên `lastMessageSeq` | Đặt tên **`latestSeq`** | Danh sách hội thoại trải document `conversation` và `conversationMember` chồng lên nhau. Trùng tên thì field của thành viên đè mất field của hội thoại |
+| Mốc đọc sau migration suy từ `lastReadMessageId` | `lastReadSeq = lastSeq − unreadCount`, kẹp trong khoảng [0, lastSeq] | Giữ đúng badge người dùng đang thấy. Số đếm cũ không tính tin của chính mình, còn vị trí của `lastReadMessageId` thì có |
+| Tab tài nguyên (chưa có trong bản nháp) | Ba cờ boolean `hasMedia`, `hasFile`, `hasLink`, mỗi cờ một index `{conversationId, hasX, seq:-1}` | Prisma bọc điều kiện trong `$expr`, và `$expr` không dùng được index trên trường mảng (đo được 25.000 key cho 0 kết quả) |
+| Đụng `(conversationId, seq)` | Chỉ hội thoại bị đụng mới giữ chỗ lại; tin của hội thoại đã xoá hoặc chưa đánh số thì bị reject, không retry | Một hội thoại lỗi không được kéo theo cả lô của người khác |
+| Lấy bù khi nối lại cho mọi hội thoại có cache | Chỉ hội thoại **đang mở**, tối đa 2 trang. Hội thoại khác bị bỏ cache và tải lại trang đầu khi mở | Hạn mức Kong là 200 request/phút theo IP |
+| Xoá hội thoại (chưa có trong bản nháp) | Ẩn ngay bằng `deletedAt` cộng `isActive = false`; cron `conversation-purge` dọn theo lô 1.000 tin | Transaction một lần với `$in` toàn bộ id vượt giới hạn: đo được 504 ở 100.000 tin |
+| Lỗ trong dãy `seq` | Mỗi lỗ (tin trùng bị loại) làm unread dư 1 | Chấp nhận (§3) |
+| Ngoài phạm vi | `changeSeq` và bia mộ cho sửa/xoá hẳn (§10.3) | Bài toán riêng |

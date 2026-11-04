@@ -15,7 +15,7 @@
  * Cần: stack dev (`docker compose --profile scale up -d`, dừng daln-chat-3).
  */
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { api } from './calls-fixtures.mjs'
 import { closeMongo, ensureDeleteGroup, ensureFixtures, mongo } from './query-profile-fixtures.mjs'
@@ -162,11 +162,22 @@ function sendAndAck(socket, payload) {
 }
 
 // ---------- kịch bản ----------
+function save(results) {
+  const file = `${OUT}${LABEL}.json`
+  let prev = null
+  try { prev = JSON.parse(readFileSync(file, 'utf8')) } catch {}
+  const ids = new Set(results.map((r) => r.id))
+  const merged = ONLY && prev ? { ...prev, results: [...prev.results.filter((r) => !ids.has(r.id)), ...results] } : { label: LABEL, at: new Date().toISOString(), results }
+  writeFileSync(file, JSON.stringify(merged, null, 2))
+  return file
+}
+
 async function main() {
   const fx = await ensureFixtures()
   const { chat } = await mongo()
   const results = []
-  const push = (r) => r && results.push(r)
+  // Ghi sau MỖI kịch bản: một kịch bản chết không được làm mất các kịch bản trước.
+  const push = (r) => { if (r) { results.push(r); save(results) } }
   const G = fx.groupId
 
   for (const kind of ['MEDIA', 'DOC', 'LINK']) {
@@ -263,7 +274,7 @@ async function main() {
     const left = await chat.collection('message').countDocuments({ conversationId: new ObjectId(D) })
     const rec = { id: 'delete-group', messages: before, apiMs, hiddenMs, purgedMs, left, error, perOp: { commands: db.commands, docs: db.docs, dbMs: db.dbMs, txnStarted: t1.started - t0.started, txnAborted: t1.aborted - t0.aborted }, groups: db.groups.slice(0, 8) }
     console.log(error ? `LỖI ${error} · còn ${left} tin` : `API ${apiMs?.toFixed(0)}ms · ẩn ${hiddenMs?.toFixed(0)}ms · dọn xong ${purgedMs?.toFixed(0)}ms · còn ${left}`)
-    results.push(rec)
+    push(rec)
   }
 
   for (const [id, mode, rate, sec] of [['cron-load', 'spread', 1000, 20], ['send-spread', 'spread', 2000, 25], ['send-hot', 'hot', 2000, 25]]) {
@@ -273,11 +284,18 @@ async function main() {
     for (let k = 0; k < 3; k++) {
       process.stdout.write(`▶ ${id} #${k + 1} … `)
       const t0 = await serverTxn()
-      const out = execFileSync('node', ['throughput.mjs'], {
-        cwd: new URL('.', import.meta.url).pathname,
-        env: { ...process.env, MODE: mode, STAGES: JSON.stringify([{ name: id, rate, sec }]) },
-        maxBuffer: 64 * 1024 * 1024,
-      }).toString()
+      let out = ''
+      try {
+        out = execFileSync('node', ['throughput.mjs'], {
+          cwd: new URL('.', import.meta.url).pathname,
+          env: { ...process.env, MODE: mode, STAGES: JSON.stringify([{ name: id, rate, sec }]) },
+          maxBuffer: 64 * 1024 * 1024,
+        }).toString()
+      } catch (e) {
+        // throughput.mjs thoát khác 0 (k6 lỗi, máy hết RAM): ghi lại, chạy tiếp.
+        out = String(e.stdout ?? '')
+        console.log(`(throughput lỗi: ${String(e.stderr ?? e.message).split('\n').find((l) => l.trim())?.slice(0, 160)})`)
+      }
       const t1 = await serverTxn()
       const row = out.split('\n').find((l) => l.startsWith('│') && l.includes(`'${id}'`)) ?? ''
       const cells = row.split('│').map((c) => c.trim())
@@ -287,7 +305,7 @@ async function main() {
       runs.push(r)
     }
     const med = (f) => pct(runs.map(f), 50)
-    results.push({
+    push({
       id, mode, rate, sec, runs,
       stored: med((r) => r.stored), ackP95: med((r) => r.ackP95), txnStarted: med((r) => r.txnStarted), txnAborted: med((r) => r.txnAborted),
       summary: { lost: Math.max(...runs.map((r) => r.summary.lost ?? 0)), reorder: Math.max(...runs.map((r) => r.summary.reorder ?? 0)) },
@@ -295,11 +313,7 @@ async function main() {
   }
 
   if (rateLimited) console.log('⚠ có kịch bản bị 429: lần chạy này KHÔNG hợp lệ')
-  const file = `${OUT}${LABEL}.json`
-  const prev = (() => { try { return JSON.parse(require('node:fs').readFileSync(file, 'utf8')) } catch { return null } })()
-  const merged = ONLY && prev ? { ...prev, results: [...prev.results.filter((r) => !ONLY.has(r.id)), ...results] } : { label: LABEL, at: new Date().toISOString(), results }
-  writeFileSync(file, JSON.stringify(merged, null, 2))
-  console.log(`→ ${file}`)
+  console.log(`→ ${save(results)}`)
   await closeMongo()
   process.exit(0)
 }

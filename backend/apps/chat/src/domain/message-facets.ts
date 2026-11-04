@@ -14,13 +14,12 @@ export type MessageFacets = {
   hasLink: boolean
 }
 
-type Kind = 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE' | 'POLL' | 'CALL'
-
 /** Cùng điều kiện tab Liên kết vẫn dùng: có `http` hoặc `www.` trong nội dung. */
 const LINK = /http|www\./
 
 export function facetsOf(
-  type: Kind | string,
+  /** messageType: TEXT, IMAGE, VIDEO, FILE, POLL, CALL. */
+  type: string,
   mediaTypes: readonly string[],
   content: string | null | undefined,
 ): MessageFacets {

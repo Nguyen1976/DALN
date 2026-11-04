@@ -144,31 +144,30 @@ export class UnreadCron {
         )
     }
 
-    const [lastResult, sendersResult] = await Promise.allSettled([
-      lastMsg
-        ? this.writeLastMessage(conversationId, lastMsg)
-        : Promise.resolve(),
-      senders.length
-        ? this.memberRepo.advanceReadOfSenders(conversationId, senders)
-        : Promise.resolve(),
-    ])
-    const lastFailed = lastResult.status === 'rejected'
-    const sendersFailed = sendersResult.status === 'rejected'
-    if (!lastFailed && !sendersFailed) return
+    // Mốc đọc của người gửi TRƯỚC, rồi mới tới tin cuối và latestSeq của mọi
+    // thành viên. Ngược lại (hoặc song song), latestSeq lên trước mốc đọc của
+    // người gửi thì chính họ thấy tin mình vừa gửi là "chưa đọc" ít nhất một
+    // nhịp cron. Lỗi ở bước nào thì trả cả hai phần chưa xong về Redis.
+    let error: unknown = null
+    let sendersDone = false
+    try {
+      if (senders.length) {
+        await this.memberRepo.advanceReadOfSenders(conversationId, senders)
+      }
+      sendersDone = true
+      if (lastMsg) await this.writeLastMessage(conversationId, lastMsg)
+      return
+    } catch (caught) {
+      error = caught
+    }
 
     await this.restoreClaim(
       conversationId,
       keys,
-      sendersFailed ? senders : [],
-      lastFailed && lastMsg
-        ? { raw: lastMsgString ?? '', seq: lastMsg.seq ?? 0 }
-        : null,
+      sendersDone ? [] : senders,
+      lastMsg ? { raw: lastMsgString ?? '', seq: lastMsg.seq ?? 0 } : null,
     )
-
-    const firstError = [lastResult, sendersResult].find(
-      (result): result is PromiseRejectedResult => result.status === 'rejected',
-    )
-    throw firstError?.reason
+    throw error
   }
 
   private async writeLastMessage(

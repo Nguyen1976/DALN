@@ -25,7 +25,6 @@ type Doc = Record<string, unknown> & {
   clientMessageId?: string
 }
 type InsertCommand = { insert: string; ordered: boolean; documents: Doc[] }
-type WriteError = { index: number; code: number; errmsg?: string }
 type StoredRow = {
   id: string
   senderId: string
@@ -95,7 +94,7 @@ function makeWriter(
       try {
         return Promise.resolve(insertResult(insert, inserts.length))
       } catch (error) {
-        return Promise.reject(error)
+        return Promise.reject(error as Error)
       }
     }),
     message: { findMany: jest.fn(() => Promise.resolve([])) },

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { RedisService } from '@app/redis'
@@ -8,16 +9,26 @@ import { oid, type RawRunner } from '../../repositories/raw-ejson'
 export const PURGE_BATCH = 1000
 const LOCK_KEY = 'lock:conversation-purge'
 const LOCK_TTL_SECONDS = 60
+/** Giữ khoá bằng token riêng của lượt này. */
+const ACQUIRE_SCRIPT = `return redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2])`
+/** Chỉ nhả khoá còn đúng là của mình: lượt dọn dài quá TTL không được xoá khoá của instance khác. */
+const RELEASE_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`
 
 /**
  * Dọn tin của các hội thoại đã xoá (`deletedAt`), theo lô, không transaction.
  *
  * Xoá hội thoại chỉ ẩn nó ngay (ConversationRepository.deleteConversationById).
  * Cron này xoá dần: mỗi lô 1.000 tin cùng media, đánh dấu xoá-phía-mình, poll
- * và phiếu bầu của chúng. Hết tin thì xoá document hội thoại, quét lại một
- * lượt (tin đã giữ chỗ seq ngay trước lúc ẩn có thể ghi xong sau lô cuối), rồi
- * mới xoá thành viên. Mọi bước chạy lại được: chết giữa chừng thì lượt sau làm
- * tiếp từ chỗ còn lại.
+ * và phiếu bầu của chúng. Hết tin thì xoá thành viên, quét lại một lượt (tin đã
+ * giữ chỗ seq ngay trước lúc ẩn có thể ghi xong sau lô cuối), rồi mới xoá
+ * document hội thoại — SAU CÙNG, vì chính `deletedAt` của nó là thứ đưa hội
+ * thoại vào danh sách cần dọn: chết ở bất cứ bước nào, lượt sau vẫn thấy và làm
+ * tiếp. Mọi bước chạy lại được.
  */
 @Injectable()
 export class ConversationPurgeCron {
@@ -35,7 +46,13 @@ export class ConversationPurgeCron {
 
   async purge(): Promise<void> {
     // Một instance mỗi lượt: hai instance cùng xoá một lô thì vô hại nhưng phí.
-    if (!(await this.redisService.claimOnce(LOCK_KEY, LOCK_TTL_SECONDS))) return
+    const token = randomUUID()
+    const acquired = await this.redisService.eval(
+      ACQUIRE_SCRIPT,
+      [LOCK_KEY],
+      [token, LOCK_TTL_SECONDS],
+    )
+    if (!acquired) return
     try {
       const deleted = await this.prisma.conversation.findMany({
         where: { deletedAt: { isSet: true } },
@@ -54,17 +71,17 @@ export class ConversationPurgeCron {
         }
       }
     } finally {
-      await this.redisService.del(LOCK_KEY)
+      await this.redisService.eval(RELEASE_SCRIPT, [LOCK_KEY], [token])
     }
   }
 
   private async purgeConversation(conversationId: string): Promise<number> {
     let removed = await this.purgeMessages(conversationId)
-    await remove(this.prisma, 'conversation', { _id: oid(conversationId) })
-    removed += await this.purgeMessages(conversationId)
     await remove(this.prisma, 'conversationMember', {
       conversationId: oid(conversationId),
     })
+    removed += await this.purgeMessages(conversationId)
+    await remove(this.prisma, 'conversation', { _id: oid(conversationId) })
     return removed
   }
 
@@ -74,6 +91,10 @@ export class ConversationPurgeCron {
       const batch = await this.prisma.message.findMany({
         where: { conversationId },
         select: { id: true, pollId: true },
+        // Có orderBy theo index (conversationId, seq). Không có, Prisma tự
+        // thêm `$sort: {_id: 1}` và Mongo đi index _id của CẢ collection: đo
+        // được 5,15 triệu document đọc để xoá 100.000 tin.
+        orderBy: { seq: 'asc' },
         take: PURGE_BATCH,
       })
       if (!batch.length) return removed

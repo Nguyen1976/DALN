@@ -223,9 +223,24 @@ describe('UnreadCron', () => {
     await cron.handleCron()
 
     expect(redis.hashes.get(unreadLastKey(CONV))).toEqual({ [A]: '5' })
-    // Tin cuối đã ghi xong -> không trả về.
-    expect(redis.strings.has(lastMessageKey(CONV))).toBe(false)
+    // Tin cuối chưa ghi (người gửi trước, rồi mới tới thành viên) -> trả về luôn.
+    expect(redis.strings.has(lastMessageKey(CONV))).toBe(true)
     expect(redis.sets.get(DIRTY_CONVERSATIONS_KEY)?.has(CONV)).toBe(true)
+  })
+
+  it('a failed sender read mark holds back the members too, so nobody sees their own message as unread', async () => {
+    const { redis, memberRepo, conversationRepo, cron } = setup()
+    redis.newMessage(CONV, A, A1, 5)
+    memberRepo.advanceReadOfSenders.mockRejectedValueOnce(
+      new Error('mongo down'),
+    )
+
+    await cron.handleCron()
+
+    expect(memberRepo.advanceMembers).not.toHaveBeenCalled()
+    expect(conversationRepo.saveLastMessage).not.toHaveBeenCalled()
+    expect(redis.hashes.get(unreadLastKey(CONV))).toEqual({ [A]: '5' })
+    expect(redis.strings.has(lastMessageKey(CONV))).toBe(true)
   })
 
   it('trả về không hạ seq mới nhất, không đè last_message mới hơn', async () => {
