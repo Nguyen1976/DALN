@@ -155,6 +155,7 @@ function matchCondition(found: Found, condition: unknown): boolean {
         if (arg === 'objectId') return found.value instanceof ObjectId
         if (arg === 'date') return found.value instanceof Date
         if (arg === 'string') return typeof found.value === 'string'
+        if (arg === 'number') return typeof found.value === 'number'
         throw new Error(`fake-db: $type ${String(arg)} chưa hỗ trợ`)
       default:
         throw new Error(`fake-db: toán tử ${op} chưa hỗ trợ`)

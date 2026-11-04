@@ -52,6 +52,14 @@ model conversation {
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   groupNameSearch     String?
+  /// Bộ đếm cấp `seq` cho tin của hội thoại (seq-allocator). Hội thoại mới
+  /// tạo có 0; hội thoại cũ được migrations/chat/0008 đặt bằng số tin.
+  lastSeq             Int?
+  /// `seq` của tin đang làm "tin cuối": chỉ ghi khi số mới lớn hơn, để tin
+  /// đến trễ không kéo tin cuối lùi lại.
+  lastMessageSeq      Int?
+  /// Đã xoá: ẩn ngay khỏi mọi nơi, cron conversation-purge dọn tin theo lô.
+  deletedAt           DateTime?
 
 
   @@index([type, groupNameSearch, updatedAt])
@@ -73,6 +81,16 @@ model conversationMember {
   lastReadMessageId String?           @db.ObjectId
   lastReadAt        DateTime?
   clearedHistoryAt  DateTime?
+  /// Mốc đã đọc theo `seq`; chỉ tăng. unreadCount = latestSeq − lastReadSeq.
+  lastReadSeq       Int?
+  /// `seq` của tin mới nhất đã lan tới dòng này (cron unread, cùng lúc với
+  /// lastMessageAt). Tên khác `conversation.lastMessageSeq` vì danh sách hội
+  /// thoại trải hai document chồng lên nhau.
+  latestSeq         Int?
+  /// `seq` của lượt nhắc mới nhất; đọc qua mốc này thì tắt badge nhắc.
+  lastMentionSeq    Int?
+  /// Xoá lịch sử phía mình: chỉ thấy tin có seq lớn hơn mốc này.
+  clearedHistorySeq Int?
   joinedAt          DateTime          @default(now())
   conversation      conversation      @relation(fields: [conversationId], references: [id])
   sentMessages      message[]         @relation("SenderMessages")
@@ -127,6 +145,14 @@ model message {
   isSystem        Boolean            @default(false)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
+  /// Số thứ tự trong hội thoại (seq-allocator): thứ tự hiển thị, phân trang,
+  /// lấy bù khi mất kết nối, mốc đã đọc. Unique (conversationId, seq) nằm ở
+  /// migrations/chat/0008 vì db push chạy TRƯỚC bước đánh số tin cũ.
+  seq             Int?
+  /// Cờ cho các tab Ảnh/Video, Tài liệu, Liên kết (domain/message-facets).
+  hasMedia        Boolean?
+  hasFile         Boolean?
+  hasLink         Boolean?
   conversation    conversation       @relation(fields: [conversationId], references: [id])
   senderMember    conversationMember @relation("SenderMessages", fields: [conversationId, senderId], references: [conversationId, userId])
   replyTo         message?           @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -136,6 +162,10 @@ model message {
 
   @@index([conversationId, createdAt, id])
   @@index([pollId])
+  // Tab tài nguyên: mỗi tab một cờ, mới nhất trước, cursor theo seq.
+  @@index([conversationId, hasMedia, seq(sort: Desc)])
+  @@index([conversationId, hasFile, seq(sort: Desc)])
+  @@index([conversationId, hasLink, seq(sort: Desc)])
 }
 
 type PollOption {

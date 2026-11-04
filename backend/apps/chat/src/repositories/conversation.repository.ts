@@ -106,6 +106,8 @@ export class ConversationRepository {
           : null,
         groupAvatar: data.groupAvatar || null,
         memberCount: data.memberCount ?? 0,
+        // Bộ đếm seq có ngay từ đầu: seq-allocator từ chối hội thoại thiếu nó.
+        lastSeq: 0,
       },
     })
   }

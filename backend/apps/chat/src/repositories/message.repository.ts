@@ -6,6 +6,8 @@ import { olderThanCursor, type KeysetCursor } from '@app/util'
 import { isUniqueConstraintError } from '@app/saga'
 import type { MessageMediaInput } from 'libs/constant/rmq/payload'
 import { findStoredBySenderClientIds } from './message-raw.queries'
+import { reserveSeq } from './seq-allocator'
+import { facetsOf } from '../domain/message-facets'
 
 const SENDER_SELECT = {
   select: { userId: true, username: true, fullName: true, avatar: true },
@@ -91,9 +93,19 @@ export class MessageRepository {
   private async createWithRelations(
     data: Parameters<MessageRepository['create']>[0],
   ) {
+    // Số thứ tự giữ chỗ TRƯỚC khi ghi. Ghi lỗi (kể cả trùng clientMessageId)
+    // thì số đó thành lỗ trong dãy — được phép, xem seq-allocator.
+    const seq = await reserveSeq(this.prisma, data.conversationId, 1)
+    const facets = facetsOf(
+      data.type,
+      (data.medias ?? []).map((media) => media.mediaType),
+      data.content,
+    )
     // Ghi dữ liệu & trả về trong 1 nhịp duy nhất (nested writes)
     const created = await this.prisma.message.create({
       data: {
+        seq,
+        ...facets,
         conversationId: data.conversationId,
         senderId: data.senderId,
         type: data.type,
@@ -157,8 +169,11 @@ export class MessageRepository {
     content: string
     callInfo: Record<string, unknown>
   }) {
+    const seq = await reserveSeq(this.prisma, data.conversationId, 1)
     const created = await this.prisma.message.create({
       data: {
+        seq,
+        ...facetsOf(messageType.CALL, [], data.content),
         conversationId: data.conversationId,
         senderId: data.senderId,
         type: messageType.CALL,
