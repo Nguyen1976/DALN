@@ -18,34 +18,35 @@ export const DIRTY_BATCH_SIZE = 500
  */
 export const FLUSH_CONCURRENCY = 25
 
-/** Hash `senderId -> số tin`, cộng dồn chờ cron cộng vào unreadCount. */
+/**
+ * Hash `senderId -> số tin` của bản cũ (trước seq). Không còn ghi; claim vẫn
+ * xoá key này để dữ liệu còn sót không nằm lại mãi.
+ */
 export const unreadCountKey = (conversationId: string) =>
   `unread_count:${conversationId}`
 
-/** JSON tin nhắn cuối cùng, chờ cron ghi xuống conversation. */
+/** JSON tin nhắn cuối cùng (kèm `seq`), chờ cron ghi xuống conversation. */
 export const lastMessageKey = (conversationId: string) =>
   `last_message:${conversationId}`
 
 /**
- * Hash `senderId -> id tin mới nhất` của người gửi đó trong cửa sổ chờ flush.
- *
- * Cron dùng nó để KHÔNG cộng unread cho người đã đọc tới tin đó. Trước đây
- * người đang mở hội thoại đọc tin N ngay (unread=0), tối đa 5 giây sau cron vẫn
- * cộng +1 cho chính tin N, và con số 1 ảo đó kẹt mãi.
+ * Hash `senderId -> seq lớn nhất` của tin người đó gửi trong cửa sổ chờ flush.
+ * Cron đẩy mốc đọc của người gửi lên tới đó: tin của chính mình không bao giờ
+ * là chưa đọc (unreadCount = latestSeq − lastReadSeq).
  */
 export const unreadLastKey = (conversationId: string) =>
   `unread_last:${conversationId}`
 
 /**
- * HSET chỉ khi id mới LỚN HƠN id đang lưu, để lệnh đến trễ/đảo thứ tự không
- * kéo id mới nhất lùi lại. ObjectId hex chữ thường cùng dài 24 ký tự nên so
- * sánh chuỗi cũng là so sánh thời điểm tạo.
+ * HSET chỉ khi seq mới LỚN HƠN seq đang lưu, để lệnh đến trễ không kéo lùi.
+ * Giá trị không phải số (ObjectId của bản cũ) coi như chưa có.
  *
- * KEYS[1] = unread_last:<c>, ARGV[1] = senderId, ARGV[2] = messageId
+ * KEYS[1] = unread_last:<c>, ARGV[1] = senderId, ARGV[2] = seq
  */
-export const SET_NEWEST_ID_SCRIPT = `
-local cur = redis.call('HGET', KEYS[1], ARGV[1])
-if (not cur) or cur < ARGV[2] then
+export const SET_NEWEST_SEQ_SCRIPT = `
+local cur = tonumber(redis.call('HGET', KEYS[1], ARGV[1]))
+local new = tonumber(ARGV[2])
+if new and ((not cur) or cur < new) then
   redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
   return 1
 end
@@ -53,56 +54,66 @@ return 0
 `
 
 /**
- * Lấy-và-xoá NGUYÊN TỬ cả ba key của một conversation.
+ * SET tin cuối chỉ khi seq mới LỚN HƠN seq của bản đang chờ. Trước đây SET vô
+ * điều kiện: tin trả lời (chờ tra tin được trích) tới sau tin thường gửi ngay
+ * sau nó, và danh sách hội thoại hiện tin cũ hơn làm tin cuối (10/10 lần).
  *
- * Trước đây cron đọc (HGETALL/GET) rồi mới DEL ở một lệnh khác: tin đến giữa
- * hai bước bị xoá theo, mất luôn số đếm. Lua chạy liền một mạch nên không lệnh
- * nào chen vào giữa: tin đến sau rơi vào key mới tinh, lượt sau xử lý. Key
- * không tồn tại thì trả rỗng, không phải lỗi.
+ * KEYS[1] = last_message:<c>, ARGV[1] = seq, ARGV[2] = JSON
+ */
+export const SET_LAST_MESSAGE_SCRIPT = `
+local cur = redis.call('GET', KEYS[1])
+if cur then
+  local ok, parsed = pcall(cjson.decode, cur)
+  if ok and type(parsed) == 'table' and tonumber(parsed.seq)
+    and tonumber(parsed.seq) >= tonumber(ARGV[1]) then
+    return 0
+  end
+end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1
+`
+
+/**
+ * Lấy-và-xoá NGUYÊN TỬ các key của một conversation.
  *
- * KEYS = unread_count, last_message, unread_last
- * Trả về [HGETALL counts, GET last (nil nếu không có), HGETALL newest]
+ * Trước đây cron đọc rồi mới DEL ở một lệnh khác: tin đến giữa hai bước bị xoá
+ * theo. Lua chạy liền một mạch nên không lệnh nào chen vào giữa: tin đến sau
+ * rơi vào key mới tinh, lượt sau xử lý. Key không tồn tại thì trả rỗng.
+ *
+ * KEYS = unread_count (bản cũ, chỉ xoá), last_message, unread_last
+ * Trả về [GET last (nil nếu không có), HGETALL newest]
  */
 export const CLAIM_SCRIPT = `
-local counts = redis.call('HGETALL', KEYS[1])
 local last = redis.call('GET', KEYS[2])
 local newest = redis.call('HGETALL', KEYS[3])
 redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])
-return { counts, last, newest }
+return { last, newest }
 `
 
 /**
  * Trả lại phần đã claim khi ghi Mongo thất bại, để lượt sau thử lại:
- * - số đếm: HINCRBY cộng lại (dồn chung với tin mới đến trong lúc flush);
- * - id mới nhất: chỉ nâng lên, không bao giờ hạ;
- * - last_message: chỉ đặt lại khi chưa có bản mới hơn được ghi sau lúc claim.
+ * - seq mới nhất của người gửi: chỉ nâng lên, không bao giờ hạ;
+ * - last_message: chỉ đặt lại khi chưa có bản mới hơn (theo seq) được ghi sau
+ *   lúc claim.
  *
  * KEYS = unread_count, last_message, unread_last
- * ARGV[1] = JSON { counts: {senderId: "delta"}, newest: {senderId: id},
- *                  last: string | "", lastId: string | "" }
+ * ARGV[1] = JSON { newest: {senderId: seq}, last: string | "", lastSeq: number }
  */
 export const RESTORE_SCRIPT = `
 local data = cjson.decode(ARGV[1])
-for sender, delta in pairs(data.counts) do
-  redis.call('HINCRBY', KEYS[1], sender, delta)
-end
-for sender, id in pairs(data.newest) do
-  local cur = redis.call('HGET', KEYS[3], sender)
-  if (not cur) or cur < id then
-    redis.call('HSET', KEYS[3], sender, id)
+for sender, seq in pairs(data.newest) do
+  local cur = tonumber(redis.call('HGET', KEYS[3], sender))
+  if (not cur) or cur < tonumber(seq) then
+    redis.call('HSET', KEYS[3], sender, seq)
   end
 end
 if type(data.last) == 'string' and data.last ~= '' then
   local cur = redis.call('GET', KEYS[2])
   local restore = true
   if cur then
-    restore = false
     local ok, parsed = pcall(cjson.decode, cur)
-    if ok and type(parsed) == 'table' and type(parsed.lastMessageId) == 'string'
-      and type(data.lastId) == 'string' and data.lastId ~= ''
-      and parsed.lastMessageId < data.lastId then
-      restore = true
-    end
+    restore = not (ok and type(parsed) == 'table' and tonumber(parsed.seq)
+      and tonumber(parsed.seq) >= tonumber(data.lastSeq))
   end
   if restore then
     redis.call('SET', KEYS[2], data.last)

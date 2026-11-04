@@ -4,6 +4,7 @@ import type { Prisma } from 'apps/chat/src/generated'
 import { RedisService } from '@app/redis'
 import { isObjectId } from '../domain/object-id'
 import { buildMemberRow } from '../domain/member-row'
+import { date, oid, rawUpdate } from './raw-ejson'
 import type { MemberProfile } from 'libs/constant/member-profile'
 
 /** An active member as the rest of the service needs them (and as cached). */
@@ -28,11 +29,22 @@ const membersKey = (conversationId: string) => `conv:members:${conversationId}`
  */
 const MEMBERS_TTL_SECONDS = 300
 
+/** Dòng thành viên chưa đọc tới `seq` (hoặc chưa từng đọc). */
+const readBefore = (seq: number) => ({
+  $or: [{ lastReadSeq: { $lt: seq } }, { lastReadSeq: null }],
+})
+
 /**
- * Trần số tin đếm lại khi đọc. Giao diện chỉ hiện tới "5+", đếm chính xác hơn
- * mức này là tốn công vô ích.
+ * Phần `$set` (pipeline) tắt badge nhắc khi mốc đọc mới đã tới/qua lượt nhắc
+ * cuối. Trong một stage `$set`, mọi biểu thức đọc giá trị CŨ của document.
  */
-const UNREAD_RECOUNT_CAP = 99
+const clearMentionsUpTo = (seq: number) => {
+  const past = { $lte: [{ $ifNull: ['$lastMentionSeq', 0] }, seq] }
+  return {
+    unreadMentionCount: { $cond: [past, 0, '$unreadMentionCount'] },
+    lastMentionMessageId: { $cond: [past, null, '$lastMentionMessageId'] },
+  }
+}
 
 /** ObjectId hex -> chữ thường; không phải ObjectId hợp lệ -> null. */
 const normalizeObjectId = (value: unknown): string | null =>
@@ -147,90 +159,115 @@ export class ConversationMemberRepository {
     return members
   }
 
-  async updateLastMessageAt(conversationId: string, lastMessageAt: Date) {
-    return await this.prisma.conversationMember.updateMany({
-      where: {
-        conversationId,
-      },
-      data: {
-        lastMessageAt: lastMessageAt,
-      },
-    })
-  }
-
   /**
-   * Điều kiện "marker đọc đứng TRƯỚC `messageId`, hoặc chưa có marker".
-   * Mọi dòng đều có field (null khi chưa đọc): buildMemberRow đặt sẵn, dòng cũ
-   * được migrations/chat/0005 điền.
+   * Tin mới nhất đã lan tới mọi dòng thành viên — do cron gọi, mỗi hội thoại
+   * một lần cho cả lô tin trong 5 giây. `$max` nên lệnh đến trễ không kéo lùi,
+   * chạy lại bao nhiêu lần cũng vậy: không cần transaction.
    */
-  private markerBefore(messageId: string) {
-    return {
-      OR: [
-        { lastReadMessageId: null },
-        { lastReadMessageId: { lt: messageId } },
-      ],
-    }
-  }
-
-  /**
-   * Cộng `unreadCount` cho mọi thành viên trừ người gửi — do cron gọi.
-   *
-   * `newestMessageId` là id tin mới nhất của người gửi trong lượt cộng này. Có
-   * nó thì BỎ QUA người đã đọc tới tin đó: họ đang mở hội thoại và đã đọc ngay
-   * (unread về 0) trước khi cron kịp chạy, cộng nữa là ra số ảo. Không có (dữ
-   * liệu Redis từ bản cũ) hoặc id hỏng thì giữ hành vi cũ: cộng cho tất cả.
-   */
-  async updateUnreadCount(
+  async advanceMembers(
     conversationId: string,
-    senderId: string,
-    unreadCount: number,
-    newestMessageId?: string | null,
+    latest: { lastMessageAt: Date; seq: number },
   ) {
-    const newest = normalizeObjectId(newestMessageId)
-    return await this.prisma.conversationMember.updateMany({
-      where: {
-        conversationId,
-        userId: {
-          not: senderId,
+    return await rawUpdate(this.prisma, 'conversationMember', [
+      {
+        q: { conversationId: oid(conversationId) },
+        u: {
+          $max: {
+            lastMessageAt: date(latest.lastMessageAt),
+            latestSeq: latest.seq,
+          },
         },
-        ...this.activeMemberFilter,
-        ...(newest ? this.markerBefore(newest) : {}),
+        multi: true,
       },
-      data: {
-        unreadCount: {
-          increment: unreadCount,
-        },
-      },
-    })
+    ])
   }
 
+  /**
+   * Người gửi đã đọc tới tin của chính mình: tin của mình không bao giờ là
+   * "chưa đọc" (unreadCount = latestSeq − lastReadSeq). Gửi tin sau lượt nhắc
+   * cũng là đã đọc qua lượt nhắc đó.
+   */
+  async advanceReadOfSenders(
+    conversationId: string,
+    senders: { senderId: string; seq: number }[],
+  ) {
+    return await rawUpdate(
+      this.prisma,
+      'conversationMember',
+      senders.map(({ senderId, seq }) => ({
+        q: {
+          conversationId: oid(conversationId),
+          userId: oid(senderId),
+          ...this.activeMemberFilter,
+        },
+        u: [
+          {
+            $set: {
+              lastReadSeq: { $max: [{ $ifNull: ['$lastReadSeq', 0] }, seq] },
+              ...clearMentionsUpTo(seq),
+            },
+          },
+        ],
+      })),
+    )
+  }
+
+  /**
+   * Nhắc tên: MỘT lệnh cho cả nhóm. Bỏ qua người đã đọc tới/qua tin này — họ
+   * đang mở hội thoại và đọc trước khi lệnh này kịp chạy, cộng nữa là badge ảo
+   * không bao giờ tắt (lần đọc sau không còn "tiến lên").
+   */
   async markMention(
     conversationId: string,
     userIds: string[],
     messageId: string,
+    seq: number,
   ) {
     if (!userIds.length) return
-    // MỘT lệnh ghi nguyên tử cho cả nhóm. Trước đây đọc rồi mới ghi
-    // (`count + 1`) nên hai lượt nhắc tới cùng lúc cùng đọc một giá trị cũ ->
-    // mất một lượt đếm; và mỗi người một truy vấn riêng.
-    await this.prisma.conversationMember.updateMany({
-      where: {
-        conversationId,
-        userId: { in: userIds },
-        ...this.activeMemberFilter,
+    await rawUpdate(this.prisma, 'conversationMember', [
+      {
+        q: {
+          conversationId: oid(conversationId),
+          userId: { $in: userIds.map(oid) },
+          ...this.activeMemberFilter,
+          ...readBefore(seq),
+        },
+        u: [
+          {
+            $set: {
+              unreadMentionCount: {
+                $add: [{ $ifNull: ['$unreadMentionCount', 0] }, 1],
+              },
+              lastMentionSeq: {
+                $max: [{ $ifNull: ['$lastMentionSeq', 0] }, seq],
+              },
+              lastMentionMessageId: {
+                $cond: [
+                  { $gt: [seq, { $ifNull: ['$lastMentionSeq', 0] }] },
+                  oid(messageId),
+                  '$lastMentionMessageId',
+                ],
+              },
+            },
+          },
+        ],
+        multi: true,
       },
-      data: {
-        unreadMentionCount: { increment: 1 },
-        lastMentionMessageId: messageId,
-      },
-    })
+    ])
   }
 
   async clearMentions(conversationId: string, userId: string) {
-    return await this.prisma.conversationMember.updateMany({
-      where: { conversationId, userId, ...this.activeMemberFilter },
-      data: { unreadMentionCount: 0, lastMentionMessageId: null },
-    })
+    const count = await rawUpdate(this.prisma, 'conversationMember', [
+      {
+        q: {
+          conversationId: oid(conversationId),
+          userId: oid(userId),
+          ...this.activeMemberFilter,
+        },
+        u: { $set: { unreadMentionCount: 0, lastMentionMessageId: null } },
+      },
+    ])
+    return { count }
   }
 
   async findByConversationIdAndUserId(conversationId: string, userId: string) {
@@ -243,62 +280,79 @@ export class ConversationMemberRepository {
     })
   }
 
-  /** Add (or bring back) people to a group; returns how many changed. */
+  /**
+   * Add (or bring back) people to a group; returns how many changed.
+   *
+   * A fixed number of commands whatever the number of people: one read of who
+   * is already there, one raw update bringing back those who had left, one
+   * insert for the rest. It used to be 2–3 commands per person, each Prisma
+   * `updateMany` a transaction of its own on MongoDB.
+   *
+   * Everyone joins having read everything so far (`lastReadSeq = lastSeq`): a
+   * newcomer's badge is 0, not the conversation's history, and someone coming
+   * back is not charged for what was said while they were gone.
+   */
   async addMembers(conversationId: string, members: MemberProfile[]) {
-    let changedCount = 0
+    if (!members.length) return 0
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { lastSeq: true },
+    })
+    const seq = conversation?.lastSeq ?? 0
 
-    for (const member of members) {
-      const existing = await this.prisma.conversationMember.findFirst({
-        where: {
-          conversationId,
-          userId: member.userId,
+    const existing = await this.prisma.conversationMember.findMany({
+      where: { conversationId, userId: { in: members.map((m) => m.userId) } },
+      select: { userId: true, isActive: true },
+    })
+    const known = new Map(existing.map((row) => [row.userId, row.isActive]))
+    const returning = members.filter((m) => known.get(m.userId) === false)
+    const fresh = members.filter((m) => !known.has(m.userId))
+    const now = new Date()
+
+    await rawUpdate(
+      this.prisma,
+      'conversationMember',
+      returning.map((member) => ({
+        q: { conversationId: oid(conversationId), userId: oid(member.userId) },
+        u: {
+          $set: {
+            role: 'MEMBER',
+            isActive: true,
+            username: member.username || null,
+            fullName: member.fullName || null,
+            avatar: member.avatar || null,
+            lastMessageAt: date(now),
+            lastReadSeq: seq,
+            latestSeq: seq,
+            unreadMentionCount: 0,
+            lastMentionMessageId: null,
+          },
         },
-        select: {
-          isActive: true,
-        },
+      })),
+    )
+    if (fresh.length) {
+      await this.prisma.conversationMember.createMany({
+        data: fresh.map((member) =>
+          buildMemberRow(conversationId, member, {
+            type: 'GROUP',
+            members,
+            seq,
+          }),
+        ),
       })
-
-      const updated = await this.prisma.conversationMember.updateMany({
-        where: {
-          conversationId,
-          userId: member.userId,
-        },
-        data: {
-          role: 'MEMBER',
-          isActive: true,
-          username: member.username || null,
-          fullName: member.fullName || null,
-          avatar: member.avatar || null,
-          lastMessageAt: new Date(),
-        },
-      })
-
-      if (updated.count > 0) {
-        if (!existing?.isActive) {
-          changedCount += 1
-        }
-        continue
-      }
-
-      await this.prisma.conversationMember.create({
-        data: buildMemberRow(conversationId, member, {
-          type: 'GROUP',
-          members,
-        }),
-      })
-
-      changedCount += 1
     }
 
     await this.invalidateMembersCache(conversationId)
-    return changedCount
+    return returning.length + fresh.length
   }
 
   /**
-   * Ghi nhận user đã đọc tới `lastReadMessageId` và tính lại unreadCount.
+   * Ghi nhận user đã đọc tới `lastReadMessageId`: MỘT lệnh, chỉ khi mốc tiến
+   * lên (sự kiện đọc đến lệch thứ tự rất thường — client bắn một lần mỗi khi
+   * danh sách tin đổi). Không còn đếm lại: unreadCount = latestSeq − lastReadSeq.
+   * Đọc qua lượt nhắc cuối thì tắt luôn badge nhắc.
    *
-   * Trả `{ count }` = số dòng có marker tiến lên (0 hoặc 1), cùng hình dạng
-   * BatchPayload như trước để bên gọi không phải đổi.
+   * Trả `{ count }` = số dòng có mốc tiến lên (0 hoặc 1), như trước.
    */
   async updateLastRead(
     conversationId: string,
@@ -312,106 +366,61 @@ export class ConversationMemberRepository {
     // giả thật lớn đẩy được marker lên "tương lai" và chặn mọi lần đọc sau đó.
     const message = await this.prisma.message.findFirst({
       where: { id: messageId, conversationId },
-      select: { createdAt: true },
+      select: { seq: true },
     })
-    if (!message) return { count: 0 }
+    if (typeof message?.seq !== 'number') return { count: 0 }
+    const seq = message.seq
 
-    const member = await this.prisma.conversationMember.findFirst({
-      where: { conversationId, userId, ...this.activeMemberFilter },
-      select: { lastReadMessageId: true },
-    })
-    if (!member) return { count: 0 }
-
-    // A read marker may only ever move forward. The client emits one read per
-    // change to its message list, and those arrive out of order often enough
-    // to matter — a late event carrying an older id used to overwrite a newer
-    // one, so the sender's "đã xem" marker silently rolled back to an earlier
-    // message (or disappeared). Mongo ObjectIds start with a timestamp and sort
-    // in creation order, so comparing them is enough to tell newer from older.
-    //
-    // Điều kiện nằm TRONG updateMany nên kiểm-rồi-ghi là một thao tác nguyên tử
-    // phía Mongo. Trước đây findFirst rồi mới update: hai lần đọc đồng thời
-    // (consumer prefetch 300) có thể để id cũ ghi đè id mới.
-    const moved = await this.prisma.conversationMember.updateMany({
-      where: {
-        conversationId,
-        userId,
-        ...this.activeMemberFilter,
-        ...this.markerBefore(messageId),
+    const count = await rawUpdate(this.prisma, 'conversationMember', [
+      {
+        q: {
+          conversationId: oid(conversationId),
+          userId: oid(userId),
+          ...this.activeMemberFilter,
+          ...readBefore(seq),
+        },
+        u: [
+          {
+            $set: {
+              lastReadSeq: seq,
+              lastReadMessageId: oid(messageId),
+              lastReadAt: date(new Date()),
+              ...clearMentionsUpTo(seq),
+            },
+          },
+        ],
       },
-      data: { lastReadMessageId: messageId, lastReadAt: new Date() },
-    })
-
-    // Luôn đếm lại từ dữ liệu thật, kể cả khi marker không đổi, để dòng đang
-    // kẹt số ảo tự lành ở lần đọc kế tiếp. Trước đây nhánh "id cũ hơn hoặc
-    // bằng" thoát sớm, nên +1 cron cộng muộn cho tin đã đọc không bao giờ về 0.
-    const stored = normalizeObjectId(member.lastReadMessageId)
-    const effective = stored && stored > messageId ? stored : messageId
-
-    // Đã đọc tới/qua lượt nhắc cuối thì tắt luôn badge nhắc. Trước đây badge
-    // chỉ tắt khi bấm chip "đi tới lượt nhắc", nên đọc hết tin rồi vẫn còn
-    // chấm đỏ. `unreadMentionCount > 0` cũng chặn dòng chưa từng bị nhắc.
-    await this.prisma.conversationMember.updateMany({
-      where: {
-        conversationId,
-        userId,
-        ...this.activeMemberFilter,
-        unreadMentionCount: { gt: 0 },
-        lastMentionMessageId: { lte: effective },
-      },
-      data: { unreadMentionCount: 0, lastMentionMessageId: null },
-    })
-
-    // Chặn dưới bằng createdAt để truy vấn bám index (conversationId,
-    // createdAt, _id): lọc riêng theo _id quét gấp 5 lần số key index trên
-    // prod. Tin sau `effective` đều tạo sau tin vừa đọc nên không loại nhầm.
-    const unread = await this.prisma.message.findMany({
-      where: {
-        conversationId,
-        senderId: { not: userId },
-        id: { gt: effective },
-        createdAt: { gte: message.createdAt },
-      },
-      select: { id: true },
-      // Sắp theo đúng thứ tự của index. Không có orderBy, Prisma tự thêm
-      // `$sort: { _id: 1 }` và Mongo có thể chọn index _id để khỏi sort — quét
-      // mọi tin mới hơn marker của TOÀN BỘ collection thay vì một hội thoại.
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      take: UNREAD_RECOUNT_CAP,
-    })
-
-    // Chỉ ghi khi marker vẫn đúng là `effective`: lần đọc đồng thời nào đã đẩy
-    // marker xa hơn thì con số của lần đó mới đúng, bản này bỏ qua.
-    await this.prisma.conversationMember.updateMany({
-      where: {
-        conversationId,
-        userId,
-        ...this.activeMemberFilter,
-        lastReadMessageId: effective,
-      },
-      data: { unreadCount: unread.length },
-    })
-
-    return { count: moved.count }
+    ])
+    return { count }
   }
 
+  /** Xoá lịch sử phía mình: ẩn mọi tin tới hiện tại, coi như đã đọc hết. */
   async clearHistoryForMember(
     conversationId: string,
     userId: string,
     clearedHistoryAt: Date,
   ) {
-    return await this.prisma.conversationMember.updateMany({
-      where: {
-        conversationId,
-        userId,
-      },
-      data: {
-        clearedHistoryAt,
-        unreadCount: 0,
-        lastReadAt: clearedHistoryAt,
-        lastReadMessageId: null,
-      },
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { lastSeq: true },
     })
+    const lastSeq = conversation?.lastSeq ?? 0
+    const count = await rawUpdate(this.prisma, 'conversationMember', [
+      {
+        q: { conversationId: oid(conversationId), userId: oid(userId) },
+        u: {
+          $set: {
+            clearedHistoryAt: date(clearedHistoryAt),
+            clearedHistorySeq: lastSeq,
+            lastReadSeq: lastSeq,
+            unreadCount: 0,
+            lastReadAt: date(clearedHistoryAt),
+            lastReadMessageId: null,
+          },
+        },
+      },
+    ])
+    return { count }
   }
 
   async updateByUserId(

@@ -7,7 +7,11 @@ type Person = Pick<conversationMember, 'userId'> &
 /** The viewer's own counters, off their membership row. */
 type ViewerState = Pick<
   conversationMember,
-  'unreadCount' | 'unreadMentionCount' | 'lastMentionMessageId'
+  | 'unreadCount'
+  | 'unreadMentionCount'
+  | 'lastMentionMessageId'
+  | 'lastReadSeq'
+  | 'latestSeq'
 >
 
 /** What a member row brings to a conversation's detail. */
@@ -71,7 +75,8 @@ export class ConversationMapper {
       displayAvatar: (isDirect ? peer?.avatar : conversation.groupAvatar) || '',
       memberCount: conversation.memberCount,
       peerUserId: peer?.userId ?? null,
-      unreadCount: Math.max(0, mine.unreadCount ?? 0),
+      // Tính, không cộng dồn: tin mới nhất đã lan tới dòng này trừ mốc đọc.
+      unreadCount: unreadOf(mine),
       unreadMentionCount: mine.unreadMentionCount ?? 0,
       lastMentionMessageId: mine.lastMentionMessageId ?? null,
       createdAt: conversation.createdAt,
@@ -88,6 +93,7 @@ export class ConversationMapper {
               fullName: member.fullName,
               lastReadAt: member.lastReadAt ?? null,
               lastReadMessageId: member.lastReadMessageId ?? null,
+              lastReadSeq: member.lastReadSeq ?? 0,
               lastMessageAt: member.lastMessageAt ?? null,
             })),
           }
@@ -97,6 +103,9 @@ export class ConversationMapper {
       membershipStatus: 'ACTIVE' as const,
       canSendMessage: true,
       lastMessageId: conversation.lastMessageId ?? null,
+      // The conversation's own field, not a member's `latestSeq`: the list
+      // only moves its "last message" forward by it.
+      lastMessageSeq: conversation.lastMessageSeq ?? null,
       lastMessageAt: conversation.lastMessageAt ?? null,
       lastMessageText: conversation.lastMessageText ?? '',
       lastMessageSenderId: conversation.lastMessageSenderId ?? null,
@@ -119,6 +128,15 @@ export class ConversationMapper {
       canSendMessage: options?.canSendMessage ?? true,
     }
   }
+}
+
+/**
+ * Unread messages for a viewer: the newest seq that has reached their row
+ * minus how far they have read. Holes in the sequence (a deduplicated resend)
+ * count once each — accepted, see docs/design/message-seq-design.md.
+ */
+function unreadOf(mine: Partial<ViewerState>): number {
+  return Math.max(0, (mine.latestSeq ?? 0) - (mine.lastReadSeq ?? 0))
 }
 
 /** The other side of a direct conversation, from whichever shape it came. */

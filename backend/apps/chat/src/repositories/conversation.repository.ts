@@ -3,6 +3,7 @@ import { conversationType, type Prisma } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { RedisService } from '@app/redis'
 import { olderThanCursor, type KeysetCursor } from '@app/util'
+import { date, oid, rawUpdate } from './raw-ejson'
 
 /**
  * A conversation as a row of the caller's list, read off their membership.
@@ -14,6 +15,9 @@ import { olderThanCursor, type KeysetCursor } from '@app/util'
 const LIST_ROW_SELECT = {
   unreadCount: true,
   unreadMentionCount: true,
+  // unreadCount = latestSeq − lastReadSeq (ConversationMapper).
+  lastReadSeq: true,
+  latestSeq: true,
   lastMentionMessageId: true,
   lastReadAt: true,
   lastMessageAt: true,
@@ -37,6 +41,8 @@ const MEMBER_VIEW_SELECT = {
   unreadCount: true,
   unreadMentionCount: true,
   lastMentionMessageId: true,
+  lastReadSeq: true,
+  latestSeq: true,
 } as const
 
 const toListRow = ({
@@ -112,20 +118,23 @@ export class ConversationRepository {
     })
   }
 
+  /** Null for a conversation that is deleted and waiting to be purged. */
   async findById(id: string) {
-    return await this.prisma.conversation.findUnique({
+    const conversation = await this.prisma.conversation.findUnique({
       where: { id },
     })
+    return conversation?.deletedAt ? null : conversation
   }
 
   /** A conversation with its active members, as detail views and events need. */
   async findByIdWithMembers(id: string) {
-    return await this.prisma.conversation.findUnique({
+    const conversation = await this.prisma.conversation.findUnique({
       where: { id },
       include: {
         members: { where: this.activeMemberWhere, select: MEMBER_VIEW_SELECT },
       },
     })
+    return conversation?.deletedAt ? null : conversation
   }
 
   async findByUserIdPaginated(
@@ -176,10 +185,17 @@ export class ConversationRepository {
     return memberships.map(toListRow)
   }
 
-  /** The last-message snapshot the conversation list shows. */
+  /**
+   * The last-message snapshot the conversation list shows — only when `seq` is
+   * newer than the one already shown. Written unconditionally, a reply (held
+   * back while its quote was looked up) landing after the plain message sent
+   * right behind it made the list show the older one (10/10 trials). A raw
+   * update: Prisma's `update` is fine, but the condition is not a unique key.
+   */
   async saveLastMessage(
     conversationId: string,
-    data?: {
+    data: {
+      seq: number
       lastMessageId?: string | null
       lastMessageAt?: Date
       lastMessageText?: string | null
@@ -188,28 +204,29 @@ export class ConversationRepository {
       lastMessageSenderAvatar?: string | null
     },
   ) {
-    return await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        updatedAt: new Date(),
-        ...(data?.lastMessageId !== undefined
-          ? { lastMessageId: data.lastMessageId }
-          : {}),
-        ...(data?.lastMessageAt ? { lastMessageAt: data.lastMessageAt } : {}),
-        ...(data?.lastMessageText !== undefined
-          ? { lastMessageText: data.lastMessageText }
-          : {}),
-        ...(data?.lastMessageSenderId !== undefined
-          ? { lastMessageSenderId: data.lastMessageSenderId }
-          : {}),
-        ...(data?.lastMessageSenderName !== undefined
-          ? { lastMessageSenderName: data.lastMessageSenderName }
-          : {}),
-        ...(data?.lastMessageSenderAvatar !== undefined
-          ? { lastMessageSenderAvatar: data.lastMessageSenderAvatar }
-          : {}),
+    const { seq, ...fields } = data
+    const set: Record<string, unknown> = {
+      updatedAt: date(new Date()),
+      lastMessageSeq: seq,
+    }
+    for (const [key, value] of Object.entries(fields)) {
+      if (value === undefined) continue
+      set[key] =
+        value instanceof Date
+          ? date(value)
+          : key === 'lastMessageId' && typeof value === 'string'
+            ? oid(value)
+            : value
+    }
+    return await rawUpdate(this.prisma, 'conversation', [
+      {
+        q: {
+          _id: oid(conversationId),
+          $or: [{ lastMessageSeq: null }, { lastMessageSeq: { $lt: seq } }],
+        },
+        u: { $set: set },
       },
-    })
+    ])
   }
 
   async incrementMemberCount(conversationId: string, delta: number) {
@@ -225,66 +242,30 @@ export class ConversationRepository {
     })
   }
 
+  /**
+   * Delete = hide now, purge later. The conversation is marked `deletedAt`
+   * (seq-allocator then refuses new messages into it) and every member row is
+   * deactivated, which is what takes it out of every list, search and send
+   * check at once. `ConversationPurgeCron` removes the messages in batches.
+   *
+   * It used to load every message id and delete everything in ONE transaction
+   * with a `$in` of all of them — at 300,000 messages that is past what a
+   * MongoDB transaction allows, so the delete failed and failed again.
+   */
   async deleteConversationById(conversationId: string) {
-    const messages = await this.prisma.message.findMany({
-      where: { conversationId },
-      select: { id: true, pollId: true },
-    })
-
-    const messageIds = messages.map((message) => message.id)
-    const pollIds = messages
-      .map((message) => message.pollId)
-      .filter((pollId): pollId is string => Boolean(pollId))
-
-    await this.prisma.$transaction(async (transaction) => {
-      if (messageIds.length > 0) {
-        await transaction.messageMedia.deleteMany({
-          where: {
-            messageId: {
-              in: messageIds,
-            },
-          },
-        })
-
-        await transaction.deleteMessage.deleteMany({
-          where: {
-            messageId: {
-              in: messageIds,
-            },
-          },
-        })
-
-        if (pollIds.length > 0) {
-          await transaction.pollVote.deleteMany({
-            where: {
-              pollId: {
-                in: pollIds,
-              },
-            },
-          })
-
-          await transaction.poll.deleteMany({
-            where: {
-              id: {
-                in: pollIds,
-              },
-            },
-          })
-        }
-      }
-
-      await transaction.message.deleteMany({
-        where: { conversationId },
-      })
-
-      await transaction.conversationMember.deleteMany({
-        where: { conversationId },
-      })
-
-      await transaction.conversation.delete({
-        where: { id: conversationId },
-      })
-    })
+    await rawUpdate(this.prisma, 'conversation', [
+      {
+        q: { _id: oid(conversationId) },
+        u: { $set: { deletedAt: date(new Date()) } },
+      },
+    ])
+    await rawUpdate(this.prisma, 'conversationMember', [
+      {
+        q: { conversationId: oid(conversationId) },
+        u: { $set: { isActive: false } },
+        multi: true,
+      },
+    ])
 
     // Cuộc trò chuyện đã biến mất -> dọn cache thành viên kèm theo.
     await this.redisService.delMany([`conv:members:${conversationId}`])

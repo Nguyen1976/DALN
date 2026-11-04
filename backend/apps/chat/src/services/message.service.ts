@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common'
 import { RedisService } from '@app/redis'
 import {
   DIRTY_CONVERSATIONS_KEY,
-  SET_NEWEST_ID_SCRIPT,
+  SET_LAST_MESSAGE_SCRIPT,
+  SET_NEWEST_SEQ_SCRIPT,
   lastMessageKey,
-  unreadCountKey,
   unreadLastKey,
 } from '../background-jobs/unread/unread.constants'
 import type {
@@ -222,6 +222,7 @@ export class MessageService {
         data.conversationId,
         mentionUserIds,
         String(message.id),
+        message.seq ?? 0,
       )
       // Thông báo cho người bị nhắc (badge trong chat chỉ thấy khi đang mở app).
       this.eventsPublisher.publishMentioned({
@@ -798,7 +799,9 @@ export class MessageService {
   }) {
     const { conversationId, senderId, message, senderMember } = params
 
+    const seq = typeof message.seq === 'number' ? message.seq : null
     const lastMessage = JSON.stringify({
+      seq,
       senderId,
       lastMessageId: message.id,
       lastMessageAt: message.createdAt
@@ -811,28 +814,33 @@ export class MessageService {
 
     const commands: (string | number)[][] = []
 
-    // Id tin mới nhất theo người gửi: cron dùng nó để KHÔNG cộng unread cho
-    // người đã đọc tới tin này. "Chỉ ghi khi lớn hơn" (Lua) để lệnh tới trễ
-    // không kéo lùi. Đặt TRƯỚC HINCRBY: nếu lượt claim của cron lỡ chen vào
-    // giữa pipeline (hiếm — Redis thường chạy liền cả gói), thà đếm dư một tin
-    // (lần đọc sau tự lành) còn hơn đếm thiếu (người nhận mất badge).
-    const messageId = message.id.toLowerCase()
-    if (isObjectId(messageId)) {
+    // Seq lớn nhất theo người gửi: cron đẩy mốc đọc của chính họ tới đó (tin
+    // của mình không bao giờ là chưa đọc). "Chỉ ghi khi lớn hơn" (Lua) để lệnh
+    // tới trễ không kéo lùi.
+    if (seq !== null) {
       commands.push([
         'eval',
-        SET_NEWEST_ID_SCRIPT,
+        SET_NEWEST_SEQ_SCRIPT,
         1,
         unreadLastKey(conversationId),
         senderId,
-        messageId,
+        seq,
       ])
     }
 
-    // Một round-trip cho cả gói. SADD đặt CUỐI để khi cron pop được id ra thì
-    // dữ liệu đã nằm sẵn trong Redis.
+    // Tin cuối cũng "chỉ khi seq lớn hơn": tin trả lời (chờ tra tin được
+    // trích) tới sau tin thường gửi liền sau nó không được đè tin mới hơn.
+    // Không còn HINCRBY: unreadCount = latestSeq − lastReadSeq. SADD đặt CUỐI
+    // để khi cron pop được id ra thì dữ liệu đã nằm sẵn trong Redis.
     commands.push(
-      ['hincrby', unreadCountKey(conversationId), senderId, 1],
-      ['set', lastMessageKey(conversationId), lastMessage],
+      [
+        'eval',
+        SET_LAST_MESSAGE_SCRIPT,
+        1,
+        lastMessageKey(conversationId),
+        seq ?? 0,
+        lastMessage,
+      ],
       ['sadd', DIRTY_CONVERSATIONS_KEY, conversationId],
     )
 
