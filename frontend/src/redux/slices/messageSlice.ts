@@ -1,4 +1,4 @@
-import { getMessagesAPI } from "@/apis/chat";
+import { getMessagesAfterAPI, getMessagesAPI } from "@/apis/chat";
 import {
   createAsyncThunk,
   createSelector,
@@ -49,6 +49,12 @@ export interface Message {
   id: string;
   conversationId: string;
   senderId: string;
+  /**
+   * Position in the conversation, set by the server (null on an optimistic
+   * copy until its ack). The thread is ordered by it, and a jump in it means
+   * a message was missed.
+   */
+  seq?: number | null;
   content: string;
   type?: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "POLL" | "CALL";
   /** Với type=CALL: dữ liệu để render thẻ cuộc gọi + nút Gọi lại/Tham gia lại. */
@@ -108,6 +114,8 @@ export interface MessageState {
    */
   drafts: Record<string, string>;
   messages: Record<string, Message[]>;
+  /** A resync (`syncAfter`) is in flight for this conversation. */
+  syncing: Record<string, boolean>;
   pagination: Record<
     string,
     {
@@ -121,6 +129,7 @@ export interface MessageState {
 const initialState: MessageState = {
   drafts: {},
   messages: {},
+  syncing: {},
   pagination: {},
 };
 
@@ -145,21 +154,90 @@ export const getMessages = createAsyncThunk(
 );
 
 /**
- * Newest-first order, matching the server's (createdAt desc, id desc).
+ * Newest-first order, a total order so every merge agrees with every other.
+ *
+ * Messages the server has numbered come by `seq`, the conversation's own
+ * order. Our own messages still waiting for their ack have no `seq` yet and
+ * are the newest of all — they were just sent — kept in the order we sent
+ * them. Timestamps are only a tie-breaker among those: the sender's clock is
+ * not the server's.
  *
  * The store keeps messages newest-first and `selectMessage` reverses them for
- * display. Merging a page from the server with a message that had already
- * arrived over the socket used to be a plain concatenation, so the newest
- * message could end up at the tail: it rendered at the top of the thread, and
- * "the last message" — used for the read receipt and for scrolling — pointed at
- * an older one. Sorting on merge keeps one true order regardless of which
- * channel delivered a message first.
+ * display; sorting on merge keeps one true order whichever channel (page,
+ * socket, resync) delivered a message first.
  */
 function compareNewestFirst(a: Message, b: Message): number {
+  const aNumbered = typeof a.seq === "number";
+  const bNumbered = typeof b.seq === "number";
+  if (aNumbered && bNumbered) return (b.seq as number) - (a.seq as number);
+  if (aNumbered !== bNumbered) return aNumbered ? 1 : -1;
   const at = new Date(a.createdAt ?? 0).getTime();
   const bt = new Date(b.createdAt ?? 0).getTime();
   if (at !== bt) return bt - at;
   return String(b.id).localeCompare(String(a.id));
+}
+
+/** The highest seq loaded for a conversation; null when nothing is loaded. */
+export function maxSeqOf(messages: Message[] | undefined): number | null {
+  let max: number | null = null;
+  for (const message of messages ?? []) {
+    if (typeof message.seq === "number" && (max === null || message.seq > max)) {
+      max = message.seq;
+    }
+  }
+  return max;
+}
+
+/** Same message from two channels: the server id, or our clientMessageId. */
+const sameMessage = (a: Message, b: Message) =>
+  a.id === b.id ||
+  (Boolean(a.clientMessageId) && a.clientMessageId === b.clientMessageId);
+
+/** At most this many resync pages before dropping the cache instead. */
+const SYNC_PAGES = 2;
+const SYNC_LIMIT = 50;
+
+/**
+ * What came after the newest message we have, oldest first. Called when a
+ * message arrives whose seq skips ahead (one was missed), and for the open
+ * conversation after a reconnect. Past two pages the gap is too wide to
+ * patch: the cache is dropped and the first page reloads instead, which also
+ * keeps a long absence from bursting the API rate limit.
+ */
+export const syncAfter = createAsyncThunk(
+  `/chat/messages/sync`,
+  async (conversationId: string, { getState }) => {
+    const state = getState() as RootState;
+    const after = maxSeqOf(state.message.messages[conversationId]);
+    if (after === null) return { conversationId, items: [], reset: false };
+    const items: Message[] = [];
+    let cursor = after;
+    for (let page = 0; page < SYNC_PAGES; page++) {
+      const result = await getMessagesAfterAPI(conversationId, SYNC_LIMIT, cursor);
+      items.push(...result.items);
+      const last = result.items[result.items.length - 1];
+      if (!result.hasMore || typeof last?.seq !== "number") {
+        return { conversationId, items, reset: false };
+      }
+      cursor = last.seq;
+    }
+    return { conversationId, items: [], reset: true };
+  },
+  {
+    // One resync per conversation at a time; a burst of gaps shares it.
+    condition: (conversationId, { getState }) =>
+      !(getState() as RootState).message.syncing[conversationId],
+  },
+);
+
+/** Keep only our own messages still on their way; the rest reloads on open. */
+function dropCache(state: MessageState, conversationId: string) {
+  const unsent = (state.messages[conversationId] ?? []).filter(
+    (m) => m.status === "pending" || m.status === "failed",
+  );
+  if (unsent.length) state.messages[conversationId] = unsent;
+  else delete state.messages[conversationId];
+  delete state.pagination[conversationId];
 }
 
 export const messageSlice = createSlice({
@@ -187,6 +265,7 @@ export const messageSlice = createSlice({
           ...message,
           status: "sent",
         };
+        currentMessages.sort(compareNewestFirst);
         return;
       } else {
         // Chèn đúng vị trí theo thứ tự thời gian: tin đến trễ qua socket không
@@ -212,6 +291,18 @@ export const messageSlice = createSlice({
           ...message,
           status: "sent",
         };
+        // It has its seq now: move it from the pending tail to its place.
+        currentMessages.sort(compareNewestFirst);
+      }
+    },
+    /**
+     * After a reconnect: what we hold for conversations other than the open
+     * one may be missing messages. Drop it (our unsent messages stay) so the
+     * first page reloads when they are opened — cheaper than resyncing all.
+     */
+    dropOtherConversations: (state, action: PayloadAction<string | null>) => {
+      for (const conversationId of Object.keys(state.messages)) {
+        if (conversationId !== action.payload) dropCache(state, conversationId);
       }
     },
     failMessage: (
@@ -383,6 +474,30 @@ export const messageSlice = createSlice({
       },
     );
 
+    builder
+      .addCase(syncAfter.pending, (state, action) => {
+        state.syncing[action.meta.arg] = true;
+      })
+      .addCase(syncAfter.rejected, (state, action) => {
+        delete state.syncing[action.meta.arg];
+      })
+      .addCase(syncAfter.fulfilled, (state, action) => {
+        const { conversationId, items, reset } = action.payload;
+        delete state.syncing[conversationId];
+        if (reset) {
+          dropCache(state, conversationId);
+          return;
+        }
+        const current = state.messages[conversationId];
+        if (!current) return;
+        for (const message of items) {
+          const index = current.findIndex((m) => sameMessage(m, message));
+          if (index === -1) current.push(message);
+          else current[index] = { ...current[index], ...message, status: "sent" };
+        }
+        current.sort(compareNewestFirst);
+      });
+
     builder.addCase(logoutAPI.fulfilled, () => initialState);
   },
 });
@@ -422,6 +537,7 @@ export const selectMessagePagination = createSelector(
 export const {
   addMessage,
   ackMessage,
+  dropOtherConversations,
   failMessage,
   setDraft,
   retryMessage,

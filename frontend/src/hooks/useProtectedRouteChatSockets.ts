@@ -12,12 +12,16 @@ import {
   updateNewMessage,
   upUnreadCount,
   markConversationMention,
+  getConversations,
   type Conversation,
 } from "@/redux/slices/conversationSlice";
 import {
   ackMessage,
   addMessage,
+  dropOtherConversations,
   failMessage,
+  maxSeqOf,
+  syncAfter,
   revokeMessage,
   updateMessagePoll,
   type Message,
@@ -74,7 +78,31 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       }
     };
 
+    // Tin tới với seq nhảy cóc (seq > lớn nhất đang có + 1) nghĩa là đã lỡ tin
+    // ở giữa: lấy bù. Gom các lần nhảy trong 300 ms thành một lần gọi.
+    const syncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const scheduleSync = (targetConversationId: string) => {
+      clearTimeout(syncTimers.get(targetConversationId));
+      syncTimers.set(
+        targetConversationId,
+        setTimeout(() => {
+          syncTimers.delete(targetConversationId);
+          void dispatch(syncAfter(targetConversationId));
+        }, 300),
+      );
+    };
+
     const processIncomingMessage = async (message: Message) => {
+      const before = maxSeqOf(
+        store.getState().message.messages[message.conversationId],
+      );
+      if (
+        before !== null &&
+        typeof message.seq === "number" &&
+        message.seq > before + 1
+      ) {
+        scheduleSync(message.conversationId);
+      }
       const hydratedConversation = await ensureConversationHydrated(
         message.conversationId,
       );
@@ -286,6 +314,14 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       for (const message of pendingTextMessages(store.getState().message)) {
         sendTextMessage(dispatch, message);
       }
+      // Trong lúc mất kết nối có thể đã lỡ tin. Hội thoại đang mở: lấy bù
+      // ngay theo seq. Hội thoại khác: bỏ cache, mở ra thì tải lại trang đầu
+      // (lấy bù tất cả cùng lúc dễ chạm hạn mức API). Danh sách hội thoại tải
+      // lại trang đầu để badge và tin cuối đúng với server.
+      const open = selectedChatIdRef.current;
+      dispatch(dropOtherConversations(open));
+      if (open) void dispatch(syncAfter(open));
+      void dispatch(getConversations({ limit: 20, cursor: null }));
     };
 
     socket.on("connect", reconnectHandler);
@@ -308,6 +344,7 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
     );
 
     return () => {
+      for (const timer of syncTimers.values()) clearTimeout(timer);
       socket.off("connect", reconnectHandler);
       socket.off(SOCKET_EVENTS.CHAT.MESSAGE_NEW, newMessageHandler);
       socket.off(SOCKET_EVENTS.CHAT.MESSAGE_ACK, ackHandler);
