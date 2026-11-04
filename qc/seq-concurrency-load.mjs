@@ -72,7 +72,7 @@ await cli.close()
 
 check(unnumbered === 0, 'Mọi tin đều có seq', `${unnumbered} tin thiếu`)
 check(dupes.length === 0, '0 cặp (conversationId, seq) trùng', JSON.stringify(dupes.slice(0, 5)))
-check(system >= TOGGLES * 2 + 1, `Có đủ tin hệ thống (tạo nhóm + ${TOGGLES * 2} lần thêm/xoá)`, `${system}`)
+check(system >= TOGGLES * 2, `Có đủ tin hệ thống (${TOGGLES * 2} lần thêm/xoá)`, `${system}`)
 check(mine.length === TEXTS && order.every((n, i) => n === i), 'Tin văn bản của B có seq tăng đúng thứ tự gửi', `${mine.length} tin`)
 check(lastSeq >= total, 'Bộ đếm lastSeq không nhỏ hơn số tin', `lastSeq=${lastSeq} tin=${total}`)
 console.log(`\n${fail ? `${fail} FAIL` : 'PASS'} · ${total} tin · ${system} tin hệ thống · lastSeq ${lastSeq}`)

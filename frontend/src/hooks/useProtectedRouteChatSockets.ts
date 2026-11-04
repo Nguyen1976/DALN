@@ -309,6 +309,11 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
     const reconnectHandler = () => {
       if (!connectedOnce) {
         connectedOnce = true;
+        // Lần kết nối đầu cũng có thể đã lỡ tin: trang tải trang đầu qua HTTP
+        // TRƯỚC khi socket kịp kết nối, tin tới giữa hai lúc đó không đến qua
+        // socket. Chưa tải gì (syncAfter tự bỏ qua) thì không tốn request.
+        const open = selectedChatIdRef.current;
+        if (open) void dispatch(syncAfter(open));
         return;
       }
       for (const message of pendingTextMessages(store.getState().message)) {

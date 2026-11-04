@@ -667,10 +667,22 @@ export class RealtimeGateway
    * 2. Gửi async message tới Chat Service để cập nhật MongoDB
    */
   @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_READ)
-  handleMessageRead(
+  async handleMessageRead(
     @MessageBody() data: MessageReadBody | undefined,
     @ConnectedSocket() client: ClientSocket,
   ) {
+    // Như message:create: mở hội thoại ngay lúc trang tải thì sự kiện đọc tới
+    // khi handshake còn đang kiểm tra phiên. Từ chối ở đây là mốc đọc không
+    // bao giờ tiến (client không gửi lại), badge chưa đọc/nhắc tên kẹt mãi.
+    const handshake = this.handshakes.get(client.id)
+    if (handshake) {
+      try {
+        await withTimeout(handshake, HANDSHAKE_WAIT_MS)
+      } catch {
+        // Phiên kiểm tra treo: bỏ lượt này, lần đọc sau sẽ báo lại.
+        return
+      }
+    }
     const userId = client.data.userId
     if (!userId) {
       client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {

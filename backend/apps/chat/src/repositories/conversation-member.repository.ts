@@ -213,6 +213,17 @@ export class ConversationMemberRepository {
   }
 
   /**
+   * Đánh dấu `userIds` đã đọc tới `seq` (chỉ tiến lên): người vừa được thêm vào
+   * nhóm không bị tính tin hệ thống báo chính việc họ được thêm.
+   */
+  async markReadUpTo(conversationId: string, userIds: string[], seq: number) {
+    return await this.advanceReadOfSenders(
+      conversationId,
+      userIds.map((senderId) => ({ senderId, seq })),
+    )
+  }
+
+  /**
    * Nhắc tên: MỘT lệnh cho cả nhóm. Bỏ qua người đã đọc tới/qua tin này — họ
    * đang mở hội thoại và đọc trước khi lệnh này kịp chạy, cộng nữa là badge ảo
    * không bao giờ tắt (lần đọc sau không còn "tiến lên").

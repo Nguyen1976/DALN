@@ -312,6 +312,26 @@ describe('RealtimeGateway', () => {
       )
     })
 
+    it('waits for the handshake before judging a read sent right after connect', async () => {
+      const client = fakeClient(`accessToken=${signAccess()}`)
+
+      // Mở một hội thoại ngay khi trang tải: sự kiện đọc được bắn (và socket.io
+      // gửi bù ngay khi 'connect') trong lúc gateway còn kiểm tra phiên. Bị
+      // từ chối ở đây thì mốc đọc không bao giờ tiến, badge không bao giờ tắt.
+      const connecting = gateway.handleConnection(client)
+      const reading = gateway.handleMessageRead(
+        { conversationId: 'c1', lastMessageId: '6a35000000000000000b0001' },
+        client,
+      )
+      await Promise.all([connecting, reading])
+
+      const errors = (client.emit.mock.calls as [string, unknown][]).filter(
+        ([event]) => event === SOCKET_EVENTS.CHAT.MESSAGE_ERROR,
+      )
+      expect(errors).toEqual([])
+      expect(publishedTo(ROUTING_RMQ.UPDATE_MESSAGE_READ)).toHaveLength(1)
+    })
+
     it('keeps send order for messages that arrive while the handshake is still finishing', async () => {
       let sessionAlive!: (v: boolean) => void
       sessionStub.isAlive.mockReturnValueOnce(

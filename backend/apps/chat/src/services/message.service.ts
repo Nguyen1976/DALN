@@ -703,6 +703,7 @@ export class MessageService {
       isSystem: true,
     })
     await this.announceSystemMessage(conversationId, actorUserId, message)
+    return message
   }
 
   /**
