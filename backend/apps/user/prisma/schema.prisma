@@ -41,6 +41,14 @@ model Friendship {
   friendId  String   @db.ObjectId
   friend    User     @relation("FriendshipFriend", fields: [friendId], references: [id])
   createdAt DateTime @default(now())
+
+  // Không có index nào ngoài _id thì mọi truy vấn bạn bè đều quét cả
+  // collection (đo 2026-11-04: COLLSCAN). Thứ tự (userId, id) là thứ tự danh
+  // sách bạn; (userId, friendId) phục vụ "hai người có là bạn"; friendId cho
+  // chiều ngược lại. Chưa đặt unique: dữ liệu cũ có thể đã trùng cặp.
+  @@index([userId, id])
+  @@index([userId, friendId])
+  @@index([friendId])
 }
 
 enum Status {
@@ -58,6 +66,11 @@ model friendRequest {
   status     Status   @default(PENDING)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  // Danh sách lời mời đến / đi, mới nhất trước (findPending), và lời mời
+  // đang chờ giữa hai người (findPendingBetweenUsers).
+  @@index([toUserId, status, createdAt])
+  @@index([fromUserId, status, createdAt])
 }
 
 enum OutboxStatus {

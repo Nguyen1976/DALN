@@ -10,6 +10,7 @@ import normalizeParticipantRole from '../../../migrations/chat/0002-normalize-pa
 import initUnreadCount from '../../../migrations/chat/0003-init-unread-count'
 import repairUnreadCounts from '../../../migrations/chat/0004-repair-unread-counts'
 import messageClientIdUnique from '../../../migrations/chat/0007-message-client-id-unique'
+import messageSeq from '../../../migrations/chat/0008-message-seq'
 import { FakeDb, matches, type FakeDoc } from './testing/fake-db'
 import { makeContext } from './testing/helpers'
 
@@ -447,5 +448,236 @@ describe('chat/0007-message-client-id-unique', () => {
     await messageClientIdUnique.up(makeContext(db, { dryRun: true }).ctx)
 
     expect(db.collection('message').indexSpecs).toEqual([])
+  })
+})
+
+describe('chat/0008-message-seq', () => {
+  const CONV = oid(500)
+  const EMPTY = oid(501)
+  const [X, Y] = [oid(100), oid(101)]
+  const at = (s: number) => new Date(Date.UTC(2026, 10, 1, 0, 0, s))
+  // m2 và m3 cùng createdAt: _id phân xử.
+  const [m1, m2, m3, m4, m5] = [oid(11), oid(12), oid(13), oid(14), oid(15)]
+
+  function seed() {
+    const db = new FakeDb('chat-service')
+    db.collection('conversation').seed(
+      { _id: CONV, type: 'GROUP', lastMessageId: m4 },
+      { _id: EMPTY, type: 'DIRECT' },
+    )
+    db.collection('message').seed(
+      {
+        _id: m3,
+        conversationId: CONV,
+        senderId: X,
+        type: 'TEXT',
+        content: 'c https://a.vn',
+        createdAt: at(2),
+      },
+      {
+        _id: m1,
+        conversationId: CONV,
+        senderId: X,
+        type: 'TEXT',
+        content: 'a',
+        createdAt: at(1),
+      },
+      {
+        _id: m5,
+        conversationId: CONV,
+        senderId: Y,
+        type: 'FILE',
+        content: null,
+        createdAt: at(3),
+      },
+      {
+        _id: m2,
+        conversationId: CONV,
+        senderId: Y,
+        type: 'IMAGE',
+        content: null,
+        createdAt: at(2),
+      },
+      {
+        _id: m4,
+        conversationId: CONV,
+        senderId: X,
+        type: 'TEXT',
+        content: 'vào www.b.vn',
+        createdAt: at(3),
+      },
+    )
+    db.collection('messageMedia').seed(
+      { _id: oid(40), messageId: m2, mediaType: 'IMAGE' },
+      { _id: oid(41), messageId: m5, mediaType: 'FILE' },
+    )
+    db.collection('conversationMember').seed(
+      // 2 tin chưa đọc thì mốc đọc là 5 − 2 = 3: badge giữ nguyên sau migration.
+      {
+        _id: oid(300),
+        conversationId: CONV,
+        userId: X,
+        isActive: true,
+        unreadCount: 2,
+        lastReadMessageId: m3,
+        lastMentionMessageId: m2,
+        clearedHistoryAt: at(2),
+      },
+      {
+        _id: oid(301),
+        conversationId: CONV,
+        userId: Y,
+        isActive: true,
+        unreadCount: 0,
+        lastReadMessageId: m4,
+      },
+      // Số đếm cũ lớn hơn số tin thật thì kẹp lại, không ra mốc âm.
+      {
+        _id: oid(302),
+        conversationId: CONV,
+        userId: oid(102),
+        isActive: false,
+        unreadCount: 99,
+      },
+      {
+        _id: oid(303),
+        conversationId: EMPTY,
+        userId: X,
+        isActive: true,
+        unreadCount: 0,
+      },
+    )
+    return db
+  }
+  const seqOf = (db: FakeDb) => byId(db.collection('message').docs, 'seq')
+
+  it('numbers messages by (createdAt, _id), ties broken by _id', async () => {
+    const db = seed()
+    await messageSeq.up(makeContext(db).ctx)
+
+    expect(seqOf(db)).toEqual({
+      [String(m1)]: 1,
+      [String(m2)]: 2,
+      [String(m3)]: 3,
+      [String(m4)]: 4,
+      [String(m5)]: 5,
+    })
+    const conv = db
+      .collection('conversation')
+      .docs.find((c) => String(c._id) === String(CONV))
+    expect(conv).toMatchObject({ lastSeq: 5, lastMessageSeq: 4 })
+  })
+
+  it('stores the facets the asset tabs read', async () => {
+    const db = seed()
+    await messageSeq.up(makeContext(db).ctx)
+
+    const facets = Object.fromEntries(
+      db
+        .collection('message')
+        .docs.map((d) => [String(d._id), [d.hasMedia, d.hasFile, d.hasLink]]),
+    )
+    expect(facets).toEqual({
+      [String(m1)]: [false, false, false],
+      [String(m2)]: [true, false, false],
+      [String(m3)]: [false, false, true],
+      [String(m4)]: [false, false, true],
+      [String(m5)]: [false, true, false],
+    })
+  })
+
+  it("keeps each member's unread count and maps the other marks to seq", async () => {
+    const db = seed()
+    await messageSeq.up(makeContext(db).ctx)
+
+    const rows = Object.fromEntries(
+      db.collection('conversationMember').docs.map((d) => [String(d._id), d]),
+    )
+    expect(rows[String(oid(300))]).toMatchObject({
+      latestSeq: 5,
+      lastReadSeq: 3,
+      lastMentionSeq: 2,
+      clearedHistorySeq: 3,
+    })
+    expect(rows[String(oid(301))]).toMatchObject({
+      latestSeq: 5,
+      lastReadSeq: 5,
+    })
+    expect(rows[String(oid(302))]).toMatchObject({
+      latestSeq: 5,
+      lastReadSeq: 0,
+    })
+  })
+
+  it('an empty conversation gets lastSeq 0 and can be written to', async () => {
+    const db = seed()
+    await messageSeq.up(makeContext(db).ctx)
+
+    const conv = db
+      .collection('conversation')
+      .docs.find((c) => String(c._id) === String(EMPTY))
+    expect(conv).toMatchObject({ lastSeq: 0 })
+    const member = db
+      .collection('conversationMember')
+      .docs.find((d) => String(d._id) === String(oid(303)))
+    expect(member).toMatchObject({ latestSeq: 0, lastReadSeq: 0 })
+  })
+
+  it('creates the unique (conversationId, seq) index after numbering', async () => {
+    const db = seed()
+    await messageSeq.up(makeContext(db).ctx)
+
+    expect(db.collection('message').indexSpecs).toContainEqual({
+      key: { conversationId: 1, seq: 1 },
+      options: { name: 'message_conversation_seq', unique: true },
+    })
+  })
+
+  it('renumbers a conversation that still has a message without seq', async () => {
+    const db = seed()
+    await messageSeq.up(makeContext(db).ctx)
+    db.collection('message').seed({
+      _id: oid(16),
+      conversationId: CONV,
+      senderId: Y,
+      type: 'TEXT',
+      content: 'muộn',
+      createdAt: at(4),
+    })
+
+    await messageSeq.up(makeContext(db).ctx)
+
+    expect(seqOf(db)[String(oid(16))]).toBe(6)
+    expect(seqOf(db)[String(m1)]).toBe(1)
+    // Mốc đọc của lần đầu được giữ, không suy lại từ unreadCount cũ.
+    const x = db
+      .collection('conversationMember')
+      .docs.find((d) => String(d._id) === String(oid(300)))
+    expect(x).toMatchObject({ lastReadSeq: 3, latestSeq: 6 })
+    const conv = db
+      .collection('conversation')
+      .docs.find((c) => String(c._id) === String(CONV))
+    expect(conv).toMatchObject({ lastSeq: 6 })
+  })
+
+  it('is a no-op on a second run', async () => {
+    const db = seed()
+    await messageSeq.up(makeContext(db).ctx)
+    const after = db.snapshot()
+
+    await messageSeq.up(makeContext(db).ctx)
+
+    expect(db.snapshot()).toEqual(after)
+  })
+
+  it('dry run writes nothing', async () => {
+    const db = seed()
+    const before = db.snapshot()
+    const { ctx, logs } = makeContext(db, { dryRun: true })
+
+    await messageSeq.up(ctx)
+
+    expect(db.snapshot()).toEqual(before)
+    expect(logs.at(-1)).toMatch(/2 hội thoại cần đánh số/)
   })
 })

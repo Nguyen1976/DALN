@@ -17,11 +17,17 @@ export function buildMemberRow(
     type,
     role = 'MEMBER',
     members,
+    seq = 0,
   }: {
     type: 'DIRECT' | 'GROUP'
     role?: MemberRole
     /** Everyone in the conversation, for the DIRECT peer fields. */
     members: MemberProfile[]
+    /**
+     * The conversation's `lastSeq` when this person joins: they start having
+     * read everything before it, so a newcomer's badge is 0, not the history.
+     */
+    seq?: number
   },
 ) {
   return {
@@ -34,6 +40,8 @@ export function buildMemberRow(
     isActive: true,
     unreadCount: 0,
     lastReadMessageId: null,
+    lastReadSeq: seq,
+    latestSeq: seq,
     lastMessageAt: new Date(),
     ...buildPeerFields(type, profile.userId, members),
   }
