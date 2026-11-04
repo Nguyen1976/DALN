@@ -148,6 +148,11 @@ export function useChatMessagesScroll({
   // request cùng cursor, phần giữ vị trí cuộn bị cộng hai lần và người đang đọc
   // lịch sử bị đẩy tụt xuống gần đáy. Chỉ nhả sau khi đã giữ lại vị trí cuộn.
   const loadingOlderRef = useRef(false);
+  // Đổi mỗi khi lượt tải trang cũ hơn nhả khoá. Việc "đi tới tin" phải tải
+  // nhiều trang liên tiếp, nhưng khoá chỉ nhả ở requestAnimationFrame — SAU lần
+  // render do trang mới gây ra — nên effect chạy lại lúc khoá còn đóng, bỏ về,
+  // và không còn gì kích nó nữa: chỉ tải được đúng một trang rồi đứng.
+  const [olderReleases, setOlderReleases] = useState(0);
 
   const loadOlderMessages = useCallback(async () => {
     if (!conversationId || !canLoadMessages) return;
@@ -186,6 +191,7 @@ export function useChatMessagesScroll({
             previousTop + (current.scrollHeight - previousHeight);
         }
         loadingOlderRef.current = false;
+        setOlderReleases((n) => n + 1);
       });
       setIsLoadingOlder(false);
     }
@@ -263,6 +269,7 @@ export function useChatMessagesScroll({
     isLoadingOlder,
     loadOlderMessages,
     messages,
+    olderReleases,
     onFocusHandled,
     pagination.hasMore,
   ]);
