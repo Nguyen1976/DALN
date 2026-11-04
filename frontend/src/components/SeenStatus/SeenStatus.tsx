@@ -40,7 +40,11 @@ export const SeenStatus: React.FC<SeenStatusProps> = ({ seenUsers }) => {
   const overflow = seenUsers.slice(3);
 
   return (
-    <div className="mr-1 mt-1 flex items-center justify-end gap-1.5">
+    <div
+      className="mr-1 mt-1 flex items-center justify-end gap-1.5"
+      // Read by the browser QC (qc/query-regression-browser.mjs).
+      data-seen-by={seenUsers.map((u) => u.userId).join(",")}
+    >
       <TooltipProvider>
         <div className="flex -space-x-1.5">
           {visible.map((user) => (

@@ -201,6 +201,9 @@ export function ChatSidebar({ className }: { className?: string }) {
         aria-current={isActive ? "true" : undefined}
         // Entrance and reordering are animated by useListMotion.
         data-motion-key={conversation.id}
+        // Read by the browser QC (qc/query-regression-browser.mjs).
+        data-conversation-id={conversation.id}
+        data-unread={unread}
         className={cn(
           "relative flex w-full items-center gap-3 rounded-xl p-2.5 text-left",
           "transition-colors duration-(--motion-fast)",
