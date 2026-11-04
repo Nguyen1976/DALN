@@ -252,3 +252,136 @@ describe('MessageRepository seq on every write path', () => {
     expect(prisma.message.create).not.toHaveBeenCalled()
   })
 })
+
+describe('MessageRepository history and assets by seq', () => {
+  type Row = { id: string; seq: number }
+  const rows = (from: number, to: number): Row[] => {
+    const out: Row[] = []
+    for (let s = from; from <= to ? s <= to : s >= to; s += from <= to ? 1 : -1)
+      out.push({ id: `m${s}`, seq: s })
+    return out
+  }
+  function makePrisma(pages: Row[][], deleted: string[] = []) {
+    const findMany = jest.fn(() => Promise.resolve(pages.shift() ?? []))
+    return {
+      message: { findMany },
+      deleteMessage: {
+        findMany: jest.fn(() =>
+          Promise.resolve(deleted.map((messageId) => ({ messageId }))),
+        ),
+      },
+    }
+  }
+  const argsOf = (prisma: ReturnType<typeof makePrisma>, call = 0) =>
+    (
+      prisma.message.findMany.mock.calls[call] as unknown as [
+        { where: Record<string, unknown>; orderBy: unknown; take: number },
+      ]
+    )[0]
+
+  it('pages by seq, newest first, below the cursor', async () => {
+    const prisma = makePrisma([rows(49, 20)])
+    const repo = new MessageRepository(prisma as never, {} as never)
+
+    const page = await repo.findByConversationIdPaginatedForUser(
+      CONV,
+      SENDER,
+      10,
+      { beforeSeq: 50, afterSeq: null, clearedHistorySeq: null },
+    )
+
+    expect(page.map((m) => m.seq)).toEqual([
+      49, 48, 47, 46, 45, 44, 43, 42, 41, 40,
+    ])
+    expect(argsOf(prisma).where).toEqual({
+      conversationId: CONV,
+      AND: [{ seq: { lt: 50 } }],
+    })
+    expect(argsOf(prisma).orderBy).toEqual({ seq: 'desc' })
+  })
+
+  it('respects clearedHistorySeq and delete-for-me', async () => {
+    const prisma = makePrisma([rows(10, 1)], ['m9'])
+    const repo = new MessageRepository(prisma as never, {} as never)
+
+    const page = await repo.findByConversationIdPaginatedForUser(
+      CONV,
+      SENDER,
+      3,
+      { beforeSeq: null, afterSeq: null, clearedHistorySeq: 6 },
+    )
+
+    expect(argsOf(prisma).where).toEqual({
+      conversationId: CONV,
+      AND: [{ seq: { gt: 6 } }],
+    })
+    expect(page.map((m) => m.seq)).toEqual([10, 8, 7])
+  })
+
+  it('afterSeq returns newer messages ascending', async () => {
+    const prisma = makePrisma([rows(121, 130)])
+    const repo = new MessageRepository(prisma as never, {} as never)
+
+    const page = await repo.findByConversationIdPaginatedForUser(
+      CONV,
+      SENDER,
+      5,
+      { beforeSeq: null, afterSeq: 120, clearedHistorySeq: 100 },
+    )
+
+    expect(page.map((m) => m.seq)).toEqual([121, 122, 123, 124, 125])
+    expect(argsOf(prisma).where).toEqual({
+      conversationId: CONV,
+      AND: [{ seq: { gt: 120 } }, { seq: { gt: 100 } }],
+    })
+    expect(argsOf(prisma).orderBy).toEqual({ seq: 'asc' })
+  })
+
+  it('keeps reading past rows deleted for this user', async () => {
+    const deleted = rows(30, 1)
+      .map((r) => r.id)
+      .filter((id) => id !== 'm2')
+    const prisma = makePrisma([rows(30, 1), []], deleted)
+    const repo = new MessageRepository(prisma as never, {} as never)
+
+    const page = await repo.findByConversationIdPaginatedForUser(
+      CONV,
+      SENDER,
+      5,
+      { beforeSeq: null, afterSeq: null, clearedHistorySeq: null },
+    )
+
+    expect(page.map((m) => m.seq)).toEqual([2])
+    // A full batch of mostly deleted rows: read on from where it ended.
+    expect(prisma.message.findMany).toHaveBeenCalledTimes(2)
+    expect(argsOf(prisma, 1).where).toEqual({
+      conversationId: CONV,
+      AND: [{ seq: { lt: 1 } }],
+    })
+  })
+
+  it.each([
+    ['MEDIA', { hasMedia: true }],
+    ['DOC', { hasFile: true }],
+    ['LINK', { hasLink: true }],
+  ] as const)(
+    'assets %s filter on the stored flag, no $lookup, by seq',
+    async (kind, flag) => {
+      const prisma = makePrisma([rows(9, 1)])
+      const repo = new MessageRepository(prisma as never, {} as never)
+
+      await repo.findConversationAssets(CONV, kind, 30, 40)
+
+      const { where, orderBy } = argsOf(prisma)
+      expect(where).toEqual({
+        conversationId: CONV,
+        ...flag,
+        isDeleted: false,
+        isRevoked: false,
+        seq: { lt: 40 },
+      })
+      expect(JSON.stringify(where)).not.toContain('medias')
+      expect(orderBy).toEqual({ seq: 'desc' })
+    },
+  )
+})

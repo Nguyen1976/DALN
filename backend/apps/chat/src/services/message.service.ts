@@ -24,7 +24,12 @@ import type { AssetKind, UploadType } from '../http/chat-http.dto'
 import { resolveMentions } from '../domain/mention.resolver'
 import { MessageMapper, type MessageRow } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
-import { buildKeysetCursor, parseKeysetCursor, toPage } from '@app/util'
+import {
+  buildSeqCursor,
+  parseKeysetCursor,
+  parseSeqCursor,
+  toPage,
+} from '@app/util'
 import { displayNameOf } from '../domain/display-name'
 import { isObjectId } from '../domain/object-id'
 
@@ -301,7 +306,7 @@ export class MessageService {
   async getMessagesByConversationId(
     conversationId: string,
     userId: string,
-    page: { limit: number; cursor?: string },
+    page: { limit: number; cursor?: string; afterSeq?: number },
   ) {
     const member = await this.memberRepo.findByConversationIdAndUserId(
       conversationId,
@@ -311,23 +316,46 @@ export class MessageService {
       ChatErrors.userNotMember()
     }
 
+    const afterSeq = page.afterSeq ?? null
     const rows = await this.messageRepo.findByConversationIdPaginatedForUser(
       conversationId,
       userId,
       page.limit + 1,
-      parseKeysetCursor(page.cursor),
-      member.clearedHistoryAt,
+      {
+        beforeSeq:
+          afterSeq === null
+            ? await this.seqOfCursor(conversationId, page.cursor)
+            : null,
+        afterSeq,
+        clearedHistorySeq: member.clearedHistorySeq ?? null,
+      },
     )
     const { items, nextCursor } = toPage(rows, page.limit, (m) =>
-      buildKeysetCursor(m.createdAt, m.id),
+      typeof m.seq === 'number' ? buildSeqCursor(m.seq) : null,
     )
     await this.attachQuotedMessages(items)
     const withPolls = await this.withPollState(items, userId)
 
-    return {
-      items: withPolls.map((m) => MessageMapper.toResponse(m)),
-      nextCursor,
-    }
+    const dtos = withPolls.map((m) => MessageMapper.toResponse(m))
+    // Lấy bù (afterSeq) đi theo chiều tiến: không có cursor trang cũ, chỉ cần
+    // biết còn tin mới hơn hay không để client gọi tiếp.
+    return afterSeq === null
+      ? { items: dtos, nextCursor }
+      : { items: dtos, nextCursor: null, hasMore: rows.length > page.limit }
+  }
+
+  /**
+   * Cursor trang cũ hơn -> seq. Cursor `s:<seq>` đọc thẳng; cursor kiểu cũ
+   * `<thời điểm>|<id>` (client mở từ trước lúc deploy) được đổi sang seq của
+   * chính tin đó, để "tải thêm" không quay về trang đầu.
+   */
+  private async seqOfCursor(conversationId: string, cursor?: string) {
+    const seq = parseSeqCursor(cursor)
+    if (seq !== null) return seq
+    const legacy = parseKeysetCursor(cursor)
+    if (!legacy?.id || !isObjectId(legacy.id)) return null
+    const message = await this.messageRepo.findById(legacy.id, conversationId)
+    return typeof message?.seq === 'number' ? message.seq : null
   }
 
   /**
@@ -506,10 +534,10 @@ export class MessageService {
       conversationId,
       kind,
       page.limit + 1,
-      parseKeysetCursor(page.cursor),
+      await this.seqOfCursor(conversationId, page.cursor),
     )
     const { items, nextCursor } = toPage(rows, page.limit, (m) =>
-      buildKeysetCursor(m.createdAt, m.id),
+      typeof m.seq === 'number' ? buildSeqCursor(m.seq) : null,
     )
     return {
       items: items.map((message) => MessageMapper.toResponse(message)),

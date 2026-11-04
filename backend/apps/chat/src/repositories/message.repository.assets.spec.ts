@@ -51,7 +51,7 @@ describe('MessageRepository.findConversationAssets', () => {
     const seen: { where?: Record<string, unknown> } = {}
     const repo = new MessageRepository(fakePrisma(seen) as never, {} as never)
 
-    const rows = await repo.findConversationAssets(CONV, 'MEDIA', 20)
+    const rows = await repo.findConversationAssets(CONV, 'MEDIA', 20, null)
 
     expect(seen.where).toMatchObject({ isDeleted: false, isRevoked: false })
     expect(rows.map((row) => (row as unknown as AssetRow).id)).toEqual(['m1'])
