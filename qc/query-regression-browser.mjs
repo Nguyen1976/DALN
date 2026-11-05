@@ -405,6 +405,35 @@ scenario('B8', 'Thêm/xoá/thêm lại thành viên, xoá nhóm', async ({ A, B,
   check(refused, 'Gửi tin vào nhóm đã xoá bị từ chối')
 })
 
+scenario('B16', '"Đã xem" trong nhóm theo seq: đọc qua tin người khác vẫn tính, tải lại / xoá lịch sử vẫn còn', async ({ A, B, fx }) => {
+  const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR xem ${Date.now().toString(36)}`, memberIds: [fx.b.id, fx.c.id] })
+  const tag = `qr16-${Date.now().toString(36)}`
+  const sockC = await connect(fx.c)
+  try {
+    await openConversation(A.page, fx.directId) // A chưa mở nhóm: chưa đọc gì
+    await openConversation(B.page, g.id)
+    await typeAndSend(B.page, `${tag}-b`)
+    await until(async () => (await countIn(B.page, `${tag}-b`)) === 1, 8000)
+    await sleep(500)
+    await send(sockC, g.id, `${tag}-c`) // tin của người khác đứng SAU tin của B
+    await until(async () => (await countIn(B.page, `${tag}-c`)) === 1, 8000)
+    await openConversation(A.page, g.id) // A đọc tới tin của C
+    const live = await until(async () => (await seenBy(B.page)).includes(fx.a.id), 10000)
+    check(live, 'B thấy A "đã xem" tin của B dù A đọc tới tin của C')
+    await sleep(6500) // cron: mốc đọc của người gửi
+    await B.page.reload({ waitUntil: 'networkidle2' })
+    const reloaded = await until(async () => (await seenBy(B.page)).includes(fx.a.id), 10000)
+    check(reloaded, '"Đã xem" của A vẫn còn sau khi B tải lại (từ lastReadSeq)')
+    await api(fx.a, 'POST', '/chat/conversations/clear-history', { conversationId: g.id })
+    await B.page.reload({ waitUntil: 'networkidle2' })
+    const cleared = await until(async () => (await seenBy(B.page)).includes(fx.a.id), 10000)
+    check(cleared, 'A xoá lịch sử phía mình: B vẫn thấy A đã xem')
+    await shot(B.page, 'b16-seen')
+  } finally {
+    sockC.close()
+  }
+})
+
 scenario('B9', 'Poll, thu hồi, xoá phía mình, xoá lịch sử, log cuộc gọi', async ({ A, B, fx, sockB }) => {
   const g = await api(fx.a, 'POST', '/chat/create', { groupName: `QR khác ${Date.now().toString(36)}`, memberIds: [fx.b.id, fx.c.id] })
   const poll = await api(fx.b, 'POST', '/chat/polls', { conversationId: g.id, question: 'qr9 ăn gì?', options: ['Phở', 'Bún'] })

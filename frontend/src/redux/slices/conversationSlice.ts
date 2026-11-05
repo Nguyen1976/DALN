@@ -14,8 +14,8 @@ import { displayNameOf } from "@/utils/displayName";
 export interface ConversationMember {
   userId: string;
   role?: "ADMIN" | "MEMBER" | "OWNER";
-  lastReadAt?: string | null;
-  lastReadMessageId?: string | null;
+  /** How far they have read, as a seq of this conversation. */
+  lastReadSeq?: number | null;
   username?: string;
   avatar?: string;
   fullName?: string;

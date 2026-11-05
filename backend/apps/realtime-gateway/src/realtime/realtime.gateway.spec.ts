@@ -332,6 +332,39 @@ describe('RealtimeGateway', () => {
       expect(publishedTo(ROUTING_RMQ.UPDATE_MESSAGE_READ)).toHaveLength(1)
     })
 
+    it('sends each batch of reads to the whole room, the first reader included', async () => {
+      jest.useFakeTimers()
+      const reader = (userId: string) => ({
+        id: `s-${userId}`,
+        data: { userId },
+        emit: jest.fn(),
+        broadcast: { to: jest.fn().mockReturnValue({ emit: jest.fn() }) },
+      })
+      const msg = '6a35000000000000000b0001'
+      // B đọc trước, A đọc trong cùng cửa sổ trên cùng gateway: lô phát qua
+      // socket.broadcast của B thì loại trừ B — B không bao giờ thấy A đã xem.
+      await gateway.handleMessageRead(
+        { conversationId: 'c1', lastMessageId: msg, seq: 7 },
+        reader('uB') as never,
+      )
+      await gateway.handleMessageRead(
+        { conversationId: 'c1', lastMessageId: msg, seq: 'x' as never },
+        reader('uA') as never,
+      )
+      jest.advanceTimersByTime(1000)
+      jest.useRealTimers()
+
+      expect(to).toHaveBeenCalledWith('conversation:c1')
+      // Seen status của client so theo seq; seq rác thì không gửi.
+      expect(emitted).toHaveBeenCalledWith(SOCKET_EVENTS.CHAT.USER_READ_BATCH, {
+        conversationId: 'c1',
+        users: [
+          { userId: 'uB', lastReadMessageId: msg, seq: 7 },
+          { userId: 'uA', lastReadMessageId: msg },
+        ],
+      })
+    })
+
     it('keeps send order for messages that arrive while the handshake is still finishing', async () => {
       let sessionAlive!: (v: boolean) => void
       sessionStub.isAlive.mockReturnValueOnce(

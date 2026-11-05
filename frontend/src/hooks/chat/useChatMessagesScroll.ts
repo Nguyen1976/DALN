@@ -305,6 +305,10 @@ export function useChatMessagesScroll({
     socket.emit(SOCKET_EVENTS.CHAT.MESSAGE_READ, {
       conversationId,
       lastMessageId: latestFromOthers.id,
+      // Others draw "seen" by seq; the server finds the seq from the id itself.
+      ...(typeof latestFromOthers.seq === "number"
+        ? { seq: latestFromOthers.seq }
+        : {}),
     });
 
     dispatch(markConversationRead({ conversationId }));

@@ -121,6 +121,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
+/** Một lượt đọc chờ broadcast: tin đọc tới và seq của nó (nếu client gửi). */
+type ReadMark = { messageId: string; seq?: number }
+
 @Injectable()
 @WebSocketGateway({
   // `origin: '*'` cộng với handshake xác thực bằng cookie là một cặp sai: mọi
@@ -170,7 +173,8 @@ export class RealtimeGateway
     string,
     {
       timer: NodeJS.Timeout
-      users: Map<string, string>
+      /** userId -> tin đọc tới, kèm seq của nó nếu client gửi số hợp lệ. */
+      users: Map<string, ReadMark>
     }
   >()
   private readonly readBatchWindowMs = 1000
@@ -203,30 +207,36 @@ export class RealtimeGateway
     this.typingConversationsBySocket.delete(client.id)
   }
 
+  /**
+   * Gom lượt đọc của một hội thoại trong một cửa sổ rồi phát MỘT lần cho cả
+   * room. Không dùng `socket.broadcast` của người đọc đầu tiên: nó loại trừ
+   * chính socket đó, nên mốc của người đọc sau (cùng lô) không bao giờ tới
+   * được người đọc đầu. Ai cũng nhận cả mốc của mình; client tự bỏ qua.
+   */
   private queueReadBroadcast(
-    client: ClientSocket,
     conversationId: string,
     userId: string,
-    lastReadMessageId: string,
+    mark: ReadMark,
   ) {
     const current = this.readBatchByConversation.get(conversationId)
 
     if (!current) {
-      const users = new Map<string, string>()
-      users.set(userId, lastReadMessageId)
+      const users = new Map<string, ReadMark>()
+      users.set(userId, mark)
 
       const timer = setTimeout(() => {
         const pending = this.readBatchByConversation.get(conversationId)
         if (!pending) return
 
         const usersPayload = Array.from(pending.users.entries()).map(
-          ([uid, msgId]) => ({
+          ([uid, { messageId, seq }]) => ({
             userId: uid,
-            lastReadMessageId: msgId,
+            lastReadMessageId: messageId,
+            ...(seq !== undefined ? { seq } : {}),
           }),
         )
 
-        client.broadcast
+        this.server
           .to(`conversation:${conversationId}`)
           .emit(SOCKET_EVENTS.CHAT.USER_READ_BATCH, {
             conversationId,
@@ -243,7 +253,7 @@ export class RealtimeGateway
       return
     }
 
-    current.users.set(userId, lastReadMessageId)
+    current.users.set(userId, mark)
   }
 
   constructor(
@@ -662,8 +672,10 @@ export class RealtimeGateway
 
   /**
    * SEEN STATUS (ĐÃ XEM)
-   * Khi người dùng mở hội thoại, emit message_read event với { conversationId, lastMessageId }
-   * 1. Broadcast tới các thành viên khác để cập nhật UI
+   * Khi người dùng mở hội thoại, emit message_read event với
+   * { conversationId, lastMessageId, seq }
+   * 1. Broadcast tới các thành viên khác để cập nhật UI (seen status so theo
+   *    seq; chỉ để hiển thị — mốc đọc thật Chat Service tự tra từ id tin)
    * 2. Gửi async message tới Chat Service để cập nhật MongoDB
    */
   @SubscribeMessage(SOCKET_EVENTS.CHAT.MESSAGE_READ)
@@ -693,7 +705,7 @@ export class RealtimeGateway
       return
     }
 
-    const { conversationId, lastMessageId } = data ?? {}
+    const { conversationId, lastMessageId, seq } = data ?? {}
     if (!conversationId || !lastMessageId) {
       client.emit(SOCKET_EVENTS.CHAT.MESSAGE_ERROR, {
         code: 'INVALID_PAYLOAD',
@@ -704,7 +716,13 @@ export class RealtimeGateway
     }
 
     // 1️⃣ Batch broadcast user_read để giảm số lượng event dồn dập
-    this.queueReadBroadcast(client, conversationId, userId, lastMessageId)
+    this.queueReadBroadcast(conversationId, userId, {
+      messageId: lastMessageId,
+      seq:
+        Number.isSafeInteger(seq) && (seq as number) > 0
+          ? (seq as number)
+          : undefined,
+    })
 
     // 2️⃣ Gửi async message tới Chat Service để cập nhật MongoDB
     this.publish(ROUTING_RMQ.UPDATE_MESSAGE_READ, {

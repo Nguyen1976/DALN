@@ -10,6 +10,8 @@ import {
   selectConversationSeenStatus,
 } from "@/redux/slices/seenStatusSlice";
 import { selectUser } from "@/redux/slices/userSlice";
+import { selectMessage } from "@/redux/slices/messageSlice";
+import { seenByMessage } from "@/utils/seenBy";
 import { getConversationByIdAPI } from "@/apis";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import type { AppDispatch, RootState } from "@/redux/store";
@@ -73,21 +75,20 @@ export function useChatConversationContext(conversationId?: string) {
     [memberNamesMap, typingUsers, user.id],
   );
 
-  /** Who has read up to each message, for the receipts under it. */
-  const seenMessages = useMemo(() => {
-    const result: Record<
-      string,
-      { userId: string; username?: string; avatar?: string }[]
-    > = {};
-    for (const [userId, messageId] of Object.entries(readMarks)) {
-      (result[messageId] ??= []).push({
+  const messages = useSelector((state: RootState) =>
+    selectMessage(state, conversationId),
+  );
+
+  /** Who has read up to each of my messages, for the receipts under it. */
+  const seenMessages = useMemo(
+    () =>
+      seenByMessage(readMarks, messages, user.id, (userId) => ({
         userId,
         username: memberNamesMap.get(userId),
         avatar: memberAvatarMap.get(userId),
-      });
-    }
-    return result;
-  }, [readMarks, memberAvatarMap, memberNamesMap]);
+      })),
+    [readMarks, messages, user.id, memberAvatarMap, memberNamesMap],
+  );
 
   const hydratedSeenRef = useRef<string>("");
 
@@ -99,7 +100,7 @@ export function useChatConversationContext(conversationId?: string) {
     if (!conversationId || !conversationMembers.length) return;
 
     const signature = conversationMembers
-      .map((member) => `${member.userId}:${member.lastReadMessageId ?? ""}`)
+      .map((member) => `${member.userId}:${member.lastReadSeq ?? ""}`)
       .join("|");
 
     if (signature === hydratedSeenRef.current) return;
