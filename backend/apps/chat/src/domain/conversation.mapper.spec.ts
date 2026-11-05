@@ -15,9 +15,7 @@ const row = (mine: Record<string, unknown>) =>
 
 describe('ConversationMapper unread count', () => {
   it('unreadCount is latestSeq minus lastReadSeq, floored at 0', () => {
-    expect(
-      row({ latestSeq: 40, lastReadSeq: 33, unreadCount: 999 }).unreadCount,
-    ).toBe(7)
+    expect(row({ latestSeq: 40, lastReadSeq: 33 }).unreadCount).toBe(7)
     expect(row({ latestSeq: 30, lastReadSeq: 33 }).unreadCount).toBe(0)
   })
 
@@ -27,5 +25,39 @@ describe('ConversationMapper unread count', () => {
 
   it("carries the conversation's own lastMessageSeq, not a member's latestSeq", () => {
     expect(row({ latestSeq: 12, lastReadSeq: 12 }).lastMessageSeq).toBe(40)
+  })
+})
+
+describe('ConversationMapper members', () => {
+  it('a member carries its read mark as seq only', () => {
+    const summary = ConversationMapper.toSummary(
+      {
+        ...base,
+        members: [
+          {
+            userId: VIEWER,
+            role: 'MEMBER',
+            username: 'a',
+            fullName: 'A',
+            avatar: null,
+            lastReadSeq: 12,
+            latestSeq: 40,
+            lastMessageAt: null,
+          },
+        ],
+      } as never,
+      VIEWER,
+    )
+    expect(summary.members).toEqual([
+      {
+        userId: VIEWER,
+        role: 'MEMBER',
+        username: 'a',
+        fullName: 'A',
+        avatar: null,
+        lastReadSeq: 12,
+        lastMessageAt: null,
+      },
+    ])
   })
 })

@@ -42,7 +42,6 @@ export type BatchedMessage = {
   isSystem: boolean
   pollId: null
   isRevoked: boolean
-  isDeleted: boolean
   createdAt: Date
   updatedAt: Date
   /** Số thứ tự trong hội thoại; gán lúc ghi lô (giữ chỗ cả khoảng). */
@@ -75,8 +74,8 @@ type Pending = {
 const MAX_BATCH = Number(process.env.MESSAGE_BATCH_SIZE ?? 100)
 
 const DUPLICATE_KEY = 11000
-/** Tên unique index (conversationId, seq) — tạo ở migrations/chat/0008. */
-const SEQ_INDEX = 'message_conversation_seq'
+/** Unique index (conversationId, seq), partial — migrations/chat/0009. */
+const SEQ_INDEX = 'message_conversation_seq_unique'
 /**
  * Lô lỗi được ghi lại với ĐÚNG các document cũ (cùng _id, createdAt, seq). Làn
  * của hội thoại đã nhả ngay khi tin vào lô, nên thử lại ở handler sẽ sinh tin
@@ -120,7 +119,6 @@ function toDocument(doc: BatchedMessage): Prisma.InputJsonObject {
       : {}),
     ...(doc.clientMessageId ? { clientMessageId: doc.clientMessageId } : {}),
     isRevoked: false,
-    isDeleted: false,
     createdAt: date(doc.createdAt),
     updatedAt: date(doc.updatedAt),
     seq: doc.seq,
@@ -191,7 +189,6 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
       isSystem: Boolean(input.isSystem),
       pollId: null,
       isRevoked: false,
-      isDeleted: false,
       createdAt: now,
       updatedAt: now,
       seq: 0,

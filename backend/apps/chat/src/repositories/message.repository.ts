@@ -325,7 +325,6 @@ export class MessageRepository {
         content: true,
         type: true,
         isRevoked: true,
-        isDeleted: true,
         createdAt: true,
         senderMember: SENDER_SELECT,
         // The first attachment only — a reply bubble shows one thumbnail.
@@ -366,7 +365,6 @@ export class MessageRepository {
       where: {
         conversationId,
         ...flag,
-        isDeleted: false,
         // Thu hồi với mọi người mà bức ảnh vẫn nằm trong tab Ảnh/Video và mở
         // được đầy màn hình thì không phải là thu hồi.
         isRevoked: false,

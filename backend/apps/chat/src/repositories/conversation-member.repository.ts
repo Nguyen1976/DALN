@@ -59,8 +59,8 @@ export class ConversationMemberRepository {
     private readonly redisService: RedisService,
   ) {}
 
-  // role chữ thường / unreadCount thiếu của dữ liệu cũ do migrations/chat/0002,
-  // 0003 chuẩn hoá một lần lúc deploy — repository không còn backfill runtime.
+  // role chữ thường của dữ liệu cũ do migrations/chat/0002 chuẩn hoá một lần
+  // lúc deploy — repository không còn backfill runtime.
   private readonly activeMemberFilter = {
     isActive: true,
   }
@@ -217,10 +217,26 @@ export class ConversationMemberRepository {
    * nhóm không bị tính tin hệ thống báo chính việc họ được thêm.
    */
   async markReadUpTo(conversationId: string, userIds: string[], seq: number) {
-    return await this.advanceReadOfSenders(
-      conversationId,
-      userIds.map((senderId) => ({ senderId, seq })),
-    )
+    if (!userIds.length) return 0
+    // Cùng một seq cho mọi người: MỘT câu multi, không phải một câu mỗi người.
+    return await rawUpdate(this.prisma, 'conversationMember', [
+      {
+        q: {
+          conversationId: oid(conversationId),
+          userId: { $in: userIds.map(oid) },
+          ...this.activeMemberFilter,
+        },
+        u: [
+          {
+            $set: {
+              lastReadSeq: { $max: [{ $ifNull: ['$lastReadSeq', 0] }, seq] },
+              ...clearMentionsUpTo(seq),
+            },
+          },
+        ],
+        multi: true,
+      },
+    ])
   }
 
   /**
@@ -358,7 +374,7 @@ export class ConversationMemberRepository {
   }
 
   /**
-   * Ghi nhận user đã đọc tới `lastReadMessageId`: MỘT lệnh, chỉ khi mốc tiến
+   * Ghi nhận user đã đọc tới tin `lastReadMessageId`: MỘT lệnh, chỉ khi mốc tiến
    * lên (sự kiện đọc đến lệch thứ tự rất thường — client bắn một lần mỗi khi
    * danh sách tin đổi). Không còn đếm lại: unreadCount = latestSeq − lastReadSeq.
    * Đọc qua lượt nhắc cuối thì tắt luôn badge nhắc.
@@ -394,8 +410,6 @@ export class ConversationMemberRepository {
           {
             $set: {
               lastReadSeq: seq,
-              lastReadMessageId: oid(messageId),
-              lastReadAt: date(new Date()),
               ...clearMentionsUpTo(seq),
             },
           },
@@ -406,11 +420,7 @@ export class ConversationMemberRepository {
   }
 
   /** Xoá lịch sử phía mình: ẩn mọi tin tới hiện tại, coi như đã đọc hết. */
-  async clearHistoryForMember(
-    conversationId: string,
-    userId: string,
-    clearedHistoryAt: Date,
-  ) {
+  async clearHistoryForMember(conversationId: string, userId: string) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
       select: { lastSeq: true },
@@ -420,14 +430,7 @@ export class ConversationMemberRepository {
       {
         q: { conversationId: oid(conversationId), userId: oid(userId) },
         u: {
-          $set: {
-            clearedHistoryAt: date(clearedHistoryAt),
-            clearedHistorySeq: lastSeq,
-            lastReadSeq: lastSeq,
-            unreadCount: 0,
-            lastReadAt: date(clearedHistoryAt),
-            lastReadMessageId: null,
-          },
+          $set: { clearedHistorySeq: lastSeq, lastReadSeq: lastSeq },
         },
       },
     ])

@@ -429,6 +429,38 @@ export class FakeCollection {
     return Promise.resolve(name)
   }
 
+  private nameOf(spec: { key: FakeDoc; options: FakeDoc }) {
+    return typeof spec.options.name === 'string'
+      ? spec.options.name
+      : Object.keys(spec.key).join('_')
+  }
+
+  /** Như driver: `_id_` cộng các index đã tạo. */
+  indexes() {
+    return settle(() => [
+      { name: '_id_', key: { _id: 1 } },
+      ...this.indexSpecs.map((spec) => ({
+        name: this.nameOf(spec),
+        key: clone(spec.key),
+      })),
+    ])
+  }
+
+  /** Như driver: index không có thì lỗi `IndexNotFound` (code 27). */
+  dropIndex(name: string) {
+    const at = this.indexSpecs.findIndex((spec) => this.nameOf(spec) === name)
+    if (at < 0) {
+      return Promise.reject(
+        Object.assign(new Error(`index not found with name [${name}]`), {
+          code: 27,
+          codeName: 'IndexNotFound',
+        }),
+      )
+    }
+    this.indexSpecs.splice(at, 1)
+    return Promise.resolve({ ok: 1 })
+  }
+
   countDocuments(filter: FakeDoc = {}) {
     return settle(() => this.matching(filter).length)
   }

@@ -85,23 +85,6 @@ describe('MessageService pages by seq', () => {
     expect(page).toMatchObject({ nextCursor: null, hasMore: true })
   })
 
-  it('a timestamp cursor from before the switch still returns the next page', async () => {
-    const { service, messageRepo } = makeService([msg(39)])
-
-    await service.getMessagesByConversationId(CONV, USER, {
-      limit: 20,
-      cursor: `2026-11-01T00:00:40.000Z|${msg(40).id}`,
-    })
-
-    expect(
-      messageRepo.findByConversationIdPaginatedForUser,
-    ).toHaveBeenCalledWith(CONV, USER, 21, {
-      beforeSeq: 40,
-      afterSeq: null,
-      clearedHistorySeq: null,
-    })
-  })
-
   it('pages an asset tab by seq', async () => {
     const { service, messageRepo } = makeService([msg(9), msg(5)])
 

@@ -376,7 +376,6 @@ describe('MessageRepository history and assets by seq', () => {
       expect(where).toEqual({
         conversationId: CONV,
         ...flag,
-        isDeleted: false,
         isRevoked: false,
         seq: { lt: 40 },
       })

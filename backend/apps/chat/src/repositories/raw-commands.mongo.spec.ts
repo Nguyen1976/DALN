@@ -49,8 +49,9 @@ run('chat raw commands on a real MongoDB', () => {
       indexes: [
         {
           key: { conversationId: 1, seq: 1 },
-          name: 'message_conversation_seq',
+          name: 'message_conversation_seq_unique',
           unique: true,
+          partialFilterExpression: { seq: { $type: 'number' } },
         },
       ],
     })
@@ -74,8 +75,6 @@ run('chat raw commands on a real MongoDB', () => {
         conversationId,
         userId,
         isActive: true,
-        unreadCount: 0,
-        lastReadMessageId: null,
         lastReadSeq: 0,
         latestSeq: 0,
         ...fields,
@@ -188,7 +187,6 @@ run('chat raw commands on a real MongoDB', () => {
     })
     expect(await row(conv, user)).toMatchObject({
       lastReadSeq: 5,
-      lastReadMessageId: m5,
       unreadMentionCount: 1,
     })
     await repo.updateLastRead(conv, user, m9)
@@ -200,9 +198,31 @@ run('chat raw commands on a real MongoDB', () => {
     await expect(repo.updateLastRead(conv, user, m7)).resolves.toEqual({
       count: 0,
     })
-    expect(await row(conv, user)).toMatchObject({
+    expect(await row(conv, user)).toMatchObject({ lastReadSeq: 9 })
+  })
+
+  it('newcomers are marked read up to a seq in one multi update, forward only', async () => {
+    const conv = await conversation({ lastSeq: 20 })
+    const [behind, ahead, mentioned] = [id(), id(), id()]
+    await member(conv, behind, { lastReadSeq: 3 })
+    await member(conv, ahead, { lastReadSeq: 12 })
+    await member(conv, mentioned, {
+      lastReadSeq: 0,
+      lastMentionSeq: 8,
+      unreadMentionCount: 1,
+    })
+    const repo = new ConversationMemberRepository(
+      prisma as never,
+      redis as never,
+    )
+
+    await repo.markReadUpTo(conv, [behind, ahead, mentioned], 9)
+
+    expect(await row(conv, behind)).toMatchObject({ lastReadSeq: 9 })
+    expect(await row(conv, ahead)).toMatchObject({ lastReadSeq: 12 })
+    expect(await row(conv, mentioned)).toMatchObject({
       lastReadSeq: 9,
-      lastReadMessageId: m9,
+      unreadMentionCount: 0,
     })
   })
 
@@ -281,7 +301,7 @@ run('chat raw commands on a real MongoDB', () => {
       where: { id: conv },
       data: { lastSeq: 50 },
     })
-    await repo.clearHistoryForMember(conv, fresh, new Date())
+    await repo.clearHistoryForMember(conv, fresh)
     expect(await row(conv, fresh)).toMatchObject({
       clearedHistorySeq: 50,
       lastReadSeq: 50,
@@ -331,12 +351,12 @@ run('unread Lua scripts on a real Redis', () => {
     r = new Redis(process.env.REDIS_IT_URL ?? 'redis://localhost:6380')
   })
   afterAll(async () => {
-    await r.del(k('count'), k('last'), k('newest'))
+    await r.del(k('last'), k('newest'))
     r.disconnect()
   })
 
   it('set-if-greater for the sender seq and the last message, claim and restore', async () => {
-    await r.del(k('count'), k('last'), k('newest'))
+    await r.del(k('last'), k('newest'))
     await r.eval(SET_NEWEST_SEQ_SCRIPT, 1, k('newest'), 'a', 7)
     await r.eval(SET_NEWEST_SEQ_SCRIPT, 1, k('newest'), 'a', 5)
     await r.hset(k('newest'), 'b', '6a350000000000000000ab01') // ObjectId của bản cũ
@@ -362,13 +382,10 @@ run('unread Lua scripts on a real Redis', () => {
       t: 'chín',
     })
 
-    const claimed = (await r.eval(
-      CLAIM_SCRIPT,
-      3,
-      k('count'),
-      k('last'),
-      k('newest'),
-    )) as [string, string[]]
+    const claimed = (await r.eval(CLAIM_SCRIPT, 2, k('last'), k('newest'))) as [
+      string,
+      string[],
+    ]
     expect(JSON.parse(claimed[0])).toEqual({ seq: 9, t: 'chín' })
     expect(claimed[1]).toEqual(['a', '7', 'b', '2'])
     expect(await r.exists(k('last'), k('newest'))).toBe(0)
@@ -384,8 +401,7 @@ run('unread Lua scripts on a real Redis', () => {
     await r.hset(k('newest'), 'a', '11')
     await r.eval(
       RESTORE_SCRIPT,
-      3,
-      k('count'),
+      2,
       k('last'),
       k('newest'),
       JSON.stringify({ newest: { a: 7, b: 2 }, last: claimed[0], lastSeq: 9 }),

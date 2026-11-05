@@ -7,25 +7,14 @@ type Person = Pick<conversationMember, 'userId'> &
 /** The viewer's own counters, off their membership row. */
 type ViewerState = Pick<
   conversationMember,
-  | 'unreadCount'
-  | 'unreadMentionCount'
-  | 'lastMentionMessageId'
-  | 'lastReadSeq'
-  | 'latestSeq'
+  'unreadMentionCount' | 'lastMentionMessageId' | 'lastReadSeq' | 'latestSeq'
 >
 
 /** What a member row brings to a conversation's detail. */
 export type MemberView = ViewerState &
   Pick<
     conversationMember,
-    | 'userId'
-    | 'role'
-    | 'username'
-    | 'fullName'
-    | 'avatar'
-    | 'lastReadAt'
-    | 'lastReadMessageId'
-    | 'lastMessageAt'
+    'userId' | 'role' | 'username' | 'fullName' | 'avatar' | 'lastMessageAt'
   >
 
 /** A row of the viewer's list: their membership flattened onto it. */
@@ -91,8 +80,6 @@ export class ConversationMapper {
               username: member.username,
               avatar: member.avatar,
               fullName: member.fullName,
-              lastReadAt: member.lastReadAt ?? null,
-              lastReadMessageId: member.lastReadMessageId ?? null,
               lastReadSeq: member.lastReadSeq ?? 0,
               lastMessageAt: member.lastMessageAt ?? null,
             })),

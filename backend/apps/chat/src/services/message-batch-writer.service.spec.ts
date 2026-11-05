@@ -35,7 +35,7 @@ type StoredRow = {
 }
 
 const SEQ_DUP =
-  'E11000 duplicate key error collection: chat-service.message index: message_conversation_seq dup key'
+  'E11000 duplicate key error collection: chat-service.message index: message_conversation_seq_unique dup key'
 const CLIENT_DUP =
   'E11000 duplicate key error collection: chat-service.message index: message_sender_client_id dup key'
 
@@ -133,6 +133,8 @@ describe('MessageBatchWriter', () => {
     expect(cmd.documents[0]._id).toEqual({ $oid: expect.any(String) })
     expect(cmd.documents[0].senderId).toEqual({ $oid: SENDER })
     expect(cmd.documents[0].createdAt).toEqual({ $date: expect.any(String) })
+    // isDeleted không bao giờ thành true: không ghi rác vào mọi tin.
+    expect(cmd.documents[0]).not.toHaveProperty('isDeleted')
   })
 
   it('assigns increasing seq per conversation in buffer order', async () => {

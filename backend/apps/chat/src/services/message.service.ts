@@ -24,12 +24,7 @@ import type { AssetKind, UploadType } from '../http/chat-http.dto'
 import { resolveMentions } from '../domain/mention.resolver'
 import { MessageMapper, type MessageRow } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
-import {
-  buildSeqCursor,
-  parseKeysetCursor,
-  parseSeqCursor,
-  toPage,
-} from '@app/util'
+import { buildSeqCursor, parseSeqCursor, toPage } from '@app/util'
 import { displayNameOf } from '../domain/display-name'
 import { isObjectId } from '../domain/object-id'
 
@@ -323,10 +318,7 @@ export class MessageService {
       userId,
       page.limit + 1,
       {
-        beforeSeq:
-          afterSeq === null
-            ? await this.seqOfCursor(conversationId, page.cursor)
-            : null,
+        beforeSeq: afterSeq === null ? parseSeqCursor(page.cursor) : null,
         afterSeq,
         clearedHistorySeq: member.clearedHistorySeq ?? null,
       },
@@ -343,20 +335,6 @@ export class MessageService {
     return afterSeq === null
       ? { items: dtos, nextCursor }
       : { items: dtos, nextCursor: null, hasMore: rows.length > page.limit }
-  }
-
-  /**
-   * Cursor trang cũ hơn -> seq. Cursor `s:<seq>` đọc thẳng; cursor kiểu cũ
-   * `<thời điểm>|<id>` (client mở từ trước lúc deploy) được đổi sang seq của
-   * chính tin đó, để "tải thêm" không quay về trang đầu.
-   */
-  private async seqOfCursor(conversationId: string, cursor?: string) {
-    const seq = parseSeqCursor(cursor)
-    if (seq !== null) return seq
-    const legacy = parseKeysetCursor(cursor)
-    if (!legacy?.id || !isObjectId(legacy.id)) return null
-    const message = await this.messageRepo.findById(legacy.id, conversationId)
-    return typeof message?.seq === 'number' ? message.seq : null
   }
 
   /**
@@ -512,7 +490,6 @@ export class MessageService {
     await this.memberRepo.clearHistoryForMember(
       data.conversationId,
       data.userId,
-      new Date(),
     )
   }
 
@@ -535,7 +512,7 @@ export class MessageService {
       conversationId,
       kind,
       page.limit + 1,
-      await this.seqOfCursor(conversationId, page.cursor),
+      parseSeqCursor(page.cursor),
     )
     const { items, nextCursor } = toPage(rows, page.limit, (m) =>
       typeof m.seq === 'number' ? buildSeqCursor(m.seq) : null,

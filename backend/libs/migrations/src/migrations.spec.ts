@@ -11,6 +11,8 @@ import initUnreadCount from '../../../migrations/chat/0003-init-unread-count'
 import repairUnreadCounts from '../../../migrations/chat/0004-repair-unread-counts'
 import messageClientIdUnique from '../../../migrations/chat/0007-message-client-id-unique'
 import messageSeq from '../../../migrations/chat/0008-message-seq'
+import messageSeqUniquePartial from '../../../migrations/chat/0009-message-seq-unique-partial'
+import dropPreSeqLeftovers from '../../../migrations/chat/0010-drop-pre-seq-leftovers'
 import { FakeDb, matches, type FakeDoc } from './testing/fake-db'
 import { makeContext } from './testing/helpers'
 
@@ -679,5 +681,99 @@ describe('chat/0008-message-seq', () => {
 
     expect(db.snapshot()).toEqual(before)
     expect(logs.at(-1)).toMatch(/2 hội thoại cần đánh số/)
+  })
+})
+
+describe('chat/0009-message-seq-unique-partial', () => {
+  const names = async (db: FakeDb) =>
+    (await db.collection('message').indexes()).map((i) => i.name)
+
+  it('replaces the plain unique index with a partial one', async () => {
+    const db = new FakeDb('chat-service')
+    void db
+      .collection('message')
+      .createIndex(
+        { conversationId: 1, seq: 1 },
+        { name: 'message_conversation_seq', unique: true },
+      )
+
+    await messageSeqUniquePartial.up(makeContext(db).ctx)
+
+    expect(db.collection('message').indexSpecs).toEqual([
+      {
+        key: { conversationId: 1, seq: 1 },
+        options: {
+          name: 'message_conversation_seq_unique',
+          unique: true,
+          partialFilterExpression: { seq: { $type: 'number' } },
+        },
+      },
+    ])
+  })
+
+  it('runs where the old index is already gone (db push dropped it)', async () => {
+    const db = new FakeDb('chat-service')
+
+    await messageSeqUniquePartial.up(makeContext(db).ctx)
+
+    expect(await names(db)).toEqual(['_id_', 'message_conversation_seq_unique'])
+  })
+
+  it('dry-run creates nothing', async () => {
+    const db = new FakeDb('chat-service')
+
+    await messageSeqUniquePartial.up(makeContext(db, { dryRun: true }).ctx)
+
+    expect(db.collection('message').indexSpecs).toEqual([])
+  })
+})
+
+describe('chat/0010-drop-pre-seq-leftovers', () => {
+  const MEMBER = oid(600)
+  const MSG = oid(601)
+
+  function seed() {
+    const db = new FakeDb('chat-service')
+    db.collection('conversationMember').seed({
+      _id: MEMBER,
+      lastReadSeq: 7,
+      unreadMentionCount: 1,
+      unreadCount: 12,
+      lastReadMessageId: oid(11),
+      lastReadAt: new Date(),
+      clearedHistoryAt: new Date(),
+    })
+    db.collection('message').seed({ _id: MSG, seq: 3, isDeleted: false })
+    return db
+  }
+
+  it('unsets the fields seq replaced, keeps the rest', async () => {
+    const db = seed()
+
+    await dropPreSeqLeftovers.up(makeContext(db).ctx)
+
+    expect(db.collection('conversationMember').docs).toEqual([
+      { _id: MEMBER, lastReadSeq: 7, unreadMentionCount: 1 },
+    ])
+    expect(db.collection('message').docs).toEqual([{ _id: MSG, seq: 3 }])
+  })
+
+  it('runs again as a no-op', async () => {
+    const db = seed()
+    await dropPreSeqLeftovers.up(makeContext(db).ctx)
+    const before = db.snapshot()
+
+    await dropPreSeqLeftovers.up(makeContext(db).ctx)
+
+    expect(db.snapshot()).toEqual(before)
+  })
+
+  it('dry-run changes nothing', async () => {
+    const db = seed()
+    const before = db.snapshot()
+
+    await dropPreSeqLeftovers.up(makeContext(db, { dryRun: true }).ctx)
+
+    expect(db.snapshot()).toEqual(before)
   })
 })

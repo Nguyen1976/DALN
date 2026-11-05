@@ -12,7 +12,6 @@ import {
   FLUSH_CONCURRENCY,
   RESTORE_SCRIPT,
   lastMessageKey,
-  unreadCountKey,
   unreadLastKey,
 } from './unread.constants'
 
@@ -118,11 +117,7 @@ export class UnreadCron {
    * transaction) và hai lệnh song song trên cùng document abort lẫn nhau.
    */
   private async flushConversation(conversationId: string): Promise<void> {
-    const keys = [
-      unreadCountKey(conversationId),
-      lastMessageKey(conversationId),
-      unreadLastKey(conversationId),
-    ]
+    const keys = [lastMessageKey(conversationId), unreadLastKey(conversationId)]
 
     // Claim TRƯỚC khi đọc: lấy-và-xoá các key trong một script nguyên tử. Tin
     // đến sau lúc claim rơi vào key mới tinh và được lượt sau xử lý.

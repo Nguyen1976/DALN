@@ -18,13 +18,6 @@ export const DIRTY_BATCH_SIZE = 500
  */
 export const FLUSH_CONCURRENCY = 25
 
-/**
- * Hash `senderId -> số tin` của bản cũ (trước seq). Không còn ghi; claim vẫn
- * xoá key này để dữ liệu còn sót không nằm lại mãi.
- */
-export const unreadCountKey = (conversationId: string) =>
-  `unread_count:${conversationId}`
-
 /** JSON tin nhắn cuối cùng (kèm `seq`), chờ cron ghi xuống conversation. */
 export const lastMessageKey = (conversationId: string) =>
   `last_message:${conversationId}`
@@ -80,13 +73,13 @@ return 1
  * theo. Lua chạy liền một mạch nên không lệnh nào chen vào giữa: tin đến sau
  * rơi vào key mới tinh, lượt sau xử lý. Key không tồn tại thì trả rỗng.
  *
- * KEYS = unread_count (bản cũ, chỉ xoá), last_message, unread_last
+ * KEYS = last_message, unread_last
  * Trả về [GET last (nil nếu không có), HGETALL newest]
  */
 export const CLAIM_SCRIPT = `
-local last = redis.call('GET', KEYS[2])
-local newest = redis.call('HGETALL', KEYS[3])
-redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])
+local last = redis.call('GET', KEYS[1])
+local newest = redis.call('HGETALL', KEYS[2])
+redis.call('DEL', KEYS[1], KEYS[2])
 return { last, newest }
 `
 
@@ -96,19 +89,19 @@ return { last, newest }
  * - last_message: chỉ đặt lại khi chưa có bản mới hơn (theo seq) được ghi sau
  *   lúc claim.
  *
- * KEYS = unread_count, last_message, unread_last
+ * KEYS = last_message, unread_last
  * ARGV[1] = JSON { newest: {senderId: seq}, last: string | "", lastSeq: number }
  */
 export const RESTORE_SCRIPT = `
 local data = cjson.decode(ARGV[1])
 for sender, seq in pairs(data.newest) do
-  local cur = tonumber(redis.call('HGET', KEYS[3], sender))
+  local cur = tonumber(redis.call('HGET', KEYS[2], sender))
   if (not cur) or cur < tonumber(seq) then
-    redis.call('HSET', KEYS[3], sender, seq)
+    redis.call('HSET', KEYS[2], sender, seq)
   end
 end
 if type(data.last) == 'string' and data.last ~= '' then
-  local cur = redis.call('GET', KEYS[2])
+  local cur = redis.call('GET', KEYS[1])
   local restore = true
   if cur then
     local ok, parsed = pcall(cjson.decode, cur)
@@ -116,7 +109,7 @@ if type(data.last) == 'string' and data.last ~= '' then
       and tonumber(parsed.seq) >= tonumber(data.lastSeq))
   end
   if restore then
-    redis.call('SET', KEYS[2], data.last)
+    redis.call('SET', KEYS[1], data.last)
   end
 end
 return 1

@@ -79,7 +79,6 @@ export interface Message {
     attachmentMimeType?: string;
     attachmentThumbnailUrl?: string;
   };
-  isDeleted?: boolean;
   isRevoked?: boolean;
   /** Tin nhắn do hệ thống ghi, không phải nội dung người dùng gõ. */
   isSystem?: boolean;

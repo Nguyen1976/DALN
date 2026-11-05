@@ -13,13 +13,11 @@ import { date, oid, rawUpdate } from './raw-ejson'
  * however big a group is.
  */
 const LIST_ROW_SELECT = {
-  unreadCount: true,
   unreadMentionCount: true,
   // unreadCount = latestSeq − lastReadSeq (ConversationMapper).
   lastReadSeq: true,
   latestSeq: true,
   lastMentionMessageId: true,
-  lastReadAt: true,
   lastMessageAt: true,
   peerUserId: true,
   peerUsername: true,
@@ -35,10 +33,7 @@ const MEMBER_VIEW_SELECT = {
   username: true,
   fullName: true,
   avatar: true,
-  lastReadAt: true,
-  lastReadMessageId: true,
   lastMessageAt: true,
-  unreadCount: true,
   unreadMentionCount: true,
   lastMentionMessageId: true,
   lastReadSeq: true,

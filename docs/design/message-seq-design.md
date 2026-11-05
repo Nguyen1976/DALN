@@ -1,6 +1,6 @@
 # Thiết kế: số thứ tự `seq` cho tin nhắn
 
-Trạng thái: **đã triển khai §1–§9** trên branch `perf/query-enhancements` (2026-11-04). Kế hoạch: `docs/superpowers/plans/2026-11-04-query-enhancements.md`. Xem mục 12 cho các chỗ lệch so với bản nháp.
+Trạng thái: **đã triển khai §1–§9**, kể cả giai đoạn 4 (dọn dẹp, 2026-11-05, §13), trên branch `perf/query-enhancements` (2026-11-04). Kế hoạch: `docs/superpowers/plans/2026-11-04-query-enhancements.md`. Xem mục 12 cho các chỗ lệch so với bản nháp.
 
 ## 1. Vấn đề
 
@@ -213,3 +213,24 @@ Mỗi giai đoạn chạy được độc lập, có test và một lượt QC t
 | Xoá hội thoại (chưa có trong bản nháp) | Ẩn ngay bằng `deletedAt` cộng `isActive = false`; cron `conversation-purge` dọn theo lô 1.000 tin | Transaction một lần với `$in` toàn bộ id vượt giới hạn: đo được 504 ở 100.000 tin |
 | Lỗ trong dãy `seq` | Mỗi lỗ (tin trùng bị loại) làm unread dư 1 | Chấp nhận (§3) |
 | Ngoài phạm vi | `changeSeq` và bia mộ cho sửa/xoá hẳn (§10.3) | Bài toán riêng |
+
+## 13. Giai đoạn 4 — dọn dẹp (2026-11-05)
+
+Những thứ `seq` đã thay mà không còn ai đọc. Để lại thì không chỉ tốn chỗ, chúng **lệch** với `seq`. Đo trên dev: 514/1.350 dòng thành viên còn `unreadCount` cũ khác số thật; `lastReadMessageId` không tiến khi cron đẩy mốc đọc của người gửi, còn xoá lịch sử thì đặt nó về null.
+
+| Bỏ | Thay bằng |
+|---|---|
+| `conversationMember.unreadCount` | `latestSeq − lastReadSeq` (mapper) |
+| `lastReadMessageId`, `lastReadAt` | `lastReadSeq`. Sự kiện `message:read` vẫn gửi id tin; server tự tra `seq`. Client gửi thêm `seq` để người khác vẽ "đã xem" |
+| `clearedHistoryAt` | `clearedHistorySeq` |
+| `message.isDeleted` | Không đường nào đặt `true`. "Xoá phía mình" là `DeleteMessage`, "thu hồi" là `isRevoked` |
+| Khoá Redis `unread_count:*` | Không còn ghi từ giai đoạn 3 |
+| Cursor kiểu cũ `<thời điểm>\|<id>` cho trang tin | Chỉ còn `s:<seq>` |
+| Index `message(conversationId, createdAt, _id)`, `member(conversationId, lastReadAt)`, `member(username)`, `conversation(lastMessageAt)` | Không truy vấn nào dùng (thống kê `$indexStats` trên dev: 2 index cuối 0 lượt) |
+
+Migration: `0009-message-seq-unique-partial` (deploy), `0010-drop-pre-seq-leftovers` (background, `$unset` các field trên — dev: 1.350 thành viên, 1.048.850 tin, 24 s).
+
+**Lỗi phát hiện khi dọn:** `prisma db push` chạy ở *mỗi* lần deploy và **xoá mọi index thường không khai trong schema** (thử trên Mongo 7.0). Nó để yên index partial. Unique `message_conversation_seq` của 0008 vì thế mất ngay ở lần deploy kế tiếp, và 0008 không chạy lại. Sửa: unique thành partial (`seq` kiểu số) do 0009 tạo; truy vấn dùng `@@index([conversationId, seq])` khai trong schema, vì Prisma bọc `where` trong `$expr` và không dùng được index partial. Hệ quả cho DB chưa từng chạy 0008: db push xoá index `(createdAt, _id)` trước khi 0008 dùng nó, nên 0008 vẫn đúng nhưng mỗi lô quét lại cả hội thoại.
+
+**"Đã xem" theo `seq`:** client gán mỗi người vào tin mới nhất *của mình* có `seq` ≤ mốc đọc của họ. So theo id thì trong nhóm, ai đọc tới tin của người khác đứng sau tin của mình không bao giờ hiện là đã xem. Kèm theo là một lỗi có từ trước: gateway gom lượt đọc trong 1 giây rồi phát bằng `socket.broadcast` của người đọc *đầu tiên*, nên người đó không bao giờ nhận được mốc của những người đọc sau trong cùng lô. Giờ lô được phát cho cả room.
+

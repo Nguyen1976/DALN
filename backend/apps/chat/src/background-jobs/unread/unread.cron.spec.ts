@@ -5,7 +5,6 @@ import {
   DIRTY_CONVERSATIONS_KEY,
   RESTORE_SCRIPT,
   lastMessageKey,
-  unreadCountKey,
   unreadLastKey,
 } from './unread.constants'
 
@@ -92,7 +91,7 @@ class FakeRedis {
     keys: string[],
     args: (string | number)[],
   ): unknown {
-    const [countKey, lastKey, newestKey] = keys
+    const [lastKey, newestKey] = keys
     const flat = (hash?: Record<string, string>) =>
       Object.entries(hash ?? {}).flat()
 
@@ -101,7 +100,6 @@ class FakeRedis {
         this.strings.get(lastKey) ?? null,
         flat(this.hashes.get(newestKey)),
       ]
-      this.hashes.delete(countKey)
       this.strings.delete(lastKey)
       this.hashes.delete(newestKey)
       return result
@@ -147,11 +145,7 @@ function setup() {
   return { redis, memberRepo, conversationRepo, cron }
 }
 
-const liveKeys = [
-  unreadCountKey(CONV),
-  lastMessageKey(CONV),
-  unreadLastKey(CONV),
-]
+const liveKeys = [lastMessageKey(CONV), unreadLastKey(CONV)]
 
 describe('UnreadCron', () => {
   beforeEach(() => {

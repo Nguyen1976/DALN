@@ -80,7 +80,6 @@ export type MessageRow = Pick<
       | 'replyToMessageId'
       | 'isRevoked'
       | 'isSystem'
-      | 'isDeleted'
       | 'seq'
     >
   > & {
@@ -162,7 +161,6 @@ export class MessageMapper {
         : undefined,
       isRevoked: Boolean(message.isRevoked),
       isSystem: Boolean(message.isSystem),
-      isDeleted: Boolean(message.isDeleted),
       createdAt: new Date(message.createdAt).toISOString(),
       senderMember: message.senderMember
         ? toSender(message.senderMember)

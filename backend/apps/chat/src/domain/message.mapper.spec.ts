@@ -16,4 +16,8 @@ describe('MessageMapper.toResponse', () => {
   it('sends null when a row has no seq', () => {
     expect(MessageMapper.toResponse(row).seq).toBeNull()
   })
+
+  it('sends no isDeleted: nothing ever sets it', () => {
+    expect(MessageMapper.toResponse(row)).not.toHaveProperty('isDeleted')
+  })
 })

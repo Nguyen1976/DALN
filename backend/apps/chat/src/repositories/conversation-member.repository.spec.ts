@@ -53,6 +53,13 @@ describe('ConversationMemberRepository on the hot paths', () => {
       isActive: true,
       $or: [{ lastReadSeq: { $lt: 40 } }, { lastReadSeq: null }],
     })
+    // Mốc đọc duy nhất là seq; lastReadMessageId/lastReadAt đã bỏ.
+    const [{ u }] = commands[0].updates as { u: [{ $set: object }] }[]
+    expect(Object.keys(u[0].$set).sort()).toEqual([
+      'lastMentionMessageId',
+      'lastReadSeq',
+      'unreadMentionCount',
+    ])
   })
 
   it('a message from another conversation or an invalid id writes nothing', async () => {
@@ -112,24 +119,41 @@ describe('ConversationMemberRepository on the hot paths', () => {
     expect((commands[1].updates as unknown[]).length).toBe(2)
   })
 
+  it('newcomers are marked read with one statement whatever their number', async () => {
+    const { repo, commands } = setup()
+
+    await repo.markReadUpTo(CONV, [USER, OTHER], 9)
+
+    expect(commands).toHaveLength(1)
+    const updates = commands[0].updates as {
+      q: object
+      u: [{ $set: Record<string, unknown> }]
+      multi: boolean
+    }[]
+    expect(updates).toHaveLength(1)
+    expect(updates[0].q).toEqual({
+      conversationId: { $oid: CONV },
+      userId: { $in: [{ $oid: USER }, { $oid: OTHER }] },
+      isActive: true,
+    })
+    expect(updates[0].multi).toBe(true)
+    expect(updates[0].u[0].$set.lastReadSeq).toEqual({
+      $max: [{ $ifNull: ['$lastReadSeq', 0] }, 9],
+    })
+  })
+
   it('clearing history marks everything so far as read and hidden', async () => {
     const { repo, commands } = setup()
 
-    await repo.clearHistoryForMember(
-      CONV,
-      USER,
-      new Date('2026-11-04T00:00:00Z'),
-    )
+    await repo.clearHistoryForMember(CONV, USER)
 
     expect(commands).toHaveLength(1)
     const [update] = commands[0].updates as {
       u: { $set: Record<string, unknown> }
     }[]
-    expect(update.u.$set).toMatchObject({
-      clearedHistorySeq: 77,
-      lastReadSeq: 77,
-      unreadCount: 0,
-    })
+    // Chỉ hai mốc seq: clearedHistoryAt / unreadCount / lastReadAt /
+    // lastReadMessageId không còn ai đọc, ghi vào là rác lệch với seq.
+    expect(update.u.$set).toEqual({ clearedHistorySeq: 77, lastReadSeq: 77 })
   })
 })
 
