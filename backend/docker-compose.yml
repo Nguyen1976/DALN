@@ -3,8 +3,10 @@
 #
 #   docker compose up -d              -> dev full stack (hot-reload + mongo/redis/...)
 #   docker compose --profile training up -d neo4j   -> chỉ bật Neo4j khi train offline
+#   Mặc định: 1 chat + 1 realtime-gateway.
 #   docker compose --profile scale up -d  -> thêm chat-2, chat-3, realtime-gateway-2,
 #                                            realtime-gateway-3 (QC nhiều instance)
+#   Bật một phần / thêm nữa / thu về 1: docs/run-multiple-instances.md
 #
 # PRODUCTION (managed cloud — không chạy container stateful):
 #   cp .env.production.example .env.production
