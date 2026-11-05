@@ -14,8 +14,8 @@ import { displayNameOf } from "@/utils/displayName";
 export interface ConversationMember {
   userId: string;
   role?: "ADMIN" | "MEMBER" | "OWNER";
-  lastReadAt?: string | null;
-  lastReadMessageId?: string | null;
+  /** How far they have read, as a seq of this conversation. */
+  lastReadSeq?: number | null;
   username?: string;
   avatar?: string;
   fullName?: string;
@@ -46,6 +46,8 @@ export interface Conversation {
   updatedAt: string;
   members?: ConversationMember[];
   lastMessageId?: string | null;
+  /** Seq of the message shown as the last one; it only ever moves forward. */
+  lastMessageSeq?: number | null;
   lastMessageAt?: string | null;
   lastMessageText?: string;
   lastMessageSenderId?: string | null;
@@ -108,11 +110,24 @@ export const conversationSlice = createSlice({
         (conversation) => conversation.id === conversationId,
       );
       if (!target) return;
+      // A message that reaches us after a newer one (a reply waits for its
+      // quote; a resync brings back older ones) must not become "the last".
+      if (
+        typeof lastMessage.seq === "number" &&
+        typeof target.lastMessageSeq === "number" &&
+        lastMessage.seq < target.lastMessageSeq
+      ) {
+        return;
+      }
 
       const preview = MessageMapper.previewText(lastMessage);
       const updated: Conversation = {
         ...target,
         lastMessageId: lastMessage.id,
+        lastMessageSeq:
+          typeof lastMessage.seq === "number"
+            ? lastMessage.seq
+            : target.lastMessageSeq,
         lastMessageAt: lastMessage.createdAt || target.lastMessageAt,
         lastMessageText: preview,
         lastMessageSenderId: lastMessage.senderId,

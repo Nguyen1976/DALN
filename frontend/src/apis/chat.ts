@@ -58,6 +58,16 @@ export const getMessagesAPI = (
     `/chat/messages/${conversationId}?limit=${limit}${cursorParam(cursor)}`,
   );
 
+/** Messages after `afterSeq`, oldest first: the resync after a gap or a reconnect. */
+export const getMessagesAfterAPI = (
+  conversationId: string,
+  limit: number,
+  afterSeq: number,
+) =>
+  api.get<{ items: Message[]; nextCursor: null; hasMore: boolean }>(
+    `/chat/messages/${conversationId}?limit=${limit}&afterSeq=${afterSeq}`,
+  );
+
 export const clearConversationMentionsAPI = (conversationId: string) =>
   api.post("/chat/mentions/clear", { conversationId });
 

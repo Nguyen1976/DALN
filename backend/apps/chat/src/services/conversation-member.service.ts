@@ -80,11 +80,19 @@ export class ConversationMemberService {
       )
     }
 
-    await this.messageService.createSystemMessageAndSync(
+    const announced = await this.messageService.createSystemMessageAndSync(
       dto.conversationId,
       dto.userId,
       `${displayNameOf(actor)} đã thêm ${newMemberIds.length} thành viên vào nhóm`,
     )
+    // Tin "đã thêm" ghi SAU khi họ vào nhóm: không tính là chưa đọc với chính họ.
+    if (typeof announced?.seq === 'number') {
+      await this.memberRepo.markReadUpTo(
+        dto.conversationId,
+        newMemberIds,
+        announced.seq,
+      )
+    }
 
     const res = await this.conversationRepo.findByIdWithMembers(conversation.id)
     if (!res) ChatErrors.conversationNotFound()

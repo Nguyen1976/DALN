@@ -2,10 +2,11 @@ import { Inject, Injectable } from '@nestjs/common'
 import { messageType, Prisma } from 'apps/chat/src/generated'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import { MessageBatchWriter } from '../services/message-batch-writer.service'
-import { olderThanCursor, type KeysetCursor } from '@app/util'
 import { isUniqueConstraintError } from '@app/saga'
 import type { MessageMediaInput } from 'libs/constant/rmq/payload'
 import { findStoredBySenderClientIds } from './message-raw.queries'
+import { reserveSeq } from './seq-allocator'
+import { facetsOf } from '../domain/message-facets'
 
 const SENDER_SELECT = {
   select: { userId: true, username: true, fullName: true, avatar: true },
@@ -91,9 +92,19 @@ export class MessageRepository {
   private async createWithRelations(
     data: Parameters<MessageRepository['create']>[0],
   ) {
+    // Số thứ tự giữ chỗ TRƯỚC khi ghi. Ghi lỗi (kể cả trùng clientMessageId)
+    // thì số đó thành lỗ trong dãy — được phép, xem seq-allocator.
+    const seq = await reserveSeq(this.prisma, data.conversationId, 1)
+    const facets = facetsOf(
+      data.type,
+      (data.medias ?? []).map((media) => media.mediaType),
+      data.content,
+    )
     // Ghi dữ liệu & trả về trong 1 nhịp duy nhất (nested writes)
     const created = await this.prisma.message.create({
       data: {
+        seq,
+        ...facets,
         conversationId: data.conversationId,
         senderId: data.senderId,
         type: data.type,
@@ -157,8 +168,11 @@ export class MessageRepository {
     content: string
     callInfo: Record<string, unknown>
   }) {
+    const seq = await reserveSeq(this.prisma, data.conversationId, 1)
     const created = await this.prisma.message.create({
       data: {
+        seq,
+        ...facetsOf(messageType.CALL, [], data.content),
         conversationId: data.conversationId,
         senderId: data.senderId,
         type: messageType.CALL,
@@ -182,30 +196,37 @@ export class MessageRepository {
   /**
    * A page of the thread as `userId` sees it: nothing from before they
    * cleared their history, nothing they deleted for themselves.
+   *
+   * Ordered by `seq`, the conversation's own numbering: `beforeSeq` pages back
+   * through history (newest first), `afterSeq` fetches what came after a seq
+   * the client already has (oldest first) — the resync after a reconnect or a
+   * gap. `seq < X` inside Prisma's `$expr` still gets index bounds on
+   * (conversationId, seq).
    */
   async findByConversationIdPaginatedForUser(
     conversationId: string,
     userId: string,
     take: number,
-    cursor: KeysetCursor | null,
-    clearedHistoryAt: Date | null,
+    range: {
+      beforeSeq: number | null
+      afterSeq: number | null
+      clearedHistorySeq: number | null
+    },
   ) {
+    const ascending = range.afterSeq !== null
     const batchSize = Math.max(take * 3, 30)
     const messages: Prisma.messageGetPayload<{
       include: typeof MESSAGE_INCLUDE
     }>[] = []
-    let nextCursor: KeysetCursor | null = cursor
+    let bound = ascending ? range.afterSeq : range.beforeSeq
 
     while (messages.length < take) {
-      // Both the cursor and the cleared-history mark constrain `createdAt`.
-      // They used to be spread in as two separate `createdAt` keys, so the
-      // second overwrote the first: a user who had cleared their history lost
-      // the cursor entirely and "load older" kept returning the same newest
-      // page for ever. Collecting them into one AND keeps both in force.
       const bounds: Prisma.messageWhereInput[] = []
-      if (nextCursor) bounds.push(olderThanCursor('createdAt', nextCursor))
-      if (clearedHistoryAt) {
-        bounds.push({ createdAt: { gt: clearedHistoryAt } })
+      if (bound !== null) {
+        bounds.push({ seq: ascending ? { gt: bound } : { lt: bound } })
+      }
+      if (range.clearedHistorySeq !== null) {
+        bounds.push({ seq: { gt: range.clearedHistorySeq } })
       }
 
       const batch = await this.prisma.message.findMany({
@@ -213,7 +234,7 @@ export class MessageRepository {
           conversationId,
           ...(bounds.length ? { AND: bounds } : {}),
         },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: { seq: ascending ? 'asc' : 'desc' },
         take: batchSize,
         include: MESSAGE_INCLUDE,
       })
@@ -241,8 +262,8 @@ export class MessageRepository {
       if (batch.length < batchSize) break
 
       const last = batch[batch.length - 1]
-      if (!last?.createdAt) break
-      nextCursor = { at: last.createdAt, id: last.id }
+      if (typeof last?.seq !== 'number') break
+      bound = last.seq
     }
 
     return messages.slice(0, take)
@@ -304,7 +325,6 @@ export class MessageRepository {
         content: true,
         type: true,
         isRevoked: true,
-        isDeleted: true,
         createdAt: true,
         senderMember: SENDER_SELECT,
         // The first attachment only — a reply bubble shows one thumbnail.
@@ -329,47 +349,28 @@ export class MessageRepository {
     conversationId: string,
     kind: 'MEDIA' | 'LINK' | 'DOC',
     take: number,
-    cursor?: KeysetCursor | null,
+    beforeSeq: number | null,
   ) {
-    // Which messages count as this kind of asset.
-    const kindWhere = {
-      MEDIA: {
-        OR: [
-          { type: { in: ['IMAGE', 'VIDEO'] } },
-          { medias: { some: { mediaType: { in: ['IMAGE', 'VIDEO'] } } } },
-        ],
-      },
-      DOC: {
-        OR: [{ type: 'FILE' }, { medias: { some: { mediaType: 'FILE' } } }],
-      },
-      LINK: {
-        OR: [
-          { content: { contains: 'http' } },
-          { content: { contains: 'www.' } },
-        ],
-      },
-    } satisfies Record<typeof kind, Prisma.messageWhereInput>
+    // Which messages count as this kind of asset: a flag stored when the
+    // message is written (domain/message-facets). Filtering on the relation
+    // made Prisma `$lookup` the media of EVERY message of the conversation
+    // before filtering — 7 s on a 305,800-message thread.
+    const flag = {
+      MEDIA: { hasMedia: true },
+      DOC: { hasFile: true },
+      LINK: { hasLink: true },
+    }[kind]
 
     return await this.prisma.message.findMany({
       where: {
         conversationId,
-        isDeleted: false,
+        ...flag,
         // Thu hồi với mọi người mà bức ảnh vẫn nằm trong tab Ảnh/Video và mở
         // được đầy màn hình thì không phải là thu hồi.
         isRevoked: false,
-        // Both filters are an OR of their own, so they meet under AND.
-        // Spreading the cursor in and then assigning `where.OR` for the kind
-        // overwrote the cursor's OR: every "next page" came back as the first
-        // page again.
-        AND: [
-          // Same tie-safe cursor as the message list: several attachments sent
-          // together share a timestamp, and a bare `lt` drops the ones that
-          // fell on the page boundary.
-          olderThanCursor('createdAt', cursor ?? null),
-          kindWhere[kind],
-        ],
+        ...(beforeSeq !== null ? { seq: { lt: beforeSeq } } : {}),
       },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: { seq: 'desc' },
       take,
       include: MESSAGE_INCLUDE,
     })

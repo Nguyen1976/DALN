@@ -1,7 +1,9 @@
 import {
   buildKeysetCursor,
+  buildSeqCursor,
   olderThanCursor,
   parseKeysetCursor,
+  parseSeqCursor,
   toPage,
 } from './cursor'
 
@@ -47,5 +49,18 @@ describe('keyset cursor', () => {
       items: rows,
       nextCursor: null,
     })
+  })
+})
+
+describe('seq cursor', () => {
+  it('round-trips a seq', () => {
+    expect(parseSeqCursor(buildSeqCursor(120))).toBe(120)
+  })
+
+  it('reads anything else as no seq cursor', () => {
+    expect(parseSeqCursor(null)).toBeNull()
+    expect(parseSeqCursor('2026-09-01T10:00:00.000Z|abc')).toBeNull()
+    expect(parseSeqCursor('s:abc')).toBeNull()
+    expect(parseSeqCursor('s:-3')).toBeNull()
   })
 })

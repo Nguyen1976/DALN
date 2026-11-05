@@ -3,3 +3,4 @@ package-lock.json
 shots/
 jar*.txt
 .scale-runs/
+.profile-runs/

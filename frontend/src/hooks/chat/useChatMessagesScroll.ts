@@ -119,12 +119,11 @@ export function useChatMessagesScroll({
   }, [lastMessageId, isAtBottom, conversationId, scrollListToBottom]);
 
   useEffect(() => {
-    if (
-      !conversationId ||
-      !canLoadMessages ||
-      messages.length > 0 ||
-      pagination.loaded
-    ) {
+    // Chỉ dựa vào `pagination.loaded`, không dựa vào việc đã có tin: sau khi
+    // nối lại, cache của hội thoại bị bỏ nhưng giữ lại tin mình chưa gửi được
+    // — nếu "đã có tin" chặn việc tải, hội thoại đó chỉ còn bong bóng của
+    // mình mãi. Trang đầu gộp với tin đang chờ theo clientMessageId.
+    if (!conversationId || !canLoadMessages || pagination.loaded) {
       return;
     }
 
@@ -135,19 +134,18 @@ export function useChatMessagesScroll({
         cursor: null,
       }),
     );
-  }, [
-    canLoadMessages,
-    conversationId,
-    dispatch,
-    messages.length,
-    pagination.loaded,
-  ]);
+  }, [canLoadMessages, conversationId, dispatch, pagination.loaded]);
 
   // Chặn gọi chồng: IntersectionObserver và handleScroll (scrollTop <= 24) có
   // thể cùng gọi trong một nhịp, trước khi state isLoadingOlder kịp đổi — hai
   // request cùng cursor, phần giữ vị trí cuộn bị cộng hai lần và người đang đọc
   // lịch sử bị đẩy tụt xuống gần đáy. Chỉ nhả sau khi đã giữ lại vị trí cuộn.
   const loadingOlderRef = useRef(false);
+  // Đổi mỗi khi lượt tải trang cũ hơn nhả khoá. Việc "đi tới tin" phải tải
+  // nhiều trang liên tiếp, nhưng khoá chỉ nhả ở requestAnimationFrame — SAU lần
+  // render do trang mới gây ra — nên effect chạy lại lúc khoá còn đóng, bỏ về,
+  // và không còn gì kích nó nữa: chỉ tải được đúng một trang rồi đứng.
+  const [olderReleases, setOlderReleases] = useState(0);
 
   const loadOlderMessages = useCallback(async () => {
     if (!conversationId || !canLoadMessages) return;
@@ -186,6 +184,7 @@ export function useChatMessagesScroll({
             previousTop + (current.scrollHeight - previousHeight);
         }
         loadingOlderRef.current = false;
+        setOlderReleases((n) => n + 1);
       });
       setIsLoadingOlder(false);
     }
@@ -263,6 +262,7 @@ export function useChatMessagesScroll({
     isLoadingOlder,
     loadOlderMessages,
     messages,
+    olderReleases,
     onFocusHandled,
     pagination.hasMore,
   ]);
@@ -305,6 +305,10 @@ export function useChatMessagesScroll({
     socket.emit(SOCKET_EVENTS.CHAT.MESSAGE_READ, {
       conversationId,
       lastMessageId: latestFromOthers.id,
+      // Others draw "seen" by seq; the server finds the seq from the id itself.
+      ...(typeof latestFromOthers.seq === "number"
+        ? { seq: latestFromOthers.seq }
+        : {}),
     });
 
     dispatch(markConversationRead({ conversationId }));

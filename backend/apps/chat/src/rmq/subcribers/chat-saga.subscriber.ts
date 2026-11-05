@@ -70,7 +70,11 @@ export class ChatSagaSubscriber {
           )
 
           const conversation = await tx.conversation.create({
-            data: { type: 'DIRECT', memberCount: uniqueMembers.length },
+            data: {
+              type: 'DIRECT',
+              memberCount: uniqueMembers.length,
+              lastSeq: 0,
+            },
           })
 
           await tx.conversationMember.createMany({

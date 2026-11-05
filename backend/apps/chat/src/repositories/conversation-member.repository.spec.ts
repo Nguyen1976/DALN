@@ -2,368 +2,162 @@ import { ConversationMemberRepository } from './conversation-member.repository'
 
 const CONV = '6a35000000000000000c0001'
 const USER = '6a35000000000000000a0001'
-// Có chữ cái để kiểm được việc chuẩn hoá hoa/thường. M1 < M2 < M3.
+const OTHER = '6a35000000000000000a0002'
 const M1 = '6a350000000000000000ab01'
-const M2 = '6a350000000000000000ab02'
-const M3 = '6a350000000000000000ab03'
-const CREATED_AT: Record<string, Date> = {
-  [M1]: new Date('2026-09-01T10:00:00Z'),
-  [M2]: new Date('2026-09-01T10:00:01Z'),
-  [M3]: new Date('2026-09-01T10:00:02Z'),
-}
-
-type Row = {
-  userId?: string
-  isActive: boolean
-  unreadCount: number
-  lastReadMessageId?: string | null
-  lastReadAt?: Date
-}
-
-/** Hình dạng `where` repo gửi xuống, đủ cho các test này. */
-type MarkerFilter = null | { isSet?: boolean; lt?: string }
-type MemberWhere = {
-  conversationId?: string
-  userId?: string | { not: string }
-  isActive?: boolean
-  lastReadMessageId?: string | null
-  OR?: { lastReadMessageId: MarkerFilter }[]
-}
 
 /**
- * Một nhánh OR trên lastReadMessageId, theo ngữ nghĩa Prisma MongoDB đo trên
- * dev: `null` chỉ khớp field bằng null, `isSet: false` chỉ khớp field không tồn
- * tại, `lt` không bao giờ khớp field không tồn tại. Mô hình chặt: `lt` ở đây
- * cũng không khớp null.
+ * Đường nóng (đọc tin, nhắc tên, cron) phải là lệnh thô: trên MongoDB, Prisma
+ * chạy `updateMany` bằng MỘT transaction (đọc id rồi mới ghi) — đo 2026-11-01:
+ * 25% số transaction của cron unread bị abort vì giẫm lên nhau. Ngữ nghĩa của
+ * các lệnh thô ($max, pipeline $cond) được kiểm trên Mongo thật ở
+ * conversation-member.repository.mongo.spec.ts.
  */
-function markerMatches(row: Row, filter: MarkerFilter): boolean {
-  if (filter === null) return row.lastReadMessageId === null
-  if (filter.isSet === false) return !('lastReadMessageId' in row)
-  if (typeof filter.lt === 'string') {
-    return (
-      typeof row.lastReadMessageId === 'string' &&
-      row.lastReadMessageId < filter.lt
-    )
-  }
-  return false
-}
-
-/** Dòng có khớp `where` không. Bảng giả chỉ có một hội thoại. */
-function rowMatches(row: Row, where: MemberWhere): boolean {
-  if (typeof where.userId === 'object' && row.userId === where.userId.not) {
-    return false
-  }
-  if (where.isActive !== undefined && row.isActive !== where.isActive) {
-    return false
-  }
-  if (
-    'lastReadMessageId' in where &&
-    row.lastReadMessageId !== where.lastReadMessageId
-  ) {
-    return false
-  }
-  if (
-    where.OR &&
-    !where.OR.some((cond) => markerMatches(row, cond.lastReadMessageId))
-  ) {
-    return false
-  }
-  return true
-}
-
-type FindMessageArgs = {
-  where: { id: string; conversationId: string }
-  select: { createdAt: true }
-}
-type FindManyArgs = {
-  where: {
-    conversationId: string
-    senderId: { not: string }
-    id: { gt: string }
-    createdAt: { gte: Date }
-  }
-  select: { id: true }
-  take: number
-}
-
-/**
- * Prisma giả, chỉ đủ cho updateLastRead. Bảng thành viên là MỘT dòng trong bộ
- * nhớ, updateMany chỉ ghi khi điều kiện khớp.
- */
-function setup(
-  row: Row | null,
-  opts: { messageExists?: boolean; unreadIds?: string[] } = {},
-) {
-  // Không có $runCommandRaw: repo gọi backfill lúc runtime là test nổ ngay.
+function setup(message: { seq: number } | null = { seq: 40 }) {
+  const commands: Record<string, unknown>[] = []
   const prisma = {
-    message: {
-      findFirst: jest.fn<
-        Promise<{ createdAt: Date } | null>,
-        [FindMessageArgs]
-      >(({ where }) =>
-        Promise.resolve(
-          opts.messageExists === false
-            ? null
-            : { createdAt: CREATED_AT[where.id] ?? new Date() },
-        ),
-      ),
-      findMany: jest.fn<Promise<{ id: string }[]>, [FindManyArgs]>(() =>
-        Promise.resolve((opts.unreadIds ?? []).map((id) => ({ id }))),
-      ),
+    message: { findFirst: jest.fn(() => Promise.resolve(message)) },
+    conversation: {
+      findUnique: jest.fn(() => Promise.resolve({ lastSeq: 77 })),
     },
     conversationMember: {
-      findFirst: jest.fn<
-        Promise<{ lastReadMessageId: string | null } | null>,
-        [{ where: MemberWhere }]
-      >(({ where }) =>
-        Promise.resolve(
-          row && rowMatches(row, where)
-            ? { lastReadMessageId: row.lastReadMessageId ?? null }
-            : null,
-        ),
+      updateMany: jest.fn(() =>
+        Promise.reject(new Error('không được dùng updateMany ở đường nóng')),
       ),
-      updateMany: jest.fn<
-        Promise<{ count: number }>,
-        [{ where: MemberWhere; data: Partial<Row> }]
-      >(({ where, data }) => {
-        if (!row || !rowMatches(row, where))
-          return Promise.resolve({ count: 0 })
-        Object.assign(row, data)
-        return Promise.resolve({ count: 1 })
-      }),
+      findFirst: jest.fn(),
     },
+    $runCommandRaw: jest.fn((cmd: Record<string, unknown>) => {
+      commands.push(cmd)
+      return Promise.resolve({ ok: 1, n: 1, nModified: 1 })
+    }),
   }
-
-  const repo = new ConversationMemberRepository(prisma as never, {} as never)
-  return { repo, prisma }
+  const redis = { delMany: jest.fn(() => Promise.resolve()) }
+  const repo = new ConversationMemberRepository(prisma as never, redis as never)
+  return { repo, prisma, commands }
 }
 
-describe('ConversationMemberRepository.updateLastRead', () => {
-  it('dòng kẹt số ảo: đọc lại đúng tin đang là marker -> đếm lại, unreadCount về 0', async () => {
-    // Người dùng đọc M2 ngay khi tin tới (unread=0), rồi cron cộng muộn +1 cho
-    // chính M2. Bản cũ thấy "id đã lưu >= id tới" là thoát sớm, số 1 kẹt mãi.
-    const row: Row = { isActive: true, unreadCount: 1, lastReadMessageId: M2 }
-    const { repo } = setup(row)
+describe('ConversationMemberRepository on the hot paths', () => {
+  it('read is one raw update, conditional on moving forward', async () => {
+    const { repo, prisma, commands } = setup()
 
-    await expect(repo.updateLastRead(CONV, USER, M2)).resolves.toEqual({
-      count: 0,
-    })
-
-    expect(row).toMatchObject({ lastReadMessageId: M2, unreadCount: 0 })
-  })
-
-  it('id mới hơn -> marker tiến lên, unreadCount = số tin còn lại sau nó', async () => {
-    const row: Row = { isActive: true, unreadCount: 5, lastReadMessageId: M1 }
-    const { repo, prisma } = setup(row, { unreadIds: [M3] })
-
-    await expect(repo.updateLastRead(CONV, USER, M2)).resolves.toEqual({
+    await expect(repo.updateLastRead(CONV, USER, M1)).resolves.toEqual({
       count: 1,
     })
 
-    expect(row).toMatchObject({ lastReadMessageId: M2, unreadCount: 1 })
-    expect(row.lastReadAt).toBeInstanceOf(Date)
-    expect(prisma.message.findMany.mock.calls).toEqual([
-      [
-        {
-          where: {
-            conversationId: CONV,
-            senderId: { not: USER },
-            id: { gt: M2 },
-            createdAt: { gte: CREATED_AT[M2] },
-          },
-          select: { id: true },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-          take: 99,
-        },
-      ],
-    ])
-  })
-
-  it('chưa từng đọc (lastReadMessageId: null) -> marker tiến được', async () => {
-    const row: Row = { isActive: true, unreadCount: 2, lastReadMessageId: null }
-    const { repo } = setup(row)
-
-    await repo.updateLastRead(CONV, USER, M1)
-
-    expect(row).toMatchObject({ lastReadMessageId: M1, unreadCount: 0 })
-  })
-
-  it('id cũ hơn -> marker KHÔNG lùi, nhưng vẫn đếm lại từ marker đang lưu', async () => {
-    const row: Row = { isActive: true, unreadCount: 2, lastReadMessageId: M3 }
-    const { repo, prisma } = setup(row)
-
-    await expect(repo.updateLastRead(CONV, USER, M1)).resolves.toEqual({
-      count: 0,
-    })
-
-    expect(row).toMatchObject({ lastReadMessageId: M3, unreadCount: 0 })
-    expect(prisma.message.findMany.mock.calls[0][0].where).toMatchObject({
-      id: { gt: M3 },
-      createdAt: { gte: CREATED_AT[M1] },
-    })
-  })
-
-  it('lần đọc đồng thời đã đẩy marker xa hơn -> không ghi đè unreadCount của nó', async () => {
-    const row: Row = { isActive: true, unreadCount: 3, lastReadMessageId: M1 }
-    const { repo, prisma } = setup(row)
-    prisma.message.findMany.mockImplementationOnce(() => {
-      // Một lần đọc M3 chạy xong đúng lúc lần đọc M2 này đang đếm.
-      row.lastReadMessageId = M3
-      row.unreadCount = 0
-      return Promise.resolve([{ id: M3 }])
-    })
-
-    await repo.updateLastRead(CONV, USER, M2)
-
-    expect(row).toMatchObject({ lastReadMessageId: M3, unreadCount: 0 })
-  })
-
-  it('tin không thuộc hội thoại này -> không ghi gì', async () => {
-    const row: Row = { isActive: true, unreadCount: 1, lastReadMessageId: M1 }
-    const { repo, prisma } = setup(row, { messageExists: false })
-
-    await expect(repo.updateLastRead(CONV, USER, M3)).resolves.toEqual({
-      count: 0,
-    })
-
-    expect(prisma.message.findFirst.mock.calls).toEqual([
-      [
-        {
-          where: { id: M3, conversationId: CONV },
-          select: { createdAt: true },
-        },
-      ],
-    ])
-    expect(prisma.conversationMember.updateMany).not.toHaveBeenCalled()
-    expect(row).toEqual({
+    expect(prisma.message.findFirst).toHaveBeenCalledTimes(1)
+    expect(commands).toHaveLength(1)
+    expect(commands[0]).toMatchObject({ update: 'conversationMember' })
+    const [update] = commands[0].updates as { q: Record<string, unknown> }[]
+    expect(update.q).toMatchObject({
+      conversationId: { $oid: CONV },
+      userId: { $oid: USER },
       isActive: true,
-      unreadCount: 1,
-      lastReadMessageId: M1,
+      $or: [{ lastReadSeq: { $lt: 40 } }, { lastReadSeq: null }],
     })
+    // Mốc đọc duy nhất là seq; lastReadMessageId/lastReadAt đã bỏ.
+    const [{ u }] = commands[0].updates as { u: [{ $set: object }] }[]
+    expect(Object.keys(u[0].$set).sort()).toEqual([
+      'lastMentionMessageId',
+      'lastReadSeq',
+      'unreadMentionCount',
+    ])
   })
 
-  it('không còn là thành viên (isActive=false) -> không ghi gì', async () => {
-    const row: Row = { isActive: false, unreadCount: 1, lastReadMessageId: M1 }
-    const { repo, prisma } = setup(row)
-
-    await expect(repo.updateLastRead(CONV, USER, M2)).resolves.toEqual({
+  it('a message from another conversation or an invalid id writes nothing', async () => {
+    const missing = setup(null)
+    await expect(missing.repo.updateLastRead(CONV, USER, M1)).resolves.toEqual({
       count: 0,
     })
+    expect(missing.commands).toHaveLength(0)
 
-    expect(prisma.conversationMember.updateMany).not.toHaveBeenCalled()
-    expect(row.lastReadMessageId).toBe(M1)
-  })
-
-  it('id không phải ObjectId -> bỏ qua, không truy vấn gì', async () => {
-    const row: Row = { isActive: true, unreadCount: 1, lastReadMessageId: M1 }
-    const { repo, prisma } = setup(row)
-
+    const invalid = setup()
     await expect(
-      repo.updateLastRead(CONV, USER, 'not-an-object-id'),
+      invalid.repo.updateLastRead(CONV, USER, 'not-an-id'),
     ).resolves.toEqual({ count: 0 })
-
-    expect(prisma.message.findFirst).not.toHaveBeenCalled()
-    expect(prisma.conversationMember.updateMany).not.toHaveBeenCalled()
+    expect(invalid.prisma.message.findFirst).not.toHaveBeenCalled()
   })
 
-  it('id chữ hoa được chuẩn hoá về chữ thường', async () => {
-    const row: Row = { isActive: true, unreadCount: 1, lastReadMessageId: M1 }
-    const { repo, prisma } = setup(row)
+  it('mention is one raw multi-update that skips whoever already read past it', async () => {
+    const { repo, commands } = setup()
 
-    await repo.updateLastRead(CONV, USER, M2.toUpperCase())
+    await repo.markMention(CONV, [USER, OTHER], M1, 41)
 
-    expect(prisma.message.findFirst.mock.calls[0][0].where).toEqual({
-      id: M2,
-      conversationId: CONV,
+    expect(commands).toHaveLength(1)
+    const [update] = commands[0].updates as {
+      q: Record<string, unknown>
+      multi: boolean
+    }[]
+    expect(update.multi).toBe(true)
+    expect(update.q).toMatchObject({
+      userId: { $in: [{ $oid: USER }, { $oid: OTHER }] },
+      $or: [{ lastReadSeq: { $lt: 41 } }, { lastReadSeq: null }],
     })
-    expect(row.lastReadMessageId).toBe(M2)
   })
-})
 
-describe('ConversationMemberRepository.updateUnreadCount', () => {
-  const SENDER = '6a35000000000000000a0009'
+  it('advancing members and senders are raw updates with $max', async () => {
+    const { repo, commands } = setup()
 
-  /** Bảng nhiều thành viên; updateMany cộng cho mọi dòng khớp điều kiện. */
-  function setupTable(rows: Row[]) {
-    const prisma = {
-      conversationMember: {
-        updateMany: jest.fn<
-          Promise<{ count: number }>,
-          [
-            {
-              where: MemberWhere
-              data: { unreadCount: { increment: number } }
-            },
-          ]
-        >(({ where, data }) => {
-          const hit = rows.filter((row) => rowMatches(row, where))
-          hit.forEach((row) => {
-            row.unreadCount += data.unreadCount.increment
-          })
-          return Promise.resolve({ count: hit.length })
-        }),
-      },
-    }
-    return new ConversationMemberRepository(prisma as never, {} as never)
-  }
-
-  const members = (): Row[] => [
-    { userId: SENDER, isActive: true, unreadCount: 0, lastReadMessageId: M2 },
-    { userId: 'da-doc', isActive: true, unreadCount: 0, lastReadMessageId: M2 },
-    { userId: 'doc-do', isActive: true, unreadCount: 1, lastReadMessageId: M1 },
-    {
-      userId: 'chua-doc',
-      isActive: true,
-      unreadCount: 0,
-      lastReadMessageId: null,
-    },
-    {
-      userId: 'chua-doc-lan-nao',
-      isActive: true,
-      unreadCount: 0,
-      lastReadMessageId: null,
-    },
-    {
-      userId: 'da-roi',
-      isActive: false,
-      unreadCount: 0,
-      lastReadMessageId: null,
-    },
-  ]
-
-  it('có newestMessageId -> bỏ qua người đã đọc tới tin đó, vẫn cộng cho người chưa đọc', async () => {
-    const rows = members()
-    const repo = setupTable(rows)
-
-    await expect(repo.updateUnreadCount(CONV, SENDER, 2, M2)).resolves.toEqual({
-      count: 3,
+    await repo.advanceMembers(CONV, {
+      lastMessageAt: new Date('2026-11-04T00:00:00Z'),
+      seq: 50,
     })
-
-    expect(rows.map((row) => [row.userId, row.unreadCount])).toEqual([
-      [SENDER, 0],
-      ['da-doc', 0],
-      ['doc-do', 3],
-      ['chua-doc', 2],
-      ['chua-doc-lan-nao', 2],
-      ['da-roi', 0],
+    await repo.advanceReadOfSenders(CONV, [
+      { senderId: USER, seq: 50 },
+      { senderId: OTHER, seq: 48 },
     ])
+
+    expect(commands).toHaveLength(2)
+    expect(commands[0]).toMatchObject({
+      update: 'conversationMember',
+      updates: [
+        {
+          q: { conversationId: { $oid: CONV } },
+          u: { $max: { latestSeq: 50 } },
+          multi: true,
+        },
+      ],
+    })
+    expect((commands[1].updates as unknown[]).length).toBe(2)
   })
 
-  it('không có newestMessageId (dữ liệu Redis từ bản cũ) -> cộng cho mọi thành viên trừ người gửi như trước', async () => {
-    const rows = members()
-    const repo = setupTable(rows)
+  it('newcomers are marked read with one statement whatever their number', async () => {
+    const { repo, commands } = setup()
 
-    await expect(repo.updateUnreadCount(CONV, SENDER, 1)).resolves.toEqual({
-      count: 4,
+    await repo.markReadUpTo(CONV, [USER, OTHER], 9)
+
+    expect(commands).toHaveLength(1)
+    const updates = commands[0].updates as {
+      q: object
+      u: [{ $set: Record<string, unknown> }]
+      multi: boolean
+    }[]
+    expect(updates).toHaveLength(1)
+    expect(updates[0].q).toEqual({
+      conversationId: { $oid: CONV },
+      userId: { $in: [{ $oid: USER }, { $oid: OTHER }] },
+      isActive: true,
     })
+    expect(updates[0].multi).toBe(true)
+    expect(updates[0].u[0].$set.lastReadSeq).toEqual({
+      $max: [{ $ifNull: ['$lastReadSeq', 0] }, 9],
+    })
+  })
 
-    expect(rows.map((row) => row.unreadCount)).toEqual([0, 1, 2, 1, 1, 0])
+  it('clearing history marks everything so far as read and hidden', async () => {
+    const { repo, commands } = setup()
+
+    await repo.clearHistoryForMember(CONV, USER)
+
+    expect(commands).toHaveLength(1)
+    const [update] = commands[0].updates as {
+      u: { $set: Record<string, unknown> }
+    }[]
+    // Chỉ hai mốc seq: clearedHistoryAt / unreadCount / lastReadAt /
+    // lastReadMessageId không còn ai đọc, ghi vào là rác lệch với seq.
+    expect(update.u.$set).toEqual({ clearedHistorySeq: 77, lastReadSeq: 77 })
   })
 })
 
 describe('ConversationMemberRepository — không còn backfill lúc runtime', () => {
-  // Dữ liệu cũ do migrations/chat/0002, 0003 xử lý lúc deploy. Repo phải gọi
-  // thẳng Prisma: không $runCommandRaw, không nuốt lỗi enum rồi thử lại.
   it('findByConversationIdAndUserId: đúng một findFirst, lỗi enum ném thẳng ra ngoài', async () => {
     const enumError = new Error(
       "Value 'member' not found in enum 'participantRole'",
@@ -378,17 +172,91 @@ describe('ConversationMemberRepository — không còn backfill lúc runtime', (
     )
     expect(prisma.conversationMember.findFirst).toHaveBeenCalledTimes(1)
   })
+})
 
-  it('clearHistoryForMember: chỉ một lời gọi Prisma', async () => {
+describe('ConversationMemberRepository.addMembers', () => {
+  const profile = (n: number) => ({
+    userId: `6a35000000000000000a01${String(n).padStart(2, '0')}`,
+    username: `u${n}`,
+    fullName: `U ${n}`,
+    avatar: null,
+  })
+
+  function setupAdd(existing: { userId: string; isActive: boolean }[]) {
+    const commands: Record<string, unknown>[] = []
     const prisma = {
-      conversationMember: {
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      conversation: {
+        findUnique: jest.fn(() => Promise.resolve({ lastSeq: 120 })),
       },
+      conversationMember: {
+        findMany: jest.fn(() => Promise.resolve(existing)),
+        createMany: jest.fn((args: { data: unknown[] }) =>
+          Promise.resolve({ count: args.data.length }),
+        ),
+        findFirst: jest.fn(() =>
+          Promise.reject(new Error('không được tra từng người')),
+        ),
+        updateMany: jest.fn(() =>
+          Promise.reject(new Error('không được updateMany từng người')),
+        ),
+        create: jest.fn(() =>
+          Promise.reject(new Error('không được create từng người')),
+        ),
+      },
+      $runCommandRaw: jest.fn((cmd: Record<string, unknown>) => {
+        commands.push(cmd)
+        return Promise.resolve({ ok: 1, n: 1, nModified: 1 })
+      }),
     }
-    const repo = new ConversationMemberRepository(prisma as never, {} as never)
+    const redis = { delMany: jest.fn(() => Promise.resolve()) }
+    const repo = new ConversationMemberRepository(
+      prisma as never,
+      redis as never,
+    )
+    return { repo, prisma, commands, redis }
+  }
 
-    await repo.clearHistoryForMember(CONV, USER, new Date())
+  it('adds new, reactivates removed, ignores active members in a fixed number of commands', async () => {
+    const people = Array.from({ length: 20 }, (_, i) => profile(i))
+    const { repo, prisma, commands, redis } = setupAdd([
+      { userId: people[0].userId, isActive: false },
+      { userId: people[1].userId, isActive: true },
+    ])
 
-    expect(prisma.conversationMember.updateMany).toHaveBeenCalledTimes(1)
+    const changed = await repo.addMembers(CONV, people)
+
+    expect(changed).toBe(19) // 18 mới + 1 vào lại; người đang ở trong nhóm không tính
+    expect(prisma.conversationMember.findMany).toHaveBeenCalledTimes(1)
+    expect(prisma.conversationMember.createMany).toHaveBeenCalledTimes(1)
+    expect(commands).toHaveLength(1)
+    expect(redis.delMany).toHaveBeenCalledTimes(1)
+  })
+
+  it('new and returning members start fully read', async () => {
+    const people = [profile(1), profile(2)]
+    const { repo, prisma, commands } = setupAdd([
+      { userId: people[0].userId, isActive: false },
+    ])
+
+    await repo.addMembers(CONV, people)
+
+    const created = (
+      prisma.conversationMember.createMany.mock.calls[0] as unknown as [
+        { data: Record<string, unknown>[] },
+      ]
+    )[0].data
+    expect(created[0]).toMatchObject({
+      userId: people[1].userId,
+      lastReadSeq: 120,
+      latestSeq: 120,
+    })
+    const [update] = commands[0].updates as {
+      u: { $set: Record<string, unknown> }
+    }[]
+    expect(update.u.$set).toMatchObject({
+      isActive: true,
+      lastReadSeq: 120,
+      latestSeq: 120,
+    })
   })
 })

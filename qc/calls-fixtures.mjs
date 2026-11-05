@@ -12,6 +12,15 @@ const REDIS_CONTAINER = process.env.REDIS_CONTAINER ?? 'daln-redis'
 const PASSWORD = 'MatKhau123'
 const OTP = '135790'
 
+/**
+ * QC_RANDOM_XFF=1: mỗi request một IP giả qua X-Forwarded-For (Kong tin header
+ * này ở dev), để bộ đo gọi API dồn dập không chạm hạn mức 200/phút theo IP.
+ */
+export const xff = () =>
+  process.env.QC_RANDOM_XFF
+    ? { 'X-Forwarded-For': `10.${(Math.random() * 255) | 0}.${(Math.random() * 255) | 0}.${1 + ((Math.random() * 253) | 0)}` }
+    : {}
+
 const R = (cmd) =>
   execSync(`docker exec ${REDIS_CONTAINER} redis-cli ${cmd}`).toString().trim()
 
@@ -19,7 +28,7 @@ const R = (cmd) =>
 export async function login(email, password = PASSWORD) {
   const res = await fetch(`${API}/user/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...xff() },
     body: JSON.stringify({ email, password }),
   })
   if (!res.ok) throw new Error(`login ${email} -> ${res.status}`)
@@ -27,18 +36,22 @@ export async function login(email, password = PASSWORD) {
     .getSetCookie()
     .map((c) => c.split(';')[0])
     .join('; ')
-  const me = await (await fetch(`${API}/user/me`, { headers: { cookie } })).json()
+  const me = await (await fetch(`${API}/user/me`, { headers: { cookie, ...xff() } })).json()
   return { email, password, cookie, id: me.id ?? me.data?.id, username: me.username ?? me.data?.username }
 }
 
 export async function api(account, method, path, body) {
   const res = await fetch(`${API}${path}`, {
     method,
-    headers: { cookie: account.cookie, 'Content-Type': 'application/json' },
+    headers: { cookie: account.cookie, 'Content-Type': 'application/json', ...xff() },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const text = await res.text()
-  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status} ${text.slice(0, 200)}`)
+  if (!res.ok) {
+    const error = new Error(`${method} ${path} -> ${res.status} ${text.slice(0, 200)}`)
+    error.status = res.status
+    throw error
+  }
   return text ? JSON.parse(text) : null
 }
 
@@ -48,14 +61,14 @@ export async function register(tag) {
   const username = `qccall${tag}${stamp}`.slice(0, 30)
   await fetch(`${API}/user/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...xff() },
     body: JSON.stringify({ email, username, password: PASSWORD, fullName: `QC Call ${tag.toUpperCase()}` }),
   })
   const hash = createHash('sha256').update(OTP).digest('hex')
   R(`set otp:reg:${email} ${hash} EX 300`)
   const res = await fetch(`${API}/user/verify-otp`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...xff() },
     body: JSON.stringify({ email, otp: OTP }),
   })
   if (res.status !== 201 && res.status !== 200) throw new Error(`verify-otp ${email} -> ${res.status}`)

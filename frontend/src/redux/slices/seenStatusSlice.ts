@@ -1,8 +1,8 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type { RootState } from "../store";
 
-/** Per conversation: how far each other member has read (userId → messageId). */
-export type ConversationReadMarks = Record<string, string>;
+/** Per conversation: how far each other member has read (userId → seq). */
+export type ConversationReadMarks = Record<string, number>;
 
 export interface SeenStatusState {
   readBy: Record<string, ConversationReadMarks>;
@@ -16,17 +16,18 @@ export const seenStatusSlice = createSlice({
   name: "seenStatus",
   initialState,
   reducers: {
-    /** Someone read up to `lastReadMessageId`. */
+    /** Someone read up to `seq`. Marks only move forward: reads arrive out of order. */
     updateSeenStatus: (
       state,
       action: PayloadAction<{
         conversationId: string;
         userId: string;
-        lastReadMessageId: string;
+        seq: number;
       }>,
     ) => {
-      const { conversationId, userId, lastReadMessageId } = action.payload;
-      (state.readBy[conversationId] ??= {})[userId] = lastReadMessageId;
+      const { conversationId, userId, seq } = action.payload;
+      const marks = (state.readBy[conversationId] ??= {});
+      marks[userId] = Math.max(marks[userId] ?? 0, seq);
     },
 
     /** Read marks as the members list reports them, after a page load. */
@@ -35,14 +36,14 @@ export const seenStatusSlice = createSlice({
       action: PayloadAction<{
         conversationId: string;
         currentUserId: string;
-        members: Array<{ userId: string; lastReadMessageId?: string | null }>;
+        members: Array<{ userId: string; lastReadSeq?: number | null }>;
       }>,
     ) => {
       const { conversationId, currentUserId, members } = action.payload;
       const marks = (state.readBy[conversationId] ??= {});
-      for (const { userId, lastReadMessageId } of members) {
-        if (userId !== currentUserId && lastReadMessageId) {
-          marks[userId] = lastReadMessageId;
+      for (const { userId, lastReadSeq } of members) {
+        if (userId !== currentUserId && lastReadSeq) {
+          marks[userId] = Math.max(marks[userId] ?? 0, lastReadSeq);
         }
       }
     },

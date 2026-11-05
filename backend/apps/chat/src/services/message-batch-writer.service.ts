@@ -5,7 +5,15 @@ import {
   Logger,
 } from '@nestjs/common'
 import { ObjectId } from 'mongodb'
-import { findStoredBySenderClientIds } from '../repositories/message-raw.queries'
+import {
+  findStoredByIds,
+  findStoredBySenderClientIds,
+} from '../repositories/message-raw.queries'
+import {
+  ConversationNotReadyError,
+  reserveSeq,
+} from '../repositories/seq-allocator'
+import { facetsOf } from '../domain/message-facets'
 import { PrismaService } from 'apps/chat/prisma/prisma.service'
 import type { Prisma } from 'apps/chat/src/generated'
 
@@ -34,9 +42,13 @@ export type BatchedMessage = {
   isSystem: boolean
   pollId: null
   isRevoked: boolean
-  isDeleted: boolean
   createdAt: Date
   updatedAt: Date
+  /** Số thứ tự trong hội thoại; gán lúc ghi lô (giữ chỗ cả khoảng). */
+  seq: number
+  hasMedia: false
+  hasFile: false
+  hasLink: boolean
   medias: never[]
   poll: null
   mentionUserIds: string[]
@@ -50,19 +62,26 @@ export type BatchedMessage = {
 }
 
 type Pending = {
+  /** `seq` là 0 cho tới khi lô giữ chỗ được khoảng số của hội thoại. */
   doc: BatchedMessage
   resolve: (message: BatchedMessage) => void
   reject: (error: unknown) => void
+  /** Đã có kết cục (lưu xong hoặc bị từ chối hẳn): lượt sau bỏ qua. */
+  settled?: true
 }
 
 /** Trần số tin mỗi lần insert. */
 const MAX_BATCH = Number(process.env.MESSAGE_BATCH_SIZE ?? 100)
 
 const DUPLICATE_KEY = 11000
+/** Unique index (conversationId, seq), partial — migrations/chat/0009. */
+const SEQ_INDEX = 'message_conversation_seq_unique'
 /**
- * Lô lỗi được ghi lại với ĐÚNG các document cũ (cùng _id, cùng createdAt). Làn
+ * Lô lỗi được ghi lại với ĐÚNG các document cũ (cùng _id, createdAt, seq). Làn
  * của hội thoại đã nhả ngay khi tin vào lô, nên thử lại ở handler sẽ sinh tin
  * mới đứng sau các tin đến sau; ghi lại bản cũ thì thứ tự vẫn giữ nguyên.
+ * Ngoại lệ duy nhất: dòng đụng unique (conversationId, seq) — số đó đã thuộc
+ * về tin khác, nên dòng ấy giữ chỗ số mới.
  */
 const WRITE_RETRY_DELAYS_MS = [50, 200, 800]
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -70,7 +89,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 type InsertResult = {
   ok: number
   n: number
-  writeErrors?: { index: number; code: number; errmsg?: string }[]
+  writeErrors?: {
+    index: number
+    code: number
+    errmsg?: string
+    keyPattern?: object
+  }[]
 }
 
 const oid = (hex: string) => ({ $oid: hex })
@@ -95,11 +119,21 @@ function toDocument(doc: BatchedMessage): Prisma.InputJsonObject {
       : {}),
     ...(doc.clientMessageId ? { clientMessageId: doc.clientMessageId } : {}),
     isRevoked: false,
-    isDeleted: false,
     createdAt: date(doc.createdAt),
     updatedAt: date(doc.updatedAt),
+    seq: doc.seq,
+    hasMedia: false,
+    hasFile: false,
+    hasLink: doc.hasLink,
   }
 }
+
+/** Dòng ghi lỗi vì trùng khoá nào: số thứ tự, hay bản đã lưu (clientMessageId/_id). */
+const isSeqDuplicate = (error: { errmsg?: string; keyPattern?: object }) =>
+  Boolean(
+    error.errmsg?.includes(SEQ_INDEX) ||
+    (error.keyPattern && 'seq' in error.keyPattern),
+  )
 
 /**
  * Gom nhiều lệnh ghi tin nhắn thành một `createMany`.
@@ -155,9 +189,12 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
       isSystem: Boolean(input.isSystem),
       pollId: null,
       isRevoked: false,
-      isDeleted: false,
       createdAt: now,
       updatedAt: now,
+      seq: 0,
+      hasMedia: false,
+      hasFile: false,
+      hasLink: facetsOf(input.type, [], input.content).hasLink,
       medias: [],
       poll: null,
       mentionUserIds: input.mentionUserIds || [],
@@ -202,25 +239,35 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
     return this.writing
   }
 
+  /**
+   * Ghi lô cho tới khi mọi tin có kết cục. Mỗi lượt chỉ ghi lại những tin còn
+   * dang dở: tin đã lưu được resolve ngay, tin của hội thoại không nhận tin bị
+   * reject ngay — một hội thoại vừa bị xoá không kéo theo cả lô của người khác.
+   */
   private async writeWithRetry(batch: Pending[]): Promise<void> {
+    let pending = batch
     for (let attempt = 0; ; attempt++) {
+      let error: unknown
       try {
-        const saved = await this.write(batch)
-        batch.forEach((item, i) => item.resolve(saved[i]))
-        break
-      } catch (error) {
-        const delay = WRITE_RETRY_DELAYS_MS[attempt]
-        this.logger.error(
-          `ghi lô ${batch.length} tin thất bại (lần ${attempt + 1}): ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        )
-        if (delay === undefined) {
-          for (const item of batch) item.reject(error)
-          return
-        }
-        await sleep(delay)
+        pending = await this.writeOnce(pending)
+        if (!pending.length) break
+        error = new Error(`${pending.length} tin cần giữ chỗ seq lại`)
+      } catch (caught) {
+        error = caught
+        pending = pending.filter((item) => !item.settled)
+        if (!pending.length) return
       }
+      const delay = WRITE_RETRY_DELAYS_MS[attempt]
+      this.logger.error(
+        `ghi lô ${pending.length} tin thất bại (lần ${attempt + 1}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+      if (delay === undefined) {
+        for (const item of pending) item.reject(error)
+        return
+      }
+      await sleep(delay)
     }
 
     this.totalMessages += batch.length
@@ -233,12 +280,20 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
     }
   }
 
-  /** Một lần insert cả lô; dòng trùng khoá trả về bản đã lưu. */
-  private async write(batch: Pending[]): Promise<BatchedMessage[]> {
+  /**
+   * Một lượt: giữ chỗ seq cho tin chưa có số (mỗi hội thoại một lệnh, chạy song
+   * song), insert cả lô, phân loại từng dòng. Trả về các tin phải ghi lại.
+   * Ném lỗi khi cả lần insert hỏng — khi đó mọi tin giữ nguyên số để ghi lại.
+   */
+  private async writeOnce(pending: Pending[]): Promise<Pending[]> {
+    const waiting = await this.assignSeq(pending)
+    const ready = pending.filter((item) => item.doc.seq > 0)
+    if (!ready.length) return waiting
+
     const result = (await this.prisma.$runCommandRaw({
       insert: 'message',
       ordered: false,
-      documents: batch.map((item) => toDocument(item.doc)),
+      documents: ready.map((item) => toDocument(item.doc)),
     })) as InsertResult
 
     const errors = result.writeErrors ?? []
@@ -249,24 +304,94 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
       )
     }
 
-    const duplicates = new Set(errors.map((e) => e.index))
+    const seqClash = new Set(
+      errors.filter((e) => isSeqDuplicate(e)).map((e) => e.index),
+    )
+    const duplicates = new Set(
+      errors.filter((e) => !isSeqDuplicate(e)).map((e) => e.index),
+    )
     const stored = await this.loadStored(
-      batch.filter((_, i) => duplicates.has(i)).map((item) => item.doc),
+      ready.filter((_, i) => duplicates.has(i)).map((item) => item.doc),
     )
-    return batch.map((item, i) =>
-      duplicates.has(i) ? (stored(item.doc) ?? item.doc) : item.doc,
+    // Dòng đụng số có thể chính là dòng lượt trước của lô này đã kịp ghi (cùng
+    // _id): khi đó nó đã nằm trong DB, với số cũ. Còn lại mới giữ chỗ số mới.
+    const clashed = ready.filter((_, i) => seqClash.has(i))
+    const alreadyIn = new Map(
+      (
+        await findStoredByIds(
+          this.prisma,
+          clashed.map((item) => item.doc.id),
+        )
+      ).map((row) => [row.id, row]),
     )
+
+    const retry: Pending[] = []
+    ready.forEach((item, i) => {
+      if (seqClash.has(i)) {
+        const row = alreadyIn.get(item.doc.id)
+        if (row) {
+          item.resolve({ ...item.doc, seq: row.seq ?? item.doc.seq })
+        } else {
+          item.doc.seq = 0
+          retry.push(item)
+        }
+        return
+      }
+      item.resolve(
+        duplicates.has(i) ? (stored(item.doc) ?? item.doc) : item.doc,
+      )
+    })
+    return [...waiting, ...retry]
   }
 
   /**
-   * Bản đã lưu của những tin bị trùng, tra theo (senderId, clientMessageId).
-   * Đi qua lệnh find thô: qua Prisma nó quét cả collection (xem message-raw.queries).
+   * Giữ chỗ một khoảng seq cho mỗi hội thoại có tin chưa đánh số, gán theo đúng
+   * thứ tự trong buffer (thứ tự của làn). Hội thoại không nhận tin: reject các
+   * tin của nó, không thử lại. Lỗi khác: các tin đó chờ lượt sau.
+   */
+  private async assignSeq(pending: Pending[]): Promise<Pending[]> {
+    const byConversation = new Map<string, Pending[]>()
+    for (const item of pending) {
+      if (item.doc.seq > 0) continue
+      const list = byConversation.get(item.doc.conversationId) ?? []
+      list.push(item)
+      byConversation.set(item.doc.conversationId, list)
+    }
+    const groups = [...byConversation.entries()]
+    const reserved = await Promise.allSettled(
+      groups.map(([conversationId, items]) =>
+        reserveSeq(this.prisma, conversationId, items.length),
+      ),
+    )
+    const waiting: Pending[] = []
+    groups.forEach(([, items], g) => {
+      const outcome = reserved[g]
+      if (outcome.status === 'fulfilled') {
+        items.forEach((item, k) => (item.doc.seq = outcome.value + k))
+      } else if (outcome.reason instanceof ConversationNotReadyError) {
+        for (const item of items) {
+          item.settled = true
+          item.reject(outcome.reason)
+        }
+      } else {
+        waiting.push(...items)
+      }
+    })
+    return waiting
+  }
+
+  /**
+   * Bản đã lưu của những tin bị trùng. Có clientMessageId thì tra theo
+   * (senderId, clientMessageId) qua lệnh find thô — qua Prisma nó quét cả
+   * collection (xem message-raw.queries). Tin hệ thống không có khoá đó: trùng
+   * thì chỉ có thể là chính _id của nó, đã ghi ở lượt trước.
    */
   private async loadStored(docs: BatchedMessage[]) {
     if (!docs.length) return () => undefined
+    const keyed = docs.filter((doc) => doc.clientMessageId)
     const rows = await findStoredBySenderClientIds(
       this.prisma,
-      docs.map((doc) => ({
+      keyed.map((doc) => ({
         senderId: doc.senderId,
         clientMessageId: doc.clientMessageId as string,
       })),
@@ -274,15 +399,29 @@ export class MessageBatchWriter implements BeforeApplicationShutdown {
     const byKey = new Map(
       rows.map((row) => [`${row.senderId}|${row.clientMessageId}`, row]),
     )
+    const byId = new Map(
+      (
+        await findStoredByIds(
+          this.prisma,
+          docs.filter((doc) => !doc.clientMessageId).map((doc) => doc.id),
+        )
+      ).map((row) => [row.id, row]),
+    )
     return (doc: BatchedMessage): BatchedMessage | undefined => {
+      if (!doc.clientMessageId) {
+        const own = byId.get(doc.id)
+        return own ? { ...doc, seq: own.seq ?? doc.seq } : undefined
+      }
       const row = byKey.get(`${doc.senderId}|${doc.clientMessageId}`)
       // Cùng _id: chính lần ghi hỏng trước của lô này đã kịp đưa vào — chưa ai
       // cộng unread/nhắc tên cho nó, nên không phải tin gửi lại.
-      if (row && String(row.id) === doc.id) return doc
+      if (row && String(row.id) === doc.id)
+        return { ...doc, seq: row.seq ?? doc.seq }
       return row
         ? {
             ...doc,
             id: String(row.id),
+            seq: row.seq ?? doc.seq,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             replayed: true,

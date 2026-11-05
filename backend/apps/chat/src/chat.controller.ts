@@ -27,6 +27,7 @@ import {
   DeleteMessageForMeDTO,
   GroupCallLogDTO,
   LeaveConversationDTO,
+  MessagesPageQueryDTO,
   PromoteMemberDTO,
   RemoveMemberFromConversationDTO,
   RevokeMessageDTO,
@@ -166,7 +167,7 @@ export class ChatController {
   getMessagesByConversationId(
     @Param('conversationId') conversationId: string,
     @UserInfo('userId') userId: string,
-    @Query() page: PageQueryDto,
+    @Query() page: MessagesPageQueryDTO,
   ) {
     return this.messages.getMessagesByConversationId(
       conversationId,
