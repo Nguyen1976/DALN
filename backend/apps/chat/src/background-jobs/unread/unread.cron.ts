@@ -12,7 +12,6 @@ import {
   FLUSH_CONCURRENCY,
   RESTORE_SCRIPT,
   lastMessageKey,
-  unreadCountKey,
   unreadLastKey,
 } from './unread.constants'
 
@@ -35,6 +34,7 @@ function pairsToRecord(flat: unknown): Record<string, string> {
 }
 
 type LastMessageSnapshot = {
+  seq?: number
   senderId?: string
   lastMessageId?: string
   lastMessageAt?: string
@@ -43,12 +43,8 @@ type LastMessageSnapshot = {
   lastMessageSenderAvatar?: string | null
 }
 
-type CountJob = {
-  senderId: string
-  delta: number
-  /** Id tin mới nhất của người gửi trong lượt này; thiếu = dữ liệu từ bản cũ. */
-  newestMessageId?: string
-}
+/** Seq lớn nhất của tin một người gửi trong lượt này: mốc đọc của chính họ. */
+type SenderMark = { senderId: string; seq: number }
 
 @Injectable()
 export class UnreadCron {
@@ -114,79 +110,71 @@ export class UnreadCron {
   /**
    * Gom dữ liệu Redis của một conversation xuống Mongo. Ném lỗi nếu thất bại,
    * SAU khi đã trả phần chưa ghi được về Redis, để handleCron đưa lại hàng đợi.
+   *
+   * Không còn số đếm: unreadCount = latestSeq − lastReadSeq. Mỗi hội thoại chỉ
+   * còn ba lệnh thô, đều "chỉ tiến lên" ($max / so seq) nên chạy lại vô hại và
+   * không cần transaction — bản cũ dùng Prisma updateMany (mỗi lệnh một
+   * transaction) và hai lệnh song song trên cùng document abort lẫn nhau.
    */
   private async flushConversation(conversationId: string): Promise<void> {
-    const keys = [
-      unreadCountKey(conversationId),
-      lastMessageKey(conversationId),
-      unreadLastKey(conversationId),
-    ]
+    const keys = [lastMessageKey(conversationId), unreadLastKey(conversationId)]
 
-    // Claim TRƯỚC khi đọc: lấy-và-xoá cả ba key trong một script nguyên tử.
-    // Trước đây cron đọc (HGETALL/GET) rồi mới DEL sau khi ghi Mongo xong — tin
-    // đến trong khoảng đó bị DEL cuốn theo, số chưa đọc của nó mất hẳn. Giờ tin
+    // Claim TRƯỚC khi đọc: lấy-và-xoá các key trong một script nguyên tử. Tin
     // đến sau lúc claim rơi vào key mới tinh và được lượt sau xử lý.
     const claimed = await this.redisService.eval(CLAIM_SCRIPT, keys)
-    const [rawCounts, rawLast, rawNewest] = Array.isArray(claimed)
+    const [rawLast, rawNewest] = Array.isArray(claimed)
       ? (claimed as unknown[])
       : []
-    const counts = pairsToRecord(rawCounts)
-    const newest = pairsToRecord(rawNewest)
     const lastMsgString = typeof rawLast === 'string' ? rawLast : null
-
-    const jobs: CountJob[] = []
-    for (const [senderId, countStr] of Object.entries(counts)) {
-      const delta = Number.parseInt(countStr, 10)
-      if (!Number.isFinite(delta) || delta <= 0) continue
-      jobs.push({ senderId, delta, newestMessageId: newest[senderId] })
-    }
-
     const lastMsg = this.parseLastMessage(conversationId, lastMsgString)
 
-    // Các write thao tác trên collection khác nhau và không phụ thuộc nhau.
-    // allSettled thay vì all: phải biết CHÍNH XÁC phần nào lỗi để chỉ trả phần
-    // đó về Redis — trả cả phần đã ghi xong thì lượt sau cộng trùng.
-    const [lastResult, ...countResults] = await Promise.allSettled([
-      lastMsg
-        ? this.writeLastMessage(conversationId, lastMsg)
-        : Promise.resolve(),
-      ...jobs.map((job) =>
-        this.memberRepo.updateUnreadCount(
-          conversationId,
-          job.senderId,
-          job.delta,
-          job.newestMessageId,
-        ),
-      ),
-    ])
+    const senders: SenderMark[] = []
+    for (const [senderId, raw] of Object.entries(pairsToRecord(rawNewest))) {
+      const seq = Number(raw)
+      // ObjectId của bản cũ (trước seq): không dùng được làm mốc đọc, bỏ qua.
+      if (Number.isInteger(seq) && seq > 0) senders.push({ senderId, seq })
+      else
+        this.logger.warn(
+          `[Batch Update] unread_last cũ, bỏ qua (${conversationId})`,
+        )
+    }
 
-    const failedJobs = jobs.filter(
-      (_job, i) => countResults[i].status === 'rejected',
-    )
-    const lastFailed = lastResult.status === 'rejected'
-    if (!failedJobs.length && !lastFailed) return
+    // Mốc đọc của người gửi TRƯỚC, rồi mới tới tin cuối và latestSeq của mọi
+    // thành viên. Ngược lại (hoặc song song), latestSeq lên trước mốc đọc của
+    // người gửi thì chính họ thấy tin mình vừa gửi là "chưa đọc" ít nhất một
+    // nhịp cron. Lỗi ở bước nào thì trả cả hai phần chưa xong về Redis.
+    let error: unknown = null
+    let sendersDone = false
+    try {
+      if (senders.length) {
+        await this.memberRepo.advanceReadOfSenders(conversationId, senders)
+      }
+      sendersDone = true
+      if (lastMsg) await this.writeLastMessage(conversationId, lastMsg)
+      return
+    } catch (caught) {
+      error = caught
+    }
 
     await this.restoreClaim(
       conversationId,
       keys,
-      failedJobs,
-      lastFailed
-        ? { raw: lastMsgString ?? '', id: lastMsg?.lastMessageId ?? '' }
-        : null,
+      sendersDone ? [] : senders,
+      lastMsg ? { raw: lastMsgString ?? '', seq: lastMsg.seq ?? 0 } : null,
     )
-
-    const firstError = [lastResult, ...countResults].find(
-      (result): result is PromiseRejectedResult => result.status === 'rejected',
-    )
-    throw firstError?.reason
+    throw error
   }
 
   private async writeLastMessage(
     conversationId: string,
     lastMsg: LastMessageSnapshot,
   ): Promise<void> {
+    // Bản Redis từ trước seq không có `seq`: coi là 0 — chỉ ghi khi
+    // conversation chưa có tin cuối nào, không bao giờ đè bản mới hơn.
+    const seq = typeof lastMsg.seq === 'number' ? lastMsg.seq : 0
     await Promise.all([
       this.conversationRepo.saveLastMessage(conversationId, {
+        seq,
         lastMessageId: lastMsg.lastMessageId || undefined,
         lastMessageAt: lastMsg.lastMessageAt
           ? new Date(lastMsg.lastMessageAt)
@@ -197,10 +185,10 @@ export class UnreadCron {
         lastMessageSenderAvatar: lastMsg.lastMessageSenderAvatar,
       }),
       lastMsg.lastMessageAt
-        ? this.memberRepo.updateLastMessageAt(
-            conversationId,
-            new Date(lastMsg.lastMessageAt),
-          )
+        ? this.memberRepo.advanceMembers(conversationId, {
+            lastMessageAt: new Date(lastMsg.lastMessageAt),
+            seq,
+          })
         : undefined,
     ])
   }
@@ -225,28 +213,23 @@ export class UnreadCron {
   }
 
   /**
-   * Trả phần đã claim nhưng ghi Mongo lỗi về Redis để lượt sau thử lại: số đếm
-   * cộng lại, id mới nhất chỉ nâng không hạ, last_message chỉ đặt lại khi chưa
-   * có bản mới hơn. Lỗi ở bước này chỉ ghi log — lỗi gốc vẫn được ném tiếp để
-   * conversation quay lại hàng đợi.
+   * Trả phần đã claim nhưng ghi Mongo lỗi về Redis để lượt sau thử lại: seq
+   * mới nhất của người gửi chỉ nâng không hạ, last_message chỉ đặt lại khi
+   * chưa có bản mới hơn. Lỗi ở bước này chỉ ghi log — lỗi gốc vẫn được ném
+   * tiếp để conversation quay lại hàng đợi.
    */
   private async restoreClaim(
     conversationId: string,
     keys: string[],
-    failedJobs: CountJob[],
-    last: { raw: string; id: string } | null,
+    failedSenders: SenderMark[],
+    last: { raw: string; seq: number } | null,
   ): Promise<void> {
     const payload = {
-      counts: Object.fromEntries(
-        failedJobs.map((job) => [job.senderId, String(job.delta)]),
-      ),
       newest: Object.fromEntries(
-        failedJobs
-          .filter((job) => job.newestMessageId)
-          .map((job) => [job.senderId, job.newestMessageId]),
+        failedSenders.map((mark) => [mark.senderId, mark.seq]),
       ),
       last: last?.raw ?? '',
-      lastId: last?.id ?? '',
+      lastSeq: last?.seq ?? 0,
     }
 
     try {

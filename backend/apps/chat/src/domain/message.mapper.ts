@@ -80,7 +80,7 @@ export type MessageRow = Pick<
       | 'replyToMessageId'
       | 'isRevoked'
       | 'isSystem'
-      | 'isDeleted'
+      | 'seq'
     >
   > & {
     /** Stored as JSON, and passed on to clients as it was stored. */
@@ -124,6 +124,8 @@ export class MessageMapper {
       id: String(message.id),
       conversationId: String(message.conversationId),
       senderId: String(message.senderId),
+      /** Position in the conversation: clients sort and resync by it. */
+      seq: message.seq ?? null,
       content: message.isRevoked ? '' : (message.content ?? '').trim(),
       type: message.type || 'TEXT',
       /** Resolved from the content by the server. */
@@ -159,7 +161,6 @@ export class MessageMapper {
         : undefined,
       isRevoked: Boolean(message.isRevoked),
       isSystem: Boolean(message.isSystem),
-      isDeleted: Boolean(message.isDeleted),
       createdAt: new Date(message.createdAt).toISOString(),
       senderMember: message.senderMember
         ? toSender(message.senderMember)

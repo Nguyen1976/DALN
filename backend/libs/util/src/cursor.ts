@@ -32,6 +32,21 @@ export function buildKeysetCursor(at: Date | string, id: string): string {
 }
 
 /**
+ * Cursor of a list ordered by a per-conversation `seq` (messages): `s:<seq>`,
+ * the seq of the last row returned. A plain number needs no tie-breaker —
+ * `seq` is unique in its conversation.
+ */
+export function buildSeqCursor(seq: number): string {
+  return `s:${seq}`
+}
+
+/** The seq of an `s:<seq>` cursor; anything else (including old timestamp cursors) is null. */
+export function parseSeqCursor(raw?: string | null): number | null {
+  const match = /^s:(\d+)$/.exec(String(raw ?? ''))
+  return match ? Number(match[1]) : null
+}
+
+/**
  * `where` fragment selecting rows strictly *older* than the cursor under a
  * (field desc, idField desc) ordering. `idField` must be the id the cursor
  * was built from: comparing it with another collection's ids breaks ties at

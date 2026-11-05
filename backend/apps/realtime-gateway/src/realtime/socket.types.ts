@@ -36,6 +36,8 @@ export interface TypingBody {
 export interface MessageReadBody {
   conversationId?: string
   lastMessageId?: string
+  /** seq của tin đó — chỉ để các client khác vẽ "đã xem". */
+  seq?: unknown
 }
 
 /** Any `call.*` or `group_call.*` event; each reads the fields it needs. */

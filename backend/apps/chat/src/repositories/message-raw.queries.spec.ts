@@ -1,5 +1,6 @@
 import {
   findIdByPollId,
+  findStoredByIds,
   findStoredBySenderClientIds,
 } from './message-raw.queries'
 
@@ -46,6 +47,7 @@ describe('findStoredBySenderClientIds', () => {
         clientMessageId: 'c1',
         createdAt: { $date: AT },
         updatedAt: { $date: AT },
+        seq: 41,
       },
     ])
 
@@ -59,6 +61,7 @@ describe('findStoredBySenderClientIds', () => {
       clientMessageId: 'c1',
       createdAt: new Date(AT),
       updatedAt: new Date(AT),
+      seq: 41,
     })
   })
 
@@ -92,5 +95,40 @@ describe('findIdByPollId', () => {
     await expect(
       findIdByPollId(prisma as never, '6a3500000000000000000f01'),
     ).resolves.toBeNull()
+  })
+})
+
+describe('findStoredByIds', () => {
+  it('reads seq and timestamps of rows by _id', async () => {
+    const { prisma, commands } = makePrisma([
+      {
+        _id: { $oid: '6ae6a902f6e85be7e915e1ca' },
+        seq: 7,
+        createdAt: { $date: AT },
+        updatedAt: { $date: AT },
+      },
+    ])
+
+    const rows = await findStoredByIds(prisma as never, [
+      '6ae6a902f6e85be7e915e1ca',
+    ])
+
+    expect(commands[0].filter).toEqual({
+      _id: { $in: [{ $oid: '6ae6a902f6e85be7e915e1ca' }] },
+    })
+    expect(rows).toEqual([
+      {
+        id: '6ae6a902f6e85be7e915e1ca',
+        seq: 7,
+        createdAt: new Date(AT),
+        updatedAt: new Date(AT),
+      },
+    ])
+  })
+
+  it('does not query when there is nothing to look up', async () => {
+    const { prisma } = makePrisma([])
+    await expect(findStoredByIds(prisma as never, [])).resolves.toEqual([])
+    expect(prisma.$runCommandRaw).not.toHaveBeenCalled()
   })
 })

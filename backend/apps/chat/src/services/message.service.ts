@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common'
 import { RedisService } from '@app/redis'
 import {
   DIRTY_CONVERSATIONS_KEY,
-  SET_NEWEST_ID_SCRIPT,
+  SET_LAST_MESSAGE_SCRIPT,
+  SET_NEWEST_SEQ_SCRIPT,
   lastMessageKey,
-  unreadCountKey,
   unreadLastKey,
 } from '../background-jobs/unread/unread.constants'
 import type {
@@ -24,7 +24,7 @@ import type { AssetKind, UploadType } from '../http/chat-http.dto'
 import { resolveMentions } from '../domain/mention.resolver'
 import { MessageMapper, type MessageRow } from '../domain/message.mapper'
 import { MessageMediaService } from './message-media.service'
-import { buildKeysetCursor, parseKeysetCursor, toPage } from '@app/util'
+import { buildSeqCursor, parseSeqCursor, toPage } from '@app/util'
 import { displayNameOf } from '../domain/display-name'
 import { isObjectId } from '../domain/object-id'
 
@@ -217,6 +217,7 @@ export class MessageService {
         data.conversationId,
         mentionUserIds,
         String(message.id),
+        message.seq ?? 0,
       )
       // Thông báo cho người bị nhắc (badge trong chat chỉ thấy khi đang mở app).
       this.eventsPublisher.publishMentioned({
@@ -301,7 +302,7 @@ export class MessageService {
   async getMessagesByConversationId(
     conversationId: string,
     userId: string,
-    page: { limit: number; cursor?: string },
+    page: { limit: number; cursor?: string; afterSeq?: number },
   ) {
     const member = await this.memberRepo.findByConversationIdAndUserId(
       conversationId,
@@ -311,23 +312,29 @@ export class MessageService {
       ChatErrors.userNotMember()
     }
 
+    const afterSeq = page.afterSeq ?? null
     const rows = await this.messageRepo.findByConversationIdPaginatedForUser(
       conversationId,
       userId,
       page.limit + 1,
-      parseKeysetCursor(page.cursor),
-      member.clearedHistoryAt,
+      {
+        beforeSeq: afterSeq === null ? parseSeqCursor(page.cursor) : null,
+        afterSeq,
+        clearedHistorySeq: member.clearedHistorySeq ?? null,
+      },
     )
     const { items, nextCursor } = toPage(rows, page.limit, (m) =>
-      buildKeysetCursor(m.createdAt, m.id),
+      typeof m.seq === 'number' ? buildSeqCursor(m.seq) : null,
     )
     await this.attachQuotedMessages(items)
     const withPolls = await this.withPollState(items, userId)
 
-    return {
-      items: withPolls.map((m) => MessageMapper.toResponse(m)),
-      nextCursor,
-    }
+    const dtos = withPolls.map((m) => MessageMapper.toResponse(m))
+    // Lấy bù (afterSeq) đi theo chiều tiến: không có cursor trang cũ, chỉ cần
+    // biết còn tin mới hơn hay không để client gọi tiếp.
+    return afterSeq === null
+      ? { items: dtos, nextCursor }
+      : { items: dtos, nextCursor: null, hasMore: rows.length > page.limit }
   }
 
   /**
@@ -483,7 +490,6 @@ export class MessageService {
     await this.memberRepo.clearHistoryForMember(
       data.conversationId,
       data.userId,
-      new Date(),
     )
   }
 
@@ -506,10 +512,10 @@ export class MessageService {
       conversationId,
       kind,
       page.limit + 1,
-      parseKeysetCursor(page.cursor),
+      parseSeqCursor(page.cursor),
     )
     const { items, nextCursor } = toPage(rows, page.limit, (m) =>
-      buildKeysetCursor(m.createdAt, m.id),
+      typeof m.seq === 'number' ? buildSeqCursor(m.seq) : null,
     )
     return {
       items: items.map((message) => MessageMapper.toResponse(message)),
@@ -674,6 +680,7 @@ export class MessageService {
       isSystem: true,
     })
     await this.announceSystemMessage(conversationId, actorUserId, message)
+    return message
   }
 
   /**
@@ -770,7 +777,9 @@ export class MessageService {
   }) {
     const { conversationId, senderId, message, senderMember } = params
 
+    const seq = typeof message.seq === 'number' ? message.seq : null
     const lastMessage = JSON.stringify({
+      seq,
       senderId,
       lastMessageId: message.id,
       lastMessageAt: message.createdAt
@@ -783,28 +792,33 @@ export class MessageService {
 
     const commands: (string | number)[][] = []
 
-    // Id tin mới nhất theo người gửi: cron dùng nó để KHÔNG cộng unread cho
-    // người đã đọc tới tin này. "Chỉ ghi khi lớn hơn" (Lua) để lệnh tới trễ
-    // không kéo lùi. Đặt TRƯỚC HINCRBY: nếu lượt claim của cron lỡ chen vào
-    // giữa pipeline (hiếm — Redis thường chạy liền cả gói), thà đếm dư một tin
-    // (lần đọc sau tự lành) còn hơn đếm thiếu (người nhận mất badge).
-    const messageId = message.id.toLowerCase()
-    if (isObjectId(messageId)) {
+    // Seq lớn nhất theo người gửi: cron đẩy mốc đọc của chính họ tới đó (tin
+    // của mình không bao giờ là chưa đọc). "Chỉ ghi khi lớn hơn" (Lua) để lệnh
+    // tới trễ không kéo lùi.
+    if (seq !== null) {
       commands.push([
         'eval',
-        SET_NEWEST_ID_SCRIPT,
+        SET_NEWEST_SEQ_SCRIPT,
         1,
         unreadLastKey(conversationId),
         senderId,
-        messageId,
+        seq,
       ])
     }
 
-    // Một round-trip cho cả gói. SADD đặt CUỐI để khi cron pop được id ra thì
-    // dữ liệu đã nằm sẵn trong Redis.
+    // Tin cuối cũng "chỉ khi seq lớn hơn": tin trả lời (chờ tra tin được
+    // trích) tới sau tin thường gửi liền sau nó không được đè tin mới hơn.
+    // Không còn HINCRBY: unreadCount = latestSeq − lastReadSeq. SADD đặt CUỐI
+    // để khi cron pop được id ra thì dữ liệu đã nằm sẵn trong Redis.
     commands.push(
-      ['hincrby', unreadCountKey(conversationId), senderId, 1],
-      ['set', lastMessageKey(conversationId), lastMessage],
+      [
+        'eval',
+        SET_LAST_MESSAGE_SCRIPT,
+        1,
+        lastMessageKey(conversationId),
+        seq ?? 0,
+        lastMessage,
+      ],
       ['sadd', DIRTY_CONVERSATIONS_KEY, conversationId],
     )
 

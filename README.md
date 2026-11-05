@@ -231,12 +231,14 @@ npm run dev
 | http://localhost:9001 | MinIO console (`minioadmin` / `minioadmin`) |
 | http://localhost:15672 | RabbitMQ management (`user` / `user`) |
 
-To run several instances, start the `scale` profile. It adds `chat-2`, `chat-3`, `realtime-gateway-2` and `realtime-gateway-3`, and Kong spreads traffic across them through Docker DNS:
+By default this runs one chat instance and one realtime gateway. To run several, start the `scale` profile. It adds `chat-2`, `chat-3`, `realtime-gateway-2` and `realtime-gateway-3`, and Kong spreads traffic across them through Docker DNS:
 
 ```bash
 cd backend
 docker compose --profile scale up -d
 ```
+
+[`docs/run-multiple-instances.md`](docs/run-multiple-instances.md) covers starting only some replicas, adding a fourth, checking who owns which partition, and going back to one.
 
 ## Tests
 
@@ -280,6 +282,7 @@ DALN/
 - [`docs/DALN-User-Stories.xlsx`](docs/DALN-User-Stories.xlsx): 75 user stories across 15 epics, with acceptance criteria
 - [`docs/diagrams/`](docs/diagrams): the diagrams above, as editable HTML sources and PNG exports
 - [`docs/superpowers/specs/2026-10-31-chat-scale-out-design.md`](docs/superpowers/specs/2026-10-31-chat-scale-out-design.md): the chat scale-out design
+- [`docs/run-multiple-instances.md`](docs/run-multiple-instances.md): running more than one chat instance or gateway locally
 - [`docs/socketio-presence-online-offline.md`](docs/socketio-presence-online-offline.md): how online presence is tracked
 - [`training/README.md`](training/README.md): the training pipeline
 - [`deploy/README.md`](deploy/README.md): deployment and operations

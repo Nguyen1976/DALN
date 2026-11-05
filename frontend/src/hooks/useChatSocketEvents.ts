@@ -76,19 +76,20 @@ export const useChatSocketEvents = () => {
       users: Array<{
         userId: string;
         lastReadMessageId: string;
+        seq?: number;
       }>;
     }) => {
       if (!data?.conversationId || !Array.isArray(data.users)) return;
 
       data.users.forEach((item) => {
-        if (!item?.userId || !item?.lastReadMessageId) return;
+        if (!item?.userId || typeof item.seq !== "number") return;
         if (item.userId === user.id) return;
 
         dispatch(
           updateSeenStatus({
             conversationId: data.conversationId,
             userId: item.userId,
-            lastReadMessageId: item.lastReadMessageId,
+            seq: item.seq,
           }),
         );
       });

@@ -52,10 +52,17 @@ model conversation {
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   groupNameSearch     String?
+  /// Bộ đếm cấp `seq` cho tin của hội thoại (seq-allocator). Hội thoại mới
+  /// tạo có 0; hội thoại cũ được migrations/chat/0008 đặt bằng số tin.
+  lastSeq             Int?
+  /// `seq` của tin đang làm "tin cuối": chỉ ghi khi số mới lớn hơn, để tin
+  /// đến trễ không kéo tin cuối lùi lại.
+  lastMessageSeq      Int?
+  /// Đã xoá: ẩn ngay khỏi mọi nơi, cron conversation-purge dọn tin theo lô.
+  deletedAt           DateTime?
 
 
   @@index([type, groupNameSearch, updatedAt])
-  @@index([lastMessageAt])
 }
 
 model conversationMember {
@@ -67,12 +74,18 @@ model conversationMember {
   avatar            String?
   role              participantRole   @default(MEMBER)
   isActive          Boolean           @default(true)
-  unreadCount       Int               @default(0)
   unreadMentionCount Int              @default(0)
   lastMentionMessageId String?        @db.ObjectId
-  lastReadMessageId String?           @db.ObjectId
-  lastReadAt        DateTime?
-  clearedHistoryAt  DateTime?
+  /// Mốc đã đọc theo `seq`; chỉ tăng. unreadCount = latestSeq − lastReadSeq.
+  lastReadSeq       Int?
+  /// `seq` của tin mới nhất đã lan tới dòng này (cron unread, cùng lúc với
+  /// lastMessageAt). Tên khác `conversation.lastMessageSeq` vì danh sách hội
+  /// thoại trải hai document chồng lên nhau.
+  latestSeq         Int?
+  /// `seq` của lượt nhắc mới nhất; đọc qua mốc này thì tắt badge nhắc.
+  lastMentionSeq    Int?
+  /// Xoá lịch sử phía mình: chỉ thấy tin có seq lớn hơn mốc này.
+  clearedHistorySeq Int?
   joinedAt          DateTime          @default(now())
   conversation      conversation      @relation(fields: [conversationId], references: [id])
   sentMessages      message[]         @relation("SenderMessages")
@@ -90,10 +103,7 @@ model conversationMember {
   peerAvatar        String?
 
   @@index([userId, isActive, lastMessageAt(sort: Desc)])
-  
   @@unique([conversationId, userId])
-  @@index([username])
-  @@index([conversationId, lastReadAt])
 }
 
 model message {
@@ -120,13 +130,21 @@ model message {
   /// Một-bình-chọn-một-tin do PollService giữ (tạo tin ngay khi tạo poll).
   pollId          String?            @db.ObjectId
   isRevoked       Boolean            @default(false)
-  isDeleted       Boolean            @default(false)
   /// Tin nhắn do hệ thống ghi (thêm/xoá thành viên, kết cục cuộc gọi...).
   /// Không phải nội dung người dùng gõ, nên hiển thị khác và không có
   /// trạng thái đã xem.
   isSystem        Boolean            @default(false)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
+  /// Số thứ tự trong hội thoại (seq-allocator): thứ tự hiển thị, phân trang,
+  /// lấy bù khi mất kết nối, mốc đã đọc. Unique (conversationId, seq) là index
+  /// partial ở migrations/chat/0009: db push xoá mọi index thường không khai
+  /// ở đây, và một unique thường sẽ vỡ vì tin cũ chưa đánh số (seq = null).
+  seq             Int?
+  /// Cờ cho các tab Ảnh/Video, Tài liệu, Liên kết (domain/message-facets).
+  hasMedia        Boolean?
+  hasFile         Boolean?
+  hasLink         Boolean?
   conversation    conversation       @relation(fields: [conversationId], references: [id])
   senderMember    conversationMember @relation("SenderMessages", fields: [conversationId, senderId], references: [conversationId, userId])
   replyTo         message?           @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -134,8 +152,14 @@ model message {
   poll            poll?              @relation(fields: [pollId], references: [id])
   medias          messageMedia[]
 
-  @@index([conversationId, createdAt, id])
   @@index([pollId])
+  // Phân trang / lấy bù theo seq (Prisma bọc where trong $expr: không dùng được
+  // index partial ở trên).
+  @@index([conversationId, seq])
+  // Tab tài nguyên: mỗi tab một cờ, mới nhất trước, cursor theo seq.
+  @@index([conversationId, hasMedia, seq(sort: Desc)])
+  @@index([conversationId, hasFile, seq(sort: Desc)])
+  @@index([conversationId, hasLink, seq(sort: Desc)])
 }
 
 type PollOption {

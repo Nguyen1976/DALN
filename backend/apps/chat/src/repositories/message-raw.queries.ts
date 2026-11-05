@@ -22,6 +22,15 @@ export type StoredKey = {
   clientMessageId: string
   createdAt: Date
   updatedAt: Date
+  seq: number | null
+}
+
+/** Phần của một tin đã lưu mà batch writer cần để trả về cho người gửi. */
+export type StoredRow = {
+  id: string
+  seq: number | null
+  createdAt: Date
+  updatedAt: Date
 }
 
 const oid = (value: unknown) => (value as Oid).$oid
@@ -58,13 +67,34 @@ export async function findStoredBySenderClientIds(
       })),
       clientMessageId: { $type: 'string' },
     },
-    { senderId: 1, clientMessageId: 1, createdAt: 1, updatedAt: 1 },
+    { senderId: 1, clientMessageId: 1, createdAt: 1, updatedAt: 1, seq: 1 },
     keys.length,
   )
   return rows.map((row) => ({
     id: oid(row._id),
     senderId: oid(row.senderId),
     clientMessageId: row.clientMessageId as string,
+    createdAt: date(row.createdAt),
+    updatedAt: date(row.updatedAt),
+    seq: typeof row.seq === 'number' ? row.seq : null,
+  }))
+}
+
+/** Các tin đã lưu theo `_id` (index _id). */
+export async function findStoredByIds(
+  prisma: RawRunner,
+  ids: string[],
+): Promise<StoredRow[]> {
+  if (!ids.length) return []
+  const rows = await find(
+    prisma,
+    { _id: { $in: ids.map((id) => ({ $oid: id })) } },
+    { seq: 1, createdAt: 1, updatedAt: 1 },
+    ids.length,
+  )
+  return rows.map((row) => ({
+    id: oid(row._id),
+    seq: typeof row.seq === 'number' ? row.seq : null,
     createdAt: date(row.createdAt),
     updatedAt: date(row.updatedAt),
   }))

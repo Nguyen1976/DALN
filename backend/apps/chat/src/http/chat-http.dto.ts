@@ -4,14 +4,16 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsMongoId,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   MaxLength,
+  Min,
 } from 'class-validator'
-import { Transform } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 import { PageQueryDto } from '@app/common/http/page-query.dto'
 
 export const ASSET_KINDS = ['MEDIA', 'LINK', 'DOC'] as const
@@ -19,6 +21,19 @@ export type AssetKind = (typeof ASSET_KINDS)[number]
 
 export const UPLOAD_TYPES = ['IMAGE', 'VIDEO', 'FILE'] as const
 export type UploadType = (typeof UPLOAD_TYPES)[number]
+
+/**
+ * A page of a thread. `afterSeq`: what came after a seq the client already
+ * has, oldest first (resync after a reconnect or a gap); otherwise `cursor`
+ * pages back through history.
+ */
+export class MessagesPageQueryDTO extends PageQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  afterSeq?: number
+}
 
 export class AssetsQueryDTO extends PageQueryDto {
   @IsMongoId()
