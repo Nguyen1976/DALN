@@ -21,6 +21,7 @@ cp backend/apps/user/src/geoip/__fixtures__/GeoIP2-City-Test.mmdb backend/geoip/
 node auth-browser.mjs            # 8 nhóm trên Chrome thật, ảnh lưu ở shots/
 node change-password-browser.mjs # 7 nhóm cho hộp thoại đổi mật khẩu
 node session-location-browser.mjs # 13 nhóm: IP, vị trí, bản đồ mini, hai mốc thời gian, IPv6 dài
+node ui-screenshots.mjs          # chụp lại docs/ui-screenshots bằng dữ liệu giả, chỉ cần frontend dev server
 ```
 
 Ghi đè được bằng biến môi trường: `API`, `DIRECT`, `APP`, `CHROME_PATH`,

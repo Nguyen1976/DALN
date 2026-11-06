@@ -40,7 +40,8 @@ import { selectFriend } from "@/redux/slices/friendSlice";
 import { formatRelativeTime } from "@/utils/formatDateTime";
 import MessageComponent from "./Messages";
 import { MessageMapper } from "@/utils/messageMapper";
-import EmojiPicker from "emoji-picker-react";
+import EmojiPicker, { Theme as EmojiPickerTheme } from "emoji-picker-react";
+import { useTheme } from "@/components/ThemeProvider";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Popover,
@@ -113,6 +114,7 @@ export default function ChatWindow({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const dispatch = useDispatch<AppDispatch>();
+  const { theme } = useTheme();
 
   const {
     user,
@@ -887,6 +889,11 @@ export default function ChatWindow({
               className="w-auto border-none bg-transparent p-0 shadow-none"
             >
               <EmojiPicker
+                theme={
+                  theme === "dark"
+                    ? EmojiPickerTheme.DARK
+                    : EmojiPickerTheme.LIGHT
+                }
                 height={360}
                 width={300}
                 searchDisabled={false}
