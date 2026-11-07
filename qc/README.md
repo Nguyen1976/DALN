@@ -21,6 +21,7 @@ cp backend/apps/user/src/geoip/__fixtures__/GeoIP2-City-Test.mmdb backend/geoip/
 node auth-browser.mjs            # 8 nhóm trên Chrome thật, ảnh lưu ở shots/
 node change-password-browser.mjs # 7 nhóm cho hộp thoại đổi mật khẩu
 node session-location-browser.mjs # 13 nhóm: IP, vị trí, bản đồ mini, hai mốc thời gian, IPv6 dài
+node ui-screenshots.mjs          # chụp lại docs/ui-screenshots bằng dữ liệu giả, chỉ cần frontend dev server
 ```
 
 Ghi đè được bằng biến môi trường: `API`, `DIRECT`, `APP`, `CHROME_PATH`,
@@ -60,6 +61,16 @@ Cần: stack dev chạy, Vite ở 5174, `npm run rtk:dev-tunnel` (backend) đã 
 webhook tới được gateway, Chrome. Prod: `APP`, `API` trỏ domain thật và
 `QC_ACCOUNTS_FILE` là file JSON `{accounts:[{email,password}×3], directId, groupId, groupName}`
 (gitignore, không commit).
+
+## Đồng bộ chat
+
+```bash
+node qc/chat-sync-browser.mjs        # S1–S4: lấy bù khi mất một tin, tab thứ hai, preview thu hồi, quyền vào room
+ONLY=S1,S4 node qc/chat-sync-browser.mjs
+```
+
+Cần: stack dev chạy, Vite ở 5174, Chrome. Chạy thêm với `--profile scale` để
+kiểm việc đẩy khỏi room khi socket nằm ở gateway khác.
 
 ## Scale-out: nhiều instance chat và nhiều gateway
 

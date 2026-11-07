@@ -57,6 +57,7 @@ import {
 import {
   fetchCallMembers,
   fetchCallPeer,
+  fetchIsMember,
   postGroupCallLog,
 } from './chat.client'
 import { RealtimeKitService } from './realtimekit.service'
@@ -178,6 +179,8 @@ export class RealtimeGateway
     }
   >()
   private readonly readBatchWindowMs = 1000
+  /** Lượt join đang kiểm tra quyền, theo `socketId:conversationId`. */
+  private readonly roomJoins = new Map<string, Promise<void>>()
 
   private emitTypingStopToRoom(
     client: ClientSocket,
@@ -464,7 +467,42 @@ export class RealtimeGateway
     const conversationId = data?.conversationId
     if (!conversationId) return
 
-    await client.join(`conversation:${conversationId}`)
+    const key = `${client.id}:${conversationId}`
+    const join = this.joinIfMember(client, conversationId).finally(() => {
+      if (this.roomJoins.get(key) === join) this.roomJoins.delete(key)
+    })
+    this.roomJoins.set(key, join)
+    await join
+  }
+
+  /** Room mang typing và "đã xem": chỉ thành viên đang hoạt động mới được vào. */
+  private async joinIfMember(client: ClientSocket, conversationId: string) {
+    // Mở hội thoại ngay lúc trang tải: join tới khi handshake còn đang chạy.
+    const handshake = this.handshakes.get(client.id)
+    if (handshake) {
+      try {
+        await withTimeout(handshake, HANDSHAKE_WAIT_MS)
+      } catch {
+        return
+      }
+    }
+    const userId = client.data.userId
+    if (!userId) return
+    if (await this.isMemberOf(conversationId, userId)) {
+      await client.join(`conversation:${conversationId}`)
+    }
+  }
+
+  /** Không hỏi được chat thì coi như không phải thành viên: đóng hơn là hở. */
+  private async isMemberOf(conversationId: string, userId: string) {
+    try {
+      return await fetchIsMember(conversationId, userId)
+    } catch (error) {
+      this.logger.warn(
+        `không kiểm tra được thành viên conversation=${conversationId} user=${userId}: ${String(error)}`,
+      )
+      return false
+    }
   }
 
   /**
@@ -478,6 +516,10 @@ export class RealtimeGateway
     const userId = client.data.userId
     const conversationId = data?.conversationId
     if (!conversationId || !userId) return
+
+    // Join còn đang chờ kiểm tra quyền mà rời trước thì nó sẽ vào room sau lệnh
+    // rời này và ở lại đó tới khi socket đứt.
+    await this.roomJoins.get(`${client.id}:${conversationId}`)
 
     const typingConversations = this.typingConversationsBySocket.get(client.id)
     if (typingConversations?.has(conversationId)) {
@@ -498,7 +540,31 @@ export class RealtimeGateway
     queue: QUEUE_RMQ.REALTIME_EMIT_EVENT,
   })
   emitToUser({ userIds, event, data }: EmitToUserPayload) {
+    this.evictFromRoom(event, data)
     this.emitToUserSockets(userIds, event, data)
+  }
+
+  /**
+   * Ai vừa rời nhóm thì ra khỏi room trên MỌI socket đang mở, kể cả ở gateway
+   * khác. Tin nhắn đã đi theo danh sách thành viên, nhưng typing và "đã xem" đi
+   * theo room.
+   */
+  private evictFromRoom(event: string, data: unknown) {
+    const { conversationId, targetUserId, actorId } = (data ?? {}) as {
+      conversationId?: string
+      targetUserId?: string
+      actorId?: string
+    }
+    const userId =
+      event === SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_REMOVED
+        ? targetUserId
+        : event === SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_LEFT
+          ? actorId
+          : undefined
+    if (!conversationId || !userId) return
+    this.server
+      .in(`user:${userId}`)
+      .socketsLeave(`conversation:${conversationId}`)
   }
 
   /**
@@ -620,7 +686,7 @@ export class RealtimeGateway
    * Broadcast tới các thành viên khác trong room
    */
   @SubscribeMessage(SOCKET_EVENTS.CHAT.USER_TYPING)
-  handleUserTyping(
+  async handleUserTyping(
     @MessageBody() data: TypingBody | undefined,
     @ConnectedSocket() client: ClientSocket,
   ) {
@@ -643,6 +709,11 @@ export class RealtimeGateway
       })
       return
     }
+
+    // Không ở trong room (không phải thành viên, hay đã bị xoá) thì không được
+    // báo đang gõ. Vừa mở hội thoại đã gõ thì chờ lượt join đang kiểm tra.
+    await this.roomJoins.get(`${client.id}:${conversationId}`)
+    if (!client.rooms.has(`conversation:${conversationId}`)) return
 
     // Broadcast to other users in the conversation room
     // Gửi tới tất cả users trong conversation, ngoại trừ sender
@@ -715,7 +786,14 @@ export class RealtimeGateway
       return
     }
 
-    // 1️⃣ Batch broadcast user_read để giảm số lượng event dồn dập
+    // 1️⃣ Batch broadcast user_read để giảm số lượng event dồn dập. Người ngoài
+    // không được phát "đã xem" vào room. Sự kiện đọc có thể tới trước lượt join
+    // của chính socket đó, nên chưa ở trong room thì hỏi chat chứ không từ chối.
+    const allowed =
+      client.rooms.has(`conversation:${conversationId}`) ||
+      (await this.isMemberOf(conversationId, userId))
+    if (!allowed) return
+
     this.queueReadBroadcast(conversationId, userId, {
       messageId: lastMessageId,
       seq:

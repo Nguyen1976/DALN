@@ -206,6 +206,223 @@ describe('RealtimeGateway', () => {
   })
 
   /**
+   * Typing và "đã xem" đi theo room `conversation:<id>`, nên đây là chỗ chặn
+   * người ngoài nghe lén hoặc giả mạo chúng.
+   */
+  describe('quyền vào room của hội thoại', () => {
+    const roomOf = 'conversation:6a3500000000000000000c01'
+    const conversationId = '6a3500000000000000000c01'
+    const lastMessageId = '6a35000000000000000b0001'
+
+    const socket = (rooms: string[] = []) => {
+      const joined = new Set(rooms)
+      const roomEmit = jest.fn()
+      return {
+        id: 'sock-1',
+        data: { userId: 'u1' },
+        rooms: joined,
+        join: jest.fn((room: string) => {
+          joined.add(room)
+          return Promise.resolve()
+        }),
+        leave: jest.fn((room: string) => {
+          joined.delete(room)
+          return Promise.resolve()
+        }),
+        emit: jest.fn(),
+        roomEmit,
+        broadcast: { to: jest.fn().mockReturnValue({ emit: roomEmit }) },
+      }
+    }
+    const asClient = (s: ReturnType<typeof socket>) =>
+      s as unknown as ClientSocket
+
+    it('thành viên vào được room, hỏi đúng hội thoại và người dùng', async () => {
+      respond(200, { member: true })
+      const s = socket()
+
+      await gateway.handleJoinConversation({ conversationId }, asClient(s))
+
+      expect(s.join).toHaveBeenCalledWith(roomOf)
+      const url = String(fetchMock.mock.calls[0][0])
+      expect(url).toContain('/chat/internal/is-member')
+      expect(url).toContain(`conversationId=${conversationId}`)
+      expect(url).toContain('userId=u1')
+    })
+
+    it('người ngoài không vào được room', async () => {
+      respond(200, { member: false })
+      const s = socket()
+
+      await gateway.handleJoinConversation({ conversationId }, asClient(s))
+
+      expect(s.join).not.toHaveBeenCalled()
+    })
+
+    it('chat không trả lời được thì không cho vào', async () => {
+      respond(500)
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined)
+      const s = socket()
+
+      await gateway.handleJoinConversation({ conversationId }, asClient(s))
+
+      expect(s.join).not.toHaveBeenCalled()
+      warn.mockRestore()
+    })
+
+    it('rời khi join còn đang kiểm tra: không kẹt lại trong room', async () => {
+      let answer!: (value: {
+        ok: boolean
+        status: number
+        text: () => Promise<string>
+      }) => void
+      fetchMock.mockReturnValueOnce(new Promise((r) => (answer = r)))
+      const s = socket()
+
+      const joining = gateway.handleJoinConversation(
+        { conversationId },
+        asClient(s),
+      )
+      const leaving = gateway.handleLeaveConversation(
+        { conversationId },
+        asClient(s),
+      )
+      answer({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify({ member: true })),
+      })
+      await Promise.all([joining, leaving])
+
+      expect(s.rooms.has(roomOf)).toBe(false)
+    })
+
+    it('ngoài room thì không phát được "đang gõ"', async () => {
+      const s = socket()
+
+      await gateway.handleUserTyping(
+        { conversationId, status: 'start' },
+        asClient(s),
+      )
+
+      expect(s.roomEmit).not.toHaveBeenCalled()
+    })
+
+    it('đang trong room thì phát "đang gõ" như thường', async () => {
+      const s = socket([roomOf])
+
+      await gateway.handleUserTyping(
+        { conversationId, status: 'start' },
+        asClient(s),
+      )
+
+      expect(s.roomEmit).toHaveBeenCalledWith(SOCKET_EVENTS.CHAT.USER_TYPING, {
+        conversationId,
+        userId: 'u1',
+        status: 'start',
+      })
+    })
+
+    it('gõ ngay khi join còn đang kiểm tra: chờ join rồi mới phát', async () => {
+      respond(200, { member: true })
+      const s = socket()
+
+      await Promise.all([
+        gateway.handleJoinConversation({ conversationId }, asClient(s)),
+        gateway.handleUserTyping(
+          { conversationId, status: 'start' },
+          asClient(s),
+        ),
+      ])
+
+      expect(s.roomEmit).toHaveBeenCalledTimes(1)
+    })
+
+    it('người ngoài không phát được "đã xem", cũng không ghi được mốc đọc', async () => {
+      jest.useFakeTimers()
+      try {
+        respond(200, { member: false })
+        await gateway.handleMessageRead(
+          { conversationId, lastMessageId, seq: 999 },
+          asClient(socket()),
+        )
+        jest.advanceTimersByTime(1000)
+      } finally {
+        jest.useRealTimers()
+      }
+
+      expect(emitted).not.toHaveBeenCalled()
+      expect(publishedTo(ROUTING_RMQ.UPDATE_MESSAGE_READ)).toHaveLength(0)
+    })
+
+    it('thành viên có sự kiện đọc tới trước lượt join: vẫn phát "đã xem"', async () => {
+      jest.useFakeTimers()
+      try {
+        respond(200, { member: true })
+        await gateway.handleMessageRead(
+          { conversationId, lastMessageId, seq: 3 },
+          asClient(socket()),
+        )
+        jest.advanceTimersByTime(1000)
+      } finally {
+        jest.useRealTimers()
+      }
+
+      expect(emitted).toHaveBeenCalledWith(SOCKET_EVENTS.CHAT.USER_READ_BATCH, {
+        conversationId,
+        users: [{ userId: 'u1', lastReadMessageId: lastMessageId, seq: 3 }],
+      })
+      expect(publishedTo(ROUTING_RMQ.UPDATE_MESSAGE_READ)).toHaveLength(1)
+    })
+
+    describe('ai rời nhóm thì ra khỏi room', () => {
+      let socketsLeave: jest.Mock
+      let inRoom: jest.Mock
+
+      beforeEach(() => {
+        socketsLeave = jest.fn()
+        inRoom = jest.fn().mockReturnValue({ socketsLeave })
+        gateway.server = { to, in: inRoom } as unknown as Server
+      })
+
+      it('bị xoá: đẩy mọi socket của người đó, vẫn báo cho người còn lại', () => {
+        gateway.emitToUser({
+          userIds: ['u2'],
+          event: SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_REMOVED,
+          data: { conversationId, actorId: 'admin', targetUserId: 'u3' },
+        })
+
+        expect(inRoom).toHaveBeenCalledWith('user:u3')
+        expect(socketsLeave).toHaveBeenCalledWith(roomOf)
+        expect(to).toHaveBeenCalledWith('user:u2')
+      })
+
+      it('tự rời: đẩy chính người rời', () => {
+        gateway.emitToUser({
+          userIds: ['u2'],
+          event: SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_LEFT,
+          data: { conversationId, actorId: 'u3' },
+        })
+
+        expect(inRoom).toHaveBeenCalledWith('user:u3')
+        expect(socketsLeave).toHaveBeenCalledWith(roomOf)
+      })
+
+      it('sự kiện khác có actorId thì không đẩy ai', () => {
+        gateway.emitToUser({
+          userIds: ['u2'],
+          event: SOCKET_EVENTS.CHAT.CONVERSATION_MEMBER_ADDED,
+          data: { conversationId, actorId: 'u3' },
+        })
+
+        expect(socketsLeave).not.toHaveBeenCalled()
+      })
+    })
+  })
+
+  /**
    * Socket là kết nối dài hạn được xác thực MỘT LẦN lúc handshake, nên đây là
    * chỗ duy nhất chặn được kẻ mang token đã bị thu hồi — và cũng là chỗ dễ để
    * hở nhất: trước đây nó chấp nhận cả refresh token.
@@ -235,6 +452,7 @@ describe('RealtimeGateway', () => {
         emit: jest.fn(),
         disconnect: jest.fn(),
         conn: { on: jest.fn() },
+        rooms: new Set(['conversation:c1']),
       }) as unknown as ClientSocket & { emit: jest.Mock; join: jest.Mock }
 
     const codeEmitted = (client: { emit: jest.Mock }): string | undefined => {
@@ -338,6 +556,7 @@ describe('RealtimeGateway', () => {
         id: `s-${userId}`,
         data: { userId },
         emit: jest.fn(),
+        rooms: new Set(['conversation:c1']),
         broadcast: { to: jest.fn().mockReturnValue({ emit: jest.fn() }) },
       })
       const msg = '6a35000000000000000b0001'

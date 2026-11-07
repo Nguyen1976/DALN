@@ -14,6 +14,7 @@ import type {
 } from 'libs/constant/rmq/payload'
 import {
   ConversationMemberRepository,
+  ConversationRepository,
   MessageRepository,
   PollRepository,
   type MemberRow,
@@ -84,6 +85,7 @@ export class MessageService {
     private readonly messageMediaService: MessageMediaService,
     private readonly redisService: RedisService,
     private readonly pollRepo: PollRepository,
+    private readonly conversationRepo: ConversationRepository,
   ) {}
 
   async clearMentions(conversationId: string, userId: string) {
@@ -442,6 +444,8 @@ export class MessageService {
       content: '',
     }
 
+    await this.saveRevokedPreview(revokedMessage)
+
     const dto = MessageMapper.toResponse(revokedMessage)
     this.eventsPublisher.publishMessageRevoked(
       {
@@ -453,6 +457,44 @@ export class MessageService {
     )
 
     return dto
+  }
+
+  /**
+   * Preview ở danh sách hội thoại là bản sao của tin cuối: không sửa thì nội dung
+   * đã thu hồi vẫn hiện ở đó cho mọi người. Lỗi ở đây chỉ ghi log: tin đã thu hồi
+   * rồi, thu hồi lại không được nữa, và mọi người vẫn cần nhận sự kiện.
+   */
+  private async saveRevokedPreview(message: {
+    id: string
+    seq?: number | null
+    conversationId: string
+    senderId: string
+    createdAt: Date
+    isRevoked: boolean
+    senderMember?: Sender
+  }) {
+    if (typeof message.seq !== 'number') return
+    try {
+      await this.conversationRepo.saveRevokedLastMessage(
+        message.conversationId,
+        {
+          seq: message.seq,
+          lastMessageId: message.id,
+          lastMessageAt: message.createdAt,
+          lastMessageText: MessageMapper.previewText(message),
+          lastMessageSenderId: message.senderId,
+          ...(message.senderMember && {
+            lastMessageSenderName: displayNameOf(message.senderMember),
+            lastMessageSenderAvatar: message.senderMember.avatar || null,
+          }),
+        },
+      )
+    } catch (error) {
+      this.logger.error(
+        `[chat-service] preview thu hồi không ghi được (${message.conversationId})`,
+        error,
+      )
+    }
   }
 
   async deleteMessageForMe(data: DeleteMessageForMeRequest) {
@@ -581,8 +623,7 @@ export class MessageService {
       ChatErrors.invalidGroupCallLog()
     }
 
-    // Không có ConversationRepository ở service này; danh sách thành viên ACTIVE
-    // rỗng đồng nghĩa không còn hội thoại để ghi vào (hoặc chưa từng có), nên
+    // Danh sách thành viên ACTIVE rỗng đồng nghĩa không còn hội thoại để ghi vào (hoặc chưa từng có), nên
     // trả ok:false thay vì cố tạo tin mồ côi.
     const members = await this.memberRepo.findByConversationId(conversationId)
     if (!members.length) {

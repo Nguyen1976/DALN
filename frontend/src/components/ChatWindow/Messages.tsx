@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/redux/slices/messageSlice";
 import { selectUser } from "@/redux/slices/userSlice";
@@ -143,6 +143,22 @@ const MessageComponent = ({
   members?: MentionMember[];
 }) => {
   const user = useSelector(selectUser);
+  // Touch has no hover: tapping a message reveals its options button, tapping
+  // anywhere else hides it again. Mouse users never see this state.
+  const [tappedMessageId, setTappedMessageId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!tappedMessageId) return;
+    const hideOnTapElsewhere = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest?.("[data-message-bubble]")) {
+        setTappedMessageId(null);
+      }
+    };
+    document.addEventListener("pointerdown", hideOnTapElsewhere);
+    return () =>
+      document.removeEventListener("pointerdown", hideOnTapElsewhere);
+  }, [tappedMessageId]);
 
   return (
     <>
@@ -469,6 +485,8 @@ const MessageComponent = ({
                   ))}
 
                 <div
+                  data-message-bubble=""
+                  onClick={() => setTappedMessageId(message.id)}
                   className={cn(
                     "group relative flex max-w-[min(30rem,78%)] flex-col text-sm leading-relaxed",
                     isMine ? "items-end" : "items-start",
@@ -708,10 +726,13 @@ const MessageComponent = ({
                           "absolute top-1 inline-flex size-8 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm",
                           "transition-opacity duration-(--motion-fast)",
                           // Hover is not the only way in: keyboard focus and an
-                          // open menu reveal it too, and on touch (no hover) it
-                          // is always visible.
+                          // open menu reveal it too, and on touch (no hover) a
+                          // tap on the message does. Hidden, it must not catch
+                          // taps meant for the thread beside the bubble.
                           "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
-                          "[@media(hover:none)]:opacity-100",
+                          tappedMessageId === message.id
+                            ? "[@media(hover:none)]:opacity-100"
+                            : "[@media(hover:none)]:pointer-events-none",
                           isMine ? "-left-9" : "-right-9",
                         )}
                       >

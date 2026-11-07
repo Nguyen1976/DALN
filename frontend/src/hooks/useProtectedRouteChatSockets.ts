@@ -80,19 +80,42 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
 
     // Tin tới với seq nhảy cóc (seq > lớn nhất đang có + 1) nghĩa là đã lỡ tin
     // ở giữa: lấy bù. Gom các lần nhảy trong 300 ms thành một lần gọi.
+    //
+    // `gapStarts` giữ nơi khoảng trống bắt đầu, vì tin làm lộ nó vào store ngay
+    // nên lúc lấy bù, seq lớn nhất đã nằm sau chỗ thiếu. Lấy bù hỏng thì mốc còn
+    // đó cho lần sau: một khi seq lớn nhất đã vượt qua thì không còn gì nhắc lại.
+    const gapStarts = new Map<string, number>();
     const syncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const noteGap = (targetConversationId: string, after: number) => {
+      const known = gapStarts.get(targetConversationId);
+      gapStarts.set(
+        targetConversationId,
+        known === undefined ? after : Math.min(known, after),
+      );
+    };
     const scheduleSync = (targetConversationId: string) => {
       clearTimeout(syncTimers.get(targetConversationId));
       syncTimers.set(
         targetConversationId,
         setTimeout(() => {
           syncTimers.delete(targetConversationId);
-          void dispatch(syncAfter(targetConversationId));
+          void runSync(targetConversationId);
         }, 300),
       );
     };
-
-    const processIncomingMessage = async (message: Message) => {
+    const runSync = async (targetConversationId: string) => {
+      const after = gapStarts.get(targetConversationId);
+      gapStarts.delete(targetConversationId);
+      const result = await dispatch(
+        syncAfter({ conversationId: targetConversationId, after }),
+      );
+      if (!syncAfter.rejected.match(result)) return;
+      if (after !== undefined) noteGap(targetConversationId, after);
+      // Một lần lấy bù khác đang chạy, nó có thể đã đọc xong trước tin này.
+      if (result.meta.condition) scheduleSync(targetConversationId);
+    };
+    /** Gọi TRƯỚC khi tin vào store, với mọi đường đưa tin có seq vào store. */
+    const detectGap = (message: Message) => {
       const before = maxSeqOf(
         store.getState().message.messages[message.conversationId],
       );
@@ -101,8 +124,13 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
         typeof message.seq === "number" &&
         message.seq > before + 1
       ) {
+        noteGap(message.conversationId, before);
         scheduleSync(message.conversationId);
       }
+    };
+
+    const processIncomingMessage = async (message: Message) => {
+      detectGap(message);
       const hydratedConversation = await ensureConversationHydrated(
         message.conversationId,
       );
@@ -140,6 +168,7 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       clientMessageId?: string;
       message: Message;
     }) => {
+      detectGap(payload.message);
       dispatch(ackMessage(payload));
       dispatch(
         updateNewMessage({
@@ -183,6 +212,7 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
     };
 
     const systemMessageHandler = ({ message }: { message: Message }) => {
+      detectGap(message);
       dispatch(addMessage(message));
       dispatch(
         updateNewMessage({
@@ -313,7 +343,7 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
         // TRƯỚC khi socket kịp kết nối, tin tới giữa hai lúc đó không đến qua
         // socket. Chưa tải gì (syncAfter tự bỏ qua) thì không tốn request.
         const open = selectedChatIdRef.current;
-        if (open) void dispatch(syncAfter(open));
+        if (open) void runSync(open);
         return;
       }
       for (const message of pendingTextMessages(store.getState().message)) {
@@ -325,7 +355,10 @@ export function useProtectedRouteChatSockets(conversationId?: string) {
       // lại trang đầu để badge và tin cuối đúng với server.
       const open = selectedChatIdRef.current;
       dispatch(dropOtherConversations(open));
-      if (open) void dispatch(syncAfter(open));
+      for (const id of [...gapStarts.keys()]) {
+        if (id !== open) gapStarts.delete(id);
+      }
+      if (open) void runSync(open);
       void dispatch(getConversations({ limit: 20, cursor: null }));
     };
 

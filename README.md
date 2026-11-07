@@ -82,7 +82,7 @@
   <img src="docs/ui-screenshots/104-m-recommendations-dark.png" alt="Mobile: friend suggestions" width="30%">
 </p>
 
-All 32 screens, in light and dark, live in [`docs/ui-screenshots`](docs/ui-screenshots).
+All 39 screens, in light and dark, live in [`docs/ui-screenshots`](docs/ui-screenshots).
 
 ## Architecture
 
