@@ -50,6 +50,16 @@ const toListRow = ({
   ...membership,
 })
 
+type LastMessageFields = {
+  seq: number
+  lastMessageId?: string | null
+  lastMessageAt?: Date
+  lastMessageText?: string | null
+  lastMessageSenderId?: string | null
+  lastMessageSenderName?: string | null
+  lastMessageSenderAvatar?: string | null
+}
+
 @Injectable()
 export class ConversationRepository {
   constructor(
@@ -187,17 +197,29 @@ export class ConversationRepository {
    * right behind it made the list show the older one (10/10 trials). A raw
    * update: Prisma's `update` is fine, but the condition is not a unique key.
    */
-  async saveLastMessage(
+  async saveLastMessage(conversationId: string, data: LastMessageFields) {
+    return await this.writeLastMessage(conversationId, data, '$lt')
+  }
+
+  /**
+   * Tin vừa thu hồi đang là (hoặc sắp là) tin cuối: ghi preview đã thu hồi.
+   *
+   * Ghi cả `lastMessageSeq` và dùng `$lte`: nếu cron chưa kịp đẩy tin này xuống,
+   * bản trong Redis vẫn còn nội dung gốc, và lệnh ghi của cron (`$lt`, cùng seq)
+   * sẽ bị từ chối nhờ mốc này. Một tin mới hơn thì vẫn ghi đè được như thường;
+   * đã có tin mới hơn tin bị thu hồi thì lệnh này không khớp gì cả.
+   */
+  async saveRevokedLastMessage(
     conversationId: string,
-    data: {
-      seq: number
-      lastMessageId?: string | null
-      lastMessageAt?: Date
-      lastMessageText?: string | null
-      lastMessageSenderId?: string | null
-      lastMessageSenderName?: string | null
-      lastMessageSenderAvatar?: string | null
-    },
+    data: LastMessageFields,
+  ) {
+    return await this.writeLastMessage(conversationId, data, '$lte')
+  }
+
+  private async writeLastMessage(
+    conversationId: string,
+    data: LastMessageFields,
+    seqGuard: '$lt' | '$lte',
   ) {
     const { seq, ...fields } = data
     const set: Record<string, unknown> = {
@@ -217,7 +239,10 @@ export class ConversationRepository {
       {
         q: {
           _id: oid(conversationId),
-          $or: [{ lastMessageSeq: null }, { lastMessageSeq: { $lt: seq } }],
+          $or: [
+            { lastMessageSeq: null },
+            { lastMessageSeq: { [seqGuard]: seq } },
+          ],
         },
         u: { $set: set },
       },

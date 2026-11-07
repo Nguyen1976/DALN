@@ -74,6 +74,17 @@ export async function fetchCallMembers(
   }
 }
 
+/** `userId` có đang là thành viên không. Ném lỗi nếu chat không trả lời được. */
+export async function fetchIsMember(
+  conversationId: string,
+  userId: string,
+): Promise<boolean> {
+  const { member } = await internalFetch<{ member: boolean }>(
+    chatUrl('is-member', { conversationId, userId }),
+  )
+  return member
+}
+
 /**
  * Ghi 1 tin hệ thống tổng kết cuộc gọi nhóm vào dòng trò chuyện.
  *

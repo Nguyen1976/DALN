@@ -299,6 +299,16 @@ export class ChatController {
     return this.conversations.getCallMembers({ conversationId, userId })
   }
 
+  // Gateway duyệt quyền vào room của hội thoại (đang gõ, đã xem).
+  @Get('internal/is-member')
+  @InternalOnly()
+  isMember(
+    @Query('conversationId') conversationId: string,
+    @Query('userId') userId: string,
+  ) {
+    return this.members.isActiveMember(conversationId, userId)
+  }
+
   // Gateway kết thúc cuộc gọi nhóm (phòng trống / webhook RealtimeKit): ghi tin tổng kết
   // cuộc gọi nhóm vào hội thoại.
   @Post('internal/group-call-log')

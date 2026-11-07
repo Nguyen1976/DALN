@@ -1,6 +1,7 @@
 import { UserDirectoryClient } from '../clients/user-directory.client'
 import { Injectable } from '@nestjs/common'
 import { displayNameOf } from '../domain/display-name'
+import { isObjectId } from '../domain/object-id'
 import {
   ConversationRepository,
   ConversationMemberRepository,
@@ -44,6 +45,18 @@ export class ConversationMemberService {
     private readonly messageService: MessageService,
     private readonly userDirectory: UserDirectoryClient,
   ) {}
+
+  /** Id sai định dạng thì trả lời "không", không để Mongo ném lỗi hạ tầng. */
+  async isActiveMember(conversationId: string, userId: string) {
+    if (!isObjectId(conversationId) || !isObjectId(userId)) {
+      return { member: false }
+    }
+    const row = await this.memberRepo.findByConversationIdAndUserId(
+      conversationId,
+      userId,
+    )
+    return { member: Boolean(row) }
+  }
 
   async addMemberToConversation(dto: AddMemberToConversationRequest) {
     const { conversation, members, actor } = await requireGroupManager(

@@ -197,20 +197,27 @@ const SYNC_PAGES = 2;
 const SYNC_LIMIT = 50;
 
 /**
- * What came after the newest message we have, oldest first. Called when a
- * message arrives whose seq skips ahead (one was missed), and for the open
- * conversation after a reconnect. Past two pages the gap is too wide to
- * patch: the cache is dropped and the first page reloads instead, which also
- * keeps a long absence from bursting the API rate limit.
+ * What came after a seq, oldest first. Called when a message arrives whose seq
+ * skips ahead (one was missed), and for the open conversation after a
+ * reconnect. Past two pages the gap is too wide to patch: the cache is dropped
+ * and the first page reloads instead, which also keeps a long absence from
+ * bursting the API rate limit.
+ *
+ * `after`: where a gap starts. It has to be given: by the time the resync runs,
+ * the message that revealed the gap is already stored, so the newest seq we
+ * hold lies past what is missing. Without it, resume from the newest we hold.
  */
 export const syncAfter = createAsyncThunk(
   `/chat/messages/sync`,
-  async (conversationId: string, { getState }) => {
+  async (
+    { conversationId, after }: { conversationId: string; after?: number },
+    { getState },
+  ) => {
     const state = getState() as RootState;
-    const after = maxSeqOf(state.message.messages[conversationId]);
-    if (after === null) return { conversationId, items: [], reset: false };
+    const newest = maxSeqOf(state.message.messages[conversationId]);
+    if (newest === null) return { conversationId, items: [], reset: false };
     const items: Message[] = [];
-    let cursor = after;
+    let cursor = after ?? newest;
     for (let page = 0; page < SYNC_PAGES; page++) {
       const result = await getMessagesAfterAPI(conversationId, SYNC_LIMIT, cursor);
       items.push(...result.items);
@@ -224,7 +231,7 @@ export const syncAfter = createAsyncThunk(
   },
   {
     // One resync per conversation at a time; a burst of gaps shares it.
-    condition: (conversationId, { getState }) =>
+    condition: ({ conversationId }, { getState }) =>
       !(getState() as RootState).message.syncing[conversationId],
   },
 );
@@ -273,26 +280,25 @@ export const messageSlice = createSlice({
         currentMessages.sort(compareNewestFirst);
       }
     },
-    /** The server saved one of ours: swap the optimistic copy for it. */
+    /**
+     * The server saved one of ours: swap the optimistic copy for it. A tab or
+     * device that did not send it has no copy, and the ack is the only event it
+     * gets (the sender is left out of MESSAGE_NEW), so it adds the message. A
+     * thread that was never loaded stays that way: opening it fetches the page.
+     */
     ackMessage: (
       state,
       action: PayloadAction<{ clientMessageId?: string; message: Message }>,
     ) => {
       const { clientMessageId, message } = action.payload;
-      if (!clientMessageId) return;
-      const currentMessages = state.messages[message.conversationId] || [];
-      const index = currentMessages.findIndex(
-        (m) => m.clientMessageId === clientMessageId,
-      );
-      if (index !== -1) {
-        currentMessages[index] = {
-          ...currentMessages[index],
-          ...message,
-          status: "sent",
-        };
-        // It has its seq now: move it from the pending tail to its place.
-        currentMessages.sort(compareNewestFirst);
-      }
+      const currentMessages = state.messages[message.conversationId];
+      if (!currentMessages) return;
+      const saved = { ...message, clientMessageId, status: "sent" as const };
+      const index = currentMessages.findIndex((m) => sameMessage(m, saved));
+      if (index === -1) currentMessages.push(saved);
+      else currentMessages[index] = { ...currentMessages[index], ...saved };
+      // It has its seq now: move it from the pending tail to its place.
+      currentMessages.sort(compareNewestFirst);
     },
     /**
      * After a reconnect: what we hold for conversations other than the open
@@ -475,10 +481,13 @@ export const messageSlice = createSlice({
 
     builder
       .addCase(syncAfter.pending, (state, action) => {
-        state.syncing[action.meta.arg] = true;
+        state.syncing[action.meta.arg.conversationId] = true;
       })
       .addCase(syncAfter.rejected, (state, action) => {
-        delete state.syncing[action.meta.arg];
+        // Refused by `condition`: the resync that holds the flag is still
+        // running, and clearing it would let a second one start beside it.
+        if (action.meta.condition) return;
+        delete state.syncing[action.meta.arg.conversationId];
       })
       .addCase(syncAfter.fulfilled, (state, action) => {
         const { conversationId, items, reset } = action.payload;

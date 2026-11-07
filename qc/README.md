@@ -62,6 +62,16 @@ webhook tới được gateway, Chrome. Prod: `APP`, `API` trỏ domain thật v
 `QC_ACCOUNTS_FILE` là file JSON `{accounts:[{email,password}×3], directId, groupId, groupName}`
 (gitignore, không commit).
 
+## Đồng bộ chat
+
+```bash
+node qc/chat-sync-browser.mjs        # S1–S4: lấy bù khi mất một tin, tab thứ hai, preview thu hồi, quyền vào room
+ONLY=S1,S4 node qc/chat-sync-browser.mjs
+```
+
+Cần: stack dev chạy, Vite ở 5174, Chrome. Chạy thêm với `--profile scale` để
+kiểm việc đẩy khỏi room khi socket nằm ở gateway khác.
+
 ## Scale-out: nhiều instance chat và nhiều gateway
 
 Spec: `docs/superpowers/specs/2026-10-31-chat-scale-out-design.md`.

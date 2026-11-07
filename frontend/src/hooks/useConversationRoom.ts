@@ -1,8 +1,8 @@
 import { useEffect } from "react";
-import { useDispatch } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { socket } from "@/lib/socket";
 import { clearTypingUsers } from "@/redux/slices/typingIndicatorSlice";
-import type { AppDispatch } from "@/redux/store";
+import type { AppDispatch, RootState } from "@/redux/store";
 
 /**
  * Join room `conversation:<id>` để nhận typing / user:read_batch của hội thoại
@@ -16,6 +16,12 @@ import type { AppDispatch } from "@/redux/store";
  */
 export const useConversationRoom = (conversationId?: string) => {
   const dispatch = useDispatch<AppDispatch>();
+  // Server chỉ cho thành viên vào room và đẩy ra ai bị xoá, nên người được thêm
+  // lại trong lúc đang mở hội thoại phải join lại.
+  const membershipStatus = useSelector(
+    (state: RootState) =>
+      state.conversations.find((c) => c.id === conversationId)?.membershipStatus,
+  );
 
   useEffect(() => {
     if (!conversationId) return;
@@ -34,5 +40,5 @@ export const useConversationRoom = (conversationId?: string) => {
       socket.emit("conversation:leave", { conversationId });
       dispatch(clearTypingUsers(conversationId));
     };
-  }, [conversationId, dispatch]);
+  }, [conversationId, membershipStatus, dispatch]);
 };
